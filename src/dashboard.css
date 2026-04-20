@@ -153,6 +153,83 @@ body { display: flex; flex-direction: column; }
   letter-spacing: -0.08px;
 }
 
+/* ────────────────────── Setup banner ────────────────────── */
+
+.setup-banner {
+  margin: 0 22px;
+  padding: 14px 18px;
+  background: linear-gradient(180deg, rgba(10, 132, 255, 0.10), rgba(10, 132, 255, 0.05));
+  border: 1px solid rgba(10, 132, 255, 0.30);
+  border-radius: 12px;
+}
+
+.setup-banner[hidden] { display: none !important; }
+
+.setup-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setup-banner-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+}
+
+.setup-banner-text span {
+  font-size: 12px;
+  color: var(--paper-dim);
+  letter-spacing: -0.08px;
+}
+
+.setup-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.setup-progress {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.setup-progress[hidden] { display: none !important; }
+
+.setup-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+#setup-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 200ms linear;
+}
+
+#setup-progress-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--paper-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 80px;
+  text-align: right;
+}
+
 /* ────────────────────── Layout ────────────────────── */
 
 .layout {

@@ -69,25 +69,46 @@ impl Pipeline {
     }
 }
 
-fn whisper_model_path() -> PathBuf {
+fn whisper_candidates() -> &'static [&'static str] {
+    &["ggml-medium.bin", "ggml-small.bin", "ggml-small.en.bin"]
+}
+
+fn user_models_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("models"))
+}
+
+fn dev_models_dir() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .map(|p| p.join("models"))
+        .unwrap_or_else(|| PathBuf::from("models"))
+}
+
+fn whisper_model_path(app: &AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("ZERM_WHISPER_MODEL") {
         return PathBuf::from(p);
     }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let models_dir = manifest_dir
-        .parent()
-        .map(|p| p.join("models"))
-        .unwrap_or_else(|| PathBuf::from("models"));
-    // Prefer the largest available multilingual model for best quality across
-    // languages. Fall back through smaller variants if the bigger ones aren't
-    // downloaded yet.
-    for candidate in &["ggml-medium.bin", "ggml-small.bin", "ggml-small.en.bin"] {
-        let path = models_dir.join(candidate);
-        if path.exists() {
-            return path;
+    // Prefer the user's app-data dir (where the auto-downloader writes), then
+    // fall back to the dev `models/` directory next to the source tree.
+    let dirs: Vec<PathBuf> = [user_models_dir(app), Some(dev_models_dir())]
+        .into_iter()
+        .flatten()
+        .collect();
+    for dir in &dirs {
+        for candidate in whisper_candidates() {
+            let path = dir.join(candidate);
+            if path.exists() {
+                return path;
+            }
         }
     }
-    models_dir.join("ggml-small.bin")
+    // Fallback path that won't exist — the load will error and the user gets
+    // the missing-model banner with a download button.
+    dirs.first()
+        .cloned()
+        .unwrap_or_else(|| dev_models_dir())
+        .join("ggml-small.bin")
 }
 
 fn looks_non_latin(text: &str) -> bool {
@@ -690,6 +711,147 @@ fn open_dashboard(app: AppHandle) {
     open_dashboard_window(&app);
 }
 
+#[derive(Clone, Serialize)]
+struct SetupStatus {
+    whisper_model_present: bool,
+    whisper_model_path: Option<String>,
+    ollama_running: bool,
+    ollama_model_pulled: bool,
+    ollama_model_name: String,
+}
+
+#[tauri::command]
+async fn check_setup(app: AppHandle) -> SetupStatus {
+    let path = whisper_model_path(&app);
+    let whisper_model_present = path.exists();
+    let model_name = std::env::var("ZERM_LLM_MODEL").unwrap_or_else(|_| "gemma3:4b".to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok();
+    let (ollama_running, ollama_model_pulled) = match client {
+        Some(c) => match c.get("http://localhost:11434/api/tags").send().await {
+            Ok(resp) if resp.status().is_success() => {
+                let pulled = resp
+                    .json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|v| {
+                        v.get("models")
+                            .and_then(|m| m.as_array())
+                            .map(|arr| {
+                                arr.iter().any(|m| {
+                                    m.get("name")
+                                        .and_then(|n| n.as_str())
+                                        .map(|n| n == model_name || n.starts_with(&format!("{model_name}:")))
+                                        .unwrap_or(false)
+                                })
+                            })
+                    })
+                    .unwrap_or(false);
+                (true, pulled)
+            }
+            _ => (false, false),
+        },
+        None => (false, false),
+    };
+
+    SetupStatus {
+        whisper_model_present,
+        whisper_model_path: Some(path.display().to_string()),
+        ollama_running,
+        ollama_model_pulled,
+        ollama_model_name: model_name,
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    downloaded: u64,
+    total: u64,
+}
+
+#[tauri::command]
+async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    const URL: &str =
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
+    const FILENAME: &str = "ggml-small.bin";
+
+    let dir = user_models_dir(&app)
+        .ok_or_else(|| "could not resolve app data dir".to_string())?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("create dir: {e}"))?;
+    let dest = dir.join(FILENAME);
+    let tmp = dir.join(format!("{FILENAME}.part"));
+
+    let resp = reqwest::get(URL)
+        .await
+        .map_err(|e| format!("request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("status: {e}"))?;
+    let total = resp.content_length().unwrap_or(0);
+    let _ = app.emit(
+        "zerm://whisper-download-progress",
+        DownloadProgress { downloaded: 0, total },
+    );
+
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| format!("create file: {e}"))?;
+    let mut downloaded: u64 = 0;
+    let mut last_emit: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("write: {e}"))?;
+        downloaded += chunk.len() as u64;
+        if downloaded - last_emit > 256 * 1024 {
+            last_emit = downloaded;
+            let _ = app.emit(
+                "zerm://whisper-download-progress",
+                DownloadProgress { downloaded, total },
+            );
+        }
+    }
+    file.flush().await.map_err(|e| format!("flush: {e}"))?;
+    drop(file);
+
+    tokio::fs::rename(&tmp, &dest)
+        .await
+        .map_err(|e| format!("rename: {e}"))?;
+
+    let _ = app.emit(
+        "zerm://whisper-download-progress",
+        DownloadProgress { downloaded: total, total },
+    );
+
+    // Trigger an in-place reload of the model
+    let pipeline = app.state::<Arc<Pipeline>>().inner().clone();
+    let whisper_arc = pipeline.whisper.clone();
+    let dest_for_load = dest.clone();
+    std::thread::spawn(move || {
+        log::info!("reloading whisper model from {dest_for_load:?}");
+        match whisper::Whisper::load(&dest_for_load) {
+            Ok(w) => {
+                let silence: Vec<f32> = vec![0.0; 16_000];
+                let _ = w.transcribe(&silence);
+                *whisper_arc.lock() = Some(w);
+                log::info!("whisper ready (post-download)");
+            }
+            Err(e) => log::error!("whisper post-download load failed: {e:#}"),
+        }
+    });
+
+    Ok(dest.display().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -716,6 +878,8 @@ pub fn run() {
             open_dashboard,
             set_pill_position,
             get_pill_position,
+            check_setup,
+            download_whisper_model,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -751,8 +915,9 @@ pub fn run() {
             // Background-load Whisper, then pre-warm
             let whisper_arc = pipeline_for_setup.whisper.clone();
             let app_for_load = app_handle.clone();
+            let app_for_path = app_handle.clone();
             std::thread::spawn(move || {
-                let path = whisper_model_path();
+                let path = whisper_model_path(&app_for_path);
                 log::info!("loading whisper model from {path:?}");
                 match whisper::Whisper::load(&path) {
                     Ok(w) => {

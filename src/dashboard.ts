@@ -286,10 +286,119 @@ function attachListeners() {
   });
 }
 
+interface SetupStatus {
+  whisper_model_present: boolean;
+  whisper_model_path: string | null;
+  ollama_running: boolean;
+  ollama_model_pulled: boolean;
+  ollama_model_name: string;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function showSetupBanner(title: string, detail: string, actionsHTML: string) {
+  const banner = $("setup-banner")!;
+  banner.hidden = false;
+  $("setup-title")!.textContent = title;
+  $("setup-detail")!.textContent = detail;
+  const actions = $("setup-actions")!;
+  actions.innerHTML = actionsHTML;
+}
+
+function hideSetupBanner() {
+  const banner = $("setup-banner")!;
+  banner.hidden = true;
+  const progress = $("setup-progress")!;
+  progress.hidden = true;
+}
+
+async function refreshSetup() {
+  const status = await safeInvoke<SetupStatus>("check_setup");
+  if (!status) return;
+  if (!status.whisper_model_present) {
+    showSetupBanner(
+      "Whisper model not installed",
+      "Zerm needs a speech-to-text model (~466 MB) to transcribe your voice.",
+      `<button class="solid-btn" id="btn-download-whisper">Download Whisper model</button>`,
+    );
+    $("btn-download-whisper")?.addEventListener("click", () => {
+      void downloadWhisper();
+    });
+    return;
+  }
+  if (!status.ollama_running) {
+    showSetupBanner(
+      "Ollama is not running",
+      "Install Ollama and start the service so Zerm can polish your transcripts locally.",
+      `<a class="solid-btn" href="https://ollama.com/download" target="_blank" rel="noreferrer">Get Ollama</a>`,
+    );
+    return;
+  }
+  if (!status.ollama_model_pulled) {
+    showSetupBanner(
+      `Pull the language model`,
+      `Run "ollama pull ${status.ollama_model_name}" in a terminal — Zerm will pick it up automatically.`,
+      `<a class="solid-btn" href="https://ollama.com/library/${encodeURIComponent(status.ollama_model_name.split(":")[0])}" target="_blank" rel="noreferrer">Open library</a>`,
+    );
+    return;
+  }
+  hideSetupBanner();
+}
+
+async function downloadWhisper() {
+  const banner = $("setup-banner")!;
+  banner.hidden = false;
+  $("setup-title")!.textContent = "Downloading Whisper model";
+  $("setup-detail")!.textContent = "This is a one-time ~466 MB download.";
+  $("setup-actions")!.innerHTML = "";
+  const progress = $("setup-progress")!;
+  const fill = $("setup-progress-fill")!;
+  const label = $("setup-progress-label")!;
+  progress.hidden = false;
+  label.textContent = "Starting…";
+
+  let lastUnlisten: (() => void) | null = null;
+  try {
+    const { listen: listenEvent } = await import("@tauri-apps/api/event");
+    const unlisten = await listenEvent<{ downloaded: number; total: number }>(
+      "zerm://whisper-download-progress",
+      (event) => {
+        const { downloaded, total } = event.payload;
+        if (total > 0) {
+          const pct = Math.min(100, (downloaded / total) * 100);
+          (fill as HTMLDivElement).style.width = `${pct.toFixed(1)}%`;
+          label.textContent = `${formatBytes(downloaded)} / ${formatBytes(total)}`;
+        } else {
+          label.textContent = formatBytes(downloaded);
+        }
+      },
+    );
+    lastUnlisten = unlisten;
+
+    const path = await safeInvoke<string>("download_whisper_model");
+    if (path) {
+      $("setup-title")!.textContent = "Whisper model installed";
+      $("setup-detail")!.textContent = "Loading the model into memory…";
+      label.textContent = "100%";
+      setTimeout(() => {
+        void refreshSetup();
+      }, 1500);
+    }
+  } finally {
+    if (lastUnlisten) lastUnlisten();
+  }
+}
+
 async function init() {
   setupTabs();
   attachListeners();
   await refresh();
+  void refreshSetup();
   try {
     await listen<DashboardData>("zerm://dashboard-updated", (event) => {
       renderStats(event.payload.stats);

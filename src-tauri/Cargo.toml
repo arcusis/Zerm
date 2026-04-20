@@ -20,8 +20,9 @@ cpal = "0.15"
 # Default whisper-rs build is CPU-only so it compiles on Linux/Windows.
 # macOS overrides below to enable Metal GPU acceleration.
 whisper-rs = { version = "0.13", default-features = false }
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util"] }
+futures-util = "0.3"
 arboard = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
