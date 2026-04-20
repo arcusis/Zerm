@@ -10,21 +10,23 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
         "title": "",
-        "width": 320,
-        "height": 96,
+        "width": 240,
+        "height": 56,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
         "shadow": false,
+        "visible": true,
         "center": true,
-        "focus": false
+        "acceptFirstMouse": true
       }
     ],
     "security": {
