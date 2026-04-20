@@ -105,15 +105,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Zerm v__VERSION__"
+          releaseName: "Zerm ${{ github.ref_name }}"
           releaseBody: |
-            See [CHANGELOG](https://github.com/arcusis/Zerm/commits/${{ github.ref_name }}) for the full list of changes.
+            ## First launch
+            1. Open Zerm. The dashboard appears with a "Set up Zerm" banner.
+            2. Click **Download Whisper model** in the banner — Zerm streams
+               the multilingual ggml-small.bin (~466 MB) into your app data
+               directory and loads it automatically.
+            3. Install [Ollama](https://ollama.com/download), then in a
+               terminal: `ollama pull gemma3:4b`. Zerm picks it up live.
+            4. macOS: grant Accessibility permission when prompted so the
+               Right Option hotkey can fire and auto-paste can simulate ⌘V.
 
-            ## Setup before first launch
-            1. Install Ollama and pull a model: `ollama pull gemma3:4b`
-            2. Download a Whisper model into the app's models directory:
-               `curl -L -o ggml-medium.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin`
-            3. macOS: grant Accessibility permission on first launch.
+            ## Use it
+            Tap **Right Option**, speak, stop talking. The cleaned text
+            lands in your clipboard and pastes into whatever app is focused.
+
+            ## What's in this release
+            See the diff: <https://github.com/arcusis/Zerm/commits/${{ github.ref_name }}>
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
