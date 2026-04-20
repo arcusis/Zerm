@@ -35,7 +35,7 @@ messages) — the LLM detects intent and formats accordingly.
 | ASR              | whisper.cpp via `whisper-rs` crate  | Metal GPU on Apple Silicon, near-realtime      |
 | Whisper model    | `ggml-base.en` (fast) or `ggml-small.en` | Tiny, English-optimized, <300ms on M-series |
 | LLM enrichment   | Ollama HTTP API (localhost:11434)   | Local, swap models freely                      |
-| LLM model        | `gemma4:4b` (default)               | Google Gemma 4, ~3GB RAM, intent-aware quality |
+| LLM model        | `gemma3:4b` (default)               | Google Gemma 3, ~3GB RAM, intent-aware quality. Override with `ZERM_LLM_MODEL=gemma4:4b` once Gemma 4 lands on Ollama. |
 | Audio capture    | `cpal` crate (cross-platform audio) | Native mic access, no Python                   |
 | Hotkey           | Tauri global shortcut plugin        | OS-level key capture, Right Option             |
 | Output           | System clipboard via Tauri          | Paste anywhere instantly                       |
@@ -90,24 +90,28 @@ messages) — the LLM detects intent and formats accordingly.
 ```
 Zerm/
 ├── plan.md                    # This file
-├── package.json               # Frontend tooling
+├── index.html                 # Vite entry (overlay markup)
+├── package.json               # pnpm + Vite + Tauri CLI
+├── tsconfig.json
+├── vite.config.ts
 ├── src/                       # Frontend (overlay UI)
-│   ├── index.html
-│   ├── main.ts
-│   └── style.css
+│   ├── main.ts                # State manager
+│   └── styles.css
 ├── src-tauri/
 │   ├── Cargo.toml
+│   ├── build.rs
 │   ├── tauri.conf.json
 │   ├── capabilities/
 │   │   └── default.json       # Tauri v2 permissions
+│   ├── icons/                 # App icons (placeholder from template)
 │   └── src/
 │       ├── main.rs            # Entry point
 │       ├── lib.rs             # Tauri app setup, command registration
-│       ├── audio.rs           # Mic capture via cpal
-│       ├── whisper.rs         # whisper-rs integration + model loading
-│       ├── ollama.rs          # Ollama HTTP client + prompt
-│       ├── hotkey.rs          # Right Option key handler
-│       └── state.rs           # App state (recording flag, model handle)
+│       ├── audio.rs           # Mic capture via cpal           (Phase 2)
+│       ├── whisper.rs         # whisper-rs integration         (Phase 3)
+│       ├── ollama.rs          # Ollama HTTP client + prompt    (Phase 4)
+│       ├── hotkey.rs          # Right Option key handler       (Phase 2)
+│       └── state.rs           # App state                      (Phase 2)
 └── models/                    # Whisper GGML model files (gitignored)
     └── .gitkeep
 ```
@@ -165,32 +169,63 @@ Achievable on Apple M-series with Metal whisper + Gemma 4 4B (4-bit quantized).
 ## Implementation Phases
 
 ### Phase 1 — Scaffold
-- [ ] Initialize Tauri v2 project
-- [ ] Set up git, push to arcusis/Zerm
-- [ ] Minimal overlay UI (HTML/CSS)
-- [ ] App runs, shows overlay window
+- [x] Initialize Tauri v2 project (vanilla-ts template)
+- [x] Git init (push to arcusis/Zerm pending explicit ask)
+- [x] Minimal overlay UI (frameless pill with state indicator)
+- [x] App runs, shows overlay window
 
 ### Phase 2 — Hotkey + Audio
-- [ ] Right Option global shortcut (tauri-plugin-global-shortcut)
-- [ ] Mic capture while key held (cpal)
-- [ ] UI reflects listening state
+- [x] Right Option global shortcut (rdev — modifier-only, push-to-talk)
+- [x] Mic capture while key held (cpal, dedicated thread)
+- [x] UI reflects listening state (Tauri events → frontend)
 
 ### Phase 3 — ASR
-- [ ] whisper-rs integration
-- [ ] Download + bundle ggml-small.en model
-- [ ] Audio buffer → transcription pipeline
-- [ ] UI shows raw transcript
+- [x] whisper-rs integration (Metal GPU on Apple Silicon)
+- [x] Download ggml-small.en model (475MB, in `models/`, gitignored)
+- [x] Audio buffer → mono → resample to 16kHz → transcription pipeline
+- [x] UI shows raw transcript via `zerm://transcript` event (in console for now)
 
 ### Phase 4 — LLM Enrichment
-- [ ] Ollama client (HTTP to localhost:11434)
-- [ ] System prompt + reformatting call
-- [ ] Output to clipboard
+- [x] Ollama HTTP client (localhost:11434, blocking via tokio runtime)
+- [x] Intent-aware system prompt (dev instruction vs. prose)
+- [x] Output copied to clipboard via arboard
 
-### Phase 5 — Polish
-- [ ] Menu bar icon + quit option
-- [ ] Settings: model selection, hotkey config
-- [ ] Error states (Ollama not running, no mic, etc.)
-- [ ] Build + bundle for macOS
+### Phase 5 — Polish (partial)
+- [x] LSUIElement (no dock icon) via embedded Info.plist
+- [x] NSMicrophoneUsageDescription embedded
+- [x] Error states emitted as `zerm://error` events with overlay flash
+- [ ] Menu bar icon + quit option (deferred)
+- [ ] Settings UI (model selection currently via env vars: `ZERM_LLM_MODEL`, `ZERM_WHISPER_MODEL`)
+- [ ] Build + bundle for macOS (`pnpm tauri build`)
+
+---
+
+## How to run
+
+```sh
+# One-time setup (already done)
+brew install cmake ollama
+brew services start ollama
+ollama pull gemma3:4b   # or gemma4:4b once available
+# Whisper model already in models/ggml-small.en.bin
+
+# Run
+pnpm install
+pnpm tauri dev
+```
+
+**First-run macOS permission grants required:**
+1. **Microphone** — auto-prompts on first hotkey press (uses NSMicrophoneUsageDescription)
+2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add `target/debug/zerm` (or the bundled `.app`). Without this, the Right Option hotkey won't fire.
+
+**Usage:**
+- Hold Right Option, speak (up to ~15 minutes)
+- Release → overlay shows "Thinking…" → output lands in clipboard
+- Paste anywhere
+
+**Override defaults via env vars:**
+- `ZERM_LLM_MODEL=gemma3:4b` (default; set to `gemma4:4b` once on Ollama)
+- `ZERM_WHISPER_MODEL=/path/to/ggml-small.en.bin`
 
 ---
 

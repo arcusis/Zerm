@@ -8,9 +8,21 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <div id="overlay" data-state="idle">
-      <div class="pill">
+    <div id="overlay" data-state="ready">
+      <div class="pill" data-tauri-drag-region>
         <span class="indicator"></span>
+        <div class="spectrum" id="spectrum">
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+        </div>
         <span class="label">Ready</span>
       </div>
     </div>
