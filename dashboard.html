@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..600&family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/dashboard.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zerm</title>
+    <script type="module" src="/src/dashboard.ts" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">Zerm</span>
+        <span class="brand-meta">— voice to clipboard</span>
+      </div>
+      <div class="hotkey-pill" id="hotkey-display">
+        <span class="hotkey-eyebrow">Hotkey</span>
+        <kbd>⌥</kbd>
+        <span id="hotkey-label">Right Option</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="sidebar">
+        <div class="nav-section">
+          <span class="eyebrow">Index</span>
+          <ul class="nav-list">
+            <li>
+              <button class="nav-item active" data-tab="history">
+                <span class="nav-num">01</span>
+                <span class="nav-label">History</span>
+              </button>
+            </li>
+            <li>
+              <button class="nav-item" data-tab="vocabulary">
+                <span class="nav-num">02</span>
+                <span class="nav-label">Vocabulary</span>
+              </button>
+            </li>
+            <li>
+              <button class="nav-item" data-tab="settings">
+                <span class="nav-num">03</span>
+                <span class="nav-label">Settings</span>
+              </button>
+            </li>
+            <li>
+              <button class="nav-item" data-tab="about">
+                <span class="nav-num">04</span>
+                <span class="nav-label">About</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="nav-footer">
+          <button id="quit-btn" class="quit-link">
+            <span>Quit Zerm</span>
+            <span class="quit-arrow">→</span>
+          </button>
+          <span class="version">v 0.1.0</span>
+        </div>
+      </nav>
+
+      <main class="content">
+        <section class="stats">
+          <div class="stat">
+            <span class="stat-value" id="stat-transcribed">0</span>
+            <span class="stat-label">Words transcribed</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat">
+            <span class="stat-value" id="stat-generated">0</span>
+            <span class="stat-label">Words generated</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat">
+            <span class="stat-value" id="stat-count">0</span>
+            <span class="stat-label">Dictations</span>
+          </div>
+        </section>
+
+        <!-- HISTORY -->
+        <section class="tab-panel active" data-tab="history">
+          <header class="panel-header">
+            <div>
+              <span class="eyebrow">Section 01</span>
+              <h2 class="panel-title">Recent dictations</h2>
+            </div>
+            <button id="clear-history" class="ghost-btn">Clear all</button>
+          </header>
+          <ul id="history-list" class="history-list">
+            <li class="empty-state">
+              <span class="empty-mark">∅</span>
+              <span>No dictations yet. Tap your hotkey to start.</span>
+            </li>
+          </ul>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="tab-panel" data-tab="settings">
+          <header class="panel-header">
+            <div>
+              <span class="eyebrow">Section 03</span>
+              <h2 class="panel-title">Settings</h2>
+            </div>
+          </header>
+
+          <div class="settings">
+            <div class="field">
+              <label class="field-label">Hotkey</label>
+              <div class="field-control">
+                <select id="hotkey-select" class="select">
+                  <option value="right_option">Right Option (⌥)</option>
+                  <option value="left_option">Left Option (⌥)</option>
+                  <option value="right_command">Right Command (⌘)</option>
+                  <option value="right_shift">Right Shift (⇧)</option>
+                  <option value="right_control">Right Control (⌃)</option>
+                  <option value="caps_lock">Caps Lock (⇪)</option>
+                  <option value="fn">Fn</option>
+                </select>
+              </div>
+              <p class="field-hint">
+                Tap once to start. Tap again or stay silent to stop.
+              </p>
+            </div>
+
+            <div class="field">
+              <label class="field-label">Prompt mode</label>
+              <div class="prompt-modes" id="prompt-modes">
+                <button class="mode-btn" data-mode="off">
+                  <span class="mode-name">Off</span>
+                  <span class="mode-desc">Raw transcript, no AI</span>
+                </button>
+                <button class="mode-btn" data-mode="agent">
+                  <span class="mode-name">Agent</span>
+                  <span class="mode-desc">Instructions for Claude Code</span>
+                </button>
+                <button class="mode-btn" data-mode="conversational">
+                  <span class="mode-name">Chat</span>
+                  <span class="mode-desc">Slack, WhatsApp, iMessage</span>
+                </button>
+                <button class="mode-btn" data-mode="professional">
+                  <span class="mode-name">Pro</span>
+                  <span class="mode-desc">Polished long-form prose</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="checkbox-row">
+                <input id="vad-toggle" type="checkbox" checked />
+                <span>Auto-stop when you stop talking <em>(1.5s silence)</em></span>
+              </label>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- VOCABULARY -->
+        <section class="tab-panel" data-tab="vocabulary">
+          <header class="panel-header">
+            <div>
+              <span class="eyebrow">Section 02</span>
+              <h2 class="panel-title">Custom vocabulary</h2>
+            </div>
+            <button id="vocab-clear" class="ghost-btn">Clear all</button>
+          </header>
+
+          <p class="lede vocab-lede">
+            Names, acronyms, libraries, identifiers — anything Whisper would
+            otherwise mis-hear. Each term you add is fed back into the
+            transcription engine as a hint, so it learns to recognise the
+            words your work depends on.
+          </p>
+
+          <form id="vocab-form" class="vocab-form" autocomplete="off">
+            <input
+              id="vocab-input"
+              class="vocab-input"
+              type="text"
+              placeholder="Add a term — e.g. Arcusis, fetchUser, ggml"
+              spellcheck="false"
+              autocapitalize="off"
+            />
+            <button type="submit" class="solid-btn">Add</button>
+          </form>
+
+          <div class="vocab-meta">
+            <span class="eyebrow">Library</span>
+            <span class="vocab-count" id="vocab-count">0 terms</span>
+          </div>
+
+          <ul id="vocab-list" class="vocab-list">
+            <li class="empty-state">
+              <span class="empty-mark">∅</span>
+              <span>Your vocabulary is empty. Add your first term above.</span>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ABOUT -->
+        <section class="tab-panel" data-tab="about">
+          <header class="panel-header">
+            <div>
+              <span class="eyebrow">Section 04</span>
+              <h2 class="panel-title">About</h2>
+            </div>
+          </header>
+
+          <div class="about">
+            <p class="lede">
+              Zerm is a local voice-to-clipboard tool for developers. Tap a
+              key, speak, paste. Whisper transcribes on-device using the
+              Apple&nbsp;Silicon GPU. A small local LLM polishes the output.
+              No cloud, no telemetry, no accounts.
+            </p>
+
+            <div class="about-grid">
+              <div class="about-block">
+                <span class="eyebrow">Privacy</span>
+                <p>
+                  Everything runs on your machine. The only network call is
+                  to your local Ollama instance at
+                  <code>localhost:11434</code>. Your microphone audio, raw
+                  transcripts, and final outputs never leave the device.
+                </p>
+              </div>
+
+              <div class="about-block">
+                <span class="eyebrow">Built with</span>
+                <ul class="credits">
+                  <li>
+                    <span class="credit-name">whisper.cpp</span>
+                    <span class="credit-by">Georgi Gerganov · MIT</span>
+                  </li>
+                  <li>
+                    <span class="credit-name">Ollama</span>
+                    <span class="credit-by">Ollama Inc. · MIT</span>
+                  </li>
+                  <li>
+                    <span class="credit-name">Gemma 3</span>
+                    <span class="credit-by">Google · Gemma Terms</span>
+                  </li>
+                  <li>
+                    <span class="credit-name">Tauri 2</span>
+                    <span class="credit-by">Tauri Programme · MIT / Apache 2.0</span>
+                  </li>
+                  <li>
+                    <span class="credit-name">cpal · arboard · objc2</span>
+                    <span class="credit-by">Rust ecosystem · MIT / Apache 2.0</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <p class="colophon">
+              Set in <em>Fraunces</em> &amp; <em>Geist</em>.
+              Made for developers who think faster than they type.
+            </p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
