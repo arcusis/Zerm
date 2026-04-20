@@ -1,0 +1,117 @@
+name: Release
+
+# Builds Zerm for macOS (universal), Windows, and Linux on every tag push,
+# uploads the installers as a draft GitHub Release. Edit the release notes
+# and publish manually.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (Apple Silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - label: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - label: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+          - label: Linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            cmake \
+            build-essential
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      - name: Install Windows build dependencies
+        if: runner.os == 'Windows'
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Stub Whisper model so the bundle build doesn't fail on missing files.
+      # Real users download their own model on first run; this just keeps the
+      # `models/` directory present.
+      - name: Touch models directory
+        shell: bash
+        run: |
+          mkdir -p models
+          touch models/.gitkeep
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Zerm v__VERSION__"
+          releaseBody: |
+            See [CHANGELOG](https://github.com/arcusis/Zerm/commits/${{ github.ref_name }}) for the full list of changes.
+
+            ## Setup before first launch
+            1. Install Ollama and pull a model: `ollama pull gemma3:4b`
+            2. Download a Whisper model into the app's models directory:
+               `curl -L -o ggml-medium.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin`
+            3. macOS: grant Accessibility permission on first launch.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

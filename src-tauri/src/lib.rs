@@ -14,7 +14,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use state::{DashboardData, HotkeyChoice, PersistentState, PromptMode};
+use state::{DashboardData, HotkeyChoice, PersistentState, PillPosition, PromptMode};
 
 const READY_EVENT: &str = "zerm://ready";
 const ERROR_EVENT: &str = "zerm://error";
@@ -616,6 +616,22 @@ fn quit_app(app: AppHandle) {
 }
 
 #[tauri::command]
+fn set_pill_position(
+    x: i32,
+    y: i32,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    state.persistent.lock().pill_position = Some(PillPosition { x, y });
+    state.save_persistent();
+    Ok(())
+}
+
+#[tauri::command]
+fn get_pill_position(state: tauri::State<'_, Arc<Pipeline>>) -> Option<PillPosition> {
+    state.persistent.lock().pill_position
+}
+
+#[tauri::command]
 fn open_dashboard(app: AppHandle) {
     open_dashboard_window(&app);
 }
@@ -643,6 +659,8 @@ pub fn run() {
             copy_history_entry,
             quit_app,
             open_dashboard,
+            set_pill_position,
+            get_pill_position,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -664,9 +682,15 @@ pub fn run() {
                 log::error!("failed to build tray: {e:#}");
             }
 
-            // Enable native macOS drag-by-background on the pill window
+            // Enable native macOS drag-by-background on the pill window,
+            // then restore its saved position if any.
             if let Some(window) = app.get_webview_window("main") {
                 enable_window_drag(&window);
+                if let Some(pos) = pipeline_for_setup.persistent.lock().pill_position {
+                    let _ = window.set_position(tauri::Position::Physical(
+                        PhysicalPosition { x: pos.x, y: pos.y },
+                    ));
+                }
             }
 
             // Background-load Whisper, then pre-warm
@@ -705,10 +729,10 @@ pub fn run() {
                 }
             });
 
-            // Right Option tap-to-toggle via NSEvent global monitor
+            // Tap-to-toggle global hotkey
             let app_for_hotkey = app_handle.clone();
             let pipeline_for_hotkey = pipeline_for_setup.clone();
-            let monitor = hotkey::install(move |pressed| {
+            let installed = hotkey::install(move |pressed| {
                 if pressed {
                     let app = app_for_hotkey.clone();
                     let pipeline = pipeline_for_hotkey.clone();
@@ -717,16 +741,19 @@ pub fn run() {
                     });
                 }
             });
-            if monitor.is_some() {
+            if installed {
                 log::info!(
                     "zerm started. Tap {} to record. Click tray icon for dashboard.",
                     hotkey_choice.label()
                 );
-                std::mem::forget(monitor);
-            } else {
+            } else if cfg!(target_os = "macos") {
                 emit_error(
                     &app_handle,
                     "Hotkey monitor failed. Grant Accessibility in System Settings → Privacy & Security.",
+                );
+            } else {
+                log::warn!(
+                    "hotkey not yet wired on this platform — open the dashboard to use Zerm"
                 );
             }
 

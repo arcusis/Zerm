@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type State = "ready" | "listening" | "processing" | "done" | "error";
 
@@ -36,6 +37,20 @@ async function init() {
 
   // Drag is handled by Rust: NSWindow.movableByWindowBackground = true
   // (set in lib.rs setup) makes the entire transparent window draggable.
+
+  // Persist the pill's position whenever the user moves it. Debounced so we
+  // don't spam disk during a drag.
+  const win = getCurrentWindow();
+  let saveTimer: number | null = null;
+  void win.onMoved((event) => {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      void invoke("set_pill_position", {
+        x: event.payload.x,
+        y: event.payload.y,
+      });
+    }, 350);
+  });
 
   const bars = Array.from(
     document.querySelectorAll<HTMLDivElement>("#spectrum .bar"),

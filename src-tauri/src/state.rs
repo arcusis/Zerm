@@ -150,6 +150,12 @@ impl Default for Settings {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct PillPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PersistentState {
     #[serde(default)]
@@ -158,6 +164,8 @@ pub struct PersistentState {
     pub history: Vec<HistoryEntry>,
     #[serde(default)]
     pub settings: Settings,
+    #[serde(default)]
+    pub pill_position: Option<PillPosition>,
 }
 
 #[derive(Clone, Debug, Serialize)]

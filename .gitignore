@@ -26,3 +26,6 @@ dist-ssr
 # Whisper models (large, downloaded separately)
 models/*
 !models/.gitkeep
+
+# Claude / IDE local config
+.claude/
