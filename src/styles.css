@@ -55,23 +55,16 @@ body {
   background: var(--lg-tint);
   backdrop-filter: blur(var(--lg-blur)) saturate(160%);
   -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(160%);
-  border: 0.5px solid var(--lg-rim-bright);
+  border: 0;
   border-radius: 999px;
-  /* Liquid Glass depth: top specular rim + soft contact + ambient lift */
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
-    0 1px 2px rgba(0, 0, 0, 0.18),
-    0 8px 24px rgba(0, 0, 0, 0.28);
+  /* Just a hairline top highlight — no border, no drop shadow. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   color: var(--paper);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.08px;
   cursor: grab;
-  transition:
-    background 220ms var(--ease-morph),
-    border-color 220ms var(--ease-morph),
-    box-shadow 220ms var(--ease-morph);
+  transition: background 220ms var(--ease-morph);
 }
 
 .pill:active { cursor: grabbing; }
@@ -116,18 +109,8 @@ body {
   box-shadow: 0 0 10px rgba(255, 69, 58, 0.55);
 }
 
-/* ── Listening glow on the pill itself ── */
-/* Subtle warm tint + soft outer bloom — no hard ring (Liquid Glass keeps */
-/* state changes restrained; the indicator dot carries the signal). */
-
-#overlay[data-state="listening"] .pill {
-  border-color: rgba(255, 69, 58, 0.20);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
-    0 1px 2px rgba(0, 0, 0, 0.18),
-    0 8px 28px rgba(255, 69, 58, 0.18);
-}
+/* No special pill treatment for listening — the indicator dot is the */
+/* affordance. Keeps Liquid Glass calm and avoids the colored ring. */
 
 /* ── Spectrum (audio-reactive) ── */
 

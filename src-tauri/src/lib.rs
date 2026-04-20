@@ -110,6 +110,37 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Send a Cmd+V keystroke to the currently focused application via
+/// AppleScript / System Events. We never grab focus ourselves (the pill
+/// has `focus: false`), so the previously focused app is still the
+/// recipient. If nothing is focused for text input the keystroke is a
+/// no-op.
+#[cfg(target_os = "macos")]
+fn send_paste_keystroke() {
+    let script =
+        "tell application \"System Events\" to keystroke \"v\" using command down";
+    match std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+    {
+        Ok(out) if !out.status.success() => {
+            log::warn!(
+                "auto-paste: osascript exited {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        Err(e) => log::warn!("auto-paste: spawn failed: {e}"),
+        _ => {}
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_paste_keystroke() {
+    // TODO: cross-platform keystroke synthesis (Win: SendInput; Linux: xdotool/wtype)
+    log::debug!("auto-paste: not implemented on this platform yet");
+}
+
 fn emit_error(app: &AppHandle, msg: impl Into<String>) {
     let msg = msg.into();
     log::error!("{msg}");
@@ -367,6 +398,17 @@ async fn process(
         emit_error(app, format!("clipboard: {e:#}"));
     }
 
+    let auto_paste = app
+        .try_state::<Arc<Pipeline>>()
+        .map(|s| s.persistent.lock().settings.auto_paste)
+        .unwrap_or(true);
+
+    if auto_paste && !output.is_empty() {
+        // Tiny delay so the clipboard write is observable before the paste fires.
+        tokio::time::sleep(std::time::Duration::from_millis(70)).await;
+        tauri::async_runtime::spawn_blocking(send_paste_keystroke);
+    }
+
     if let Some(state) = app.try_state::<Arc<Pipeline>>() {
         state
             .persistent
@@ -486,6 +528,18 @@ fn set_vad_enabled(
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     state.persistent.lock().settings.vad_enabled = enabled;
+    state.save_persistent();
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_auto_paste(
+    enabled: bool,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    state.persistent.lock().settings.auto_paste = enabled;
     state.save_persistent();
     emit_dashboard_update(&app);
     Ok(())
@@ -650,6 +704,7 @@ pub fn run() {
             get_dashboard,
             set_llm_model,
             set_vad_enabled,
+            set_auto_paste,
             set_prompt_mode,
             set_hotkey,
             add_vocabulary_term,

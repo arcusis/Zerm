@@ -29,6 +29,7 @@ interface Settings {
   prompt_mode: PromptMode;
   hotkey: HotkeyChoice;
   vocabulary: string[];
+  auto_paste: boolean;
 }
 
 interface DashboardData {
@@ -106,6 +107,8 @@ function renderHistory(history: HistoryEntry[]) {
 
 function renderSettings(settings: Settings) {
   ($("vad-toggle") as HTMLInputElement | null)!.checked = settings.vad_enabled;
+  const autoPasteEl = $("autopaste-toggle") as HTMLInputElement | null;
+  if (autoPasteEl) autoPasteEl.checked = settings.auto_paste;
   ($("hotkey-select") as HTMLSelectElement | null)!.value = settings.hotkey;
 
   const meta = HOTKEY_LABELS[settings.hotkey];
@@ -217,6 +220,11 @@ function attachListeners() {
   $("vad-toggle")?.addEventListener("change", async (e) => {
     const checked = (e.target as HTMLInputElement).checked;
     await safeInvoke("set_vad_enabled", { enabled: checked });
+  });
+
+  $("autopaste-toggle")?.addEventListener("change", async (e) => {
+    const checked = (e.target as HTMLInputElement).checked;
+    await safeInvoke("set_auto_paste", { enabled: checked });
   });
 
   // Prompt mode

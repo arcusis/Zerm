@@ -111,7 +111,11 @@ pub struct Settings {
     pub hotkey: HotkeyChoice,
     #[serde(default, deserialize_with = "deserialize_vocabulary")]
     pub vocabulary: Vec<String>,
+    #[serde(default = "default_true")]
+    pub auto_paste: bool,
 }
+
+fn default_true() -> bool { true }
 
 // Migrate from old String-typed vocabulary to Vec<String> seamlessly
 fn deserialize_vocabulary<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -146,6 +150,7 @@ impl Default for Settings {
             prompt_mode: PromptMode::Agent,
             hotkey: HotkeyChoice::RightOption,
             vocabulary: Vec::new(),
+            auto_paste: true,
         }
     }
 }
