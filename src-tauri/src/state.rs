@@ -22,14 +22,15 @@ pub struct HistoryEntry {
 #[serde(rename_all = "lowercase")]
 pub enum PromptMode {
     Off,
-    Agent,
+    #[serde(alias = "agent")]
+    Developer,
     Conversational,
     Professional,
 }
 
 impl Default for PromptMode {
     fn default() -> Self {
-        PromptMode::Agent
+        PromptMode::Developer
     }
 }
 
@@ -147,7 +148,7 @@ impl Default for Settings {
         Self {
             llm_model: "gemma3:4b".to_string(),
             vad_enabled: true,
-            prompt_mode: PromptMode::Agent,
+            prompt_mode: PromptMode::Developer,
             hotkey: HotkeyChoice::RightOption,
             vocabulary: Vec::new(),
             auto_paste: true,

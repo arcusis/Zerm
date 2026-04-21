@@ -364,12 +364,22 @@ body { display: flex; flex-direction: column; }
 
 /* ────────────────────── Stats ────────────────────── */
 
+/* Stats are only visible on the History tab now — customers complained
+   that the global word count / dictation count felt noisy on Settings,
+   Vocabulary, and About. */
 .stats {
-  display: grid;
+  display: none;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 10px;
   margin-bottom: 22px;
 }
+
+.tab-panel[data-tab="history"].active ~ * .stats,
+.tab-panel[data-tab="history"].active .stats {
+  /* Fallback; real show/hide is handled by JS via body class */
+}
+
+body.on-history .stats { display: grid; }
 
 .stat {
   display: flex;

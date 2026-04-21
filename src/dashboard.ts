@@ -13,7 +13,7 @@ interface Stats {
   generation_count: number;
 }
 
-type PromptMode = "off" | "agent" | "conversational" | "professional";
+type PromptMode = "off" | "developer" | "conversational" | "professional";
 type HotkeyChoice =
   | "right_option"
   | "left_option"
@@ -194,6 +194,14 @@ async function refresh() {
 }
 
 function setupTabs() {
+  const applyBodyTabClass = (tab: string) => {
+    document.body.classList.toggle("on-history", tab === "history");
+  };
+
+  // Initial state
+  const activeNav = document.querySelector<HTMLButtonElement>(".nav-item.active");
+  applyBodyTabClass(activeNav?.dataset.tab ?? "history");
+
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       const tab = btn.dataset.tab;
@@ -204,6 +212,7 @@ function setupTabs() {
       document.querySelectorAll<HTMLElement>(".tab-panel").forEach((panel) => {
         panel.classList.toggle("active", panel.dataset.tab === tab);
       });
+      applyBodyTabClass(tab);
     });
   });
 }

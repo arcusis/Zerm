@@ -574,7 +574,7 @@ fn set_prompt_mode(
 ) -> Result<(), String> {
     let parsed = match mode.as_str() {
         "off" => PromptMode::Off,
-        "agent" => PromptMode::Agent,
+        "developer" | "agent" => PromptMode::Developer, // "agent" kept for back-compat
         "conversational" => PromptMode::Conversational,
         "professional" => PromptMode::Professional,
         other => return Err(format!("unknown prompt mode: {other}")),
@@ -1106,7 +1106,7 @@ pub fn run() {
             let model_for_warmup = current_llm_model(&pipeline_for_setup);
             tauri::async_runtime::spawn(async move {
                 log::info!("pre-warming ollama ({model_for_warmup})…");
-                match ollama::reformat(&model_for_warmup, "ping", PromptMode::Agent).await {
+                match ollama::reformat(&model_for_warmup, "ping", PromptMode::Developer).await {
                     Ok(_) => log::info!("ollama ready"),
                     Err(e) => log::warn!("ollama pre-warm failed: {e:#}"),
                 }
