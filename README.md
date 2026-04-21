@@ -45,11 +45,11 @@ vocabulary, and settings.
 Pre‑built installers will appear on the [Releases](https://github.com/arcusis/Zerm/releases)
 page once CI runs against a tag.
 
-| Platform | Status              | Notes                                                  |
+| Platform | Status              | Hotkey                                                 |
 |----------|---------------------|--------------------------------------------------------|
-| macOS    | First‑class         | Apple Silicon (arm64) and Intel (x86_64)               |
-| Windows  | Builds via CI       | Hotkey is dashboard‑only for now (see Roadmap)         |
-| Linux    | Builds via CI       | Hotkey is dashboard‑only for now (see Roadmap)         |
+| macOS    | First‑class         | **Right Option** (modifier‑only, via NSEvent monitor)  |
+| Windows  | Works               | **Ctrl + Shift + Space**                               |
+| Linux    | Works               | **Ctrl + Shift + Space** (X11; Wayland clipboard may no‑op) |
 
 ## Setup (one‑time)
 
@@ -141,8 +141,9 @@ update servers (yet).
 
 ## Roadmap
 
-- Cross‑platform global hotkey on Windows (Win32 hooks) and Linux (X11/Wayland)
-- Bundle Whisper models with a first‑run downloader instead of manual setup
+- Modifier‑only push‑to‑talk on Windows (Win32 low‑level hook) and Linux
+  (evdev or Wayland input grabbers) — today those platforms use a
+  Ctrl + Shift + Space combo via the Tauri global‑shortcut plugin
 - Streaming Whisper + streaming Ollama for sub‑second perceived latency on
   long recordings
 - Optional dock‑icon mode for users who prefer it over the tray

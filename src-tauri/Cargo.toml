@@ -13,6 +13,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+# Cross-platform global hotkey fallback (Windows/Linux; macOS uses the
+# native NSEvent monitor in hotkey.rs for modifier-only push-to-talk).
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

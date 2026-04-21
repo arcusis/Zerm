@@ -860,7 +860,26 @@ pub fn run() {
     let pipeline = Arc::new(Pipeline::new());
     let pipeline_for_setup = pipeline.clone();
 
+    // On non-macOS platforms we register a Ctrl+Shift+Space hotkey via the
+    // global-shortcut plugin. On macOS the NSEvent monitor below does the
+    // modifier-only push-to-talk instead, so the plugin is registered but
+    // no shortcut is bound.
+    let pipeline_for_plugin = pipeline.clone();
+    let gs_builder = tauri_plugin_global_shortcut::Builder::new().with_handler(
+        move |app: &AppHandle, _sc, event| {
+            use tauri_plugin_global_shortcut::ShortcutState;
+            if matches!(event.state(), ShortcutState::Pressed) {
+                let app = app.clone();
+                let pipeline = pipeline_for_plugin.clone();
+                tauri::async_runtime::spawn(async move {
+                    handle_toggle(&app, &pipeline);
+                });
+            }
+        },
+    );
+
     tauri::Builder::default()
+        .plugin(gs_builder.build())
         .invoke_handler(tauri::generate_handler![
             pill_done,
             get_dashboard,
@@ -972,9 +991,28 @@ pub fn run() {
                     "Hotkey monitor failed. Grant Accessibility in System Settings → Privacy & Security.",
                 );
             } else {
-                log::warn!(
-                    "hotkey not yet wired on this platform — open the dashboard to use Zerm"
-                );
+                // Windows / Linux: register Ctrl+Shift+Space via the plugin.
+                #[cfg(not(target_os = "macos"))]
+                {
+                    use tauri_plugin_global_shortcut::{
+                        Code, GlobalShortcutExt, Modifiers, Shortcut,
+                    };
+                    let shortcut = Shortcut::new(
+                        Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                        Code::Space,
+                    );
+                    match app.global_shortcut().register(shortcut) {
+                        Ok(_) => log::info!(
+                            "zerm started. Tap Ctrl+Shift+Space to record. Click tray for dashboard."
+                        ),
+                        Err(e) => emit_error(
+                            &app_handle,
+                            format!(
+                                "could not register Ctrl+Shift+Space: {e:#}. Another app may own it."
+                            ),
+                        ),
+                    }
+                }
             }
 
             // Open the dashboard automatically so the user can see the app
