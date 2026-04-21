@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Apple-style squircle background with subtle radial sheen -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f1f24"/>
+      <stop offset="100%" stop-color="#101013"/>
+    </linearGradient>
+    <linearGradient id="mic" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.84"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.30"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="50%" cy="0%" r="80%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Squircle (continuous-corner) background. Approximated with d. -->
+  <path
+    fill="url(#bg)"
+    d="M512 32
+       C 200 32 32 200 32 512
+       S 200 992 512 992
+       S 992 824 992 512
+       S 824 32 512 32 Z"
+  />
+  <!-- Top sheen for the glassy lift -->
+  <path
+    fill="url(#sheen)"
+    d="M512 32
+       C 200 32 32 200 32 512
+       S 200 992 512 992
+       S 992 824 992 512
+       S 824 32 512 32 Z"
+  />
+
+  <!-- Tiny live red dot, top-right, like a recording indicator -->
+  <circle cx="780" cy="244" r="44" fill="#ff453a"/>
+  <circle cx="780" cy="244" r="56" fill="#ff453a" opacity="0.20"/>
+
+  <!-- Microphone capsule -->
+  <rect
+    x="412" y="270"
+    width="200" height="380"
+    rx="100" ry="100"
+    fill="url(#mic)"
+  />
+
+  <!-- U-shaped stand -->
+  <path
+    d="M 312 540
+       a 200 200 0 0 0 400 0"
+    fill="none"
+    stroke="url(#ring)"
+    stroke-width="32"
+    stroke-linecap="round"
+  />
+
+  <!-- Vertical post from capsule bottom to base -->
+  <rect
+    x="490" y="720"
+    width="44" height="88"
+    rx="22" ry="22"
+    fill="url(#ring)"
+  />
+
+  <!-- Horizontal base bar -->
+  <rect
+    x="372" y="788"
+    width="280" height="36"
+    rx="18" ry="18"
+    fill="url(#ring)"
+  />
+</svg>
