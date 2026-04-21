@@ -230,6 +230,10 @@ fn frontmost_focus_identity() -> Option<FocusIdentity> {
         .bundleIdentifier()
         .map(|value| value.to_string())
         .unwrap_or_default();
+    if bundle_id == "com.arcusis.zerm" {
+        log::warn!("auto-paste: Zerm was focused at recording start; no external paste target");
+        return None;
+    }
     Some(FocusIdentity { pid, bundle_id })
 }
 
@@ -266,12 +270,12 @@ struct InputPermissionStatus {
 fn input_permission_status() -> InputPermissionStatus {
     #[cfg(target_os = "macos")]
     {
-        let granted = accessibility_is_trusted() || INPUT_MONITOR_READY.load(Ordering::SeqCst);
+        let granted = accessibility_is_trusted();
         InputPermissionStatus {
             required: true,
             granted,
             title: "Allow Accessibility".to_string(),
-            detail: "Zerm needs macOS Accessibility permission for the hotkey and auto-paste after this app build was installed.".to_string(),
+            detail: "Zerm needs macOS Accessibility permission for the hotkey and auto-paste after this app build was installed. If this app was just replaced, remove and re-add /Applications/Zerm.app.".to_string(),
             settings_label: "Open Accessibility Settings".to_string(),
         }
     }
@@ -438,25 +442,36 @@ fn send_paste_via_system_events() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn send_paste_keystroke(expected: FocusIdentity) {
-    if !activate_paste_target(&expected) {
-        return;
+fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
+    if !accessibility_is_trusted() {
+        return Err("Auto-paste needs macOS Accessibility permission. Remove and re-add /Applications/Zerm.app in System Settings → Privacy & Security → Accessibility, then reopen Zerm.".to_string());
     }
 
-    if send_paste_via_system_events() {
-        log::info!("auto-paste sent via System Events");
-        return;
+    if !activate_paste_target(&expected) {
+        return Err(format!(
+            "Auto-paste could not refocus the app that was active when recording started ({:?}).",
+            expected
+        ));
     }
 
     if send_paste_via_core_graphics() {
-        log::info!("auto-paste sent via CoreGraphics fallback");
+        log::info!("auto-paste sent via CoreGraphics");
+        return Ok(());
     }
+
+    if send_paste_via_system_events() {
+        log::info!("auto-paste sent via System Events fallback");
+        return Ok(());
+    }
+
+    Err("Auto-paste could not synthesize Cmd+V. Check macOS Accessibility permission for /Applications/Zerm.app.".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn send_paste_keystroke(_expected: FocusIdentity) {
+fn send_paste_keystroke(_expected: FocusIdentity) -> Result<(), String> {
     // TODO: cross-platform keystroke synthesis (Win: SendInput; Linux: xdotool/wtype)
     log::debug!("auto-paste: not implemented on this platform yet");
+    Err("Auto-paste keystroke synthesis is not implemented on this platform yet.".to_string())
 }
 
 fn emit_error(app: &AppHandle, msg: impl Into<String>) {
@@ -829,15 +844,36 @@ async fn process(
         .unwrap_or((false, true));
 
     if auto_paste && !output.is_empty() {
-        tokio::time::sleep(std::time::Duration::from_millis(70)).await;
-        // Re-check inside the delay window — user may have Cmd-tabbed
-        // during the 70ms and triggered another recording.
-        if CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id {
-            let paste_target = pipeline.paste_target.lock().clone();
-            if let Some(expected) = paste_target {
-                tauri::async_runtime::spawn_blocking(move || send_paste_keystroke(expected));
-            } else {
-                log::warn!("auto-paste cancelled: focused app was not captured at recording start");
+        if !accessibility_is_trusted() {
+            emit_error(
+                app,
+                "Auto-paste needs macOS Accessibility permission. Remove and re-add /Applications/Zerm.app in System Settings → Privacy & Security → Accessibility, then reopen Zerm.",
+            );
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(70)).await;
+            // Re-check inside the delay window — user may have Cmd-tabbed
+            // during the 70ms and triggered another recording.
+            if CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id {
+                let paste_target = pipeline.paste_target.lock().clone();
+                if let Some(expected) = paste_target {
+                    let app_for_paste = app.clone();
+                    match tauri::async_runtime::spawn_blocking(move || {
+                        send_paste_keystroke(expected)
+                    })
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(msg)) => emit_error(&app_for_paste, msg),
+                        Err(e) => {
+                            emit_error(&app_for_paste, format!("auto-paste task failed: {e:#}"))
+                        }
+                    }
+                } else {
+                    emit_error(
+                        app,
+                        "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.",
+                    );
+                }
             }
         }
     }
