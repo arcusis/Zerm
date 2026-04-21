@@ -51,26 +51,25 @@ page once CI runs against a tag.
 | Windows  | Works               | **Ctrl + Shift + Space**                               |
 | Linux    | Works               | **Ctrl + Shift + Space** (X11; Wayland clipboard may no‑op) |
 
-## Setup (one‑time)
+## Setup
 
-You need three things on your machine:
+The first time you open Zerm it sets itself up. The dashboard streams
+three things automatically:
 
-1. **Ollama** with a model pulled
-   ```sh
-   brew install ollama         # macOS
-   brew services start ollama
-   ollama pull gemma3:4b
-   ```
-2. **A Whisper model** placed at `models/ggml-medium.bin` or
-   `models/ggml-small.bin`. The app prefers `medium` (better multilingual
-   quality, ~1.5 GB) and falls back to `small` (~466 MB).
-   ```sh
-   curl -L -o models/ggml-medium.bin \
-     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
-   ```
-3. **macOS only:** grant Accessibility permission to the app the first
-   time you launch it (System Settings → Privacy & Security → Accessibility).
-   Microphone permission is requested automatically on first hotkey press.
+1. **Whisper model** — the multilingual `ggml-small.bin` (~466 MB) is
+   downloaded into the app's data directory.
+2. **Ollama** — if not already installed, Zerm downloads the official
+   installer for your platform and launches it. Approve the system
+   prompt and the Ollama service will come online.
+3. **Gemma 3 4B** — pulled through your local Ollama (~3.3 GB).
+
+A progress bar tracks each phase. No terminal commands, no manual
+downloads. Just open the app.
+
+The only manual grant required is **Accessibility** on macOS, so Zerm
+can observe the Right Option keypress and simulate ⌘V for auto-paste.
+System Settings → Privacy & Security → Accessibility. Microphone
+permission is requested automatically on first use.
 
 ## Usage
 
