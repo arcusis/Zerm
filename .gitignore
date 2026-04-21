@@ -29,3 +29,6 @@ models/*
 
 # Claude / IDE local config
 .claude/
+
+# Local verification artifacts
+output/

@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Zerm — voice to clipboard, on-device</title>
+    <title>Zerm - local voice to clipboard</title>
     <meta
       name="description"
-      content="Tap a key, speak, paste. Whisper transcription on your GPU, local LLM polish, zero cloud. macOS, Windows, and Linux."
+      content="Zerm is an open-source desktop app for local voice-to-clipboard dictation with Whisper, Ollama, and no telemetry."
     />
-    <meta property="og:title" content="Zerm — voice to clipboard" />
+    <meta property="og:title" content="Zerm - local voice to clipboard" />
     <meta
       property="og:description"
-      content="Local voice-to-clipboard for developers. 100% on-device. Open source."
+      content="Tap a key, speak, paste. Whisper transcription, optional local LLM polish, and a privacy-first desktop workflow."
     />
     <meta property="og:image" content="./icon.png" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -20,179 +20,167 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <!-- Ambient glow layer for Liquid Glass depth -->
-    <div class="ambient" aria-hidden="true">
-      <div class="ambient-a"></div>
-      <div class="ambient-b"></div>
-    </div>
-
     <header class="topbar">
-      <a class="brand" href="./">
+      <a class="brand" href="./" aria-label="Zerm home">
         <img src="./icon.png" alt="" class="brand-logo" />
-        <span class="brand-name">Zerm</span>
+        <span>Zerm</span>
       </a>
-      <nav class="topbar-nav">
+      <nav class="topbar-nav" aria-label="Primary navigation">
         <a href="#download">Download</a>
-        <a href="#how">How it works</a>
-        <a href="https://github.com/arcusis/Zerm" rel="noreferrer">GitHub&nbsp;↗</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/arcusis/Zerm" rel="noreferrer">GitHub</a>
       </nav>
     </header>
 
     <main>
       <section class="hero">
-        <div class="hero-mark">
-          <img src="./icon.png" alt="Zerm icon" />
-        </div>
-        <h1 class="hero-title">Voice to clipboard.<br /><em>On your machine.</em></h1>
-        <p class="hero-lede">
-          Tap a key, speak, paste. Whisper transcribes on your GPU, a local
-          LLM polishes the text, and it lands in whatever you've got focused.
-          No cloud, no accounts, no telemetry.
-        </p>
-
-        <div class="hero-cta">
-          <a id="primary-download" class="btn-primary glass" href="https://github.com/arcusis/Zerm/releases/latest">
-            <span class="btn-label">Download for macOS</span>
-            <span class="btn-sub" id="primary-download-sub">latest release</span>
-          </a>
-          <a class="btn-secondary" href="#download">All platforms →</a>
-        </div>
-
-        <div class="hero-meta">
-          <span id="release-tag" class="tag">v0.1.0-alpha.2</span>
-          <span class="dot"></span>
-          <span>MIT licensed</span>
-          <span class="dot"></span>
-          <span>Open source</span>
-        </div>
-      </section>
-
-      <section class="pillars">
-        <article class="pillar glass">
-          <h3>Instant</h3>
-          <p>
-            Whisper runs on Apple&nbsp;Silicon's Metal GPU. The typical
-            end-to-end round trip is well under two seconds on a warm pipeline.
+        <div class="hero-copy">
+          <img src="./icon.png" alt="Zerm app logo" class="hero-logo" />
+          <p class="kicker">Open-source desktop dictation</p>
+          <h1>Zerm turns speech into clean clipboard text.</h1>
+          <p class="hero-lede">
+            Tap a hotkey, speak, and paste. Whisper transcribes locally,
+            Ollama can polish locally, and Zerm keeps the workflow private by
+            default.
           </p>
-        </article>
-        <article class="pillar glass">
-          <h3>Private</h3>
-          <p>
-            Audio, transcripts and outputs never leave the machine. The only
-            network call is to your local Ollama instance on localhost:11434.
-          </p>
-        </article>
-        <article class="pillar glass">
-          <h3>Yours to shape</h3>
-          <p>
-            Four prompt modes, custom vocabulary for names Whisper mis-hears,
-            swappable LLM, remappable hotkey, persistent pill position.
-          </p>
-        </article>
-      </section>
-
-      <section id="how" class="how">
-        <div class="how-text">
-          <span class="eyebrow">How it works</span>
-          <h2>Four keystrokes, zero friction.</h2>
-          <ol class="how-steps">
-            <li>
-              <span class="step-n">1</span>
-              <div>
-                <strong>Tap Right Option.</strong>
-                <span>A small glass pill appears and starts listening.</span>
-              </div>
-            </li>
-            <li>
-              <span class="step-n">2</span>
-              <div>
-                <strong>Speak.</strong>
-                <span>Up to ~15 minutes, any supported language. Stop talking and Zerm auto-detects the silence.</span>
-              </div>
-            </li>
-            <li>
-              <span class="step-n">3</span>
-              <div>
-                <strong>Paste.</strong>
-                <span>Cleaned text lands in your clipboard and pastes into the focused app automatically.</span>
-              </div>
-            </li>
-          </ol>
-        </div>
-        <aside class="how-pill glass" aria-hidden="true">
-          <span class="pill-dot"></span>
-          <div class="pill-spec" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span><span></span><span></span>
+          <div class="hero-actions">
+            <a id="primary-download" class="button primary" href="https://github.com/arcusis/Zerm/releases">
+              <span class="btn-label">Download latest</span>
+              <span class="btn-sub" id="primary-download-sub">GitHub Releases</span>
+            </a>
+            <a class="button secondary" href="https://github.com/arcusis/Zerm">View source</a>
           </div>
-        </aside>
+          <div class="release-line" aria-live="polite">
+            <span id="release-tag">latest release</span>
+            <span>MIT licensed</span>
+            <span>No accounts or telemetry</span>
+          </div>
+        </div>
+
+        <div class="workflow-panel" aria-label="Zerm recording workflow">
+          <div class="pill-preview">
+            <span class="record-dot"></span>
+            <span class="wave" style="--h: 10px"></span>
+            <span class="wave" style="--h: 18px"></span>
+            <span class="wave" style="--h: 26px"></span>
+            <span class="wave" style="--h: 16px"></span>
+            <span class="wave" style="--h: 22px"></span>
+            <span class="wave" style="--h: 12px"></span>
+          </div>
+          <div class="workflow-steps">
+            <div>
+              <span>01</span>
+              <strong>Record</strong>
+              <p>Right Option on macOS, Ctrl+Shift+Space on Windows and Linux.</p>
+            </div>
+            <div>
+              <span>02</span>
+              <strong>Transcribe</strong>
+              <p>Whisper runs locally with a bundled model.</p>
+            </div>
+            <div>
+              <span>03</span>
+              <strong>Paste</strong>
+              <p>The result lands in your clipboard, ready for the focused app.</p>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section id="download" class="downloads">
-        <div class="downloads-head">
-          <span class="eyebrow">Downloads</span>
-          <h2>Pick your platform</h2>
+      <section class="strip" aria-label="Highlights">
+        <div>
+          <strong>Local first</strong>
+          <span>Audio and transcripts stay on the machine.</span>
+        </div>
+        <div>
+          <strong>Developer ready</strong>
+          <span>Agent, chat, pro, and raw transcript modes.</span>
+        </div>
+        <div>
+          <strong>Auditable</strong>
+          <span>Tauri 2, Rust, TypeScript, and MIT license.</span>
+        </div>
+      </section>
+
+      <section id="download" class="section">
+        <div class="section-head">
+          <p class="kicker">Downloads</p>
+          <h2>Install a build or compile from source.</h2>
           <p>
-            Grab the installer that matches your machine. Tag
-            <span id="release-tag-2">v0.1.0-alpha.2</span>.
-            Models (Whisper, Ollama) auto-install on first launch.
+            The cards update from GitHub Releases when a release is available.
+            Current detected release: <span id="release-tag-2">checking...</span>.
           </p>
         </div>
+
         <div class="download-grid">
-          <a class="dl glass" data-platform="mac-arm" href="https://github.com/arcusis/Zerm/releases/latest">
-            <div class="dl-os">macOS · Apple Silicon</div>
-            <div class="dl-file"><strong>.dmg</strong></div>
-            <div class="dl-hint">M1 / M2 / M3 / M4</div>
+          <a class="download-card" data-platform="mac-arm" href="https://github.com/arcusis/Zerm/releases">
+            <span>macOS Apple Silicon</span>
+            <strong>.dmg</strong>
+            <small>M1 and newer</small>
           </a>
-          <a class="dl glass" data-platform="mac-x86" href="https://github.com/arcusis/Zerm/releases/latest">
-            <div class="dl-os">macOS · Intel</div>
-            <div class="dl-file"><strong>.dmg</strong></div>
-            <div class="dl-hint">x86_64</div>
+          <a class="download-card" data-platform="mac-x86" href="https://github.com/arcusis/Zerm/releases">
+            <span>macOS Intel</span>
+            <strong>.dmg</strong>
+            <small>x86_64</small>
           </a>
-          <a class="dl glass" data-platform="win" href="https://github.com/arcusis/Zerm/releases/latest">
-            <div class="dl-os">Windows</div>
-            <div class="dl-file"><strong>.msi&nbsp;/&nbsp;.exe</strong></div>
-            <div class="dl-hint">10 · 11</div>
+          <a class="download-card" data-platform="win" href="https://github.com/arcusis/Zerm/releases">
+            <span>Windows</span>
+            <strong>.msi / .exe</strong>
+            <small>Windows 10 and 11</small>
           </a>
-          <a class="dl glass" data-platform="linux-appimage" href="https://github.com/arcusis/Zerm/releases/latest">
-            <div class="dl-os">Linux</div>
-            <div class="dl-file"><strong>.AppImage</strong></div>
-            <div class="dl-hint">Ubuntu 22.04+</div>
+          <a class="download-card" data-platform="linux-appimage" href="https://github.com/arcusis/Zerm/releases">
+            <span>Linux</span>
+            <strong>.AppImage</strong>
+            <small>Portable package</small>
           </a>
-          <a class="dl glass" data-platform="linux-deb" href="https://github.com/arcusis/Zerm/releases/latest">
-            <div class="dl-os">Linux (Debian)</div>
-            <div class="dl-file"><strong>.deb</strong></div>
-            <div class="dl-hint">apt install ./Zerm.deb</div>
+          <a class="download-card" data-platform="linux-deb" href="https://github.com/arcusis/Zerm/releases">
+            <span>Debian / Ubuntu</span>
+            <strong>.deb</strong>
+            <small>Install with apt</small>
           </a>
-          <a class="dl dl-source" href="https://github.com/arcusis/Zerm">
-            <div class="dl-os">Source</div>
-            <div class="dl-file"><strong>GitHub&nbsp;↗</strong></div>
-            <div class="dl-hint">pnpm tauri build</div>
+          <a class="download-card source-card" href="https://github.com/arcusis/Zerm#build-from-source">
+            <span>Source</span>
+            <strong>pnpm tauri dev</strong>
+            <small>Build locally</small>
           </a>
         </div>
-        <p class="install-note">
-          <strong>First launch:</strong> open Zerm, click
-          <em>Download Whisper model</em> in the setup banner, install
-          <a href="https://ollama.com/download" rel="noreferrer">Ollama</a>,
-          then run <code>ollama pull gemma3:4b</code>. That's it.
-        </p>
       </section>
 
-      <section class="cta">
-        <div class="cta-card glass">
-          <h2>Small project. Real tool.</h2>
-          <p>
-            Zerm is an open‑source project from
-            <a href="https://arcusis.com" rel="noreferrer">Arcusis</a>. If it's
-            useful — star the repo, file issues, send patches.
-          </p>
-          <a class="btn-primary glass" href="https://github.com/arcusis/Zerm">Open on GitHub →</a>
+      <section id="privacy" class="section split">
+        <div class="section-head left">
+          <p class="kicker">Privacy model</p>
+          <h2>No hosted transcription. No analytics. History off by default.</h2>
         </div>
+        <div class="privacy-list">
+          <p>
+            Zerm records through the local microphone API, transcribes with a
+            local Whisper model, and only sends text to a verified local Ollama
+            listener when a rewrite mode needs it.
+          </p>
+          <ul>
+            <li>Dictation history is opt-in.</li>
+            <li>Clearing history removes the backup state file too.</li>
+            <li>Setup downloads are bounded and verified where possible.</li>
+            <li>Stable releases require signing secrets before publishing.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section repo">
+        <div>
+          <p class="kicker">Open source</p>
+          <h2>Read the code, file issues, send patches.</h2>
+          <p>
+            The README includes architecture notes, platform setup, release
+            process, and verification commands for local contributors.
+          </p>
+        </div>
+        <a class="button primary" href="https://github.com/arcusis/Zerm">Open repository</a>
       </section>
     </main>
 
     <footer class="site-foot">
-      <span>© <span id="year"></span> Arcusis · MIT License</span>
+      <span>© <span id="year"></span> Arcusis. MIT License.</span>
       <span class="foot-links">
         <a href="https://github.com/arcusis/Zerm">Repository</a>
         <a href="https://github.com/arcusis/Zerm/releases">Releases</a>

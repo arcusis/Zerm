@@ -1,175 +1,264 @@
-# Zerm
+<p align="center">
+  <img src="./assets/logo.png" alt="Zerm logo" width="120" height="120" />
+</p>
 
-> Local voice‑to‑clipboard for developers. Tap a key, speak, paste.
-> Zero cloud, zero accounts, zero telemetry.
+<h1 align="center">Zerm</h1>
 
-Zerm is a small native menu‑bar app that turns your voice into clean,
-structured text — instructions for a coding agent, a Slack message, a polished
-email, or just a raw transcript. It runs entirely on your machine.
+<p align="center">
+  Local voice-to-clipboard for developers. Tap a key, speak, paste.
+</p>
 
-* **Whisper.cpp** transcribes audio on the GPU (Metal on Apple Silicon).
-* **Ollama + Gemma 3** reformats the transcript locally with one of four
-  prompt modes.
-* The result lands in your clipboard, ready to paste anywhere.
+<p align="center">
+  <a href="https://github.com/arcusis/Zerm/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/arcusis/Zerm/ci.yml?branch=Production&label=ci"></a>
+  <a href="https://github.com/arcusis/Zerm/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/arcusis/Zerm?include_prereleases&label=release"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/arcusis/Zerm"></a>
+  <a href="https://arcusis.github.io/Zerm/"><img alt="Website" src="https://img.shields.io/badge/website-arcusis.github.io%2FZerm-111111"></a>
+</p>
 
-The UI is built with Tauri 2 in the spirit of Apple's Liquid Glass material —
-a small floating pill while you speak, and a dashboard window for history,
-vocabulary, and settings.
+Zerm is a native desktop app that turns speech into clean text without sending
+your voice to a cloud service. It records from your microphone, transcribes with
+Whisper on your machine, optionally reformats the transcript through your local
+Ollama model, and writes the result to your clipboard.
+
+It is built for people who use voice as an input method for coding agents,
+Slack, email, notes, pull request reviews, and long-form writing.
+
+## Contents
+
+- [Features](#features)
+- [Install](#install)
+- [First-run Setup](#first-run-setup)
+- [Usage](#usage)
+- [Privacy And Security](#privacy-and-security)
+- [Build From Source](#build-from-source)
+- [Project Structure](#project-structure)
+- [Verification](#verification)
+- [Contributing](#contributing)
+- [Release Process](#release-process)
+- [Roadmap](#roadmap)
+- [License](#license)
 
 ## Features
 
-- **Tap‑to‑toggle hotkey** — defaults to Right Option on macOS, configurable
-  in Settings (Right Cmd, Right Shift, Caps Lock, Fn, etc.)
-- **Voice‑activity detection** — auto‑stops on ~1.5 s of silence
-- **Live audio spectrum** in the floating pill while you speak
-- **Multilingual** — auto‑detects the input language; English, Hebrew, Russian,
-  Arabic, Chinese, etc.
-- **Four prompt modes**
-  - **Off** — raw transcript (with a conservative cleanup pass for
-    non‑Latin scripts so punctuation/typos still get fixed without
-    translation or paraphrasing)
-  - **Agent** — instruction for Claude Code or any coding agent
-  - **Chat** — short casual message for Slack / WhatsApp / iMessage
-  - **Pro** — polished long‑form prose for emails, posts, articles
-- **Custom vocabulary** — add company names, acronyms, and identifiers that
-  Whisper would otherwise mis‑hear. Each term biases Whisper's decoding.
-- **Persistent history** — last 100 dictations, click any to re‑copy
-- **Position memory** — drag the pill where you want; it'll be there next
-  launch
-- **System tray** integration with menu and click‑to‑open dashboard
-- **100 % local** — only network call is to your local Ollama at
-  `localhost:11434`
+- **On-device transcription** with `whisper.cpp` through `whisper-rs`.
+- **Local rewrite modes** through Ollama and Gemma 3: Off, Agent, Chat, and Pro.
+- **Clipboard-first workflow**: record, process, copy, and optionally auto-paste.
+- **Hotkey recording**: Right Option on macOS; Ctrl+Shift+Space on Windows/Linux.
+- **Voice activity detection** to auto-stop after silence.
+- **Custom vocabulary** for names, project terms, acronyms, and identifiers.
+- **Private by default history**: history starts off and can be enabled explicitly.
+- **First-run setup UI** for Whisper, Ollama, and the local model.
+- **Cross-platform bundles** for macOS, Windows, and Linux through Tauri 2.
 
 ## Install
 
-Pre‑built installers will appear on the [Releases](https://github.com/arcusis/Zerm/releases)
-page once CI runs against a tag.
+Download the latest build from the
+[Releases](https://github.com/arcusis/Zerm/releases) page or the
+[project website](https://arcusis.github.io/Zerm/).
 
-| Platform | Status              | Hotkey                                                 |
-|----------|---------------------|--------------------------------------------------------|
-| macOS    | First‑class         | **Right Option** (modifier‑only, via NSEvent monitor)  |
-| Windows  | Works               | **Ctrl + Shift + Space**                               |
-| Linux    | Works               | **Ctrl + Shift + Space** (X11; Wayland clipboard may no‑op) |
+| Platform | Package | Current hotkey |
+| --- | --- | --- |
+| macOS Apple Silicon | `.dmg` | Right Option |
+| macOS Intel | `.dmg` | Right Option |
+| Windows | `.msi` or `.exe` | Ctrl+Shift+Space |
+| Linux | `.deb` or `.AppImage` | Ctrl+Shift+Space |
 
-## Setup
+Stable public releases are expected to be signed. Prerelease builds may be
+unsigned while the project is still moving quickly.
 
-The first time you open Zerm it sets itself up. The dashboard streams
-three things automatically:
+## First-run Setup
 
-1. **Whisper model** — the multilingual `ggml-small.bin` (~466 MB) is
-   downloaded into the app's data directory.
-2. **Ollama** — if not already installed, Zerm downloads the official
-   installer for your platform and launches it. Approve the system
-   prompt and the Ollama service will come online.
-3. **Gemma 3 4B** — pulled through your local Ollama (~3.3 GB).
+The dashboard walks through setup when something is missing:
 
-A progress bar tracks each phase. No terminal commands, no manual
-downloads. Just open the app.
+1. **Whisper model**: downloads the multilingual `ggml-small.bin` model into
+   the app data directory.
+2. **Ollama**: detects a trusted local Ollama listener, or offers install steps
+   when Ollama is missing.
+3. **Gemma 3 4B**: pulls the default local rewrite model through Ollama.
 
-The only manual grant required is **Accessibility** on macOS, so Zerm
-can observe the Right Option keypress and simulate ⌘V for auto-paste.
-System Settings → Privacy & Security → Accessibility. Microphone
-permission is requested automatically on first use.
+macOS also requires Accessibility permission for global modifier-key recording
+and auto-paste. Microphone permission is requested by the operating system on
+first use.
 
 ## Usage
 
-1. Launch Zerm. The dashboard opens, and a tray icon appears in your menu
-   bar.
-2. **Tap your hotkey** (Right Option by default) — the pill appears with a
-   pulsing red dot and a live audio spectrum.
-3. Speak. Zerm auto‑stops when you stop talking, or you can tap the
-   hotkey again.
-4. The cleaned text is on your clipboard. Paste it anywhere.
+1. Launch Zerm.
+2. Press the hotkey to start recording.
+3. Speak naturally.
+4. Press the hotkey again or stop talking and let silence detection finish.
+5. Paste the copied result wherever you were working.
 
-## Configuration
+Prompt modes:
 
-All settings live in the dashboard:
+| Mode | Output |
+| --- | --- |
+| Off | Raw transcript with conservative cleanup |
+| Agent | A clear instruction for a coding agent |
+| Chat | Short casual message |
+| Pro | Polished long-form prose |
 
-- **Hotkey** — pick from Right Option, Left Option, Right Cmd, Right Shift,
-  Right Ctrl, Caps Lock, Fn
-- **Prompt mode** — Off / Agent / Chat / Pro
-- **Auto‑stop on silence** — toggle VAD on or off
-- **Custom vocabulary** — chip‑style library of acronyms and names
+## Privacy And Security
 
-Power‑user environment variables:
+Zerm is designed around local processing.
 
-| Variable               | Effect                                                              |
-|------------------------|---------------------------------------------------------------------|
-| `ZERM_LLM_MODEL`       | Override the Ollama model. Default `gemma3:4b`.                     |
-| `ZERM_WHISPER_MODEL`   | Path to a specific Whisper GGML model file.                         |
+- No accounts.
+- No telemetry.
+- No hosted transcription service.
+- No cloud LLM calls from Zerm.
+- Dictation history is off by default.
+- Clearing or disabling history also erases the backup state file.
+- Local Ollama access is verified before transcripts are sent to
+  `127.0.0.1:11434`; degraded local identity checks require explicit opt-in.
 
-State (history, settings, pill position) lives in
-`~/Library/Application Support/com.arcusis.zerm/zerm-state.json` on macOS.
+First-run setup does make network requests to download required model and
+installer assets:
 
-## Build from source
+| Destination | Purpose |
+| --- | --- |
+| `huggingface.co` | Whisper model download |
+| `api.github.com` / `github.com` | Ollama release metadata and installer assets |
+| Ollama model registry | Gemma model pull through the local Ollama service |
+
+Downloaded setup assets are bounded and hash/signature checked where the app can
+verify them. Release builds are also checked by CI before publishing.
+
+## Build From Source
+
+Prerequisites:
+
+- Node.js 22 or newer
+- pnpm 10.33.0 through Corepack
+- Rust stable
+- Tauri system dependencies for your platform
+- CMake
+- Ollama, if you want local rewrite modes during development
+
+macOS:
 
 ```sh
-# Prerequisites
 brew install cmake ollama
-ollama pull gemma3:4b
-curl -L -o models/ggml-medium.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
-
-# Install JS deps and run dev
+corepack enable
+corepack prepare pnpm@10.33.0 --activate
 pnpm install
 pnpm tauri dev
+```
 
-# Build a release bundle
+Ubuntu 22.04+:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  libgtk-3-dev \
+  libsoup-3.0-dev \
+  libjavascriptcoregtk-4.1-dev \
+  libasound2-dev \
+  libxdo-dev \
+  cmake \
+  build-essential
+
+corepack enable
+corepack prepare pnpm@10.33.0 --activate
+pnpm install
+pnpm tauri dev
+```
+
+Build a bundle:
+
+```sh
 pnpm tauri build
 ```
 
-The first Rust build takes ~2–3 minutes (whisper.cpp + Tauri tree).
-Subsequent incremental builds are seconds.
+## Project Structure
 
-## Privacy
+| Path | Purpose |
+| --- | --- |
+| `src-tauri/src/lib.rs` | Tauri commands, app lifecycle, setup, recording pipeline |
+| `src-tauri/src/audio.rs` | Microphone capture and audio utilities |
+| `src-tauri/src/whisper.rs` | Whisper model loading and transcription |
+| `src-tauri/src/ollama.rs` | Local Ollama identity checks and rewrite requests |
+| `src-tauri/src/state.rs` | Settings, history, stats, persistence |
+| `dashboard.html` | Main dashboard markup |
+| `src/dashboard.ts` | Dashboard behavior and setup flows |
+| `src/styles.css` | App UI styling |
+| `docs/` | GitHub Pages landing page |
+| `assets/` | Repository-facing logo assets |
 
-**At runtime,** everything happens on your machine. Microphone audio,
-raw Whisper transcripts, AI‑refined output, and persisted history never
-leave the device. The only network connection is HTTP to your local
-Ollama instance on `localhost:11434`. There are no analytics, no error
-reporters, no update servers (yet).
+## Verification
 
-**At first‑run setup,** Zerm makes exactly three outbound connections:
+Run the same checks used by CI:
 
-1. `huggingface.co` — downloads the Whisper `ggml‑small.bin` model
-   (hash‑pinned and verified on the fly; aborted if the stream exceeds
-   500 MB or the SHA‑256 digest doesn't match).
-2. `ollama.com` — downloads the official Ollama installer for your
-   platform when you click **Install Ollama**. You'll be asked to
-   confirm the URL before we download it, and the OS installer itself
-   will show its own signature/notarization dialog. The launcher is
-   never run silently.
-3. `localhost:11434` — your newly installed Ollama pulls the language
-   model. This is Ollama talking to its own library, not Zerm.
+```sh
+pnpm typecheck
+pnpm build
+pnpm audit --prod
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo audit --file src-tauri/Cargo.lock --deny warnings
+```
 
-## Tech stack
+`cargo fmt`, `cargo clippy`, and `cargo audit` require `rustfmt`,
+`clippy`, and `cargo-audit` to be installed for your Rust toolchain.
 
-- **Tauri 2** — Rust core + WKWebView/WebView2 UI shell
-- **whisper.cpp** via `whisper-rs` — on‑device speech‑to‑text with Metal GPU
-- **Ollama + Gemma 3** — local LLM for prompt‑mode reformatting
-- **cpal** — cross‑platform microphone capture
-- **objc2** — native NSEvent global hotkey monitor on macOS
-- **arboard** — clipboard write
-
-## Roadmap
-
-- Modifier‑only push‑to‑talk on Windows (Win32 low‑level hook) and Linux
-  (evdev or Wayland input grabbers) — today those platforms use a
-  Ctrl + Shift + Space combo via the Tauri global‑shortcut plugin
-- Streaming Whisper + streaming Ollama for sub‑second perceived latency on
-  long recordings
-- Optional dock‑icon mode for users who prefer it over the tray
-- Plugin API for custom prompt modes
+```sh
+rustup component add rustfmt clippy
+cargo install cargo-audit --locked
+```
 
 ## Contributing
 
-Issues and PRs welcome. The codebase is small enough to read in an
-afternoon — `src-tauri/src/lib.rs` is the wiring entry point; the rest is
-modules per concern (`audio`, `whisper`, `ollama`, `hotkey`, `state`).
+Issues and pull requests are welcome.
+
+Before opening a PR:
+
+1. Keep changes focused and explain the user-facing behavior.
+2. Add or update tests for persistence, privacy, setup, or platform behavior.
+3. Run the verification commands above.
+4. Include screenshots or short recordings for UI changes.
+5. Note any platform you could not test.
+
+Good first areas:
+
+- Platform-specific hotkey improvements.
+- Linux and Windows setup recovery.
+- Accessibility and keyboard navigation.
+- Additional local prompt modes.
+- Documentation for distro-specific Linux dependencies.
+
+## Release Process
+
+Releases are driven by tags.
+
+```sh
+git tag v0.1.0-alpha.16
+git push origin v0.1.0-alpha.16
+```
+
+The release workflow runs preflight checks, creates a draft GitHub Release,
+builds platform artifacts, uploads them, and publishes only after every matrix
+job succeeds.
+
+Stable tags such as `v0.1.0` require Apple and Windows signing secrets in the
+GitHub repository. Prerelease tags such as `v0.1.0-alpha.16` can publish
+unsigned artifacts.
+
+The website deploys separately from `docs/` on pushes to the `Production`
+branch or through manual workflow dispatch.
+
+## Roadmap
+
+- Push-to-talk style modifier hooks for Windows and Linux.
+- Faster streaming transcription and rewrite feedback.
+- Optional encrypted history storage.
+- User-defined prompt mode templates.
+- Richer release provenance and public checksums.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Zerm is released under the [MIT License](./LICENSE).
 
-Built by [Arcusis](https://arcusis.com) for developers who think faster
-than they type.
+Built by [Arcusis](https://arcusis.com).

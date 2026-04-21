@@ -253,7 +253,16 @@ jobs:
           APPLE_ID: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_ID || '' }}
           APPLE_PASSWORD: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_TEAM_ID || '' }}
-        run: pnpm tauri build ${{ matrix.args }}
+        run: |
+          args="${{ matrix.args }}"
+          is_prerelease=false
+          case "${{ github.ref_name }}" in
+            *-alpha*|*-beta*|*-rc*) is_prerelease=true ;;
+          esac
+          if [[ "${{ runner.os }}" == "macOS" && "$is_prerelease" == "true" ]]; then
+            args="$args --no-sign"
+          fi
+          pnpm tauri build $args
 
       - name: Upload release artifacts
         shell: bash
