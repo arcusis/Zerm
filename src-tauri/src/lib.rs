@@ -271,6 +271,26 @@ fn accessibility_is_trusted() -> bool {
 }
 
 #[cfg(target_os = "macos")]
+fn input_control_is_ready() -> bool {
+    accessibility_is_trusted() || INPUT_MONITOR_READY.load(Ordering::SeqCst)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn input_control_is_ready() -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn auto_paste_is_ready() -> bool {
+    accessibility_is_trusted()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn auto_paste_is_ready() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> std::ffi::c_uchar;
@@ -309,7 +329,7 @@ struct InputPermissionStatus {
 fn input_permission_status() -> InputPermissionStatus {
     #[cfg(target_os = "macos")]
     {
-        let granted = accessibility_is_trusted();
+        let granted = input_control_is_ready();
         InputPermissionStatus {
             required: true,
             granted,
@@ -482,7 +502,7 @@ fn send_paste_via_system_events() -> bool {
 
 #[cfg(target_os = "macos")]
 fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
-    if !accessibility_is_trusted() {
+    if !auto_paste_is_ready() {
         return Err(auto_paste_permission_message());
     }
 
@@ -885,7 +905,7 @@ async fn process(
         .unwrap_or((false, true));
 
     if auto_paste && !output.is_empty() {
-        if !accessibility_is_trusted() {
+        if !auto_paste_is_ready() {
             emit_error(app, auto_paste_permission_message());
         } else {
             tokio::time::sleep(std::time::Duration::from_millis(70)).await;
@@ -1124,7 +1144,7 @@ fn set_auto_paste(
     if enabled {
         #[cfg(target_os = "macos")]
         {
-            if !accessibility_is_trusted() && !request_accessibility_trust() {
+            if !auto_paste_is_ready() && !request_accessibility_trust() {
                 let _ = open_accessibility_settings();
                 return Err(auto_paste_permission_message());
             }
