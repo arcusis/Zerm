@@ -350,13 +350,35 @@ async function runSetup() {
     return;
   }
 
-  // 2. Ollama — auto-install + auto-start
+  // 2. Ollama — require explicit user click before downloading and
+  //    executing a third-party installer. Never silent.
   if (!status.ollama_running) {
-    await autoInstallOllama();
+    showSetupBanner(
+      "Ollama is not running",
+      "Zerm needs Ollama (open-source, runs locally) to polish transcripts. Installing runs the official Ollama installer; you'll be asked to approve it.",
+      `<button class="solid-btn" id="btn-install-ollama">Install Ollama</button>
+       <a class="ghost-btn" href="https://ollama.com" target="_blank" rel="noreferrer">What is this?</a>`,
+    );
+    $("btn-install-ollama")?.addEventListener("click", async () => {
+      const url = {
+        darwin: "https://ollama.com/download/Ollama-darwin.zip",
+        win32: "https://ollama.com/download/OllamaSetup.exe",
+        linux: "https://ollama.com/install.sh",
+      };
+      const ok = window.confirm(
+        "This will download the official Ollama installer from ollama.com and launch it. " +
+          "Continue?\n\n" +
+          `URL: ${url.darwin} (or the equivalent for your OS)\n` +
+          "The installer is signed/notarized by Ollama Inc. — you'll see a system prompt to confirm.",
+      );
+      if (ok) await autoInstallOllama();
+    });
     return;
   }
 
-  // 3. Gemma model — auto-pull via local Ollama API
+  // 3. Gemma model — pull from the user's own local Ollama. This is a
+  //    LOCAL-only network call (ollama's /api/pull, which Ollama itself
+  //    fetches from its library). Safe to kick automatically.
   if (!status.ollama_model_pulled) {
     await autoPullModel(status.ollama_model_name);
     await runSetup();

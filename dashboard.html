@@ -241,10 +241,18 @@
               <div class="about-block">
                 <span class="eyebrow">Privacy</span>
                 <p>
-                  Everything runs on your machine. The only network call is
+                  <strong>At runtime:</strong> everything happens on your
+                  machine. Your microphone audio, raw transcripts, and final
+                  outputs never leave the device. The only network call is
                   to your local Ollama instance at
-                  <code>localhost:11434</code>. Your microphone audio, raw
-                  transcripts, and final outputs never leave the device.
+                  <code>localhost:11434</code>.
+                </p>
+                <p>
+                  <strong>At first-run setup:</strong> Zerm downloads the
+                  Whisper model from <code>huggingface.co</code> (hash-pinned
+                  and verified) and launches the official Ollama installer
+                  from <code>ollama.com</code>. You'll confirm before the
+                  Ollama installer runs.
                 </p>
               </div>
 

@@ -151,7 +151,9 @@ impl Default for Settings {
             prompt_mode: PromptMode::Developer,
             hotkey: HotkeyChoice::RightOption,
             vocabulary: Vec::new(),
-            auto_paste: true,
+            // Auto-paste is OPT-IN. It can paste into the wrong window if the
+            // user tabs away during the async Whisper+Ollama round trip.
+            auto_paste: false,
         }
     }
 }
@@ -189,12 +191,46 @@ impl PersistentState {
         }
     }
 
+    /// Atomic save: write to a sibling `.tmp` file, fsync, rename over the
+    /// target. Prevents corruption if the process dies mid-write or two
+    /// concurrent saves interleave. A `.bak` of the previous good file is
+    /// kept so we can recover if the parse at load time ever fails.
     pub fn save(&self, path: &Path) -> Result<()> {
+        use std::io::Write;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
+        let serialized = serde_json::to_string_pretty(self)?;
+        let tmp = path.with_extension("json.tmp");
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(serialized.as_bytes())?;
+            f.sync_all()?;
+        }
+        // Preserve the prior good copy as a `.bak` before clobbering.
+        if path.exists() {
+            let bak = path.with_extension("json.bak");
+            let _ = std::fs::rename(path, &bak);
+        }
+        std::fs::rename(&tmp, path)?;
         Ok(())
+    }
+
+    pub fn load_with_backup(path: &Path) -> Self {
+        if let Ok(s) = std::fs::read_to_string(path) {
+            if let Ok(state) = serde_json::from_str::<Self>(&s) {
+                return state;
+            }
+            log::warn!("state file at {path:?} failed to parse; trying .bak");
+        }
+        let bak = path.with_extension("json.bak");
+        if let Ok(s) = std::fs::read_to_string(&bak) {
+            if let Ok(state) = serde_json::from_str::<Self>(&s) {
+                log::info!("recovered state from {bak:?}");
+                return state;
+            }
+        }
+        Self::default()
     }
 
     pub fn record(&mut self, transcript: String, output: String) {

@@ -8,7 +8,7 @@ use anyhow::Result;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -24,6 +24,27 @@ const TRANSCRIPT_EVENT: &str = "zerm://transcript";
 const DONE_EVENT: &str = "zerm://done";
 const DASHBOARD_UPDATED_EVENT: &str = "zerm://dashboard-updated";
 const AUDIO_LEVEL_EVENT: &str = "zerm://audio-level";
+
+// Set before calling app.exit(0) so the RunEvent::ExitRequested handler
+// below knows this is an intentional quit, not a last-window-closed event.
+static INTENTIONAL_QUIT: AtomicBool = AtomicBool::new(false);
+
+// Monotonic job counter so a fresh recording can invalidate in-flight
+// processing from a previous recording — prevents stale auto-paste after
+// the user tabs away.
+static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
+static CURRENT_JOB_ID: AtomicU64 = AtomicU64::new(0);
+
+// Known-good SHA-256 digest and max byte size for the Whisper model we ship.
+// Pinned so that a compromised CDN or repo commit can't silently swap in a
+// different file. Confirmed against Hugging Face LFS metadata (see
+// ggerganov/whisper.cpp on HF for the `ggml-small.bin` LFS oid).
+const WHISPER_SMALL_SHA256: &str =
+    "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
+const WHISPER_SMALL_MAX_BYTES: u64 = 500_000_000;
+// Pinned to a commit rather than `main` so the repo owner can't rev the
+// file under the pinned digest without also changing the URL.
+const WHISPER_SMALL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
 const PILL_WIDTH: i32 = 240;
 const STATE_FILE: &str = "zerm-state.json";
 
@@ -56,11 +77,17 @@ impl Pipeline {
         }
     }
 
+    /// Serialize writes through a single mutex so two in-flight saves
+    /// can't interleave on the same file. The save itself uses the
+    /// atomic tempfile+rename path in state::PersistentState::save.
     fn save_persistent(&self) {
         let path = self.state_path.lock().clone();
         let snapshot = self.persistent.lock().clone();
         if let Some(p) = path {
+            static SAVE_GUARD: once_cell::sync::Lazy<std::sync::Mutex<()>> =
+                once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
             std::thread::spawn(move || {
+                let _guard = SAVE_GUARD.lock().expect("save lock poisoned");
                 if let Err(e) = snapshot.save(&p) {
                     log::error!("failed to save state: {e:#}");
                 }
@@ -301,6 +328,12 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
 
     let _ = app.emit(PROCESSING_EVENT, ());
 
+    // Allocate a fresh job id. Anything older now in flight will still
+    // emit DONE_EVENT but will NOT auto-paste, because auto-paste is
+    // gated on `job_id == CURRENT_JOB_ID`.
+    let job_id = NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst);
+    CURRENT_JOB_ID.store(job_id, Ordering::SeqCst);
+
     let raw = std::mem::take(&mut *pipeline.audio_buffer.lock());
     let app_clone = app.clone();
     let whisper = pipeline.whisper.clone();
@@ -320,6 +353,7 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
             llm_model,
             prompt_mode,
             vocabulary,
+            job_id,
         )
         .await;
         if let Err(e) = result {
@@ -337,6 +371,7 @@ async fn process(
     llm_model: String,
     prompt_mode: PromptMode,
     vocabulary: String,
+    job_id: u64,
 ) -> Result<()> {
     if raw.len() < (sample_rate as usize) / 4 {
         log::warn!("audio too short ({} samples), skipping", raw.len());
@@ -371,7 +406,9 @@ async fn process(
     .await??;
 
     let transcript = state::strip_whisper_tokens(&raw_transcript);
-    log::info!("transcript: {transcript}");
+    // Transcripts contain dictated text which may include secrets (PII,
+    // credentials, draft messages). Keep them out of info-level logs.
+    log::debug!("transcript ({} chars)", transcript.len());
     let _ = app.emit(TRANSCRIPT_EVENT, transcript.clone());
 
     if transcript.is_empty() {
@@ -422,12 +459,18 @@ async fn process(
     let auto_paste = app
         .try_state::<Arc<Pipeline>>()
         .map(|s| s.persistent.lock().settings.auto_paste)
-        .unwrap_or(true);
+        .unwrap_or(false);
 
-    if auto_paste && !output.is_empty() {
-        // Tiny delay so the clipboard write is observable before the paste fires.
+    // Only paste if (a) auto-paste is on, (b) this is still the most
+    // recent job (no new recording started), and (c) we have output.
+    let still_current = CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id;
+    if auto_paste && still_current && !output.is_empty() {
         tokio::time::sleep(std::time::Duration::from_millis(70)).await;
-        tauri::async_runtime::spawn_blocking(send_paste_keystroke);
+        // Re-check inside the delay window — user may have Cmd-tabbed
+        // during the 70ms and triggered another recording.
+        if CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id {
+            tauri::async_runtime::spawn_blocking(send_paste_keystroke);
+        }
     }
 
     if let Some(state) = app.try_state::<Arc<Pipeline>>() {
@@ -469,7 +512,10 @@ fn build_tray(app: &tauri::App, pipeline: Arc<Pipeline>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .tooltip("Zerm — voice to clipboard")
         .on_menu_event(move |app, event| match event.id.as_ref() {
-            "quit" => app.exit(0),
+            "quit" => {
+                INTENTIONAL_QUIT.store(true, Ordering::SeqCst);
+                app.exit(0);
+            }
             "toggle" => handle_toggle(&app_for_menu, &pipeline_for_menu),
             "dashboard" => open_dashboard_window(&app_for_menu),
             _ => {}
@@ -687,6 +733,7 @@ fn copy_history_entry(
 
 #[tauri::command]
 fn quit_app(app: AppHandle) {
+    INTENTIONAL_QUIT.store(true, Ordering::SeqCst);
     app.exit(0);
 }
 
@@ -724,7 +771,16 @@ struct SetupStatus {
 async fn check_setup(app: AppHandle) -> SetupStatus {
     let path = whisper_model_path(&app);
     let whisper_model_present = path.exists();
-    let model_name = std::env::var("ZERM_LLM_MODEL").unwrap_or_else(|_| "gemma3:4b".to_string());
+    // Match runtime resolution: env var overrides, otherwise persisted setting,
+    // otherwise default. Previously this only honoured the env var so setup
+    // could report-and-pull one model while the runtime used another.
+    let model_name = if let Ok(env) = std::env::var("ZERM_LLM_MODEL") {
+        env
+    } else if let Some(state) = app.try_state::<Arc<Pipeline>>() {
+        state.persistent.lock().settings.llm_model.clone()
+    } else {
+        "gemma3:4b".to_string()
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -917,10 +973,9 @@ async fn pull_ollama_model(app: AppHandle, model: String) -> Result<(), String> 
 #[tauri::command]
 async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
     use futures_util::StreamExt;
+    use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
 
-    const URL: &str =
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
     const FILENAME: &str = "ggml-small.bin";
 
     let dir = user_models_dir(&app)
@@ -929,31 +984,57 @@ async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
         .await
         .map_err(|e| format!("create dir: {e}"))?;
     let dest = dir.join(FILENAME);
-    let tmp = dir.join(format!("{FILENAME}.part"));
 
-    let resp = reqwest::get(URL)
+    // Use a randomized temp path inside the user's app-data dir (not /tmp),
+    // so no other user/process can pre-create a symlink at a predictable
+    // path and substitute a malicious file. `tempfile` opens with O_EXCL
+    // on unix and CreateFile DISPOSITION_CREATE_NEW on Windows.
+    let tmp_file = tempfile::Builder::new()
+        .prefix(".ggml-small-")
+        .suffix(".part")
+        .tempfile_in(&dir)
+        .map_err(|e| format!("tempfile: {e}"))?;
+    let tmp_path = tmp_file.path().to_path_buf();
+
+    let resp = reqwest::get(WHISPER_SMALL_URL)
         .await
         .map_err(|e| format!("request: {e}"))?
         .error_for_status()
         .map_err(|e| format!("status: {e}"))?;
+
+    // Don't trust Content-Length; use it only to reject obviously-wrong
+    // responses early.
+    if let Some(len) = resp.content_length() {
+        if len > WHISPER_SMALL_MAX_BYTES {
+            return Err(format!(
+                "refusing: content-length {len} exceeds cap {WHISPER_SMALL_MAX_BYTES}"
+            ));
+        }
+    }
     let total = resp.content_length().unwrap_or(0);
     let _ = app.emit(
         "zerm://whisper-download-progress",
         DownloadProgress { downloaded: 0, total },
     );
 
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .map_err(|e| format!("create file: {e}"))?;
+    let std_tmp = tmp_file.reopen().map_err(|e| format!("reopen: {e}"))?;
+    let mut file = tokio::fs::File::from_std(std_tmp);
+    let mut hasher = Sha256::new();
     let mut downloaded: u64 = 0;
     let mut last_emit: u64 = 0;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
+        downloaded += chunk.len() as u64;
+        if downloaded > WHISPER_SMALL_MAX_BYTES {
+            return Err(format!(
+                "refusing: stream exceeded {WHISPER_SMALL_MAX_BYTES} byte cap"
+            ));
+        }
+        hasher.update(&chunk);
         file.write_all(&chunk)
             .await
             .map_err(|e| format!("write: {e}"))?;
-        downloaded += chunk.len() as u64;
         if downloaded - last_emit > 256 * 1024 {
             last_emit = downloaded;
             let _ = app.emit(
@@ -963,18 +1044,34 @@ async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
         }
     }
     file.flush().await.map_err(|e| format!("flush: {e}"))?;
+    file.sync_all().await.map_err(|e| format!("sync: {e}"))?;
     drop(file);
 
-    tokio::fs::rename(&tmp, &dest)
-        .await
-        .map_err(|e| format!("rename: {e}"))?;
+    // Verify the pinned hash BEFORE the file becomes live. If it doesn't
+    // match we drop the tempfile (which deletes itself) and error out.
+    let got = hex::encode(hasher.finalize());
+    if got != WHISPER_SMALL_SHA256 {
+        return Err(format!(
+            "whisper model hash mismatch: expected {WHISPER_SMALL_SHA256}, got {got}"
+        ));
+    }
+
+    // Atomic: link the verified tempfile to its final name. `persist_noclobber`
+    // refuses if something already exists at the destination, so an attacker
+    // who managed to create a decoy file can't trick us into silently keeping
+    // the attacker's version.
+    if dest.exists() {
+        let _ = tokio::fs::remove_file(&dest).await;
+    }
+    tmp_file
+        .persist_noclobber(&dest)
+        .map_err(|e| format!("persist: {}", e.error))?;
 
     let _ = app.emit(
         "zerm://whisper-download-progress",
         DownloadProgress { downloaded: total, total },
     );
 
-    // Trigger an in-place reload of the model
     let pipeline = app.state::<Arc<Pipeline>>().inner().clone();
     let whisper_arc = pipeline.whisper.clone();
     let dest_for_load = dest.clone();
@@ -1050,7 +1147,7 @@ pub fn run() {
             // Load persistent state from app data dir
             if let Ok(dir) = app.path().app_data_dir() {
                 let path = dir.join(STATE_FILE);
-                let loaded = PersistentState::load(&path);
+                let loaded = PersistentState::load_with_backup(&path);
                 *pipeline_for_setup.persistent.lock() = loaded;
                 *pipeline_for_setup.state_path.lock() = Some(path);
                 log::info!("state dir: {dir:?}");
@@ -1173,7 +1270,13 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+                // Prevent the LSUIElement/tray-icon behaviour where the app
+                // quits when the last window closes. But let the user quit
+                // explicitly via the tray "Quit Zerm" item or dashboard
+                // "Quit" button, which set INTENTIONAL_QUIT first.
+                if !INTENTIONAL_QUIT.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
 }

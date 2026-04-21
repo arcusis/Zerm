@@ -123,11 +123,24 @@ Subsequent incremental builds are seconds.
 
 ## Privacy
 
-Everything happens on your machine. The microphone audio, raw Whisper
-transcripts, AI‑refined output, and persisted history never leave the
-device. The only network connection is HTTP to your local Ollama instance
-on `localhost:11434`. There are no analytics, no error reporters, no
-update servers (yet).
+**At runtime,** everything happens on your machine. Microphone audio,
+raw Whisper transcripts, AI‑refined output, and persisted history never
+leave the device. The only network connection is HTTP to your local
+Ollama instance on `localhost:11434`. There are no analytics, no error
+reporters, no update servers (yet).
+
+**At first‑run setup,** Zerm makes exactly three outbound connections:
+
+1. `huggingface.co` — downloads the Whisper `ggml‑small.bin` model
+   (hash‑pinned and verified on the fly; aborted if the stream exceeds
+   500 MB or the SHA‑256 digest doesn't match).
+2. `ollama.com` — downloads the official Ollama installer for your
+   platform when you click **Install Ollama**. You'll be asked to
+   confirm the URL before we download it, and the OS installer itself
+   will show its own signature/notarization dialog. The launcher is
+   never run silently.
+3. `localhost:11434` — your newly installed Ollama pulls the language
+   model. This is Ollama talking to its own library, not Zerm.
 
 ## Tech stack
 

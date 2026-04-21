@@ -13,6 +13,11 @@ const SPEECH_RMS_THRESHOLD: f32 = 0.02;
 const SILENCE_DURATION_MS: u64 = 1500;
 const VAD_TICK_MS: u64 = 100;
 
+/// Hard cap on recording length so a stuck VAD, silent room, or forgotten
+/// recording can never exhaust RAM. 20 minutes at 48 kHz stereo ≈ 220 MB
+/// of f32 samples, which is the upper bound we accept.
+pub const MAX_RECORDING_SECS: u64 = 20 * 60;
+
 pub struct CaptureHandle {
     pub stop: Sender<()>,
     pub sample_rate: u32,
@@ -106,6 +111,8 @@ where
         let frames_per_tick =
             (sample_rate as u64 * channels as u64 * VAD_TICK_MS / 1000) as usize;
         let silence_ticks_required = (SILENCE_DURATION_MS / VAD_TICK_MS) as u32;
+        let max_samples: usize =
+            (sample_rate as u64 * channels as u64 * MAX_RECORDING_SECS) as usize;
         let mut speech_detected = false;
         let mut silence_ticks: u32 = 0;
         let mut last_pos: usize = 0;
@@ -119,6 +126,18 @@ where
                 let buf = buffer_for_thread.lock();
                 buf.len()
             };
+
+            // Hard cap: if the buffer has grown past the max-recording
+            // allowance, stop whether or not VAD detected silence.
+            if snapshot_len >= max_samples {
+                log::warn!(
+                    "max recording length ({MAX_RECORDING_SECS}s) reached, auto-stopping"
+                );
+                drop(stream);
+                on_silence();
+                return;
+            }
+
             if snapshot_len <= last_pos {
                 continue;
             }
