@@ -77,7 +77,7 @@ jobs:
         run: pnpm typecheck
 
       - name: npm dependency audit
-        run: pnpm audit --prod --audit-level high || echo "::warning::pnpm audit flagged advisories — review above"
+        run: pnpm audit --prod --audit-level high
 
       - name: Cargo check
         working-directory: src-tauri
@@ -89,9 +89,10 @@ jobs:
 
       - name: Rust dependency audit
         uses: rustsec/audit-check@v2
-        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Our Cargo.lock lives under src-tauri/, not the repo root.
+          working-directory: src-tauri
 
   build:
     name: Build (${{ matrix.label }})
@@ -177,6 +178,48 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Require signing secrets for stable releases
+        if: ${{ !contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') }}
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            test -n "$APPLE_CERTIFICATE" || { echo "::error::APPLE_CERTIFICATE is required for stable macOS releases"; exit 1; }
+            test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::APPLE_CERTIFICATE_PASSWORD is required for stable macOS releases"; exit 1; }
+            test -n "$APPLE_ID" || { echo "::error::APPLE_ID is required for stable macOS notarization"; exit 1; }
+            test -n "$APPLE_PASSWORD" || { echo "::error::APPLE_PASSWORD is required for stable macOS notarization"; exit 1; }
+            test -n "$APPLE_TEAM_ID" || { echo "::error::APPLE_TEAM_ID is required for stable macOS notarization"; exit 1; }
+          fi
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            test -n "$WINDOWS_CERTIFICATE" || { echo "::error::WINDOWS_CERTIFICATE is required for stable Windows releases"; exit 1; }
+            test -n "$WINDOWS_CERTIFICATE_PASSWORD" || { echo "::error::WINDOWS_CERTIFICATE_PASSWORD is required for stable Windows releases"; exit 1; }
+          fi
+
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Host "::warning::WINDOWS_CERTIFICATE is not set; prerelease artifacts may be unsigned."
+            exit 0
+          }
+          New-Item -ItemType Directory -Force -Path certificate | Out-Null
+          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+          Remove-Item certificate/tempCert.txt
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+
       - name: Touch models directory
         shell: bash
         run: |
@@ -187,6 +230,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0.5.22
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Zerm ${{ github.ref_name }}"
@@ -207,11 +255,12 @@ jobs:
             + Linux), speak, stop talking. Text lands in your clipboard.
 
             ## Notes
-            - macOS .dmg is unsigned for prereleases — first launch:
-              `xattr -cr /Applications/Zerm.app` or right-click → Open.
-            - Windows .msi is unsigned; SmartScreen will warn — click
-              "More info" → "Run anyway".
+            - Stable macOS builds are signed and notarized with Developer ID.
+            - Stable Windows installers are Authenticode signed.
+            - Prereleases may be unsigned; stable releases fail CI if signing
+              credentials are not configured.
             - Linux .AppImage built on Ubuntu 22.04.
+            - SHA-256 checksums are attached as `SHA256SUMS.txt`.
 
             ## Changes
             <https://github.com/arcusis/Zerm/commits/${{ github.ref_name }}>
@@ -219,10 +268,50 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
 
+      - name: Verify macOS signing and notarization
+        if: ${{ runner.os == 'macOS' && !contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') }}
+        shell: bash
+        run: |
+          mapfile -t apps < <(find src-tauri/target -maxdepth 8 -path '*/release/bundle/macos/*.app' -print)
+          if [[ ${#apps[@]} -eq 0 ]]; then
+            echo "::error::No macOS .app bundle found for signing verification"
+            exit 1
+          fi
+          for app in "${apps[@]}"; do
+            codesign --verify --deep --strict --verbose=4 "$app"
+            codesign -dv --verbose=4 "$app" 2>&1 | tee /tmp/zerm-codesign.txt
+            grep -q 'Authority=Developer ID Application' /tmp/zerm-codesign.txt
+            grep -q 'TeamIdentifier=' /tmp/zerm-codesign.txt
+            spctl -a -vv -t exec "$app"
+          done
+
+      - name: Verify Windows Authenticode signatures
+        if: ${{ runner.os == 'Windows' && !contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') }}
+        shell: pwsh
+        run: |
+          $artifacts = Get-ChildItem -Path src-tauri\target -Recurse -Include *.exe,*.msi
+          if (-not $artifacts) {
+            Write-Error "No Windows installers found for signature verification"
+            exit 1
+          }
+          foreach ($artifact in $artifacts) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
+            if ($sig.Status -ne "Valid") {
+              Write-Error "$($artifact.FullName) is not Authenticode signed: $($sig.Status)"
+              exit 1
+            }
+            Write-Host "Verified $($artifact.Name): $($sig.SignerCertificate.Subject)"
+          }
+
   pages:
     name: Deploy landing page
     needs: preflight
     runs-on: ubuntu-latest
+    # continue-on-error so a Pages deployment hiccup (e.g. environment
+    # first-time provisioning) doesn't block the release from being
+    # published. Site can always be redeployed via the workflow_dispatch
+    # trigger.
+    continue-on-error: true
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -237,9 +326,29 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [build, pages]
+    # Depend on build (must succeed for all matrix legs). Pages is
+    # continue-on-error so a Pages hiccup doesn't block the release.
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
+      - name: Generate and upload release checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ github.ref_name }}" \
+            --repo ${{ github.repository }} \
+            --dir release-assets \
+            --clobber
+          cd release-assets
+          rm -f SHA256SUMS.txt
+          find . -maxdepth 1 -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS.txt
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt \
+            --repo ${{ github.repository }} \
+            --clobber
+
       - name: Promote draft to published
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
