@@ -264,14 +264,33 @@ fn open_dashboard_window(app: &AppHandle) {
 }
 
 fn handle_toggle(app: &AppHandle, pipeline: &Pipeline) {
-    let was_recording = pipeline.recording.fetch_xor(true, Ordering::SeqCst);
-    if was_recording {
-        log::info!("toggle → stop");
-        handle_release(app, pipeline);
-    } else {
+    // compare_exchange instead of fetch_xor: if the user manually stops
+    // at the exact moment VAD/hard-limit auto-stop fires, the two
+    // "stop" attempts must not compose into a net "start". Only the
+    // first one that actually observes the matching prior state wins;
+    // the loser is a no-op.
+    if pipeline
+        .recording
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
         log::info!("toggle → start");
         handle_press(app, pipeline);
+        return;
     }
+    if pipeline
+        .recording
+        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        log::info!("toggle → stop");
+        handle_release(app, pipeline);
+        return;
+    }
+    // Lost both races. Another toggle claimed whatever transition we
+    // were about to make; drop silently so auto-stop + manual-stop
+    // concurrent firings don't double-bounce.
+    log::debug!("toggle lost race, no-op");
 }
 
 fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
@@ -468,19 +487,30 @@ async fn process(
         }
     };
 
+    // Gate ALL user-visible side effects on the still-current check.
+    // If the user started a new recording while we were in Whisper or
+    // Ollama, we must not overwrite their clipboard, paste anything,
+    // emit a "Copied" UI state, or append to history. The stale job
+    // finishes silently.
+    let still_current = CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id;
+    if !still_current {
+        log::info!("job {job_id} is stale (newer recording started); skipping clipboard + history + paste");
+        return Ok(());
+    }
+
     if let Err(e) = copy_to_clipboard(&output) {
         emit_error(app, format!("clipboard: {e:#}"));
     }
 
-    let auto_paste = app
+    let (auto_paste, save_history) = app
         .try_state::<Arc<Pipeline>>()
-        .map(|s| s.persistent.lock().settings.auto_paste)
-        .unwrap_or(false);
+        .map(|s| {
+            let p = s.persistent.lock();
+            (p.settings.auto_paste, p.settings.save_history)
+        })
+        .unwrap_or((false, true));
 
-    // Only paste if (a) auto-paste is on, (b) this is still the most
-    // recent job (no new recording started), and (c) we have output.
-    let still_current = CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id;
-    if auto_paste && still_current && !output.is_empty() {
+    if auto_paste && !output.is_empty() {
         tokio::time::sleep(std::time::Duration::from_millis(70)).await;
         // Re-check inside the delay window — user may have Cmd-tabbed
         // during the 70ms and triggered another recording.
@@ -489,12 +519,14 @@ async fn process(
         }
     }
 
-    if let Some(state) = app.try_state::<Arc<Pipeline>>() {
-        state
-            .persistent
-            .lock()
-            .record(transcript.clone(), output.clone());
-        state.save_persistent();
+    if save_history {
+        if let Some(state) = app.try_state::<Arc<Pipeline>>() {
+            state
+                .persistent
+                .lock()
+                .record(transcript.clone(), output.clone());
+            state.save_persistent();
+        }
     }
     emit_dashboard_update(app);
 
@@ -578,22 +610,46 @@ fn anchor_from_rect(rect: &tauri::Rect) -> Option<PhysicalPosition<f64>> {
     })
 }
 
-#[tauri::command]
-fn pill_done(app: AppHandle) {
-    hide_pill(&app);
+/// Gate every dashboard-only command behind a window-label check.
+/// Prevents the always-on-top pill window (label = "main") from being
+/// tricked into calling privileged commands like install_ollama or
+/// clear_history if its WebView content were ever compromised.
+fn require_dashboard(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "dashboard" {
+        Ok(())
+    } else {
+        Err(format!(
+            "command not permitted from window '{}' (dashboard only)",
+            window.label()
+        ))
+    }
 }
 
 #[tauri::command]
-fn get_dashboard(state: tauri::State<'_, Arc<Pipeline>>) -> DashboardData {
-    state.persistent.lock().dashboard()
+fn pill_done(window: tauri::WebviewWindow, app: AppHandle) {
+    // Only the pill should hide itself.
+    if window.label() == "main" {
+        hide_pill(&app);
+    }
+}
+
+#[tauri::command]
+fn get_dashboard(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<DashboardData, String> {
+    require_dashboard(&window)?;
+    Ok(state.persistent.lock().dashboard())
 }
 
 #[tauri::command]
 fn set_llm_model(
+    window: tauri::WebviewWindow,
     model: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     let trimmed = model.trim().to_string();
     if trimmed.is_empty() {
         return Err("model cannot be empty".into());
@@ -606,10 +662,12 @@ fn set_llm_model(
 
 #[tauri::command]
 fn set_vad_enabled(
+    window: tauri::WebviewWindow,
     enabled: bool,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     state.persistent.lock().settings.vad_enabled = enabled;
     state.save_persistent();
     emit_dashboard_update(&app);
@@ -618,10 +676,12 @@ fn set_vad_enabled(
 
 #[tauri::command]
 fn set_auto_paste(
+    window: tauri::WebviewWindow,
     enabled: bool,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     state.persistent.lock().settings.auto_paste = enabled;
     state.save_persistent();
     emit_dashboard_update(&app);
@@ -629,11 +689,27 @@ fn set_auto_paste(
 }
 
 #[tauri::command]
+fn set_save_history(
+    window: tauri::WebviewWindow,
+    enabled: bool,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    state.persistent.lock().settings.save_history = enabled;
+    state.save_persistent();
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn set_prompt_mode(
+    window: tauri::WebviewWindow,
     mode: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     let parsed = match mode.as_str() {
         "off" => PromptMode::Off,
         "developer" | "agent" => PromptMode::Developer, // "agent" kept for back-compat
@@ -649,10 +725,12 @@ fn set_prompt_mode(
 
 #[tauri::command]
 fn set_hotkey(
+    window: tauri::WebviewWindow,
     key: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     let choice = HotkeyChoice::from_key(&key).ok_or_else(|| format!("unknown hotkey: {key}"))?;
     state.persistent.lock().settings.hotkey = choice;
     state.save_persistent();
@@ -664,10 +742,12 @@ fn set_hotkey(
 
 #[tauri::command]
 fn add_vocabulary_term(
+    window: tauri::WebviewWindow,
     term: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     let trimmed = term.trim().to_string();
     if trimmed.is_empty() {
         return Err("term cannot be empty".into());
@@ -693,10 +773,12 @@ fn add_vocabulary_term(
 
 #[tauri::command]
 fn remove_vocabulary_term(
+    window: tauri::WebviewWindow,
     term: String,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     {
         let mut p = state.persistent.lock();
         p.settings.vocabulary.retain(|t| t != &term);
@@ -708,9 +790,11 @@ fn remove_vocabulary_term(
 
 #[tauri::command]
 fn clear_vocabulary(
+    window: tauri::WebviewWindow,
     app: AppHandle,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     state.persistent.lock().settings.vocabulary.clear();
     state.save_persistent();
     emit_dashboard_update(&app);
@@ -718,7 +802,12 @@ fn clear_vocabulary(
 }
 
 #[tauri::command]
-fn clear_history(app: AppHandle, state: tauri::State<'_, Arc<Pipeline>>) -> Result<(), String> {
+fn clear_history(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
     {
         let mut p = state.persistent.lock();
         p.history.clear();
@@ -731,9 +820,11 @@ fn clear_history(app: AppHandle, state: tauri::State<'_, Arc<Pipeline>>) -> Resu
 
 #[tauri::command]
 fn copy_history_entry(
+    window: tauri::WebviewWindow,
     timestamp: u64,
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
+    require_dashboard(&window)?;
     let entry = state
         .persistent
         .lock()
@@ -748,9 +839,11 @@ fn copy_history_entry(
 }
 
 #[tauri::command]
-fn quit_app(app: AppHandle) {
+fn quit_app(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
+    require_dashboard(&window)?;
     INTENTIONAL_QUIT.store(true, Ordering::SeqCst);
     app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -771,6 +864,8 @@ fn get_pill_position(state: tauri::State<'_, Arc<Pipeline>>) -> Option<PillPosit
 
 #[tauri::command]
 fn open_dashboard(app: AppHandle) {
+    // Allowed from any window — opening the dashboard is how users recover
+    // if something goes weird. Not gated.
     open_dashboard_window(&app);
 }
 
@@ -784,7 +879,8 @@ struct SetupStatus {
 }
 
 #[tauri::command]
-async fn check_setup(app: AppHandle) -> SetupStatus {
+async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<SetupStatus, String> {
+    require_dashboard(&window)?;
     let path = whisper_model_path(&app);
     let whisper_model_present = path.exists();
     // Match runtime resolution: env var overrides, otherwise persisted setting,
@@ -829,13 +925,13 @@ async fn check_setup(app: AppHandle) -> SetupStatus {
         None => (false, false),
     };
 
-    SetupStatus {
+    Ok(SetupStatus {
         whisper_model_present,
         whisper_model_path: Some(path.display().to_string()),
         ollama_running,
         ollama_model_pulled,
         ollama_model_name: model_name,
-    }
+    })
 }
 
 #[derive(Clone, Serialize)]
@@ -844,160 +940,227 @@ struct DownloadProgress {
     total: u64,
 }
 
-// Fetch from GitHub Releases directly (what ollama.com/download redirects
-// to). GitHub serves over hardened infra and every release asset is
-// auditable; authenticity is verified by the OS installer's own
-// signature/notarization check before code runs.
+// GitHub Releases API: we ask for the latest release, find the asset
+// whose name matches our platform, extract its published `digest`
+// (SHA-256), download from that asset's download_url, and verify the
+// streamed bytes match the digest before launching anything.
 #[cfg(target_os = "macos")]
-const OLLAMA_INSTALLER_URL: &str =
-    "https://github.com/ollama/ollama/releases/latest/download/Ollama-darwin.zip";
+const OLLAMA_ASSET_NAME: &str = "Ollama-darwin.zip";
 #[cfg(target_os = "windows")]
-const OLLAMA_INSTALLER_URL: &str =
-    "https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe";
-#[cfg(target_os = "linux")]
-const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/install.sh";
+const OLLAMA_ASSET_NAME: &str = "OllamaSetup.exe";
 
 // Hard upper bound; anything more is either wrong or malicious.
 const OLLAMA_INSTALLER_MAX_BYTES: u64 = 500_000_000;
 
-#[tauri::command]
-async fn install_ollama(app: AppHandle) -> Result<(), String> {
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[derive(serde::Deserialize)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+    digest: Option<String>,
+}
 
-    // User-owned cache dir, not /tmp. Avoids the world-writable temp-file
-    // race that could let another local process substitute the binary
-    // between our download and our launch.
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| format!("cache dir: {e}"))?;
-    tokio::fs::create_dir_all(&cache_dir)
-        .await
-        .map_err(|e| format!("mkdir: {e}"))?;
-
-    let suffix = match std::env::consts::OS {
-        "macos" => ".zip",
-        "windows" => ".exe",
-        _ => ".sh",
-    };
-    let tmp = tempfile::Builder::new()
-        .prefix(".ollama-installer-")
-        .suffix(suffix)
-        .tempfile_in(&cache_dir)
-        .map_err(|e| format!("tempfile: {e}"))?;
-
-    let _ = app.emit("zerm://ollama-install-progress", "downloading");
-    let resp = reqwest::get(OLLAMA_INSTALLER_URL)
-        .await
-        .map_err(|e| format!("request: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("status: {e}"))?;
-    if let Some(len) = resp.content_length() {
-        if len > OLLAMA_INSTALLER_MAX_BYTES {
-            return Err(format!(
-                "refusing: content-length {len} exceeds cap {OLLAMA_INSTALLER_MAX_BYTES}"
-            ));
-        }
-    }
-
-    let std_tmp = tmp.reopen().map_err(|e| format!("reopen: {e}"))?;
-    let mut file = tokio::fs::File::from_std(std_tmp);
-    let mut stream = resp.bytes_stream();
-    let mut written: u64 = 0;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
-        written += chunk.len() as u64;
-        if written > OLLAMA_INSTALLER_MAX_BYTES {
-            return Err(format!(
-                "refusing: download exceeded {OLLAMA_INSTALLER_MAX_BYTES} byte cap"
-            ));
-        }
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("write: {e}"))?;
-    }
-    file.flush().await.map_err(|e| format!("flush: {e}"))?;
-    file.sync_all().await.map_err(|e| format!("sync: {e}"))?;
-    drop(file);
-
-    let persist_name = match std::env::consts::OS {
-        "macos" => "Ollama-installer.zip",
-        "windows" => "OllamaSetup.exe",
-        _ => "ollama-install.sh",
-    };
-    let persisted = cache_dir.join(persist_name);
-    // persist() is atomic-replace across platforms (rename on unix,
-    // MoveFileExW with REPLACE_EXISTING on Windows).
-    let persisted = tmp
-        .persist(&persisted)
-        .map_err(|e| format!("persist: {}", e.error))?;
-    drop(persisted);
-    let installer_path = cache_dir.join(persist_name);
-
-    let _ = app.emit("zerm://ollama-install-progress", "launching");
-
-    #[cfg(target_os = "macos")]
-    {
-        // Unzip into /Applications. We rely on macOS Gatekeeper to verify
-        // the .app's signature/notarization when `open` launches it.
-        let status = std::process::Command::new("unzip")
-            .args(["-o", installer_path.to_str().unwrap(), "-d", "/Applications/"])
-            .status()
-            .map_err(|e| format!("unzip: {e}"))?;
-        if !status.success() {
-            return Err(format!("unzip exited {status}"));
-        }
-        let _ = std::process::Command::new("open")
-            .arg("/Applications/Ollama.app")
-            .spawn();
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // UAC shows the Authenticode signer "Ollama Inc." before the
-        // installer actually runs; that's our authenticity check.
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", installer_path.to_str().unwrap()])
-            .spawn()
-            .map_err(|e| format!("launch: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let script = installer_path.to_string_lossy().into_owned();
-        let candidates: &[&[&str]] = &[
-            &["x-terminal-emulator", "-e", "sh", &script],
-            &["gnome-terminal", "--", "sh", &script],
-            &["konsole", "-e", "sh", &script],
-            &["xterm", "-e", "sh", &script],
-        ];
-        let mut launched = false;
-        for args in candidates {
-            if std::process::Command::new(args[0])
-                .args(&args[1..])
-                .spawn()
-                .is_ok()
-            {
-                launched = true;
-                break;
-            }
-        }
-        if !launched {
-            return Err(
-                "Could not find a terminal emulator. Run this manually: \
-                 `sh <script-path>` (path printed in Zerm's logs)."
-                    .into(),
-            );
-        }
-    }
-
-    let _ = app.emit("zerm://ollama-install-progress", "done");
-    Ok(())
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[derive(serde::Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    assets: Vec<GhAsset>,
 }
 
 #[tauri::command]
-async fn pull_ollama_model(app: AppHandle, model: String) -> Result<(), String> {
+async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
+    require_dashboard(&window)?;
+
+    // Linux: do NOT fetch + pipe `curl | sh`. Instead open Ollama's
+    // download page in the user's browser so they install via their
+    // distribution package manager, with sudo prompts under their own
+    // shell, reviewable scripts, etc. The remote-shell-script exec
+    // path is not acceptable.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app.emit("zerm://ollama-install-progress", "launching");
+        // xdg-open is the de-facto open-URL command on Linux desktops.
+        std::process::Command::new("xdg-open")
+            .arg("https://ollama.com/download/linux")
+            .spawn()
+            .map_err(|e| format!("xdg-open: {e}"))?;
+        let _ = app.emit("zerm://ollama-install-progress", "done");
+        return Ok(());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        use futures_util::StreamExt;
+        use sha2::{Digest, Sha256};
+        use tokio::io::AsyncWriteExt;
+
+        let cache_dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| format!("cache dir: {e}"))?;
+        tokio::fs::create_dir_all(&cache_dir)
+            .await
+            .map_err(|e| format!("mkdir: {e}"))?;
+
+        // Step 1. Ask GitHub for the current Ollama release metadata.
+        // GitHub ships an authoritative SHA-256 digest per asset via the
+        // v3 API (`assets[].digest` of the form "sha256:<hex>"). That
+        // becomes our integrity pin — no ongoing hard-coded hash
+        // maintenance, but a supply-chain compromise would have to
+        // compromise github.com AND the attacker's own CDN in lockstep.
+        let _ = app.emit("zerm://ollama-install-progress", "resolving");
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("Zerm")
+            .build()
+            .map_err(|e| format!("http client: {e}"))?;
+        let release: GhRelease = client
+            .get("https://api.github.com/repos/ollama/ollama/releases/latest")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| format!("gh api: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("gh api status: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("gh api parse: {e}"))?;
+        let asset = release
+            .assets
+            .iter()
+            .find(|a| a.name == OLLAMA_ASSET_NAME)
+            .ok_or_else(|| {
+                format!(
+                    "GitHub release {} has no asset named {OLLAMA_ASSET_NAME}",
+                    release.tag_name
+                )
+            })?;
+        let expected_digest = asset
+            .digest
+            .as_deref()
+            .and_then(|d| d.strip_prefix("sha256:"))
+            .ok_or_else(|| {
+                "GitHub release asset is missing a sha256 digest — refusing to install".to_string()
+            })?
+            .to_ascii_lowercase();
+
+        // Step 2. Download the asset into a randomized tempfile within
+        // the user's app_cache_dir (never /tmp, never a predictable name),
+        // streaming SHA-256 as bytes land.
+        let suffix = match std::env::consts::OS {
+            "macos" => ".zip",
+            "windows" => ".exe",
+            _ => "",
+        };
+        let tmp = tempfile::Builder::new()
+            .prefix(".ollama-installer-")
+            .suffix(suffix)
+            .tempfile_in(&cache_dir)
+            .map_err(|e| format!("tempfile: {e}"))?;
+
+        let _ = app.emit("zerm://ollama-install-progress", "downloading");
+        let resp = client
+            .get(&asset.browser_download_url)
+            .send()
+            .await
+            .map_err(|e| format!("request: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("status: {e}"))?;
+        if let Some(len) = resp.content_length() {
+            if len > OLLAMA_INSTALLER_MAX_BYTES {
+                return Err(format!(
+                    "refusing: content-length {len} exceeds cap {OLLAMA_INSTALLER_MAX_BYTES}"
+                ));
+            }
+        }
+
+        let std_tmp = tmp.reopen().map_err(|e| format!("reopen: {e}"))?;
+        let mut file = tokio::fs::File::from_std(std_tmp);
+        let mut stream = resp.bytes_stream();
+        let mut hasher = Sha256::new();
+        let mut written: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
+            written += chunk.len() as u64;
+            if written > OLLAMA_INSTALLER_MAX_BYTES {
+                return Err(format!(
+                    "refusing: download exceeded {OLLAMA_INSTALLER_MAX_BYTES} byte cap"
+                ));
+            }
+            hasher.update(&chunk);
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("write: {e}"))?;
+        }
+        file.flush().await.map_err(|e| format!("flush: {e}"))?;
+        file.sync_all().await.map_err(|e| format!("sync: {e}"))?;
+        drop(file);
+
+        // Step 3. Verify the streamed hash matches the GitHub-published
+        // digest BEFORE anything executes.
+        let got = hex::encode(hasher.finalize());
+        if got != expected_digest {
+            return Err(format!(
+                "Ollama installer hash mismatch — refusing to launch. \
+                 expected sha256 {expected_digest}, got {got}. \
+                 (Release tag: {})",
+                release.tag_name
+            ));
+        }
+
+        let persist_name = match std::env::consts::OS {
+            "macos" => "Ollama-installer.zip",
+            "windows" => "OllamaSetup.exe",
+            _ => "ollama-installer",
+        };
+        let persisted = cache_dir.join(persist_name);
+        let _ = tmp
+            .persist(&persisted)
+            .map_err(|e| format!("persist: {}", e.error))?;
+        let installer_path = cache_dir.join(persist_name);
+
+        let _ = app.emit("zerm://ollama-install-progress", "launching");
+
+        #[cfg(target_os = "macos")]
+        {
+            let status = std::process::Command::new("unzip")
+                .args(["-o", installer_path.to_str().unwrap(), "-d", "/Applications/"])
+                .status()
+                .map_err(|e| format!("unzip: {e}"))?;
+            if !status.success() {
+                return Err(format!("unzip exited {status}"));
+            }
+            // Gatekeeper now validates the app's signature + notarization
+            // ticket before code runs; our SHA-256 check guaranteed the
+            // zip on disk is the one GitHub published.
+            let _ = std::process::Command::new("open")
+                .arg("/Applications/Ollama.app")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // UAC shows the Authenticode signer ("Ollama Inc.") before
+            // the installer is allowed to elevate. Combined with the
+            // digest check above, authenticity is covered.
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", installer_path.to_str().unwrap()])
+                .spawn()
+                .map_err(|e| format!("launch: {e}"))?;
+        }
+
+        let _ = app.emit("zerm://ollama-install-progress", "done");
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn pull_ollama_model(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    model: String,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
     use futures_util::StreamExt;
 
     let _ = app.emit(
@@ -1040,7 +1203,11 @@ async fn pull_ollama_model(app: AppHandle, model: String) -> Result<(), String> 
 }
 
 #[tauri::command]
-async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
+async fn download_whisper_model(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+) -> Result<String, String> {
+    require_dashboard(&window)?;
     use futures_util::StreamExt;
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
@@ -1192,6 +1359,7 @@ pub fn run() {
             set_llm_model,
             set_vad_enabled,
             set_auto_paste,
+            set_save_history,
             set_prompt_mode,
             set_hotkey,
             add_vocabulary_term,

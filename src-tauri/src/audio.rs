@@ -13,10 +13,21 @@ const SPEECH_RMS_THRESHOLD: f32 = 0.02;
 const SILENCE_DURATION_MS: u64 = 1500;
 const VAD_TICK_MS: u64 = 100;
 
-/// Hard cap on recording length so a stuck VAD, silent room, or forgotten
-/// recording can never exhaust RAM. 20 minutes at 48 kHz stereo ≈ 220 MB
-/// of f32 samples, which is the upper bound we accept.
+/// Absolute cap on recorded samples, regardless of device sample rate
+/// or channel count. Chosen so the buffer stays under ~500 MB even if
+/// the user's mic exposes a 48 kHz stereo (≈ 115M f32 samples) config.
+/// Previously we capped by seconds, which scaled with rate/channels —
+/// at 192 kHz the 20-min cap would allocate >1.5 GB.
+pub const MAX_SAMPLES: usize = 120_000_000;
+
+/// Documented human-friendly cap (for log messages). Derived from
+/// MAX_SAMPLES assuming 48 kHz stereo.
 pub const MAX_RECORDING_SECS: u64 = 20 * 60;
+
+/// If no speech RMS above threshold is observed for this long, stop.
+/// Prevents an accidental hotkey in a quiet room from recording until
+/// MAX_SAMPLES is reached.
+const NO_SPEECH_TIMEOUT_MS: u64 = 10_000;
 
 pub struct CaptureHandle {
     pub stop: Sender<()>,
@@ -28,10 +39,13 @@ pub struct CaptureHandle {
 /// Why the capture ended on its own (not via the explicit stop channel).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
-    /// VAD detected sustained silence.
+    /// VAD detected sustained silence after speech.
     Silence,
-    /// Max recording length reached — we must stop regardless of VAD state.
+    /// Max recording length reached — stop regardless of VAD state.
     HardLimit,
+    /// Recording started but no speech was ever detected within
+    /// NO_SPEECH_TIMEOUT_MS. Likely an accidental hotkey press.
+    NoSpeech,
 }
 
 pub fn start_capture<F>(buffer: Arc<Mutex<Vec<f32>>>, on_stop: F) -> Result<CaptureHandle>
@@ -50,6 +64,10 @@ where
     let sample_format = config.sample_format();
 
     let (stop_tx, stop_rx) = channel::<()>();
+    // Worker signals stream-startup success (or a build/play error) before
+    // we return Ok to the caller. Otherwise the UI would flip to
+    // "Listening…" even when the mic stream actually failed to open.
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<std::result::Result<(), String>>(1);
     let buffer_for_thread = buffer.clone();
     let level = Arc::new(Mutex::new(0.0_f32));
     let level_for_thread = level.clone();
@@ -57,14 +75,19 @@ where
     thread::spawn(move || {
         let buffer_for_stream = buffer_for_thread.clone();
         let level_for_stream = level_for_thread.clone();
+        // Cap each write so a single extend_from_slice can't push the
+        // buffer above MAX_SAMPLES even if the OS hands us a huge chunk.
+        let buffer_for_len_cap = buffer_for_thread.clone();
         let err_fn = |e| log::error!("audio stream error: {e}");
         let stream_result = match sample_format {
             SampleFormat::F32 => device.build_input_stream(
                 &config.into(),
                 move |data: &[f32], _| {
                     let mut buf = buffer_for_stream.lock();
-                    buf.extend_from_slice(data);
-                    *level_for_stream.lock() = compute_rms(data);
+                    let available = MAX_SAMPLES.saturating_sub(buf.len());
+                    let take = data.len().min(available);
+                    buf.extend_from_slice(&data[..take]);
+                    *level_for_stream.lock() = compute_rms(&data[..take]);
                 },
                 err_fn,
                 None,
@@ -73,8 +96,12 @@ where
                 &config.into(),
                 move |data: &[i16], _| {
                     let mut buf = buffer_for_stream.lock();
-                    let converted: Vec<f32> =
-                        data.iter().map(|s| (*s as f32) / (i16::MAX as f32)).collect();
+                    let available = MAX_SAMPLES.saturating_sub(buf.len());
+                    let take = data.len().min(available);
+                    let converted: Vec<f32> = data[..take]
+                        .iter()
+                        .map(|s| (*s as f32) / (i16::MAX as f32))
+                        .collect();
                     *level_for_stream.lock() = compute_rms(&converted);
                     buf.extend(converted);
                 },
@@ -85,7 +112,9 @@ where
                 &config.into(),
                 move |data: &[u16], _| {
                     let mut buf = buffer_for_stream.lock();
-                    let converted: Vec<f32> = data
+                    let available = MAX_SAMPLES.saturating_sub(buf.len());
+                    let take = data.len().min(available);
+                    let converted: Vec<f32> = data[..take]
                         .iter()
                         .map(|s| {
                             ((*s as f32) - (u16::MAX as f32 / 2.0)) / (u16::MAX as f32 / 2.0)
@@ -98,7 +127,7 @@ where
                 None,
             ),
             other => {
-                log::error!("unsupported sample format: {other:?}");
+                let _ = ready_tx.send(Err(format!("unsupported sample format: {other:?}")));
                 return;
             }
         };
@@ -106,24 +135,27 @@ where
         let stream = match stream_result {
             Ok(s) => s,
             Err(e) => {
-                log::error!("failed to build audio stream: {e}");
+                let _ = ready_tx.send(Err(format!("build_input_stream: {e}")));
                 return;
             }
         };
 
         if let Err(e) = stream.play() {
-            log::error!("failed to play audio stream: {e}");
+            let _ = ready_tx.send(Err(format!("stream.play: {e}")));
             return;
         }
+        // Stream is actually playing — tell the caller it's safe to emit
+        // RECORDING_EVENT.
+        let _ = ready_tx.send(Ok(()));
 
         // VAD loop: wake every VAD_TICK_MS, evaluate recent audio chunk
         let frames_per_tick =
             (sample_rate as u64 * channels as u64 * VAD_TICK_MS / 1000) as usize;
         let silence_ticks_required = (SILENCE_DURATION_MS / VAD_TICK_MS) as u32;
-        let max_samples: usize =
-            (sample_rate as u64 * channels as u64 * MAX_RECORDING_SECS) as usize;
+        let no_speech_ticks_required = (NO_SPEECH_TIMEOUT_MS / VAD_TICK_MS) as u32;
         let mut speech_detected = false;
         let mut silence_ticks: u32 = 0;
+        let mut no_speech_ticks: u32 = 0;
         let mut last_pos: usize = 0;
 
         loop {
@@ -132,15 +164,16 @@ where
             }
 
             let snapshot_len = {
-                let buf = buffer_for_thread.lock();
+                let buf = buffer_for_len_cap.lock();
                 buf.len()
             };
 
-            // Hard cap: if the buffer has grown past the max-recording
-            // allowance, stop whether or not VAD detected silence.
-            if snapshot_len >= max_samples {
+            // Hard cap: if the buffer reached MAX_SAMPLES, the cpal callback
+            // will no longer append anything, so recording is effectively
+            // frozen. Stop.
+            if snapshot_len >= MAX_SAMPLES {
                 log::warn!(
-                    "max recording length ({MAX_RECORDING_SECS}s) reached, auto-stopping"
+                    "max sample count ({MAX_SAMPLES}) reached (~{MAX_RECORDING_SECS}s @48k stereo); auto-stopping"
                 );
                 drop(stream);
                 on_stop(StopReason::HardLimit);
@@ -153,7 +186,7 @@ where
 
             let chunk_start = snapshot_len.saturating_sub(frames_per_tick.max(1));
             let rms = {
-                let buf = buffer_for_thread.lock();
+                let buf = buffer_for_len_cap.lock();
                 compute_rms(&buf[chunk_start..snapshot_len])
             };
             last_pos = snapshot_len;
@@ -161,6 +194,7 @@ where
             if rms >= SPEECH_RMS_THRESHOLD {
                 speech_detected = true;
                 silence_ticks = 0;
+                no_speech_ticks = 0;
             } else if speech_detected && rms < SILENCE_RMS_THRESHOLD {
                 silence_ticks += 1;
                 if silence_ticks >= silence_ticks_required {
@@ -171,18 +205,37 @@ where
                 }
             } else if speech_detected {
                 silence_ticks = silence_ticks.saturating_sub(1);
+            } else {
+                // Still waiting for the first syllable.
+                no_speech_ticks += 1;
+                if no_speech_ticks >= no_speech_ticks_required {
+                    log::info!(
+                        "no speech detected in {NO_SPEECH_TIMEOUT_MS}ms; auto-stopping"
+                    );
+                    drop(stream);
+                    on_stop(StopReason::NoSpeech);
+                    return;
+                }
             }
         }
 
         drop(stream);
     });
 
-    Ok(CaptureHandle {
-        stop: stop_tx,
-        sample_rate,
-        channels,
-        level,
-    })
+    // Wait up to 3 seconds for the stream thread to signal that
+    // build+play succeeded. If it didn't, surface the error so
+    // handle_press can skip emitting RECORDING_EVENT and show the user
+    // a real error instead of a fake "Listening…" state.
+    match ready_rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(Ok(())) => Ok(CaptureHandle {
+            stop: stop_tx,
+            sample_rate,
+            channels,
+            level,
+        }),
+        Ok(Err(e)) => Err(anyhow!("audio capture failed to start: {e}")),
+        Err(_) => Err(anyhow!("audio capture startup timed out")),
+    }
 }
 
 pub fn compute_rms(samples: &[f32]) -> f32 {

@@ -118,7 +118,16 @@ pub struct Settings {
     // silently opt users into the dangerous behavior.
     #[serde(default)]
     pub auto_paste: bool,
+
+    /// Whether to save dictations to the history log. Defaults to true
+    /// (otherwise the History tab would be empty for most users). Users
+    /// who dictate sensitive material can flip this off to prevent any
+    /// transcript/output from being written to disk.
+    #[serde(default = "default_save_history")]
+    pub save_history: bool,
 }
+
+fn default_save_history() -> bool { true }
 
 // Migrate from old String-typed vocabulary to Vec<String> seamlessly
 fn deserialize_vocabulary<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -156,6 +165,7 @@ impl Default for Settings {
             // Auto-paste is OPT-IN. It can paste into the wrong window if the
             // user tabs away during the async Whisper+Ollama round trip.
             auto_paste: false,
+            save_history: true,
         }
     }
 }

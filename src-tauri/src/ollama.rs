@@ -71,6 +71,36 @@ DO NOT:
 Output the prose ONLY. No preamble.";
 
 const ENDPOINT: &str = "http://localhost:11434/api/generate";
+const VERSION_ENDPOINT: &str = "http://localhost:11434/api/version";
+
+/// Verify that the process listening on localhost:11434 is actually
+/// Ollama and not some random service that bound the port first. We
+/// hit /api/version (which Ollama responds to with `{ "version": "X" }`)
+/// and accept only a parseable response with a non-empty `version`
+/// string. Anything else and we refuse to POST transcripts to it.
+pub async fn verify_identity() -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .context("build http client")?;
+    let resp = client
+        .get(VERSION_ENDPOINT)
+        .send()
+        .await
+        .context("GET /api/version")?;
+    if !resp.status().is_success() {
+        anyhow::bail!("ollama /api/version returned {}", resp.status());
+    }
+    let body: serde_json::Value = resp.json().await.context("parse /api/version")?;
+    let version = body
+        .get("version")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("service on 11434 did not return an Ollama-shaped /api/version response"))?;
+    if version.trim().is_empty() {
+        anyhow::bail!("ollama /api/version returned an empty version string");
+    }
+    Ok(version.to_string())
+}
 
 #[derive(Serialize)]
 struct GenerateRequest<'a> {
@@ -113,6 +143,9 @@ pub async fn reformat_with_system(
     if transcript.trim().is_empty() {
         return Ok(String::new());
     }
+    verify_identity()
+        .await
+        .context("Ollama identity check failed — refusing to POST transcript")?;
     let req = GenerateRequest {
         model,
         prompt: transcript,
@@ -154,6 +187,12 @@ pub async fn reformat(model: &str, transcript: &str, mode: PromptMode) -> Result
         // Off mode: return raw transcript unchanged
         return Ok(transcript.trim().to_string());
     };
+
+    // Identity check before we POST the transcript. If something other
+    // than Ollama is listening on 11434, treat as no LLM available.
+    verify_identity()
+        .await
+        .context("Ollama identity check failed — refusing to POST transcript")?;
 
     let req = GenerateRequest {
         model,

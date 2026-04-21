@@ -30,6 +30,7 @@ interface Settings {
   hotkey: HotkeyChoice;
   vocabulary: string[];
   auto_paste: boolean;
+  save_history: boolean;
 }
 
 interface DashboardData {
@@ -109,6 +110,8 @@ function renderSettings(settings: Settings) {
   ($("vad-toggle") as HTMLInputElement | null)!.checked = settings.vad_enabled;
   const autoPasteEl = $("autopaste-toggle") as HTMLInputElement | null;
   if (autoPasteEl) autoPasteEl.checked = settings.auto_paste;
+  const saveHistoryEl = $("savehistory-toggle") as HTMLInputElement | null;
+  if (saveHistoryEl) saveHistoryEl.checked = settings.save_history;
   ($("hotkey-select") as HTMLSelectElement | null)!.value = settings.hotkey;
 
   const meta = HOTKEY_LABELS[settings.hotkey];
@@ -234,6 +237,11 @@ function attachListeners() {
   $("autopaste-toggle")?.addEventListener("change", async (e) => {
     const checked = (e.target as HTMLInputElement).checked;
     await safeInvoke("set_auto_paste", { enabled: checked });
+  });
+
+  $("savehistory-toggle")?.addEventListener("change", async (e) => {
+    const checked = (e.target as HTMLInputElement).checked;
+    await safeInvoke("set_save_history", { enabled: checked });
   });
 
   // Prompt mode
