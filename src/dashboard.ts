@@ -578,7 +578,7 @@ async function runSetup() {
   if (status.ollama_identity_warning && !status.allow_unverified_ollama) {
     showSetupBanner(
       "Set up Ollama",
-      "Zerm found a local Ollama service. Install the official app, or keep using the local one already on this Mac.",
+      "Zerm found a local Ollama service that could not be fully verified. Install the official app, or explicitly keep using the existing local service.",
       `<button class="solid-btn" id="btn-install-ollama">Install official app</button>
        <button class="ghost-btn" id="btn-allow-unverified-ollama">Use existing Ollama</button>
        <button class="ghost-btn" id="btn-retry-setup">Retry</button>`,
@@ -592,7 +592,7 @@ async function runSetup() {
     $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
     $("btn-allow-unverified-ollama")?.addEventListener("click", async () => {
       const ok = window.confirm(
-        "Use the Ollama service already running on this Mac?",
+        "Use the Ollama service already running on this computer?",
       );
       if (!ok) return;
       await requiredInvoke("set_allow_unverified_ollama", { enabled: true });

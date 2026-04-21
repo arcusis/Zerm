@@ -58,9 +58,27 @@ Output the prose ONLY. No preamble.";
 const ENDPOINT: &str = "http://127.0.0.1:11434/api/generate";
 const VERSION_ENDPOINT: &str = "http://127.0.0.1:11434/api/version";
 
+#[cfg(target_os = "macos")]
+const LSOF_BIN: &str = "/usr/sbin/lsof";
+#[cfg(target_os = "linux")]
+const LSOF_BIN: &str = "/usr/bin/lsof";
+#[cfg(target_os = "macos")]
+const CODESIGN_BIN: &str = "/usr/bin/codesign";
+
+#[cfg(target_os = "windows")]
+fn system32_path(parts: &[&str]) -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    let mut path = std::path::PathBuf::from(root);
+    path.push("System32");
+    for part in parts {
+        path.push(part);
+    }
+    path
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn listener_from_lsof() -> Result<(String, String)> {
-    let out = std::process::Command::new("lsof")
+    let out = std::process::Command::new(LSOF_BIN)
         .args(["-nP", "-iTCP@127.0.0.1:11434", "-sTCP:LISTEN", "-Fpc"])
         .output()
         .context("run lsof")?;
@@ -96,7 +114,7 @@ fn verify_listener_process() -> Result<()> {
         );
     }
 
-    let out = std::process::Command::new("lsof")
+    let out = std::process::Command::new(LSOF_BIN)
         .args(["-nP", "-p", &pid, "-d", "txt", "-Fn"])
         .output()
         .context("resolve Ollama listener path")?;
@@ -110,7 +128,7 @@ fn verify_listener_process() -> Result<()> {
         .filter(|path| path.contains("Ollama.app/Contents/"))
         .ok_or_else(|| anyhow::anyhow!("could not resolve signed Ollama listener path"))?;
 
-    let details = std::process::Command::new("codesign")
+    let details = std::process::Command::new(CODESIGN_BIN)
         .args(["-dv", "--verbose=4", path])
         .output()
         .context("inspect Ollama listener signature")?;
@@ -132,8 +150,6 @@ fn verify_listener_process() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn verify_listener_process() -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
     let (pid, command) = listener_from_lsof()?;
     if !command.eq_ignore_ascii_case("ollama") {
         anyhow::bail!(
@@ -141,27 +157,9 @@ fn verify_listener_process() -> Result<()> {
             command
         );
     }
-
-    let exe =
-        std::fs::read_link(format!("/proc/{pid}/exe")).context("resolve /proc listener exe")?;
-    if exe.file_name().and_then(|n| n.to_str()) != Some("ollama") {
-        anyhow::bail!("listener executable is not named ollama: {}", exe.display());
-    }
-    let exe_meta = std::fs::metadata(&exe).context("stat listener executable")?;
-    if exe_meta.permissions().mode() & 0o002 != 0 {
-        anyhow::bail!("listener executable is world-writable: {}", exe.display());
-    }
-    if let Some(parent) = exe.parent() {
-        let parent_meta =
-            std::fs::metadata(parent).context("stat listener executable directory")?;
-        if parent_meta.permissions().mode() & 0o002 != 0 {
-            anyhow::bail!(
-                "listener executable directory is world-writable: {}",
-                parent.display()
-            );
-        }
-    }
-    Ok(())
+    anyhow::bail!(
+        "Linux Ollama listener identity is not attested; use existing local Ollama only after explicit opt-in"
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -192,7 +190,8 @@ Write-Output $proc.Path
         "__OLLAMA_WINDOWS_SIGNER_THUMBPRINT__",
         OLLAMA_WINDOWS_SIGNER_THUMBPRINT,
     );
-    let out = std::process::Command::new("powershell")
+    let powershell = system32_path(&["WindowsPowerShell", "v1.0", "powershell.exe"]);
+    let out = std::process::Command::new(powershell)
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output()
         .context("verify Ollama listener process")?;

@@ -75,6 +75,8 @@ The dashboard walks through setup when something is missing:
    the app data directory.
 2. **Ollama**: installs the official local app when needed, or lets users keep
    an existing Homebrew/custom Ollama service with one clear confirmation.
+   Linux treats existing local Ollama services as unverified unless the user
+   explicitly opts in.
 3. **Gemma 3 4B**: pulls the default local rewrite model through Ollama.
 
 macOS also requires Accessibility permission for global modifier-key recording
@@ -110,10 +112,12 @@ Zerm is designed around local processing.
 - No cloud LLM calls from Zerm.
 - Dictation history is off by default.
 - Clearing or disabling history also erases the backup state file.
-- Local Ollama access is verified before transcripts are sent to
-  `127.0.0.1:11434`. When a local service exists but cannot be fully verified,
-  Zerm offers a simple choice: install the official app or keep using the
-  existing local Ollama.
+- Local Ollama access is checked before transcripts are sent to
+  `127.0.0.1:11434`. macOS and Windows verify the official app/publisher where
+  supported; Linux treats an existing local listener as unverified unless the
+  user explicitly opts in. When a local service exists but cannot be fully
+  verified, Zerm offers a simple choice: install the official app or keep using
+  the existing local Ollama.
 
 First-run setup does make network requests to download required model and
 installer assets:

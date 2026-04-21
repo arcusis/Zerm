@@ -13,16 +13,13 @@ const SPEECH_RMS_THRESHOLD: f32 = 0.02;
 const SILENCE_DURATION_MS: u64 = 1500;
 const VAD_TICK_MS: u64 = 100;
 
-/// Absolute cap on recorded samples, regardless of device sample rate
-/// or channel count. Chosen so the buffer stays under ~500 MB even if
-/// the user's mic exposes a 48 kHz stereo (≈ 115M f32 samples) config.
-/// Previously we capped by seconds, which scaled with rate/channels —
-/// at 192 kHz the 20-min cap would allocate >1.5 GB.
-pub const MAX_SAMPLES: usize = 120_000_000;
+/// Absolute cap on raw interleaved samples. 24M f32 samples is about 96 MB
+/// before mono/resample processing allocates its working buffers.
+pub const MAX_SAMPLES: usize = 24_000_000;
 
-/// Documented human-friendly cap (for log messages). Derived from
-/// MAX_SAMPLES assuming 48 kHz stereo.
-pub const MAX_RECORDING_SECS: u64 = 20 * 60;
+/// Human-friendly duration cap. The effective raw cap is the lower of this
+/// duration at the device rate/channel count and MAX_SAMPLES.
+pub const MAX_RECORDING_SECS: u64 = 5 * 60;
 
 /// If no speech RMS above threshold is observed for this long, stop.
 /// Prevents an accidental hotkey in a quiet room from recording until
@@ -62,6 +59,7 @@ where
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
     let sample_format = config.sample_format();
+    let max_samples = max_samples_for_config(sample_rate, channels);
 
     let (stop_tx, stop_rx) = channel::<()>();
     // Worker signals stream-startup success (or a build/play error) before
@@ -78,13 +76,14 @@ where
         // Cap each write so a single extend_from_slice can't push the
         // buffer above MAX_SAMPLES even if the OS hands us a huge chunk.
         let buffer_for_len_cap = buffer_for_thread.clone();
+        let max_samples_for_stream = max_samples;
         let err_fn = |e| log::error!("audio stream error: {e}");
         let stream_result = match sample_format {
             SampleFormat::F32 => device.build_input_stream(
                 &config.into(),
                 move |data: &[f32], _| {
                     let mut buf = buffer_for_stream.lock();
-                    let available = MAX_SAMPLES.saturating_sub(buf.len());
+                    let available = max_samples_for_stream.saturating_sub(buf.len());
                     let take = data.len().min(available);
                     buf.extend_from_slice(&data[..take]);
                     *level_for_stream.lock() = compute_rms(&data[..take]);
@@ -96,7 +95,7 @@ where
                 &config.into(),
                 move |data: &[i16], _| {
                     let mut buf = buffer_for_stream.lock();
-                    let available = MAX_SAMPLES.saturating_sub(buf.len());
+                    let available = max_samples_for_stream.saturating_sub(buf.len());
                     let take = data.len().min(available);
                     let converted: Vec<f32> = data[..take]
                         .iter()
@@ -112,7 +111,7 @@ where
                 &config.into(),
                 move |data: &[u16], _| {
                     let mut buf = buffer_for_stream.lock();
-                    let available = MAX_SAMPLES.saturating_sub(buf.len());
+                    let available = max_samples_for_stream.saturating_sub(buf.len());
                     let take = data.len().min(available);
                     let converted: Vec<f32> = data[..take]
                         .iter()
@@ -168,12 +167,12 @@ where
                 buf.len()
             };
 
-            // Hard cap: if the buffer reached MAX_SAMPLES, the cpal callback
+            // Hard cap: if the buffer reached max_samples, the cpal callback
             // will no longer append anything, so recording is effectively
             // frozen. Stop.
-            if snapshot_len >= MAX_SAMPLES {
+            if snapshot_len >= max_samples {
                 log::warn!(
-                    "max sample count ({MAX_SAMPLES}) reached (~{MAX_RECORDING_SECS}s @48k stereo); auto-stopping"
+                    "max sample count ({max_samples}) reached (duration cap {MAX_RECORDING_SECS}s, absolute cap {MAX_SAMPLES}); auto-stopping"
                 );
                 drop(stream);
                 on_stop(StopReason::HardLimit);
@@ -234,6 +233,11 @@ where
         Ok(Err(e)) => Err(anyhow!("audio capture failed to start: {e}")),
         Err(_) => Err(anyhow!("audio capture startup timed out")),
     }
+}
+
+pub fn max_samples_for_config(sample_rate: u32, channels: u16) -> usize {
+    let by_duration = sample_rate as usize * channels.max(1) as usize * MAX_RECORDING_SECS as usize;
+    by_duration.clamp(1, MAX_SAMPLES)
 }
 
 pub fn compute_rms(samples: &[f32]) -> f32 {
@@ -311,5 +315,11 @@ mod tests {
     fn rms_known_value() {
         let samples = vec![0.5, -0.5, 0.5, -0.5];
         assert!((compute_rms(&samples) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn max_samples_uses_lower_duration_or_absolute_cap() {
+        assert_eq!(max_samples_for_config(16_000, 1), 4_800_000);
+        assert_eq!(max_samples_for_config(192_000, 2), MAX_SAMPLES);
     }
 }

@@ -417,7 +417,7 @@ fn send_paste_via_core_graphics() -> bool {
 #[cfg(target_os = "macos")]
 fn send_paste_via_system_events() -> bool {
     let script = r#"tell application "System Events" to keystroke "v" using command down"#;
-    match std::process::Command::new("osascript")
+    match std::process::Command::new("/usr/bin/osascript")
         .args(["-e", script])
         .output()
     {
@@ -817,9 +817,8 @@ async fn process(
         return Ok(());
     }
 
-    if let Err(e) = copy_to_clipboard(&output) {
-        emit_error(app, format!("clipboard: {e:#}"));
-    }
+    copy_to_clipboard(&output)
+        .map_err(|e| anyhow!("clipboard write failed; skipping auto-paste/history/done: {e:#}"))?;
 
     let (auto_paste, save_history) = app
         .try_state::<Arc<Pipeline>>()
@@ -1304,7 +1303,7 @@ fn open_input_permission_settings(window: tauri::WebviewWindow) -> Result<(), St
     require_dashboard(&window)?;
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
+        std::process::Command::new("/usr/bin/open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             .spawn()
             .map_err(|e| format!("open Accessibility settings: {e}"))?;
@@ -1438,6 +1437,17 @@ const OLLAMA_WINDOWS_ISSUER_CN: &str = "DigiCert G5 CS ECC SHA384 2021 CA1";
 #[cfg(target_os = "windows")]
 const OLLAMA_WINDOWS_SIGNER_THUMBPRINT: &str = "716CD3BC8C02361431A18F56F98C72DE88066103";
 
+#[cfg(target_os = "windows")]
+fn system32_path(parts: &[&str]) -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    let mut path = std::path::PathBuf::from(root);
+    path.push("System32");
+    for part in parts {
+        path.push(part);
+    }
+    path
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[derive(serde::Deserialize)]
 struct GhAsset {
@@ -1455,7 +1465,7 @@ struct GhRelease {
 
 #[cfg(target_os = "macos")]
 fn verify_macos_app_signature(app_path: &str) -> Result<(), String> {
-    let verify = std::process::Command::new("codesign")
+    let verify = std::process::Command::new("/usr/bin/codesign")
         .args(["--verify", "--deep", "--strict", "--verbose=2", app_path])
         .output()
         .map_err(|e| format!("codesign verify: {e}"))?;
@@ -1466,7 +1476,7 @@ fn verify_macos_app_signature(app_path: &str) -> Result<(), String> {
         ));
     }
 
-    let details = std::process::Command::new("codesign")
+    let details = std::process::Command::new("/usr/bin/codesign")
         .args(["-dv", "--verbose=4", app_path])
         .output()
         .map_err(|e| format!("codesign details: {e}"))?;
@@ -1489,7 +1499,7 @@ fn verify_macos_app_signature(app_path: &str) -> Result<(), String> {
         ));
     }
 
-    let gatekeeper = std::process::Command::new("spctl")
+    let gatekeeper = std::process::Command::new("/usr/sbin/spctl")
         .args(["-a", "-vv", "-t", "exec", app_path])
         .output()
         .map_err(|e| format!("spctl: {e}"))?;
@@ -1526,7 +1536,8 @@ fn verify_windows_installer_signature(installer_path: &std::path::Path) -> Resul
         OLLAMA_WINDOWS_ORG_SERIAL,
         issuer_re.replace('\'', "''"),
     );
-    let out = std::process::Command::new("powershell")
+    let powershell = system32_path(&["WindowsPowerShell", "v1.0", "powershell.exe"]);
+    let out = std::process::Command::new(powershell)
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output()
         .map_err(|e| format!("powershell signature check: {e}"))?;
@@ -1557,7 +1568,7 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
     {
         let _ = app.emit("zerm://ollama-install-progress", "launching");
         // xdg-open is the de-facto open-URL command on Linux desktops.
-        std::process::Command::new("xdg-open")
+        std::process::Command::new("/usr/bin/xdg-open")
             .arg("https://ollama.com/download/linux")
             .spawn()
             .map_err(|e| format!("xdg-open: {e}"))?;
@@ -1723,7 +1734,7 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
                 .prefix(".ollama-extract-")
                 .tempdir_in(&cache_dir)
                 .map_err(|e| format!("extract tempdir: {e}"))?;
-            let status = std::process::Command::new("unzip")
+            let status = std::process::Command::new("/usr/bin/unzip")
                 .args([
                     "-o",
                     installer_path.to_str().unwrap(),
@@ -1749,7 +1760,7 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
                 std::fs::remove_dir_all(staged_path)
                     .map_err(|e| format!("remove staged Ollama.app: {e}"))?;
             }
-            let status = std::process::Command::new("ditto")
+            let status = std::process::Command::new("/usr/bin/ditto")
                 .args([extracted_app_str, "/Applications/Ollama.app.zerm-new"])
                 .status()
                 .map_err(|e| format!("ditto: {e}"))?;
@@ -1757,14 +1768,34 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
                 return Err(format!("ditto exited {status}"));
             }
             verify_macos_app_signature("/Applications/Ollama.app.zerm-new")?;
-            if install_path.exists() {
-                std::fs::remove_dir_all(install_path)
-                    .map_err(|e| format!("remove existing Ollama.app: {e}"))?;
+            let backup_path = std::path::Path::new("/Applications/Ollama.app.zerm-backup");
+            if backup_path.exists() {
+                std::fs::remove_dir_all(backup_path)
+                    .map_err(|e| format!("remove stale Ollama.app backup: {e}"))?;
             }
-            std::fs::rename(staged_path, install_path)
-                .map_err(|e| format!("install verified Ollama.app: {e}"))?;
-            verify_macos_app_signature("/Applications/Ollama.app")?;
-            let _ = std::process::Command::new("open")
+            let had_existing = install_path.exists();
+            if had_existing {
+                std::fs::rename(install_path, backup_path)
+                    .map_err(|e| format!("backup existing Ollama.app: {e}"))?;
+            }
+            if let Err(e) = std::fs::rename(staged_path, install_path) {
+                if had_existing {
+                    let _ = std::fs::rename(backup_path, install_path);
+                }
+                return Err(format!("install verified Ollama.app: {e}"));
+            }
+            if let Err(e) = verify_macos_app_signature("/Applications/Ollama.app") {
+                let _ = std::fs::remove_dir_all(install_path);
+                if had_existing {
+                    let _ = std::fs::rename(backup_path, install_path);
+                }
+                return Err(e);
+            }
+            if had_existing && backup_path.exists() {
+                std::fs::remove_dir_all(backup_path)
+                    .map_err(|e| format!("remove Ollama.app backup: {e}"))?;
+            }
+            let _ = std::process::Command::new("/usr/bin/open")
                 .arg("/Applications/Ollama.app")
                 .spawn();
         }
@@ -1773,7 +1804,8 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
         {
             let _ = app.emit("zerm://ollama-install-progress", "verifying");
             verify_windows_installer_signature(&installer_path)?;
-            std::process::Command::new("cmd")
+            let cmd = system32_path(&["cmd.exe"]);
+            std::process::Command::new(cmd)
                 .args(["/C", "start", "", installer_path.to_str().unwrap()])
                 .spawn()
                 .map_err(|e| format!("launch: {e}"))?;
