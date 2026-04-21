@@ -2,7 +2,7 @@ name: Release
 
 # Multi-stage release pipeline. Runs on tag push (or manual dispatch):
 #
-#   preflight → [ build (matrix) , pages ] → publish
+#   preflight → build (matrix) → publish
 #
 # preflight runs typecheck + cargo check + cargo test + pnpm audit +
 # rustsec audit on one fast runner. If any of those fail, no matrix
@@ -11,11 +11,9 @@ name: Release
 # build fans out to 4 OS-arch combinations and uploads installers as
 # a draft GitHub Release (one per matrix leg, atomically attached).
 #
-# pages deploys docs/ to GitHub Pages in parallel with build.
-#
-# publish un-drafts the release once every matrix leg and the pages
-# deployment both succeeded. If any upstream job fails we leave the
-# release as a draft so we can inspect it before publishing manually.
+# publish un-drafts the release once every matrix leg succeeded. If
+# any upstream job fails we leave the release as a draft so we can
+# inspect it before publishing manually.
 
 on:
   push:
@@ -327,12 +325,10 @@ jobs:
   pages:
     name: Deploy landing page
     needs: preflight
+    if: ${{ github.ref_type != 'tag' }}
     runs-on: ubuntu-latest
-    # continue-on-error so a Pages deployment hiccup (e.g. environment
-    # first-time provisioning) doesn't block the release from being
-    # published. Site can always be redeployed via the workflow_dispatch
-    # trigger.
-    continue-on-error: true
+    # GitHub Pages environment protection rejects tag refs. Release tags
+    # publish app artifacts only; branch/manual runs may deploy docs.
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -347,8 +343,6 @@ jobs:
 
   publish:
     name: Publish release
-    # Depend on build (must succeed for all matrix legs). Pages is
-    # continue-on-error so a Pages hiccup doesn't block the release.
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -380,4 +374,3 @@ jobs:
       - name: Summary
         run: |
           echo "::notice title=Release published::Zerm ${{ github.ref_name }} is live."
-          echo "::notice title=Landing page deployed::https://arcusis.github.io/Zerm/"
