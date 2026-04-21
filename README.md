@@ -41,8 +41,8 @@ Slack, email, notes, pull request reviews, and long-form writing.
 ## Features
 
 - **On-device transcription** with `whisper.cpp` through `whisper-rs`.
-- **Local rewrite modes** through Ollama and Gemma 3: Off, Agent, Chat, and Pro.
-- **Clipboard-first workflow**: record, process, copy, and optionally auto-paste on macOS.
+- **Local rewrite modes** through Ollama and Gemma 3: Off, Developer, Chat, and Pro.
+- **Clipboard-first workflow**: record, process, copy, and optionally auto-paste on macOS with native key events.
 - **Hotkey recording**: Right Option on macOS; Ctrl+Shift+Space on Windows/Linux.
 - **Voice activity detection** to auto-stop after silence.
 - **Custom vocabulary** for names, project terms, acronyms, and identifiers.
@@ -73,14 +73,15 @@ The dashboard walks through setup when something is missing:
 
 1. **Whisper model**: downloads the multilingual `ggml-small.bin` model into
    the app data directory.
-2. **Ollama**: detects a trusted local Ollama listener, or offers install steps
-   when Ollama is missing.
+2. **Ollama**: installs the official local app when needed, or lets users keep
+   an existing Homebrew/custom Ollama service with one clear confirmation.
 3. **Gemma 3 4B**: pulls the default local rewrite model through Ollama.
 
 macOS also requires Accessibility permission for global modifier-key recording
-and auto-paste. Auto-paste is currently macOS-only until Windows and Linux
-paste synthesis exists. Microphone permission is requested by the operating
-system on first use.
+and auto-paste. Auto-paste is currently macOS-only and sends a native `Cmd+V`
+keyboard sequence to the app that was focused when recording started. Windows
+and Linux paste synthesis is not implemented yet. Microphone permission is
+requested by the operating system on first use.
 
 ## Usage
 
@@ -95,7 +96,7 @@ Prompt modes:
 | Mode | Output |
 | --- | --- |
 | Off | Raw transcript with conservative cleanup |
-| Agent | A clear instruction for a coding agent |
+| Developer | A clear instruction for a coding agent |
 | Chat | Short casual message |
 | Pro | Polished long-form prose |
 
@@ -110,7 +111,9 @@ Zerm is designed around local processing.
 - Dictation history is off by default.
 - Clearing or disabling history also erases the backup state file.
 - Local Ollama access is verified before transcripts are sent to
-  `127.0.0.1:11434`; degraded local identity checks require explicit opt-in.
+  `127.0.0.1:11434`. When a local service exists but cannot be fully verified,
+  Zerm offers a simple choice: install the official app or keep using the
+  existing local Ollama.
 
 First-run setup does make network requests to download required model and
 installer assets:

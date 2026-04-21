@@ -526,8 +526,8 @@ async function runSetup() {
   //    executing a third-party installer. Never silent.
   if (!status.ollama_running) {
     showSetupBanner(
-      "Ollama is not running",
-      "Zerm needs Ollama (open-source, runs locally) to polish transcripts. Installing downloads the official release asset, verifies its hash and publisher where supported, then asks you to approve it.",
+      "Set up Ollama",
+      "Zerm can install the local AI helper it uses to polish transcripts. Nothing is sent to a cloud service.",
       `<button class="solid-btn" id="btn-install-ollama">Install Ollama</button>
        <a class="ghost-btn" href="https://ollama.com" target="_blank" rel="noreferrer">What is this?</a>`,
     );
@@ -555,17 +555,22 @@ async function runSetup() {
 
   if (status.ollama_identity_warning && !status.allow_unverified_ollama) {
     showSetupBanner(
-      "Verify local Ollama",
-      status.ollama_identity_warning,
-      `<button class="solid-btn" id="btn-retry-setup">Retry</button>
-       <button class="ghost-btn" id="btn-allow-unverified-ollama">Use unverified local Ollama</button>
-       <a class="ghost-btn" href="https://ollama.com/download" target="_blank" rel="noreferrer">Install official app</a>`,
-      "error",
+      "Set up Ollama",
+      "Zerm found a local Ollama service. Install the official app, or keep using the local one already on this Mac.",
+      `<button class="solid-btn" id="btn-install-ollama">Install official app</button>
+       <button class="ghost-btn" id="btn-allow-unverified-ollama">Use existing Ollama</button>
+       <button class="ghost-btn" id="btn-retry-setup">Retry</button>`,
     );
+    $("btn-install-ollama")?.addEventListener("click", async () => {
+      const ok = window.confirm(
+        "Zerm will download the official Ollama app, verify it, and open it. Continue?",
+      );
+      if (ok) await autoInstallOllama();
+    });
     $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
     $("btn-allow-unverified-ollama")?.addEventListener("click", async () => {
       const ok = window.confirm(
-        "This allows Zerm to send dictated transcripts to the local service on 127.0.0.1:11434 even when its process identity could not be fully verified. Continue?",
+        "Use the Ollama service already running on this Mac?",
       );
       if (!ok) return;
       await requiredInvoke("set_allow_unverified_ollama", { enabled: true });

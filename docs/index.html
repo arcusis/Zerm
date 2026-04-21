@@ -40,8 +40,8 @@
           <h1>Zerm turns speech into clean clipboard text.</h1>
           <p class="hero-lede">
             Tap a hotkey, speak, and paste. Whisper transcribes locally,
-            Ollama can polish locally, and Zerm keeps the workflow private by
-            default.
+            Ollama can polish locally, Zerm can set it up for you, and the
+            workflow stays private by default.
           </p>
           <div class="hero-actions">
             <a id="primary-download" class="button primary" href="https://github.com/arcusis/Zerm/releases">
@@ -81,7 +81,7 @@
             <div>
               <span>03</span>
               <strong>Paste</strong>
-              <p>The result lands in your clipboard, ready for the focused app.</p>
+              <p>The result lands in your clipboard, with optional native auto-paste on macOS.</p>
             </div>
           </div>
         </div>
@@ -90,7 +90,7 @@
       <section class="strip" aria-label="Highlights">
         <div>
           <strong>Local first</strong>
-          <span>Audio and transcripts stay on the machine.</span>
+          <span>Audio and transcripts stay on the machine, with guided local setup.</span>
         </div>
         <div>
           <strong>Developer ready</strong>
@@ -154,13 +154,16 @@
         <div class="privacy-list">
           <p>
             Zerm records through the local microphone API, transcribes with a
-            local Whisper model, and only sends text to a verified local Ollama
-            listener when a rewrite mode needs it.
+            local Whisper model, and only sends text to your local Ollama
+            service when a rewrite mode needs it. Zerm installs the official
+            Ollama app when needed, while still letting developers use an
+            existing Homebrew or custom Ollama service.
           </p>
           <ul>
             <li>Dictation history is opt-in.</li>
             <li>Clearing history removes the backup state file too.</li>
             <li>Setup downloads are bounded and verified where possible.</li>
+            <li>macOS auto-paste uses native keyboard events and never changes focus.</li>
             <li>Stable macOS and Windows releases require signing secrets before publishing; Linux artifacts ship with SHA-256 checksums instead of signing.</li>
             <li>Prerelease builds may be unsigned.</li>
           </ul>

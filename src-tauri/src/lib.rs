@@ -277,30 +277,64 @@ fn focus_still_matches(_expected: &FocusIdentity) -> bool {
 }
 
 /// Send a Cmd+V keystroke to the currently focused application via
-/// AppleScript / System Events. We never grab focus ourselves (the pill
-/// has `focus: false`), so the previously focused app is still the
-/// recipient. If nothing is focused for text input the keystroke is a
-/// no-op.
+/// CoreGraphics. We never grab focus ourselves (the pill has `focus: false`),
+/// so the previously focused app is still the recipient. If nothing is focused
+/// for text input the keystroke is a no-op.
 #[cfg(target_os = "macos")]
 fn send_paste_keystroke(expected: FocusIdentity) {
+    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, KeyCode};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
     if !focus_still_matches(&expected) {
         return;
     }
-    let script = "tell application \"System Events\" to keystroke \"v\" using command down";
-    match std::process::Command::new("osascript")
-        .args(["-e", script])
-        .output()
-    {
-        Ok(out) if !out.status.success() => {
-            log::warn!(
-                "auto-paste: osascript exited {}: {}",
-                out.status,
-                String::from_utf8_lossy(&out.stderr)
-            );
+
+    let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+        Ok(source) => source,
+        Err(()) => {
+            log::warn!("auto-paste: could not create CoreGraphics event source");
+            return;
         }
-        Err(e) => log::warn!("auto-paste: spawn failed: {e}"),
-        _ => {}
-    }
+    };
+
+    let command_flag = CGEventFlags::CGEventFlagCommand;
+    let command_down = match CGEvent::new_keyboard_event(source.clone(), KeyCode::COMMAND, true) {
+        Ok(event) => event,
+        Err(()) => {
+            log::warn!("auto-paste: could not create Command key-down event");
+            return;
+        }
+    };
+    let key_down = match CGEvent::new_keyboard_event(source.clone(), KeyCode::ANSI_V, true) {
+        Ok(event) => event,
+        Err(()) => {
+            log::warn!("auto-paste: could not create Cmd+V key-down event");
+            return;
+        }
+    };
+    let key_up = match CGEvent::new_keyboard_event(source.clone(), KeyCode::ANSI_V, false) {
+        Ok(event) => event,
+        Err(()) => {
+            log::warn!("auto-paste: could not create Cmd+V key-up event");
+            return;
+        }
+    };
+    let command_up = match CGEvent::new_keyboard_event(source, KeyCode::COMMAND, false) {
+        Ok(event) => event,
+        Err(()) => {
+            log::warn!("auto-paste: could not create Command key-up event");
+            return;
+        }
+    };
+
+    command_down.set_flags(command_flag);
+    key_down.set_flags(command_flag);
+    key_up.set_flags(command_flag);
+    command_up.set_flags(CGEventFlags::CGEventFlagNull);
+    command_down.post(CGEventTapLocation::HID);
+    key_down.post(CGEventTapLocation::HID);
+    key_up.post(CGEventTapLocation::HID);
+    command_up.post(CGEventTapLocation::HID);
 }
 
 #[cfg(not(target_os = "macos"))]
