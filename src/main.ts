@@ -99,13 +99,13 @@ async function init() {
     setState("processing");
   });
 
-  await listen<string>("zerm://transcript", (event) => {
-    console.log("transcript:", event.payload);
+  await listen<string>("zerm://transcript", () => {
+    // Payload is dictated text — may contain secrets. Do NOT log.
   });
 
-  await listen<{ transcript: string; output: string }>("zerm://done", (event) => {
+  await listen<{ transcript: string; output: string }>("zerm://done", () => {
+    // Payload contains cleaned output. Do NOT log.
     setState("done");
-    console.log("done:", event.payload);
     fadeOutAfter(1500);
   });
 

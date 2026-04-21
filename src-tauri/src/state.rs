@@ -112,11 +112,13 @@ pub struct Settings {
     pub hotkey: HotkeyChoice,
     #[serde(default, deserialize_with = "deserialize_vocabulary")]
     pub vocabulary: Vec<String>,
-    #[serde(default = "default_true")]
+    // Auto-paste defaults to FALSE for both fresh installs and migrations.
+    // Using a plain `#[serde(default)]` (which falls back to bool::default()
+    // i.e. false) so an old state file that predates the field doesn't
+    // silently opt users into the dangerous behavior.
+    #[serde(default)]
     pub auto_paste: bool,
 }
-
-fn default_true() -> bool { true }
 
 // Migrate from old String-typed vocabulary to Vec<String> seamlessly
 fn deserialize_vocabulary<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -207,11 +209,19 @@ impl PersistentState {
             f.write_all(serialized.as_bytes())?;
             f.sync_all()?;
         }
-        // Preserve the prior good copy as a `.bak` before clobbering.
+        // Preserve the prior good copy as a `.bak` before clobbering. On
+        // Windows `rename` refuses to overwrite, so we have to remove any
+        // pre-existing `.bak` first; otherwise the `.bak` stays forever and
+        // every subsequent save fails to back up.
         if path.exists() {
             let bak = path.with_extension("json.bak");
+            let _ = std::fs::remove_file(&bak);
             let _ = std::fs::rename(path, &bak);
         }
+        // Same reason — make sure the final rename of `.tmp` into place
+        // always succeeds. `path` was either never there, or we just moved
+        // it to `.bak` above, but we also defensively remove.
+        let _ = std::fs::remove_file(path);
         std::fs::rename(&tmp, path)?;
         Ok(())
     }

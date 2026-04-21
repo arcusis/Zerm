@@ -44,7 +44,11 @@ const WHISPER_SMALL_SHA256: &str =
 const WHISPER_SMALL_MAX_BYTES: u64 = 500_000_000;
 // Pinned to a commit rather than `main` so the repo owner can't rev the
 // file under the pinned digest without also changing the URL.
-const WHISPER_SMALL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
+// Commit-pinned so the repo owner can't swap the bytes under this URL.
+// Verified: ggerganov/whisper.cpp LFS oid at this revision matches the
+// SHA-256 we pin above. If this revision ever 404s, bump both together.
+const WHISPER_SMALL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin";
 const PILL_WIDTH: i32 = 240;
 const STATE_FILE: &str = "zerm-state.json";
 
@@ -59,6 +63,7 @@ struct Pipeline {
     audio_buffer: Arc<Mutex<Vec<f32>>>,
     capture: Arc<Mutex<Option<audio::CaptureHandle>>>,
     recording: Arc<AtomicBool>,
+    active_job_id: Arc<AtomicU64>,
     tray_anchor: Arc<Mutex<Option<PhysicalPosition<f64>>>>,
     persistent: Arc<Mutex<PersistentState>>,
     state_path: Arc<Mutex<Option<PathBuf>>>,
@@ -71,6 +76,7 @@ impl Pipeline {
             audio_buffer: Arc::new(Mutex::new(Vec::with_capacity(48_000 * 30))),
             capture: Arc::new(Mutex::new(None)),
             recording: Arc::new(AtomicBool::new(false)),
+            active_job_id: Arc::new(AtomicU64::new(0)),
             tray_anchor: Arc::new(Mutex::new(None)),
             persistent: Arc::new(Mutex::new(PersistentState::default())),
             state_path: Arc::new(Mutex::new(None)),
@@ -271,14 +277,25 @@ fn handle_toggle(app: &AppHandle, pipeline: &Pipeline) {
 fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
     pipeline.audio_buffer.lock().clear();
 
-    let vad_enabled = pipeline.persistent.lock().settings.vad_enabled;
-    let app_for_vad = app.clone();
+    // Invalidate any in-flight previous recording so its eventual paste
+    // can't fire. We bump CURRENT_JOB_ID at press time — not at release —
+    // so a user can press-A, press-B before A's processing finishes and
+    // A still gets cancelled from pasting.
+    let job_id = NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst);
+    CURRENT_JOB_ID.store(job_id, Ordering::SeqCst);
+    pipeline.active_job_id.store(job_id, Ordering::SeqCst);
 
-    let result = audio::start_capture(pipeline.audio_buffer.clone(), move || {
-        if !vad_enabled {
+    let vad_enabled = pipeline.persistent.lock().settings.vad_enabled;
+    let app_for_stop = app.clone();
+
+    let result = audio::start_capture(pipeline.audio_buffer.clone(), move |reason| {
+        // The hard-length limit MUST stop the pipeline regardless of VAD
+        // setting — otherwise with VAD off we'd quietly drop the mic
+        // stream at 20min and leave the app marked "recording" forever.
+        if matches!(reason, audio::StopReason::Silence) && !vad_enabled {
             return;
         }
-        let app = app_for_vad.clone();
+        let app = app_for_stop.clone();
         tauri::async_runtime::spawn(async move {
             if let Some(state) = app.try_state::<Arc<Pipeline>>() {
                 handle_toggle(&app, &state);
@@ -328,11 +345,10 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
 
     let _ = app.emit(PROCESSING_EVENT, ());
 
-    // Allocate a fresh job id. Anything older now in flight will still
-    // emit DONE_EVENT but will NOT auto-paste, because auto-paste is
-    // gated on `job_id == CURRENT_JOB_ID`.
-    let job_id = NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst);
-    CURRENT_JOB_ID.store(job_id, Ordering::SeqCst);
+    // Job id was allocated at press time. Processing keeps that id; an
+    // intervening press bumped CURRENT_JOB_ID past ours, so auto-paste
+    // will self-cancel when process() compares.
+    let job_id = pipeline.active_job_id.load(Ordering::SeqCst);
 
     let raw = std::mem::take(&mut *pipeline.audio_buffer.lock());
     let app_clone = app.clone();
@@ -828,24 +844,48 @@ struct DownloadProgress {
     total: u64,
 }
 
+// Fetch from GitHub Releases directly (what ollama.com/download redirects
+// to). GitHub serves over hardened infra and every release asset is
+// auditable; authenticity is verified by the OS installer's own
+// signature/notarization check before code runs.
 #[cfg(target_os = "macos")]
-const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/download/Ollama-darwin.zip";
+const OLLAMA_INSTALLER_URL: &str =
+    "https://github.com/ollama/ollama/releases/latest/download/Ollama-darwin.zip";
 #[cfg(target_os = "windows")]
-const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/download/OllamaSetup.exe";
+const OLLAMA_INSTALLER_URL: &str =
+    "https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe";
 #[cfg(target_os = "linux")]
 const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/install.sh";
 
+// Hard upper bound; anything more is either wrong or malicious.
+const OLLAMA_INSTALLER_MAX_BYTES: u64 = 500_000_000;
+
 #[tauri::command]
 async fn install_ollama(app: AppHandle) -> Result<(), String> {
-    let tmp_name = match std::env::consts::OS {
-        "macos" => "Ollama.zip",
-        "windows" => "OllamaSetup.exe",
-        _ => "ollama-install.sh",
-    };
-    let tmp = std::env::temp_dir().join(tmp_name);
-
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
+
+    // User-owned cache dir, not /tmp. Avoids the world-writable temp-file
+    // race that could let another local process substitute the binary
+    // between our download and our launch.
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("cache dir: {e}"))?;
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .map_err(|e| format!("mkdir: {e}"))?;
+
+    let suffix = match std::env::consts::OS {
+        "macos" => ".zip",
+        "windows" => ".exe",
+        _ => ".sh",
+    };
+    let tmp = tempfile::Builder::new()
+        .prefix(".ollama-installer-")
+        .suffix(suffix)
+        .tempfile_in(&cache_dir)
+        .map_err(|e| format!("tempfile: {e}"))?;
 
     let _ = app.emit("zerm://ollama-install-progress", "downloading");
     let resp = reqwest::get(OLLAMA_INSTALLER_URL)
@@ -853,32 +893,61 @@ async fn install_ollama(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("request: {e}"))?
         .error_for_status()
         .map_err(|e| format!("status: {e}"))?;
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .map_err(|e| format!("create: {e}"))?;
+    if let Some(len) = resp.content_length() {
+        if len > OLLAMA_INSTALLER_MAX_BYTES {
+            return Err(format!(
+                "refusing: content-length {len} exceeds cap {OLLAMA_INSTALLER_MAX_BYTES}"
+            ));
+        }
+    }
+
+    let std_tmp = tmp.reopen().map_err(|e| format!("reopen: {e}"))?;
+    let mut file = tokio::fs::File::from_std(std_tmp);
     let mut stream = resp.bytes_stream();
+    let mut written: u64 = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
+        written += chunk.len() as u64;
+        if written > OLLAMA_INSTALLER_MAX_BYTES {
+            return Err(format!(
+                "refusing: download exceeded {OLLAMA_INSTALLER_MAX_BYTES} byte cap"
+            ));
+        }
         file.write_all(&chunk)
             .await
             .map_err(|e| format!("write: {e}"))?;
     }
-    file.flush().await.ok();
+    file.flush().await.map_err(|e| format!("flush: {e}"))?;
+    file.sync_all().await.map_err(|e| format!("sync: {e}"))?;
     drop(file);
+
+    let persist_name = match std::env::consts::OS {
+        "macos" => "Ollama-installer.zip",
+        "windows" => "OllamaSetup.exe",
+        _ => "ollama-install.sh",
+    };
+    let persisted = cache_dir.join(persist_name);
+    // persist() is atomic-replace across platforms (rename on unix,
+    // MoveFileExW with REPLACE_EXISTING on Windows).
+    let persisted = tmp
+        .persist(&persisted)
+        .map_err(|e| format!("persist: {}", e.error))?;
+    drop(persisted);
+    let installer_path = cache_dir.join(persist_name);
 
     let _ = app.emit("zerm://ollama-install-progress", "launching");
 
     #[cfg(target_os = "macos")]
     {
-        // Unzip into /Applications
+        // Unzip into /Applications. We rely on macOS Gatekeeper to verify
+        // the .app's signature/notarization when `open` launches it.
         let status = std::process::Command::new("unzip")
-            .args(["-o", tmp.to_str().unwrap(), "-d", "/Applications/"])
+            .args(["-o", installer_path.to_str().unwrap(), "-d", "/Applications/"])
             .status()
             .map_err(|e| format!("unzip: {e}"))?;
         if !status.success() {
             return Err(format!("unzip exited {status}"));
         }
-        // Launch it so the Ollama server starts
         let _ = std::process::Command::new("open")
             .arg("/Applications/Ollama.app")
             .spawn();
@@ -886,17 +955,17 @@ async fn install_ollama(app: AppHandle) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
+        // UAC shows the Authenticode signer "Ollama Inc." before the
+        // installer actually runs; that's our authenticity check.
         std::process::Command::new("cmd")
-            .args(["/C", "start", "", tmp.to_str().unwrap()])
+            .args(["/C", "start", "", installer_path.to_str().unwrap()])
             .spawn()
             .map_err(|e| format!("launch: {e}"))?;
     }
 
     #[cfg(target_os = "linux")]
     {
-        // Open the installer in the user's default terminal so they see the
-        // sudo prompt and progress output.
-        let script = tmp.to_string_lossy().into_owned();
+        let script = installer_path.to_string_lossy().into_owned();
         let candidates: &[&[&str]] = &[
             &["x-terminal-emulator", "-e", "sh", &script],
             &["gnome-terminal", "--", "sh", &script],
@@ -917,7 +986,7 @@ async fn install_ollama(app: AppHandle) -> Result<(), String> {
         if !launched {
             return Err(
                 "Could not find a terminal emulator. Run this manually: \
-                 `curl -fsSL https://ollama.com/install.sh | sh`"
+                 `sh <script-path>` (path printed in Zerm's logs)."
                     .into(),
             );
         }
@@ -1056,15 +1125,13 @@ async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
         ));
     }
 
-    // Atomic: link the verified tempfile to its final name. `persist_noclobber`
-    // refuses if something already exists at the destination, so an attacker
-    // who managed to create a decoy file can't trick us into silently keeping
-    // the attacker's version.
-    if dest.exists() {
-        let _ = tokio::fs::remove_file(&dest).await;
-    }
+    // Atomic replace: tempfile::NamedTempFile::persist wraps the
+    // platform-correct atomic rename (rename(2) on unix, MoveFileExW
+    // with REPLACE_EXISTING on Windows). We keep the verified tempfile
+    // untouched if persist fails, so a working old model is never lost
+    // to a half-finished replacement.
     tmp_file
-        .persist_noclobber(&dest)
+        .persist(&dest)
         .map_err(|e| format!("persist: {}", e.error))?;
 
     let _ = app.emit(

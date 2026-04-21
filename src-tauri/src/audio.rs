@@ -25,9 +25,18 @@ pub struct CaptureHandle {
     pub level: Arc<Mutex<f32>>,
 }
 
-pub fn start_capture<F>(buffer: Arc<Mutex<Vec<f32>>>, on_silence: F) -> Result<CaptureHandle>
+/// Why the capture ended on its own (not via the explicit stop channel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    /// VAD detected sustained silence.
+    Silence,
+    /// Max recording length reached — we must stop regardless of VAD state.
+    HardLimit,
+}
+
+pub fn start_capture<F>(buffer: Arc<Mutex<Vec<f32>>>, on_stop: F) -> Result<CaptureHandle>
 where
-    F: Fn() + Send + 'static,
+    F: Fn(StopReason) + Send + 'static,
 {
     let host = cpal::default_host();
     let device = host
@@ -134,7 +143,7 @@ where
                     "max recording length ({MAX_RECORDING_SECS}s) reached, auto-stopping"
                 );
                 drop(stream);
-                on_silence();
+                on_stop(StopReason::HardLimit);
                 return;
             }
 
@@ -157,7 +166,7 @@ where
                 if silence_ticks >= silence_ticks_required {
                     log::info!("VAD: silence detected, auto-stopping");
                     drop(stream);
-                    on_silence();
+                    on_stop(StopReason::Silence);
                     return;
                 }
             } else if speech_detected {
