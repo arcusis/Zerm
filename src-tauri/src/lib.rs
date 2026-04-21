@@ -144,11 +144,35 @@ fn whisper_model_path(app: &AppHandle) -> PathBuf {
         .join("ggml-small.bin")
 }
 
-fn looks_non_latin(text: &str) -> bool {
-    text.chars()
-        .filter(|c| c.is_alphabetic())
-        .take(40)
-        .any(|c| !c.is_ascii())
+/// Languages where our current default (`gemma3:4b`) is too weak —
+/// especially when the speaker mixes the local language with English
+/// technical terms. For these we auto-upgrade to a multilingual-first
+/// model if the user hasn't explicitly overridden `llm_model`.
+fn is_multilingual_heavy(lang: &str) -> bool {
+    matches!(
+        lang,
+        "he" | "ru" | "ar" | "fa" | "ur" | "zh" | "ja" | "ko" | "th" | "hi" | "bn" | "el"
+    )
+}
+
+/// Model to use for a given detected language, honoring ZERM_LLM_MODEL
+/// and the persisted `llm_model` setting first; falling back to
+/// `aya-expanse:8b` for Hebrew/Russian/Arabic/CJK and `gemma3:4b` for
+/// Latin-script languages.
+fn llm_model_for_lang(pipeline: &Pipeline, lang: &str) -> String {
+    if let Ok(env) = std::env::var("ZERM_LLM_MODEL") {
+        return env;
+    }
+    let user_set = pipeline.persistent.lock().settings.llm_model.clone();
+    if user_set != "gemma3:4b" {
+        // User has an explicit override; respect it.
+        return user_set;
+    }
+    if is_multilingual_heavy(lang) {
+        "aya-expanse:8b".to_string()
+    } else {
+        "gemma3:4b".to_string()
+    }
 }
 
 fn current_llm_model(pipeline: &Pipeline) -> String {
@@ -372,7 +396,11 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
     let raw = std::mem::take(&mut *pipeline.audio_buffer.lock());
     let app_clone = app.clone();
     let whisper = pipeline.whisper.clone();
-    let llm_model = current_llm_model(pipeline);
+    let pipeline_for_model = Arc::clone(
+        // `pipeline: &Pipeline` is behind Tauri's state::<Arc<Pipeline>>()
+        // so the caller side gives us an Arc to re-clone.
+        &app.state::<Arc<Pipeline>>().inner().clone(),
+    );
     let (prompt_mode, vocabulary) = {
         let p = pipeline.persistent.lock();
         (p.settings.prompt_mode, p.settings.vocabulary.join(", "))
@@ -385,7 +413,7 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
             raw,
             sample_rate,
             channels,
-            llm_model,
+            pipeline_for_model,
             prompt_mode,
             vocabulary,
             job_id,
@@ -403,7 +431,7 @@ async fn process(
     raw: Vec<f32>,
     sample_rate: u32,
     channels: u16,
-    llm_model: String,
+    pipeline: Arc<Pipeline>,
     prompt_mode: PromptMode,
     vocabulary: String,
     job_id: u64,
@@ -431,15 +459,18 @@ async fn process(
     } else {
         Some(format!("Vocabulary: {}", vocabulary.trim()))
     };
-    let raw_transcript = tauri::async_runtime::spawn_blocking(move || -> Result<String> {
-        let guard = whisper_for_blocking.lock();
-        let w = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("whisper model not loaded yet"))?;
-        w.transcribe_with_options(&prepared, None, initial_prompt.as_deref())
-    })
+    let (raw_transcript, detected_lang) = tauri::async_runtime::spawn_blocking(
+        move || -> Result<(String, String)> {
+            let guard = whisper_for_blocking.lock();
+            let w = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("whisper model not loaded yet"))?;
+            w.transcribe_with_options(&prepared, None, initial_prompt.as_deref())
+        },
+    )
     .await??;
 
+    log::info!("detected language: {detected_lang}");
     let transcript = state::strip_whisper_tokens(&raw_transcript);
     // Transcripts contain dictated text which may include secrets (PII,
     // credentials, draft messages). Keep them out of info-level logs.
@@ -457,27 +488,28 @@ async fn process(
         return Ok(());
     }
 
-    let needs_cleanup = looks_non_latin(&transcript);
-    let output = if matches!(prompt_mode, PromptMode::Off) && needs_cleanup {
-        // Non-Latin transcript with no AI mode → run a conservative cleanup
-        // pass so that misheard non-English input still gets punctuation /
-        // typo fixes without changing meaning.
-        log::info!("non-latin transcript detected, running minimal cleanup pass");
-        match ollama::reformat_with_system(
-            &llm_model,
-            &transcript,
-            ollama::minimal_cleanup_prompt(),
-        )
-        .await
-        {
+    // Pick the model based on the detected language. Hebrew/Russian/CJK
+    // auto-upgrade to `aya-expanse:8b` (a multilingual-first model) if
+    // the user hasn't explicitly overridden `llm_model`. Latin scripts
+    // keep the faster `gemma3:4b` default.
+    let llm_model = llm_model_for_lang(&pipeline, &detected_lang);
+    log::info!("using llm model: {llm_model} (lang={detected_lang})");
+
+    let output = if matches!(prompt_mode, PromptMode::Off)
+        && !ollama::system_prompt_for_lang(prompt_mode, &detected_lang).is_none()
+    {
+        // Off mode on a non-Latin script still gets a bespoke minimal-
+        // cleanup pass (the language-specific prompt already IS light-touch).
+        log::info!("non-latin Off mode → language-specific cleanup");
+        match ollama::reformat_lang(&llm_model, &transcript, prompt_mode, &detected_lang).await {
             Ok(t) => t,
             Err(e) => {
-                log::warn!("minimal cleanup failed, using raw: {e:#}");
+                log::warn!("lang-specific cleanup failed, using raw: {e:#}");
                 transcript.clone()
             }
         }
     } else {
-        match ollama::reformat(&llm_model, &transcript, prompt_mode).await {
+        match ollama::reformat_lang(&llm_model, &transcript, prompt_mode, &detected_lang).await {
             Ok(t) => t,
             Err(e) => {
                 log::warn!("ollama reformat failed, falling back to raw: {e:#}");

@@ -3,6 +3,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const DEVELOPER_PROMPT: &str = include_str!("system_prompt.txt");
+const HEBREW_PROMPT: &str = include_str!("prompt_he.txt");
+const RUSSIAN_PROMPT: &str = include_str!("prompt_ru.txt");
+const NONLATIN_PROMPT: &str = include_str!("prompt_nonlatin.txt");
 
 const MINIMAL_CLEANUP_PROMPT: &str = "You are an extremely conservative transcript cleaner for a voice dictation. Your ONLY job is to fix obvious transcription errors and punctuation.
 
@@ -131,6 +134,25 @@ pub fn system_prompt_for(mode: PromptMode) -> Option<&'static str> {
     }
 }
 
+/// Language-aware prompt selection.
+/// - For Hebrew / Russian / non-Latin scripts we override regardless of
+///   PromptMode because the code-switching behaviour (preserve inline
+///   English technical terms verbatim) is orthogonal to the formality
+///   tier and matters more than which tone the user picked.
+/// - For Latin-script languages (en, es, fr, de, ...) we use the
+///   existing mode-specific prompts.
+pub fn system_prompt_for_lang(mode: PromptMode, lang: &str) -> Option<&'static str> {
+    match lang {
+        "he" => Some(HEBREW_PROMPT),
+        "ru" => Some(RUSSIAN_PROMPT),
+        // Non-Latin scripts that don't have a bespoke prompt yet.
+        "ar" | "fa" | "ur" | "zh" | "ja" | "ko" | "th" | "hi" | "bn" | "el" | "ka" | "hy" | "am" | "ti" => {
+            Some(NONLATIN_PROMPT)
+        }
+        _ => system_prompt_for(mode),
+    }
+}
+
 pub fn minimal_cleanup_prompt() -> &'static str {
     MINIMAL_CLEANUP_PROMPT
 }
@@ -180,11 +202,20 @@ pub async fn reformat_with_system(
 }
 
 pub async fn reformat(model: &str, transcript: &str, mode: PromptMode) -> Result<String> {
+    reformat_lang(model, transcript, mode, "").await
+}
+
+pub async fn reformat_lang(
+    model: &str,
+    transcript: &str,
+    mode: PromptMode,
+    lang: &str,
+) -> Result<String> {
     if transcript.trim().is_empty() {
         return Ok(String::new());
     }
-    let Some(system) = system_prompt_for(mode) else {
-        // Off mode: return raw transcript unchanged
+    let Some(system) = system_prompt_for_lang(mode, lang) else {
+        // Off mode on a Latin-script language: return raw transcript unchanged
         return Ok(transcript.trim().to_string());
     };
 
