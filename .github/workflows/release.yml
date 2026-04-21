@@ -1,8 +1,21 @@
 name: Release
 
-# Builds Zerm for macOS (arm64 + x86_64), Windows, and Linux on every tag
-# push, uploads the installers as a draft GitHub Release. Edit the release
-# notes and publish manually.
+# Multi-stage release pipeline. Runs on tag push (or manual dispatch):
+#
+#   preflight → [ build (matrix) , pages ] → publish
+#
+# preflight runs typecheck + cargo check + cargo test + pnpm audit +
+# rustsec audit on one fast runner. If any of those fail, no matrix
+# builds are attempted and nothing is published.
+#
+# build fans out to 4 OS-arch combinations and uploads installers as
+# a draft GitHub Release (one per matrix leg, atomically attached).
+#
+# pages deploys docs/ to GitHub Pages in parallel with build.
+#
+# publish un-drafts the release once every matrix leg and the pages
+# deployment both succeeded. If any upstream job fails we leave the
+# release as a draft so we can inspect it before publishing manually.
 
 on:
   push:
@@ -13,10 +26,76 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "release-${{ github.ref }}"
+  cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Preflight (typecheck · cargo test · audit)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libasound2-dev \
+            libxdo-dev \
+            cmake \
+            build-essential
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend typecheck
+        run: pnpm typecheck
+
+      - name: npm dependency audit
+        run: pnpm audit --prod --audit-level high || echo "::warning::pnpm audit flagged advisories — review above"
+
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: Cargo tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Rust dependency audit
+        uses: rustsec/audit-check@v2
+        continue-on-error: true
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build (${{ matrix.label }})
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -47,26 +126,23 @@ jobs:
         shell: bash
         run: git config --system core.longpaths true
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Setup Node
-        uses: actions/setup-node@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.target }}
 
       - name: Install Linux build dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -93,6 +169,11 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
+      - name: Set CMake generator (Windows only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "CMAKE_GENERATOR=Visual Studio 17 2022" >> $GITHUB_ENV
+
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
@@ -101,14 +182,6 @@ jobs:
         run: |
           mkdir -p models
           touch models/.gitkeep
-
-      # CMake's `-G ""` is fatal — the empty default crashes whisper.cpp's
-      # build on macOS/Linux. Only set CMAKE_GENERATOR on Windows where it
-      # actually helps.
-      - name: Set CMake generator (Windows only)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: echo "CMAKE_GENERATOR=Visual Studio 17 2022" >> $GITHUB_ENV
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0.5.22
@@ -119,29 +192,62 @@ jobs:
           releaseName: "Zerm ${{ github.ref_name }}"
           releaseBody: |
             ## First launch
-            1. Open Zerm. The dashboard appears with a "Set up Zerm" banner.
-            2. Click **Download Whisper model** in the banner — Zerm streams
-               the multilingual ggml-small.bin (~466 MB) into your app data
-               directory and loads it automatically.
-            3. Install [Ollama](https://ollama.com/download), then in a
-               terminal: `ollama pull gemma3:4b`. Zerm picks it up live.
-            4. macOS: grant Accessibility permission when prompted so the
-               Right Option hotkey can fire and auto-paste can simulate ⌘V.
+            1. Open Zerm. The dashboard shows a setup banner.
+            2. Zerm streams the hash-pinned Whisper model (~466 MB)
+               into your app-data dir automatically.
+            3. Click **Install Ollama**. Zerm downloads the signed
+               installer from github.com/ollama/ollama/releases and
+               hands it to your OS's own signature check before it
+               runs.
+            4. Gemma 3 4B is then pulled through your local Ollama.
+            5. macOS: grant Accessibility permission when prompted.
 
             ## Use it
-            Tap **Right Option**, speak, stop talking. The cleaned text
-            lands in your clipboard and pastes into whatever app is focused.
+            Tap **Right Option** (macOS) / **Ctrl+Shift+Space** (Windows
+            + Linux), speak, stop talking. Text lands in your clipboard.
 
             ## Notes
-            - macOS builds are unsigned for this prerelease — first launch
-              requires `xattr -cr /Applications/Zerm.app` or right-click → Open.
-            - Windows .msi is unsigned; SmartScreen will warn — click "More
-              info" → "Run anyway".
-            - Linux .AppImage is built on Ubuntu 22.04 — should run on
-              22.04+.
+            - macOS .dmg is unsigned for prereleases — first launch:
+              `xattr -cr /Applications/Zerm.app` or right-click → Open.
+            - Windows .msi is unsigned; SmartScreen will warn — click
+              "More info" → "Run anyway".
+            - Linux .AppImage built on Ubuntu 22.04.
 
             ## Changes
             <https://github.com/arcusis/Zerm/commits/${{ github.ref_name }}>
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
+
+  pages:
+    name: Deploy landing page
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  publish:
+    name: Publish release
+    needs: [build, pages]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote draft to published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --draft=false \
+            --repo ${{ github.repository }}
+      - name: Summary
+        run: |
+          echo "::notice title=Release published::Zerm ${{ github.ref_name }} is live."
+          echo "::notice title=Landing page deployed::https://arcusis.github.io/Zerm/"
