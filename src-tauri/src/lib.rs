@@ -337,7 +337,10 @@ fn activate_paste_target(expected: &FocusIdentity) -> bool {
         return false;
     };
 
-    if app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
+    // Use both documented activation bits without referencing the deprecated
+    // constant directly. On current macOS it still improves reliability for
+    // LSUIElement/menu-bar style apps returning focus to a normal app.
+    if app.activateWithOptions(NSApplicationActivationOptions(0b11)) {
         std::thread::sleep(std::time::Duration::from_millis(180));
     }
 
@@ -354,20 +357,16 @@ fn activate_paste_target(expected: &FocusIdentity) -> bool {
 /// so the previously focused app is still the recipient. If nothing is focused
 /// for text input the keystroke is a no-op.
 #[cfg(target_os = "macos")]
-fn send_paste_keystroke(expected: FocusIdentity) {
+fn send_paste_via_core_graphics() -> bool {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, KeyCode};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use std::time::Duration;
-
-    if !activate_paste_target(&expected) {
-        return;
-    }
 
     let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
         Ok(source) => source,
         Err(()) => {
             log::warn!("auto-paste: could not create CoreGraphics event source");
-            return;
+            return false;
         }
     };
 
@@ -376,28 +375,28 @@ fn send_paste_keystroke(expected: FocusIdentity) {
         Ok(event) => event,
         Err(()) => {
             log::warn!("auto-paste: could not create Command key-down event");
-            return;
+            return false;
         }
     };
     let key_down = match CGEvent::new_keyboard_event(source.clone(), KeyCode::ANSI_V, true) {
         Ok(event) => event,
         Err(()) => {
             log::warn!("auto-paste: could not create Cmd+V key-down event");
-            return;
+            return false;
         }
     };
     let key_up = match CGEvent::new_keyboard_event(source.clone(), KeyCode::ANSI_V, false) {
         Ok(event) => event,
         Err(()) => {
             log::warn!("auto-paste: could not create Cmd+V key-up event");
-            return;
+            return false;
         }
     };
     let command_up = match CGEvent::new_keyboard_event(source, KeyCode::COMMAND, false) {
         Ok(event) => event,
         Err(()) => {
             log::warn!("auto-paste: could not create Command key-up event");
-            return;
+            return false;
         }
     };
 
@@ -412,6 +411,46 @@ fn send_paste_keystroke(expected: FocusIdentity) {
     key_up.post(CGEventTapLocation::HID);
     std::thread::sleep(Duration::from_millis(8));
     command_up.post(CGEventTapLocation::HID);
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn send_paste_via_system_events() -> bool {
+    let script = r#"tell application "System Events" to keystroke "v" using command down"#;
+    match std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+    {
+        Ok(out) if out.status.success() => true,
+        Ok(out) => {
+            log::warn!(
+                "auto-paste: System Events paste failed: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            false
+        }
+        Err(e) => {
+            log::warn!("auto-paste: failed to launch System Events paste: {e}");
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_paste_keystroke(expected: FocusIdentity) {
+    if !activate_paste_target(&expected) {
+        return;
+    }
+
+    if send_paste_via_system_events() {
+        log::info!("auto-paste sent via System Events");
+        return;
+    }
+
+    if send_paste_via_core_graphics() {
+        log::info!("auto-paste sent via CoreGraphics fallback");
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

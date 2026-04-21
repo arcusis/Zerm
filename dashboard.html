@@ -245,11 +245,29 @@
 
           <div class="about">
             <p class="lede">
-              Zerm is a local voice-to-clipboard tool for developers. Tap a
-              key, speak, paste. Whisper transcribes on-device using the
-              Apple&nbsp;Silicon GPU. A small local LLM polishes the output.
-              No cloud, no telemetry, no accounts.
+              Zerm is a native voice-to-clipboard tool for developers. Tap a
+              key, speak, paste. Whisper transcribes on-device, Ollama can
+              polish locally, and the workflow stays private by default.
             </p>
+
+            <div class="about-links" aria-label="Project links">
+              <a href="https://github.com/arcusis/Zerm" target="_blank" rel="noreferrer">
+                <span>Repository</span>
+                <strong>github.com/arcusis/Zerm</strong>
+              </a>
+              <a href="https://github.com/arcusis/Zerm/releases" target="_blank" rel="noreferrer">
+                <span>Releases</span>
+                <strong>Downloads and changelog</strong>
+              </a>
+              <a href="https://github.com/arcusis/Zerm/issues" target="_blank" rel="noreferrer">
+                <span>Issues</span>
+                <strong>Report bugs and requests</strong>
+              </a>
+              <a href="https://arcusis.github.io/Zerm/" target="_blank" rel="noreferrer">
+                <span>Website</span>
+                <strong>Project homepage</strong>
+              </a>
+            </div>
 
             <div class="about-grid">
               <div class="about-block">
@@ -271,7 +289,29 @@
               </div>
 
               <div class="about-block">
-                <span class="eyebrow">Built with</span>
+                <span class="eyebrow">Runtime</span>
+                <p>
+                  Auto-paste is opt-in. On macOS, Zerm restores the app that
+                  was focused when recording started, then sends a normal
+                  <code>Cmd+V</code> through Accessibility. Windows and Linux
+                  use the fixed <code>Ctrl+Shift+Space</code> hotkey while
+                  native paste support is expanded.
+                </p>
+              </div>
+
+              <div class="about-block">
+                <span class="eyebrow">Open source</span>
+                <p>
+                  Zerm is MIT licensed and built in the open. Release builds
+                  run type checks and Rust tests on macOS, Windows, and Linux.
+                </p>
+                <p>
+                  Version <code>0.1.0</code> · Tauri 2 · Rust · TypeScript
+                </p>
+              </div>
+
+              <div class="about-block">
+                <span class="eyebrow">Credits</span>
                 <ul class="credits">
                   <li>
                     <span class="credit-name">whisper.cpp</span>
