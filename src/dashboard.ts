@@ -317,37 +317,149 @@ function hideSetupBanner() {
   progress.hidden = true;
 }
 
+let setupRunning = false;
+
 async function refreshSetup() {
+  if (setupRunning) return;
+  setupRunning = true;
+  try {
+    await runSetup();
+  } finally {
+    setupRunning = false;
+  }
+}
+
+async function runSetup() {
   const status = await safeInvoke<SetupStatus>("check_setup");
   if (!status) return;
+
+  // 1. Whisper — auto-download, no click needed
   if (!status.whisper_model_present) {
-    showSetupBanner(
-      "Whisper model not installed",
-      "Zerm needs a speech-to-text model (~466 MB) to transcribe your voice.",
-      `<button class="solid-btn" id="btn-download-whisper">Download Whisper model</button>`,
-    );
-    $("btn-download-whisper")?.addEventListener("click", () => {
-      void downloadWhisper();
-    });
+    await downloadWhisper();
+    await poll(() => checkWhisperReady(), 1500, 60);
+    await runSetup();
     return;
   }
+
+  // 2. Ollama — auto-install + auto-start
   if (!status.ollama_running) {
-    showSetupBanner(
-      "Ollama is not running",
-      "Install Ollama and start the service so Zerm can polish your transcripts locally.",
-      `<a class="solid-btn" href="https://ollama.com/download" target="_blank" rel="noreferrer">Get Ollama</a>`,
-    );
+    await autoInstallOllama();
     return;
   }
+
+  // 3. Gemma model — auto-pull via local Ollama API
   if (!status.ollama_model_pulled) {
-    showSetupBanner(
-      `Pull the language model`,
-      `Run "ollama pull ${status.ollama_model_name}" in a terminal — Zerm will pick it up automatically.`,
-      `<a class="solid-btn" href="https://ollama.com/library/${encodeURIComponent(status.ollama_model_name.split(":")[0])}" target="_blank" rel="noreferrer">Open library</a>`,
-    );
+    await autoPullModel(status.ollama_model_name);
+    await runSetup();
     return;
   }
+
   hideSetupBanner();
+}
+
+async function checkWhisperReady(): Promise<boolean> {
+  const s = await safeInvoke<SetupStatus>("check_setup");
+  return !!s && s.whisper_model_present;
+}
+
+async function poll<T>(
+  fn: () => Promise<T>,
+  intervalMs: number,
+  maxTries: number,
+): Promise<T | null> {
+  for (let i = 0; i < maxTries; i++) {
+    const r = await fn();
+    if (r) return r;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return null;
+}
+
+async function autoInstallOllama() {
+  showSetupBanner(
+    "Installing Ollama",
+    "Zerm is downloading the Ollama installer. You may see a system prompt — approve it.",
+    "",
+  );
+  const progress = $("setup-progress")!;
+  const label = $("setup-progress-label")!;
+  progress.hidden = false;
+  label.textContent = "Downloading…";
+
+  try {
+    const { listen: listenEvent } = await import("@tauri-apps/api/event");
+    const unlisten = await listenEvent<string>(
+      "zerm://ollama-install-progress",
+      (event) => {
+        if (event.payload === "downloading") label.textContent = "Downloading installer…";
+        if (event.payload === "launching") label.textContent = "Launching installer…";
+        if (event.payload === "done") label.textContent = "Waiting for Ollama to start…";
+      },
+    );
+    const result = await safeInvoke("install_ollama");
+    unlisten();
+
+    if (result !== null) {
+      // Wait up to ~2 minutes for Ollama to be running
+      showSetupBanner(
+        "Finishing Ollama install",
+        "Zerm is waiting for the Ollama service to come online…",
+        "",
+      );
+      const ok = await poll(async () => {
+        const s = await safeInvoke<SetupStatus>("check_setup");
+        return !!s && s.ollama_running;
+      }, 3000, 40);
+      if (ok) {
+        await runSetup();
+      } else {
+        showSetupBanner(
+          "Ollama didn't start automatically",
+          "Open the Ollama app manually, then click Retry.",
+          `<button class="solid-btn" id="btn-retry-setup">Retry</button>`,
+        );
+        $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
+      }
+    }
+  } catch (err) {
+    console.warn("ollama install failed", err);
+  }
+}
+
+async function autoPullModel(modelName: string) {
+  showSetupBanner(
+    `Pulling ${modelName}`,
+    "Zerm is pulling the language model into your local Ollama (one-time).",
+    "",
+  );
+  const progress = $("setup-progress")!;
+  const fill = $("setup-progress-fill") as HTMLDivElement;
+  const label = $("setup-progress-label")!;
+  progress.hidden = false;
+  fill.style.width = "0%";
+  label.textContent = "Starting…";
+
+  try {
+    const { listen: listenEvent } = await import("@tauri-apps/api/event");
+    const unlisten = await listenEvent<{
+      status?: string;
+      completed?: number;
+      total?: number;
+    }>("zerm://ollama-pull-progress", (event) => {
+      const p = event.payload;
+      if (p.total && p.completed != null) {
+        const pct = Math.min(100, (p.completed / p.total) * 100);
+        fill.style.width = `${pct.toFixed(1)}%`;
+        label.textContent = `${formatBytes(p.completed)} / ${formatBytes(p.total)}`;
+      } else if (p.status) {
+        label.textContent = p.status;
+      }
+    });
+    await safeInvoke("pull_ollama_model", { model: modelName });
+    unlisten();
+  } catch (err) {
+    console.warn("ollama pull failed", err);
+  }
 }
 
 async function downloadWhisper() {

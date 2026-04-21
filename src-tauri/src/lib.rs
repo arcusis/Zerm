@@ -772,6 +772,148 @@ struct DownloadProgress {
     total: u64,
 }
 
+#[cfg(target_os = "macos")]
+const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/download/Ollama-darwin.zip";
+#[cfg(target_os = "windows")]
+const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/download/OllamaSetup.exe";
+#[cfg(target_os = "linux")]
+const OLLAMA_INSTALLER_URL: &str = "https://ollama.com/install.sh";
+
+#[tauri::command]
+async fn install_ollama(app: AppHandle) -> Result<(), String> {
+    let tmp_name = match std::env::consts::OS {
+        "macos" => "Ollama.zip",
+        "windows" => "OllamaSetup.exe",
+        _ => "ollama-install.sh",
+    };
+    let tmp = std::env::temp_dir().join(tmp_name);
+
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let _ = app.emit("zerm://ollama-install-progress", "downloading");
+    let resp = reqwest::get(OLLAMA_INSTALLER_URL)
+        .await
+        .map_err(|e| format!("request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("status: {e}"))?;
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| format!("create: {e}"))?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("write: {e}"))?;
+    }
+    file.flush().await.ok();
+    drop(file);
+
+    let _ = app.emit("zerm://ollama-install-progress", "launching");
+
+    #[cfg(target_os = "macos")]
+    {
+        // Unzip into /Applications
+        let status = std::process::Command::new("unzip")
+            .args(["-o", tmp.to_str().unwrap(), "-d", "/Applications/"])
+            .status()
+            .map_err(|e| format!("unzip: {e}"))?;
+        if !status.success() {
+            return Err(format!("unzip exited {status}"));
+        }
+        // Launch it so the Ollama server starts
+        let _ = std::process::Command::new("open")
+            .arg("/Applications/Ollama.app")
+            .spawn();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", tmp.to_str().unwrap()])
+            .spawn()
+            .map_err(|e| format!("launch: {e}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Open the installer in the user's default terminal so they see the
+        // sudo prompt and progress output.
+        let script = tmp.to_string_lossy().into_owned();
+        let candidates: &[&[&str]] = &[
+            &["x-terminal-emulator", "-e", "sh", &script],
+            &["gnome-terminal", "--", "sh", &script],
+            &["konsole", "-e", "sh", &script],
+            &["xterm", "-e", "sh", &script],
+        ];
+        let mut launched = false;
+        for args in candidates {
+            if std::process::Command::new(args[0])
+                .args(&args[1..])
+                .spawn()
+                .is_ok()
+            {
+                launched = true;
+                break;
+            }
+        }
+        if !launched {
+            return Err(
+                "Could not find a terminal emulator. Run this manually: \
+                 `curl -fsSL https://ollama.com/install.sh | sh`"
+                    .into(),
+            );
+        }
+    }
+
+    let _ = app.emit("zerm://ollama-install-progress", "done");
+    Ok(())
+}
+
+#[tauri::command]
+async fn pull_ollama_model(app: AppHandle, model: String) -> Result<(), String> {
+    use futures_util::StreamExt;
+
+    let _ = app.emit(
+        "zerm://ollama-pull-progress",
+        serde_json::json!({ "status": "starting", "model": model }),
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60 * 30)) // 30 min for big models
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+
+    let resp = client
+        .post("http://localhost:11434/api/pull")
+        .json(&serde_json::json!({ "name": model, "stream": true }))
+        .send()
+        .await
+        .map_err(|e| format!("request: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("status: {e}"))?;
+
+    let mut stream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("chunk: {e}"))?;
+        buf.extend_from_slice(&chunk);
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line = buf.drain(..=pos).collect::<Vec<u8>>();
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&line) {
+                let _ = app.emit("zerm://ollama-pull-progress", json);
+            }
+        }
+    }
+
+    let _ = app.emit(
+        "zerm://ollama-pull-progress",
+        serde_json::json!({ "status": "success" }),
+    );
+    Ok(())
+}
+
 #[tauri::command]
 async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
     use futures_util::StreamExt;
@@ -899,6 +1041,8 @@ pub fn run() {
             get_pill_position,
             check_setup,
             download_whisper_model,
+            install_ollama,
+            pull_ollama_model,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
