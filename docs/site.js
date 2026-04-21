@@ -26,18 +26,20 @@
   function detectOsKey() {
     const ua = navigator.userAgent || "";
     const platform = navigator.platform || "";
-    if (/Mac/i.test(platform) || /Mac/i.test(ua)) return "mac-arm";
+    if (/Mac/i.test(platform) || /Mac/i.test(ua)) return "mac";
     if (/Win/i.test(platform) || /Windows/i.test(ua)) return "win";
     if (/Linux|X11/i.test(platform) || /Linux/i.test(ua)) return "linux-appimage";
-    return "mac-arm";
+    return "unknown";
   }
 
   const osLabels = {
+    mac: "Choose macOS build",
     "mac-arm": "Download for macOS",
     "mac-x86": "Download for macOS Intel",
     win: "Download for Windows",
     "linux-appimage": "Download for Linux",
     "linux-deb": "Download .deb",
+    unknown: "Choose a download",
   };
 
   function formatSize(bytes) {
@@ -52,7 +54,7 @@
     if (!resp.ok) throw new Error(`GitHub ${resp.status}`);
     const releases = await resp.json();
     if (!Array.isArray(releases)) return null;
-    return releases.find((release) => !release.draft) || null;
+    return releases.find((release) => !release.draft && !release.prerelease) || null;
   }
 
   async function hydrateDownloads() {
@@ -93,8 +95,11 @@
         }
       });
 
-      const matching = assetFor(osKey, assets);
-      if (primary && matching?.browser_download_url) {
+      const matching = osKey === "mac" || osKey === "unknown" ? null : assetFor(osKey, assets);
+      if (primary && osKey === "mac" && release.html_url) {
+        primary.href = release.html_url;
+        if (primarySub) primarySub.textContent = `${tag} · GitHub Releases`;
+      } else if (primary && matching?.browser_download_url) {
         primary.href = matching.browser_download_url;
         const size = formatSize(matching.size);
         if (primarySub) primarySub.textContent = size ? `${tag} · ${size}` : tag;

@@ -42,7 +42,7 @@ Slack, email, notes, pull request reviews, and long-form writing.
 
 - **On-device transcription** with `whisper.cpp` through `whisper-rs`.
 - **Local rewrite modes** through Ollama and Gemma 3: Off, Agent, Chat, and Pro.
-- **Clipboard-first workflow**: record, process, copy, and optionally auto-paste.
+- **Clipboard-first workflow**: record, process, copy, and optionally auto-paste on macOS.
 - **Hotkey recording**: Right Option on macOS; Ctrl+Shift+Space on Windows/Linux.
 - **Voice activity detection** to auto-stop after silence.
 - **Custom vocabulary** for names, project terms, acronyms, and identifiers.
@@ -63,8 +63,9 @@ Download the latest build from the
 | Windows | `.msi` or `.exe` | Ctrl+Shift+Space |
 | Linux | `.deb` or `.AppImage` | Ctrl+Shift+Space |
 
-Stable public releases are expected to be signed. Prerelease builds may be
-unsigned while the project is still moving quickly.
+Stable macOS and Windows releases are expected to be signed. Linux release
+artifacts are published with SHA-256 checksums instead of platform signing.
+Prerelease builds may be unsigned while the project is still moving quickly.
 
 ## First-run Setup
 
@@ -77,8 +78,9 @@ The dashboard walks through setup when something is missing:
 3. **Gemma 3 4B**: pulls the default local rewrite model through Ollama.
 
 macOS also requires Accessibility permission for global modifier-key recording
-and auto-paste. Microphone permission is requested by the operating system on
-first use.
+and auto-paste. Auto-paste is currently macOS-only until Windows and Linux
+paste synthesis exists. Microphone permission is requested by the operating
+system on first use.
 
 ## Usage
 
@@ -198,7 +200,26 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-cargo audit --file src-tauri/Cargo.lock --deny warnings
+cargo audit --file src-tauri/Cargo.lock --deny warnings \
+  --ignore RUSTSEC-2024-0370 \
+  --ignore RUSTSEC-2024-0411 \
+  --ignore RUSTSEC-2024-0412 \
+  --ignore RUSTSEC-2024-0413 \
+  --ignore RUSTSEC-2024-0414 \
+  --ignore RUSTSEC-2024-0415 \
+  --ignore RUSTSEC-2024-0416 \
+  --ignore RUSTSEC-2024-0417 \
+  --ignore RUSTSEC-2024-0418 \
+  --ignore RUSTSEC-2024-0419 \
+  --ignore RUSTSEC-2024-0420 \
+  --ignore RUSTSEC-2024-0429 \
+  --ignore RUSTSEC-2025-0057 \
+  --ignore RUSTSEC-2025-0075 \
+  --ignore RUSTSEC-2025-0080 \
+  --ignore RUSTSEC-2025-0081 \
+  --ignore RUSTSEC-2025-0098 \
+  --ignore RUSTSEC-2025-0100 \
+  --ignore RUSTSEC-2026-0097
 ```
 
 `cargo fmt`, `cargo clippy`, and `cargo audit` require `rustfmt`,
@@ -208,6 +229,9 @@ cargo audit --file src-tauri/Cargo.lock --deny warnings
 rustup component add rustfmt clippy
 cargo install cargo-audit --locked
 ```
+
+The RustSec audit line matches the release workflow's current ignore list for
+known advisories.
 
 ## Contributing
 
@@ -243,8 +267,9 @@ builds platform artifacts, uploads them, and publishes only after every matrix
 job succeeds.
 
 Stable tags such as `v0.1.0` require Apple and Windows signing secrets in the
-GitHub repository. Prerelease tags such as `v0.1.0-alpha.16` can publish
-unsigned artifacts.
+GitHub repository. Linux release artifacts are published with SHA-256 checksums
+rather than platform signing. Prerelease tags such as `v0.1.0-alpha.16` can
+publish unsigned artifacts.
 
 The website deploys separately from `docs/` on pushes to the `Production`
 branch or through manual workflow dispatch.
