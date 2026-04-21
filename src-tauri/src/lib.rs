@@ -210,6 +210,37 @@ fn current_llm_model(pipeline: &Pipeline) -> String {
     pipeline.persistent.lock().settings.llm_model.clone()
 }
 
+#[cfg(target_os = "macos")]
+fn maybe_run_auto_paste_self_test() {
+    let mut args = std::env::args().skip(1);
+    let Some(flag) = args.next() else {
+        return;
+    };
+    if flag != "--zerm-autopaste-self-test" {
+        return;
+    }
+
+    let text = args
+        .next()
+        .unwrap_or_else(|| "ZERM_AUTOPASTE_SELF_TEST".to_string());
+    if let Err(e) = copy_to_clipboard(&text) {
+        eprintln!("auto-paste self-test failed to copy text: {e:#}");
+        std::process::exit(2);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let Some(target) = frontmost_focus_identity() else {
+        eprintln!("auto-paste self-test could not find a non-Zerm focused app");
+        std::process::exit(3);
+    };
+    match send_paste_to_target(target, &text) {
+        Ok(()) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("auto-paste self-test failed: {e}");
+            std::process::exit(4);
+        }
+    }
+}
+
 fn copy_to_clipboard(text: &str) -> Result<()> {
     let mut clipboard = arboard::Clipboard::new()?;
     clipboard.set_text(text.to_string())?;
@@ -294,6 +325,68 @@ fn auto_paste_is_ready() -> bool {
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> std::ffi::c_uchar;
+}
+
+#[cfg(target_os = "macos")]
+fn insert_text_via_accessibility(text: &str) -> Result<(), String> {
+    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
+    use std::ffi::c_void;
+
+    type AXError = i32;
+    type AXUIElementRef = *const c_void;
+    const AX_ERROR_SUCCESS: AXError = 0;
+
+    extern "C" {
+        fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+        fn AXUIElementCopyAttributeValue(
+            element: AXUIElementRef,
+            attribute: CFStringRef,
+            value: *mut CFTypeRef,
+        ) -> AXError;
+        fn AXUIElementSetAttributeValue(
+            element: AXUIElementRef,
+            attribute: CFStringRef,
+            value: CFTypeRef,
+        ) -> AXError;
+    }
+
+    let system = unsafe { AXUIElementCreateSystemWide() };
+    if system.is_null() {
+        return Err("could not create system accessibility element".to_string());
+    }
+
+    let focused_attr = CFString::new("AXFocusedUIElement");
+    let selected_text_attr = CFString::new("AXSelectedText");
+    let replacement = CFString::new(text);
+    let mut focused: CFTypeRef = std::ptr::null();
+    let copy_err = unsafe {
+        AXUIElementCopyAttributeValue(system, focused_attr.as_concrete_TypeRef(), &mut focused)
+    };
+    unsafe { CFRelease(system as CFTypeRef) };
+
+    if copy_err != AX_ERROR_SUCCESS || focused.is_null() {
+        return Err(format!(
+            "could not read focused accessibility element (AXError {copy_err})"
+        ));
+    }
+
+    let set_err = unsafe {
+        AXUIElementSetAttributeValue(
+            focused as AXUIElementRef,
+            selected_text_attr.as_concrete_TypeRef(),
+            replacement.as_CFTypeRef(),
+        )
+    };
+    unsafe { CFRelease(focused) };
+
+    if set_err == AX_ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(format!(
+            "focused element rejected direct text insertion (AXError {set_err})"
+        ))
+    }
 }
 
 fn auto_paste_permission_message() -> String {
@@ -482,7 +575,7 @@ fn send_paste_via_system_events() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
+fn send_paste_to_target(expected: FocusIdentity, text: &str) -> Result<(), String> {
     if !auto_paste_is_ready() {
         return Err(auto_paste_permission_message());
     }
@@ -492,6 +585,16 @@ fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
             "Auto-paste could not refocus the app that was active when recording started ({:?}).",
             expected
         ));
+    }
+
+    match insert_text_via_accessibility(text) {
+        Ok(()) => {
+            log::info!("auto-paste inserted text via focused accessibility element");
+            return Ok(());
+        }
+        Err(e) => {
+            log::warn!("auto-paste direct accessibility insertion failed: {e}");
+        }
     }
 
     // Prefer System Events first because osascript returns a real status when
@@ -510,7 +613,7 @@ fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn send_paste_keystroke(_expected: FocusIdentity) -> Result<(), String> {
+fn send_paste_to_target(_expected: FocusIdentity, _text: &str) -> Result<(), String> {
     // TODO: cross-platform keystroke synthesis (Win: SendInput; Linux: xdotool/wtype)
     log::debug!("auto-paste: not implemented on this platform yet");
     Err("Auto-paste keystroke synthesis is not implemented on this platform yet.".to_string())
@@ -894,6 +997,7 @@ async fn process(
             // during the 70ms and triggered another recording.
             if CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id {
                 let captured_target = pipeline.paste_target.lock().clone();
+                let output_for_paste = output.clone();
                 let app_for_paste = app.clone();
                 match tauri::async_runtime::spawn_blocking(move || {
                     let expected = captured_target
@@ -901,7 +1005,7 @@ async fn process(
                         .ok_or_else(|| {
                             "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.".to_string()
                         })?;
-                    send_paste_keystroke(expected)
+                    send_paste_to_target(expected, &output_for_paste)
                 })
                 .await
                 {
@@ -2091,6 +2195,8 @@ async fn download_whisper_model(
 pub fn run() {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .try_init();
+    #[cfg(target_os = "macos")]
+    maybe_run_auto_paste_self_test();
 
     let pipeline = Arc::new(Pipeline::new());
     let pipeline_for_setup = pipeline.clone();
