@@ -279,8 +279,21 @@ function attachListeners() {
   });
 
   $("autopaste-toggle")?.addEventListener("change", async (e) => {
-    const checked = (e.target as HTMLInputElement).checked;
-    await safeInvoke("set_auto_paste", { enabled: checked });
+    const toggle = e.target as HTMLInputElement;
+    const checked = toggle.checked;
+    toggle.disabled = true;
+    try {
+      await requiredInvoke("set_auto_paste", { enabled: checked });
+      await refresh();
+      await refreshSetup();
+    } catch (err) {
+      toggle.checked = !checked;
+      window.alert(`Could not enable auto-paste:\n${String(err)}`);
+      await refresh();
+      await refreshSetup();
+    } finally {
+      toggle.disabled = false;
+    }
   });
 
   $("unverified-ollama-toggle")?.addEventListener("change", async (e) => {

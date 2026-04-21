@@ -9,7 +9,7 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>Zerm uses your microphone to transcribe your voice into developer instructions.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Zerm needs to monitor key events to detect the Right Option hotkey.</string>
+    <string>Zerm uses System Events as a fallback to send Cmd+V for auto-paste.</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

@@ -6040,6 +6040,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "block2",
+ "core-foundation",
  "core-graphics",
  "cpal",
  "embed_plist",

@@ -247,6 +247,24 @@ fn accessibility_is_trusted() -> bool {
     unsafe { AXIsProcessTrusted() != 0 }
 }
 
+#[cfg(target_os = "macos")]
+fn request_accessibility_trust() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::string::CFString;
+
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> std::ffi::c_uchar;
+    }
+
+    let prompt_key = CFString::new("AXTrustedCheckOptionPrompt");
+    let prompt_value = CFBoolean::true_value();
+    let options =
+        CFDictionary::from_CFType_pairs(&[(prompt_key.as_CFType(), prompt_value.as_CFType())]);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0 }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn accessibility_is_trusted() -> bool {
     true
@@ -256,6 +274,27 @@ fn accessibility_is_trusted() -> bool {
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> std::ffi::c_uchar;
+}
+
+fn auto_paste_permission_message() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "Auto-paste needs macOS Accessibility permission. Allow Zerm in System Settings -> Privacy & Security -> Accessibility, then reopen or retry Zerm.".to_string()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Auto-paste keystroke synthesis is not implemented on this platform yet.".to_string()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn open_accessibility_settings() -> Result<(), String> {
+    std::process::Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .spawn()
+        .map_err(|e| format!("open Accessibility settings: {e}"))?;
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
@@ -444,7 +483,7 @@ fn send_paste_via_system_events() -> bool {
 #[cfg(target_os = "macos")]
 fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
     if !accessibility_is_trusted() {
-        return Err("Auto-paste needs macOS Accessibility permission. Remove and re-add /Applications/Zerm.app in System Settings → Privacy & Security → Accessibility, then reopen Zerm.".to_string());
+        return Err(auto_paste_permission_message());
     }
 
     if !activate_paste_target(&expected) {
@@ -454,17 +493,19 @@ fn send_paste_keystroke(expected: FocusIdentity) -> Result<(), String> {
         ));
     }
 
-    if send_paste_via_core_graphics() {
-        log::info!("auto-paste sent via CoreGraphics");
-        return Ok(());
-    }
-
+    // Prefer System Events first because osascript returns a real status when
+    // macOS blocks the paste. CoreGraphics can silently drop synthetic events.
     if send_paste_via_system_events() {
-        log::info!("auto-paste sent via System Events fallback");
+        log::info!("auto-paste sent via System Events");
         return Ok(());
     }
 
-    Err("Auto-paste could not synthesize Cmd+V. Check macOS Accessibility permission for /Applications/Zerm.app.".to_string())
+    if send_paste_via_core_graphics() {
+        log::info!("auto-paste sent via CoreGraphics fallback");
+        return Ok(());
+    }
+
+    Err("Auto-paste could not synthesize Cmd+V after refocusing the target app.".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -845,10 +886,7 @@ async fn process(
 
     if auto_paste && !output.is_empty() {
         if !accessibility_is_trusted() {
-            emit_error(
-                app,
-                "Auto-paste needs macOS Accessibility permission. Remove and re-add /Applications/Zerm.app in System Settings → Privacy & Security → Accessibility, then reopen Zerm.",
-            );
+            emit_error(app, auto_paste_permission_message());
         } else {
             tokio::time::sleep(std::time::Duration::from_millis(70)).await;
             // Re-check inside the delay window — user may have Cmd-tabbed
@@ -1083,6 +1121,20 @@ fn set_auto_paste(
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     require_dashboard(&window)?;
+    if enabled {
+        #[cfg(target_os = "macos")]
+        {
+            if !accessibility_is_trusted() && !request_accessibility_trust() {
+                let _ = open_accessibility_settings();
+                return Err(auto_paste_permission_message());
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(auto_paste_permission_message());
+        }
+    }
     state.persistent.lock().settings.auto_paste = enabled;
     state.save_persistent();
     emit_dashboard_update(&app);
@@ -1339,10 +1391,8 @@ fn open_input_permission_settings(window: tauri::WebviewWindow) -> Result<(), St
     require_dashboard(&window)?;
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("/usr/bin/open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-            .spawn()
-            .map_err(|e| format!("open Accessibility settings: {e}"))?;
+        let _ = request_accessibility_trust();
+        open_accessibility_settings()?;
     }
     Ok(())
 }
