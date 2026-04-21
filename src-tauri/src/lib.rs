@@ -282,7 +282,7 @@ fn input_control_is_ready() -> bool {
 
 #[cfg(target_os = "macos")]
 fn auto_paste_is_ready() -> bool {
-    accessibility_is_trusted()
+    input_control_is_ready()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -434,13 +434,6 @@ fn send_paste_via_core_graphics() -> bool {
     };
 
     let command_flag = CGEventFlags::CGEventFlagCommand;
-    let command_down = match CGEvent::new_keyboard_event(source.clone(), KeyCode::COMMAND, true) {
-        Ok(event) => event,
-        Err(()) => {
-            log::warn!("auto-paste: could not create Command key-down event");
-            return false;
-        }
-    };
     let key_down = match CGEvent::new_keyboard_event(source.clone(), KeyCode::ANSI_V, true) {
         Ok(event) => event,
         Err(()) => {
@@ -455,25 +448,13 @@ fn send_paste_via_core_graphics() -> bool {
             return false;
         }
     };
-    let command_up = match CGEvent::new_keyboard_event(source, KeyCode::COMMAND, false) {
-        Ok(event) => event,
-        Err(()) => {
-            log::warn!("auto-paste: could not create Command key-up event");
-            return false;
-        }
-    };
 
-    command_down.set_flags(command_flag);
     key_down.set_flags(command_flag);
     key_up.set_flags(command_flag);
-    command_up.set_flags(CGEventFlags::CGEventFlagNull);
-    command_down.post(CGEventTapLocation::HID);
-    std::thread::sleep(Duration::from_millis(8));
+
     key_down.post(CGEventTapLocation::HID);
-    std::thread::sleep(Duration::from_millis(8));
+    std::thread::sleep(Duration::from_millis(20));
     key_up.post(CGEventTapLocation::HID);
-    std::thread::sleep(Duration::from_millis(8));
-    command_up.post(CGEventTapLocation::HID);
     true
 }
 
@@ -912,25 +893,23 @@ async fn process(
             // Re-check inside the delay window — user may have Cmd-tabbed
             // during the 70ms and triggered another recording.
             if CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id {
-                let paste_target = pipeline.paste_target.lock().clone();
-                if let Some(expected) = paste_target {
-                    let app_for_paste = app.clone();
-                    match tauri::async_runtime::spawn_blocking(move || {
-                        send_paste_keystroke(expected)
-                    })
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(msg)) => emit_error(&app_for_paste, msg),
-                        Err(e) => {
-                            emit_error(&app_for_paste, format!("auto-paste task failed: {e:#}"))
-                        }
+                let captured_target = pipeline.paste_target.lock().clone();
+                let app_for_paste = app.clone();
+                match tauri::async_runtime::spawn_blocking(move || {
+                    let expected = captured_target
+                        .or_else(frontmost_focus_identity)
+                        .ok_or_else(|| {
+                            "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.".to_string()
+                        })?;
+                    send_paste_keystroke(expected)
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(msg)) => emit_error(&app_for_paste, msg),
+                    Err(e) => {
+                        emit_error(&app_for_paste, format!("auto-paste task failed: {e:#}"))
                     }
-                } else {
-                    emit_error(
-                        app,
-                        "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.",
-                    );
                 }
             }
         }
