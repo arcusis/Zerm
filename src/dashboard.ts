@@ -392,6 +392,13 @@ interface SetupStatus {
   allow_unverified_ollama: boolean;
   hotkey_configurable: boolean;
   runtime_hotkey_label: string;
+  input_permission: {
+    required: boolean;
+    granted: boolean;
+    title: string;
+    detail: string;
+    settings_label: string;
+  };
 }
 
 function formatBytes(n: number): string {
@@ -519,6 +526,21 @@ async function runSetup() {
         "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
       );
     }
+    return;
+  }
+
+  if (status.input_permission.required && !status.input_permission.granted) {
+    showSetupBanner(
+      status.input_permission.title,
+      status.input_permission.detail,
+      `<button class="solid-btn" id="btn-open-input-permissions">${status.input_permission.settings_label}</button>
+       <button class="ghost-btn" id="btn-retry-setup">Retry</button>`,
+      "error",
+    );
+    $("btn-open-input-permissions")?.addEventListener("click", async () => {
+      await safeInvoke("open_input_permission_settings");
+    });
+    $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
     return;
   }
 

@@ -37,9 +37,9 @@ hex = "0.4"
 tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "0.25"
+core-graphics = { version = "0.25", features = ["elcapitan"] }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSEvent"] }
+objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSRunningApplication", "NSWorkspace"] }
 objc2-foundation = "0.3"
 block2 = "0.6"
 embed_plist = "1"

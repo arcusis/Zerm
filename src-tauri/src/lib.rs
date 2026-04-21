@@ -36,6 +36,7 @@ static INTENTIONAL_QUIT: AtomicBool = AtomicBool::new(false);
 // the user tabs away.
 static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
 static CURRENT_JOB_ID: AtomicU64 = AtomicU64::new(0);
+static INPUT_MONITOR_READY: AtomicBool = AtomicBool::new(false);
 
 // Known-good SHA-256 digest and max byte size for the Whisper model we ship.
 // Pinned so that a compromised CDN or repo commit can't silently swap in a
@@ -57,7 +58,7 @@ const STATE_FILE: &str = "zerm-state.json";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FocusIdentity {
-    pid: u32,
+    pid: i32,
     bundle_id: String,
 }
 
@@ -217,33 +218,18 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn frontmost_focus_identity() -> Option<FocusIdentity> {
-    let script = r#"
-tell application "System Events"
-  set frontApp to first application process whose frontmost is true
-  set frontPid to unix id of frontApp
-  try
-    set frontBundle to bundle identifier of frontApp
-  on error
-    set frontBundle to ""
-  end try
-  return (frontPid as text) & tab & frontBundle
-end tell
-"#;
-    let out = std::process::Command::new("osascript")
-        .args(["-e", script])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        log::warn!(
-            "auto-paste: could not read frontmost app: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+    use objc2_app_kit::NSWorkspace;
+
+    let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+    let pid = app.processIdentifier();
+    if pid <= 0 {
+        log::warn!("auto-paste: frontmost app did not expose a process id");
         return None;
     }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let mut parts = stdout.trim().split('\t');
-    let pid = parts.next()?.parse::<u32>().ok()?;
-    let bundle_id = parts.next().unwrap_or("").trim().to_string();
+    let bundle_id = app
+        .bundleIdentifier()
+        .map(|value| value.to_string())
+        .unwrap_or_default();
     Some(FocusIdentity { pid, bundle_id })
 }
 
@@ -253,27 +239,114 @@ fn frontmost_focus_identity() -> Option<FocusIdentity> {
 }
 
 #[cfg(target_os = "macos")]
-fn focus_still_matches(expected: &FocusIdentity) -> bool {
-    match frontmost_focus_identity() {
-        Some(current) if &current == expected => true,
-        Some(current) => {
-            log::warn!(
-                "auto-paste cancelled: focus changed from {:?} to {:?}",
-                expected,
-                current
-            );
-            false
+fn accessibility_is_trusted() -> bool {
+    unsafe { AXIsProcessTrusted() != 0 }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn accessibility_is_trusted() -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> std::ffi::c_uchar;
+}
+
+#[derive(Clone, Serialize)]
+struct InputPermissionStatus {
+    required: bool,
+    granted: bool,
+    title: String,
+    detail: String,
+    settings_label: String,
+}
+
+fn input_permission_status() -> InputPermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let granted = accessibility_is_trusted() || INPUT_MONITOR_READY.load(Ordering::SeqCst);
+        InputPermissionStatus {
+            required: true,
+            granted,
+            title: "Allow Accessibility".to_string(),
+            detail: "Zerm needs macOS Accessibility permission for the hotkey and auto-paste after this app build was installed.".to_string(),
+            settings_label: "Open Accessibility Settings".to_string(),
         }
-        None => {
-            log::warn!("auto-paste cancelled: could not verify focused app");
-            false
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        InputPermissionStatus {
+            required: false,
+            granted: true,
+            title: "Input permissions ready".to_string(),
+            detail: "Windows does not require an extra app-level input permission for Zerm's current hotkey setup.".to_string(),
+            settings_label: "Open Settings".to_string(),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        InputPermissionStatus {
+            required: false,
+            granted: true,
+            title: "Input permissions ready".to_string(),
+            detail: "Linux does not require an extra app-level input permission for Zerm's current hotkey setup.".to_string(),
+            settings_label: "Open Settings".to_string(),
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        InputPermissionStatus {
+            required: false,
+            granted: true,
+            title: "Input permissions ready".to_string(),
+            detail: "This platform does not require an extra app-level input permission for Zerm's current input setup.".to_string(),
+            settings_label: "Open Settings".to_string(),
         }
     }
 }
 
+#[cfg(target_os = "macos")]
+fn focus_is_target(expected: &FocusIdentity) -> bool {
+    matches!(frontmost_focus_identity(), Some(current) if &current == expected)
+}
+
 #[cfg(not(target_os = "macos"))]
-fn focus_still_matches(_expected: &FocusIdentity) -> bool {
+fn focus_is_target(_expected: &FocusIdentity) -> bool {
     false
+}
+
+#[cfg(target_os = "macos")]
+fn activate_paste_target(expected: &FocusIdentity) -> bool {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+    if focus_is_target(expected) {
+        return true;
+    }
+
+    let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(expected.pid)
+    else {
+        log::warn!(
+            "auto-paste: original target app is no longer running: {:?}",
+            expected
+        );
+        return false;
+    };
+
+    if app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
+        std::thread::sleep(std::time::Duration::from_millis(180));
+    }
+
+    if focus_is_target(expected) {
+        true
+    } else {
+        log::warn!("auto-paste: could not restore focus to {:?}", expected);
+        false
+    }
 }
 
 /// Send a Cmd+V keystroke to the currently focused application via
@@ -284,8 +357,9 @@ fn focus_still_matches(_expected: &FocusIdentity) -> bool {
 fn send_paste_keystroke(expected: FocusIdentity) {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, KeyCode};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use std::time::Duration;
 
-    if !focus_still_matches(&expected) {
+    if !activate_paste_target(&expected) {
         return;
     }
 
@@ -332,8 +406,11 @@ fn send_paste_keystroke(expected: FocusIdentity) {
     key_up.set_flags(command_flag);
     command_up.set_flags(CGEventFlags::CGEventFlagNull);
     command_down.post(CGEventTapLocation::HID);
+    std::thread::sleep(Duration::from_millis(8));
     key_down.post(CGEventTapLocation::HID);
+    std::thread::sleep(Duration::from_millis(8));
     key_up.post(CGEventTapLocation::HID);
+    std::thread::sleep(Duration::from_millis(8));
     command_up.post(CGEventTapLocation::HID);
 }
 
@@ -1183,6 +1260,19 @@ fn open_dashboard(app: AppHandle) {
     open_dashboard_window(&app);
 }
 
+#[tauri::command]
+fn open_input_permission_settings(window: tauri::WebviewWindow) -> Result<(), String> {
+    require_dashboard(&window)?;
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn()
+            .map_err(|e| format!("open Accessibility settings: {e}"))?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 struct SetupStatus {
     whisper_model_present: bool,
@@ -1195,6 +1285,7 @@ struct SetupStatus {
     allow_unverified_ollama: bool,
     hotkey_configurable: bool,
     runtime_hotkey_label: String,
+    input_permission: InputPermissionStatus,
 }
 
 #[tauri::command]
@@ -1274,6 +1365,7 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
         } else {
             "Ctrl+Shift+Space".to_string()
         },
+        input_permission: input_permission_status(),
     })
 }
 
@@ -1884,6 +1976,7 @@ pub fn run() {
             copy_history_entry,
             quit_app,
             open_dashboard,
+            open_input_permission_settings,
             set_pill_position,
             get_pill_position,
             check_setup,
@@ -1973,6 +2066,7 @@ pub fn run() {
                 }
             });
             if installed {
+                INPUT_MONITOR_READY.store(true, Ordering::SeqCst);
                 log::info!(
                     "zerm started. Tap {} to record. Click tray icon for dashboard.",
                     hotkey_choice.label()
@@ -2009,6 +2103,10 @@ pub fn run() {
 
             // Open the dashboard automatically so the user can see the app
             let app_for_dash = app_handle.clone();
+            let input_permission = input_permission_status();
+            if input_permission.required && !input_permission.granted {
+                emit_error(&app_handle, input_permission.detail.clone());
+            }
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 open_dashboard_window(&app_for_dash);
