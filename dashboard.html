@@ -177,6 +177,13 @@
 
             <div class="field">
               <label class="checkbox-row">
+                <input id="unverified-ollama-toggle" type="checkbox" />
+                <span>Use unverified local Ollama <em>(only when process identity checks are unavailable)</em></span>
+              </label>
+            </div>
+
+            <div class="field">
+              <label class="checkbox-row">
                 <input id="savehistory-toggle" type="checkbox" />
                 <span>Save dictations to History <em>(off by default for privacy)</em></span>
               </label>
@@ -257,9 +264,9 @@
                 <p>
                   <strong>At first-run setup:</strong> Zerm downloads the
                   Whisper model from <code>huggingface.co</code> (hash-pinned
-                  and verified) and launches the official Ollama installer
-                  from <code>ollama.com</code>. You'll confirm before the
-                  Ollama installer runs.
+                  and verified) and launches the official Ollama release
+                  asset after hash verification and publisher checks where
+                  supported. You'll confirm before the Ollama installer runs.
                 </p>
               </div>
 

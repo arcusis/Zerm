@@ -4,7 +4,7 @@ mod ollama;
 mod state;
 mod whisper;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -104,11 +104,16 @@ impl Pipeline {
         let _guard = SAVE_GUARD.lock().expect("save lock poisoned");
         let path = self.state_path.lock().clone();
         let snapshot = self.persistent.lock().clone();
-        if let Some(p) = path {
-            snapshot.save(&p)?;
+        let Some(p) = path else {
             if remove_backup {
-                PersistentState::remove_backup(&p)?;
+                return Err(anyhow!("state path is unavailable; cannot erase backup"));
             }
+            return Ok(());
+        };
+
+        snapshot.save(&p)?;
+        if remove_backup {
+            PersistentState::remove_backup(&p)?;
         }
         Ok(())
     }
@@ -119,10 +124,8 @@ impl Pipeline {
         }
     }
 
-    fn save_persistent_erasing_backup(&self) {
-        if let Err(e) = self.save_persistent_result(true) {
-            log::error!("failed to save state and erase backup: {e:#}");
-        }
+    fn save_persistent_erasing_backup(&self) -> Result<()> {
+        self.save_persistent_result(true)
     }
 }
 
@@ -500,9 +503,13 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
         // so the caller side gives us an Arc to re-clone.
         &app.state::<Arc<Pipeline>>().inner().clone(),
     );
-    let (prompt_mode, vocabulary) = {
+    let (prompt_mode, vocabulary, allow_unverified_ollama) = {
         let p = pipeline.persistent.lock();
-        (p.settings.prompt_mode, p.settings.vocabulary.join(", "))
+        (
+            p.settings.prompt_mode,
+            p.settings.vocabulary.join(", "),
+            p.settings.allow_unverified_ollama,
+        )
     };
 
     let job = ProcessJob {
@@ -511,6 +518,7 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
         channels,
         prompt_mode,
         vocabulary,
+        allow_unverified_ollama,
         job_id,
     };
 
@@ -528,6 +536,7 @@ struct ProcessJob {
     channels: u16,
     prompt_mode: PromptMode,
     vocabulary: String,
+    allow_unverified_ollama: bool,
     job_id: u64,
 }
 
@@ -543,6 +552,7 @@ async fn process(
         channels,
         prompt_mode,
         vocabulary,
+        allow_unverified_ollama,
         job_id,
     } = job;
 
@@ -610,7 +620,15 @@ async fn process(
         // Off mode on a non-Latin script still gets a bespoke minimal-
         // cleanup pass (the language-specific prompt already IS light-touch).
         log::info!("non-latin Off mode → language-specific cleanup");
-        match ollama::reformat_lang(&llm_model, &transcript, prompt_mode, &detected_lang).await {
+        match ollama::reformat_lang(
+            &llm_model,
+            &transcript,
+            prompt_mode,
+            &detected_lang,
+            allow_unverified_ollama,
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 log::warn!("lang-specific cleanup failed, using raw: {e:#}");
@@ -618,7 +636,15 @@ async fn process(
             }
         }
     } else {
-        match ollama::reformat_lang(&llm_model, &transcript, prompt_mode, &detected_lang).await {
+        match ollama::reformat_lang(
+            &llm_model,
+            &transcript,
+            prompt_mode,
+            &detected_lang,
+            allow_unverified_ollama,
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 log::warn!("ollama reformat failed, falling back to raw: {e:#}");
@@ -804,6 +830,17 @@ fn require_dashboard(window: &tauri::WebviewWindow) -> Result<(), String> {
     }
 }
 
+fn require_pill(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err(format!(
+            "command not permitted from window '{}' (pill only)",
+            window.label()
+        ))
+    }
+}
+
 #[tauri::command]
 fn pill_done(window: tauri::WebviewWindow, app: AppHandle) {
     // Only the pill should hide itself.
@@ -868,6 +905,28 @@ fn set_auto_paste(
 }
 
 #[tauri::command]
+fn set_allow_unverified_ollama(
+    window: tauri::WebviewWindow,
+    enabled: bool,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    let original = {
+        let mut p = state.persistent.lock();
+        let original = p.clone();
+        p.settings.allow_unverified_ollama = enabled;
+        original
+    };
+    if let Err(e) = state.save_persistent_result(false) {
+        *state.persistent.lock() = original;
+        return Err(e.to_string());
+    }
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn set_save_history(
     window: tauri::WebviewWindow,
     enabled: bool,
@@ -875,18 +934,22 @@ fn set_save_history(
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     require_dashboard(&window)?;
-    {
-        let mut p = state.persistent.lock();
-        p.settings.save_history = enabled;
-        if !enabled {
-            p.history.clear();
-            p.stats = state::Stats::default();
-        }
-    }
     if enabled {
+        state.persistent.lock().settings.save_history = true;
         state.save_persistent();
     } else {
-        state.save_persistent_erasing_backup();
+        let original = {
+            let mut p = state.persistent.lock();
+            let original = p.clone();
+            p.settings.save_history = false;
+            p.history.clear();
+            p.stats = state::Stats::default();
+            original
+        };
+        if let Err(e) = state.save_persistent_erasing_backup() {
+            *state.persistent.lock() = original;
+            return Err(e.to_string());
+        }
     }
     emit_dashboard_update(&app);
     Ok(())
@@ -1006,12 +1069,17 @@ fn clear_history(
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     require_dashboard(&window)?;
-    {
+    let original = {
         let mut p = state.persistent.lock();
+        let original = p.clone();
         p.history.clear();
         p.stats = state::Stats::default();
+        original
+    };
+    if let Err(e) = state.save_persistent_erasing_backup() {
+        *state.persistent.lock() = original;
+        return Err(e.to_string());
     }
-    state.save_persistent_erasing_backup();
     emit_dashboard_update(&app);
     Ok(())
 }
@@ -1052,15 +1120,26 @@ fn quit_app(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn set_pill_position(x: i32, y: i32, state: tauri::State<'_, Arc<Pipeline>>) -> Result<(), String> {
-    state.persistent.lock().pill_position = Some(PillPosition { x, y });
+fn set_pill_position(
+    window: tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_pill(&window)?;
+    let pos = clamp_pill_position(&window, PillPosition { x, y });
+    state.persistent.lock().pill_position = Some(pos);
     state.save_persistent();
     Ok(())
 }
 
 #[tauri::command]
-fn get_pill_position(state: tauri::State<'_, Arc<Pipeline>>) -> Option<PillPosition> {
-    state.persistent.lock().pill_position
+fn get_pill_position(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<Option<PillPosition>, String> {
+    require_dashboard(&window)?;
+    Ok(state.persistent.lock().pill_position)
 }
 
 #[tauri::command]
@@ -1078,6 +1157,8 @@ struct SetupStatus {
     ollama_running: bool,
     ollama_model_pulled: bool,
     ollama_model_name: String,
+    ollama_identity_warning: Option<String>,
+    allow_unverified_ollama: bool,
     hotkey_configurable: bool,
     runtime_hotkey_label: String,
 }
@@ -1094,19 +1175,27 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
     // Match runtime resolution: env var overrides, otherwise persisted setting,
     // otherwise default. Previously this only honoured the env var so setup
     // could report-and-pull one model while the runtime used another.
-    let model_name = if let Ok(env) = std::env::var("ZERM_LLM_MODEL") {
-        env
-    } else if let Some(state) = app.try_state::<Arc<Pipeline>>() {
-        state.persistent.lock().settings.llm_model.clone()
-    } else {
-        "gemma3:4b".to_string()
-    };
+    let settings = app
+        .try_state::<Arc<Pipeline>>()
+        .map(|state| state.persistent.lock().settings.clone());
+    let allow_unverified_ollama = settings
+        .as_ref()
+        .map(|s| s.allow_unverified_ollama)
+        .unwrap_or(false);
+    let model_name = std::env::var("ZERM_LLM_MODEL")
+        .ok()
+        .or_else(|| settings.as_ref().map(|s| s.llm_model.clone()))
+        .unwrap_or_else(|| "gemma3:4b".to_string());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .ok();
-    let ollama_identity_ok = ollama::verify_identity().await.is_ok();
+    let identity_report = ollama::verify_identity_report().await.ok();
+    let ollama_identity_warning = identity_report
+        .as_ref()
+        .and_then(|report| report.warning.clone());
+    let ollama_identity_ok = identity_report.is_some();
     let (ollama_running, ollama_model_pulled) = match (client, ollama_identity_ok) {
         (Some(c), true) => match c.get("http://127.0.0.1:11434/api/tags").send().await {
             Ok(resp) if resp.status().is_success() => {
@@ -1141,6 +1230,8 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
         ollama_running,
         ollama_model_pulled,
         ollama_model_name: model_name,
+        ollama_identity_warning,
+        allow_unverified_ollama,
         hotkey_configurable: cfg!(target_os = "macos"),
         runtime_hotkey_label: if cfg!(target_os = "macos") {
             app.try_state::<Arc<Pipeline>>()
@@ -1167,8 +1258,20 @@ const OLLAMA_ASSET_NAME: &str = "Ollama-darwin.zip";
 #[cfg(target_os = "windows")]
 const OLLAMA_ASSET_NAME: &str = "OllamaSetup.exe";
 
-// Hard upper bound; anything more is either wrong or malicious.
-const OLLAMA_INSTALLER_MAX_BYTES: u64 = 500_000_000;
+// Hard upper bound; the current Windows installer is roughly 1.9 GB.
+const OLLAMA_INSTALLER_MAX_BYTES: u64 = 2_500_000_000;
+#[cfg(target_os = "macos")]
+const OLLAMA_MACOS_TEAM_ID: &str = "3MU9H2V9Y9";
+#[cfg(target_os = "macos")]
+const OLLAMA_MACOS_BUNDLE_ID: &str = "com.electron.ollama";
+#[cfg(target_os = "windows")]
+const OLLAMA_WINDOWS_PUBLISHER_CN: &str = "Ollama Inc.";
+#[cfg(target_os = "windows")]
+const OLLAMA_WINDOWS_ORG_SERIAL: &str = "2713355";
+#[cfg(target_os = "windows")]
+const OLLAMA_WINDOWS_ISSUER_CN: &str = "DigiCert G5 CS ECC SHA384 2021 CA1";
+#[cfg(target_os = "windows")]
+const OLLAMA_WINDOWS_SIGNER_THUMBPRINT: &str = "716CD3BC8C02361431A18F56F98C72DE88066103";
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[derive(serde::Deserialize)]
@@ -1206,12 +1309,20 @@ fn verify_macos_app_signature(app_path: &str) -> Result<(), String> {
     if !codesign_text.contains("Authority=Developer ID Application") {
         return Err("Ollama.app is not signed with a Developer ID Application certificate".into());
     }
+    if !codesign_text.contains(&format!("Identifier={OLLAMA_MACOS_BUNDLE_ID}")) {
+        return Err("Ollama.app bundle identifier does not match the expected Ollama app".into());
+    }
     let team_id = codesign_text
         .lines()
         .find_map(|line| line.strip_prefix("TeamIdentifier="))
         .map(str::trim)
         .filter(|team| !team.is_empty())
         .ok_or_else(|| "Ollama.app signature has no TeamIdentifier".to_string())?;
+    if team_id != OLLAMA_MACOS_TEAM_ID {
+        return Err(format!(
+            "Ollama.app TeamIdentifier mismatch: expected {OLLAMA_MACOS_TEAM_ID}, got {team_id}"
+        ));
+    }
 
     let gatekeeper = std::process::Command::new("spctl")
         .args(["-a", "-vv", "-t", "exec", app_path])
@@ -1231,12 +1342,24 @@ fn verify_macos_app_signature(app_path: &str) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn verify_windows_installer_signature(installer_path: &std::path::Path) -> Result<(), String> {
+    let publisher_re = OLLAMA_WINDOWS_PUBLISHER_CN.replace('.', "\\.");
+    let issuer_re = OLLAMA_WINDOWS_ISSUER_CN.replace('.', "\\.");
     let script = format!(
         "$s = Get-AuthenticodeSignature -LiteralPath '{}'; \
          if ($s.Status -ne 'Valid') {{ throw \"Authenticode status: $($s.Status)\" }}; \
-         if ($s.SignerCertificate.Subject -notmatch 'Ollama') {{ throw \"Unexpected signer: $($s.SignerCertificate.Subject)\" }}; \
+         $subject = $s.SignerCertificate.Subject; \
+         $issuer = $s.SignerCertificate.Issuer; \
+         if ($s.SignerCertificate.Thumbprint -ne '{}') {{ throw \"Unexpected signer thumbprint: $($s.SignerCertificate.Thumbprint)\" }}; \
+         if ($subject -notmatch 'CN={}' -or $subject -notmatch 'O={}' -or $subject -notmatch 'SERIALNUMBER={}') {{ throw \"Unexpected signer: $subject\" }}; \
+         if ($issuer -notmatch 'CN={}') {{ throw \"Unexpected issuer: $issuer\" }}; \
+         if (-not ($s.SignerCertificate.EnhancedKeyUsageList | Where-Object {{ $_.FriendlyName -eq 'Code Signing' }})) {{ throw \"Signer certificate is not valid for code signing\" }}; \
          Write-Output $s.SignerCertificate.Subject",
-        installer_path.display().to_string().replace('\'', "''")
+        installer_path.display().to_string().replace('\'', "''"),
+        OLLAMA_WINDOWS_SIGNER_THUMBPRINT,
+        publisher_re.replace('\'', "''"),
+        publisher_re.replace('\'', "''"),
+        OLLAMA_WINDOWS_ORG_SERIAL,
+        issuer_re.replace('\'', "''"),
     );
     let out = std::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
@@ -1332,6 +1455,14 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
                 "GitHub release asset is missing a sha256 digest — refusing to install".to_string()
             })?
             .to_ascii_lowercase();
+        let download_url = reqwest::Url::parse(&asset.browser_download_url)
+            .map_err(|e| format!("release asset URL parse: {e}"))?;
+        if download_url.host_str() != Some("github.com") {
+            return Err(format!(
+                "refusing Ollama asset from unexpected host: {}",
+                download_url.host_str().unwrap_or("<none>")
+            ));
+        }
 
         // Step 2. Download the asset into a randomized tempfile within
         // the user's app_cache_dir (never /tmp, never a predictable name),
@@ -1349,13 +1480,14 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 
         let _ = app.emit("zerm://ollama-install-progress", "downloading");
         let resp = client
-            .get(&asset.browser_download_url)
+            .get(download_url)
             .send()
             .await
             .map_err(|e| format!("request: {e}"))?
             .error_for_status()
             .map_err(|e| format!("status: {e}"))?;
-        if let Some(len) = resp.content_length() {
+        let total_bytes = resp.content_length();
+        if let Some(len) = total_bytes {
             if len > OLLAMA_INSTALLER_MAX_BYTES {
                 return Err(format!(
                     "refusing: content-length {len} exceeds cap {OLLAMA_INSTALLER_MAX_BYTES}"
@@ -1380,6 +1512,16 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
             file.write_all(&chunk)
                 .await
                 .map_err(|e| format!("write: {e}"))?;
+            if let Some(total) = total_bytes {
+                let _ = app.emit(
+                    "zerm://ollama-install-progress",
+                    serde_json::json!({
+                        "status": "downloading",
+                        "downloaded": written,
+                        "total": total
+                    }),
+                );
+            }
         }
         file.flush().await.map_err(|e| format!("flush: {e}"))?;
         file.sync_all().await.map_err(|e| format!("sync: {e}"))?;
@@ -1412,18 +1554,50 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 
         #[cfg(target_os = "macos")]
         {
+            let extract_dir = tempfile::Builder::new()
+                .prefix(".ollama-extract-")
+                .tempdir_in(&cache_dir)
+                .map_err(|e| format!("extract tempdir: {e}"))?;
             let status = std::process::Command::new("unzip")
                 .args([
                     "-o",
                     installer_path.to_str().unwrap(),
                     "-d",
-                    "/Applications/",
+                    extract_dir.path().to_str().unwrap(),
                 ])
                 .status()
                 .map_err(|e| format!("unzip: {e}"))?;
             if !status.success() {
                 return Err(format!("unzip exited {status}"));
             }
+            let extracted_app = extract_dir.path().join("Ollama.app");
+            let extracted_app_str = extracted_app
+                .to_str()
+                .ok_or_else(|| "extracted Ollama.app path is not valid UTF-8".to_string())?;
+            let _ = app.emit("zerm://ollama-install-progress", "verifying");
+            verify_macos_app_signature(extracted_app_str)?;
+
+            let _ = app.emit("zerm://ollama-install-progress", "installing");
+            let install_path = std::path::Path::new("/Applications/Ollama.app");
+            let staged_path = std::path::Path::new("/Applications/Ollama.app.zerm-new");
+            if staged_path.exists() {
+                std::fs::remove_dir_all(staged_path)
+                    .map_err(|e| format!("remove staged Ollama.app: {e}"))?;
+            }
+            let status = std::process::Command::new("ditto")
+                .args([extracted_app_str, "/Applications/Ollama.app.zerm-new"])
+                .status()
+                .map_err(|e| format!("ditto: {e}"))?;
+            if !status.success() {
+                return Err(format!("ditto exited {status}"));
+            }
+            verify_macos_app_signature("/Applications/Ollama.app.zerm-new")?;
+            if install_path.exists() {
+                std::fs::remove_dir_all(install_path)
+                    .map_err(|e| format!("remove existing Ollama.app: {e}"))?;
+            }
+            std::fs::rename(staged_path, install_path)
+                .map_err(|e| format!("install verified Ollama.app: {e}"))?;
             verify_macos_app_signature("/Applications/Ollama.app")?;
             let _ = std::process::Command::new("open")
                 .arg("/Applications/Ollama.app")
@@ -1432,6 +1606,7 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 
         #[cfg(target_os = "windows")]
         {
+            let _ = app.emit("zerm://ollama-install-progress", "verifying");
             verify_windows_installer_signature(&installer_path)?;
             std::process::Command::new("cmd")
                 .args(["/C", "start", "", installer_path.to_str().unwrap()])
@@ -1448,10 +1623,16 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 async fn pull_ollama_model(
     window: tauri::WebviewWindow,
     app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
     model: String,
 ) -> Result<(), String> {
     require_dashboard(&window)?;
     use futures_util::StreamExt;
+
+    let allow_unverified = state.persistent.lock().settings.allow_unverified_ollama;
+    ollama::verify_identity_with_policy(allow_unverified)
+        .await
+        .map_err(|e| format!("Ollama identity check failed: {e:#}"))?;
 
     let _ = app.emit(
         "zerm://ollama-pull-progress",
@@ -1658,6 +1839,7 @@ pub fn run() {
             set_llm_model,
             set_vad_enabled,
             set_auto_paste,
+            set_allow_unverified_ollama,
             set_save_history,
             set_prompt_mode,
             set_hotkey,
@@ -1814,4 +1996,47 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn privacy_erase_requires_state_path() {
+        let pipeline = Pipeline::new();
+
+        let err = pipeline.save_persistent_erasing_backup().unwrap_err();
+
+        assert!(err.to_string().contains("state path is unavailable"));
+    }
+
+    #[test]
+    fn privacy_erase_removes_sensitive_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zerm-state.json");
+        let backup = PersistentState::backup_path(&path);
+        let pipeline = Pipeline::new();
+        *pipeline.state_path.lock() = Some(path.clone());
+
+        {
+            let mut state = pipeline.persistent.lock();
+            state.settings.save_history = true;
+            state.record("secret transcript".to_string(), "secret output".to_string());
+        }
+        pipeline.save_persistent_result(false).unwrap();
+
+        {
+            let mut state = pipeline.persistent.lock();
+            state.settings.save_history = false;
+            state.history.clear();
+            state.stats = state::Stats::default();
+        }
+        pipeline.save_persistent_erasing_backup().unwrap();
+
+        assert!(!backup.exists());
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("secret transcript"));
+        assert!(!raw.contains("secret output"));
+    }
 }

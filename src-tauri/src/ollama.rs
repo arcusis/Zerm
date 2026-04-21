@@ -59,9 +59,9 @@ const ENDPOINT: &str = "http://127.0.0.1:11434/api/generate";
 const VERSION_ENDPOINT: &str = "http://127.0.0.1:11434/api/version";
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn verify_listener_process() -> Result<()> {
+fn listener_from_lsof() -> Result<(String, String)> {
     let out = std::process::Command::new("lsof")
-        .args(["-nP", "-iTCP:11434", "-sTCP:LISTEN", "-Fpc"])
+        .args(["-nP", "-iTCP@127.0.0.1:11434", "-sTCP:LISTEN", "-Fpc"])
         .output()
         .context("run lsof")?;
     if !out.status.success() {
@@ -81,28 +81,150 @@ fn verify_listener_process() -> Result<()> {
     }
 
     let command = command.ok_or_else(|| anyhow::anyhow!("no listener command found"))?;
-    if command.eq_ignore_ascii_case("ollama") {
-        return Ok(());
+    let pid = pid.ok_or_else(|| anyhow::anyhow!("no listener pid found"))?;
+    Ok((pid, command))
+}
+
+#[cfg(target_os = "macos")]
+fn verify_listener_process() -> Result<()> {
+    const OLLAMA_MACOS_TEAM_ID: &str = "3MU9H2V9Y9";
+    let (pid, command) = listener_from_lsof()?;
+    if !command.eq_ignore_ascii_case("ollama") && !command.eq_ignore_ascii_case("ollama app") {
+        anyhow::bail!(
+            "port 11434 is owned by '{}' (pid {pid}), not Ollama",
+            command
+        );
     }
 
-    anyhow::bail!(
-        "port 11434 is owned by '{}' (pid {:?}), not Ollama",
-        command,
-        pid
-    )
+    let out = std::process::Command::new("lsof")
+        .args(["-nP", "-p", &pid, "-d", "txt", "-Fn"])
+        .output()
+        .context("resolve Ollama listener path")?;
+    if !out.status.success() {
+        anyhow::bail!("lsof exited {}", out.status);
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let path = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix('n'))
+        .filter(|path| path.contains("Ollama.app/Contents/"))
+        .ok_or_else(|| anyhow::anyhow!("could not resolve signed Ollama listener path"))?;
+
+    let details = std::process::Command::new("codesign")
+        .args(["-dv", "--verbose=4", path])
+        .output()
+        .context("inspect Ollama listener signature")?;
+    if !details.status.success() {
+        anyhow::bail!(
+            "could not inspect Ollama listener signature: {}",
+            String::from_utf8_lossy(&details.stderr)
+        );
+    }
+    let codesign_text = String::from_utf8_lossy(&details.stderr);
+    if !codesign_text.contains("Authority=Developer ID Application") {
+        anyhow::bail!("Ollama listener is not signed with Developer ID");
+    }
+    if !codesign_text.contains(&format!("TeamIdentifier={OLLAMA_MACOS_TEAM_ID}")) {
+        anyhow::bail!("Ollama listener TeamIdentifier did not match expected Ollama team");
+    }
+    Ok(())
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(target_os = "linux")]
 fn verify_listener_process() -> Result<()> {
-    anyhow::bail!("listener process verification is not implemented on this platform")
+    use std::os::unix::fs::PermissionsExt;
+
+    let (pid, command) = listener_from_lsof()?;
+    if !command.eq_ignore_ascii_case("ollama") {
+        anyhow::bail!(
+            "port 11434 is owned by '{}' (pid {pid}), not Ollama",
+            command
+        );
+    }
+
+    let exe =
+        std::fs::read_link(format!("/proc/{pid}/exe")).context("resolve /proc listener exe")?;
+    if exe.file_name().and_then(|n| n.to_str()) != Some("ollama") {
+        anyhow::bail!("listener executable is not named ollama: {}", exe.display());
+    }
+    let exe_meta = std::fs::metadata(&exe).context("stat listener executable")?;
+    if exe_meta.permissions().mode() & 0o002 != 0 {
+        anyhow::bail!("listener executable is world-writable: {}", exe.display());
+    }
+    if let Some(parent) = exe.parent() {
+        let parent_meta =
+            std::fs::metadata(parent).context("stat listener executable directory")?;
+        if parent_meta.permissions().mode() & 0o002 != 0 {
+            anyhow::bail!(
+                "listener executable directory is world-writable: {}",
+                parent.display()
+            );
+        }
+    }
+    Ok(())
 }
 
-/// Verify that the process listening on localhost:11434 is actually
-/// Ollama and not some random service that bound the port first. We
-/// hit /api/version (which Ollama responds to with `{ "version": "X" }`)
-/// and accept only a parseable response with a non-empty `version`
-/// string. Anything else and we refuse to POST transcripts to it.
-pub async fn verify_identity() -> Result<String> {
+#[cfg(target_os = "windows")]
+fn verify_listener_process() -> Result<()> {
+    const OLLAMA_WINDOWS_SIGNER_THUMBPRINT: &str = "716CD3BC8C02361431A18F56F98C72DE88066103";
+    let script = r#"
+$conn = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 11434 -State Listen -ErrorAction Stop | Select-Object -First 1
+if (-not $conn) { throw "no listener on 127.0.0.1:11434" }
+$proc = Get-Process -Id $conn.OwningProcess -ErrorAction Stop
+if (-not $proc.Path) { throw "could not resolve listener process path" }
+if ([System.IO.Path]::GetFileNameWithoutExtension($proc.Path) -ne "ollama") { throw "listener process is not ollama: $($proc.Path)" }
+$sig = Get-AuthenticodeSignature -LiteralPath $proc.Path
+if ($sig.Status -ne "Valid") { throw "listener Authenticode status: $($sig.Status)" }
+$subject = $sig.SignerCertificate.Subject
+$issuer = $sig.SignerCertificate.Issuer
+if ($sig.SignerCertificate.Thumbprint -ne "__OLLAMA_WINDOWS_SIGNER_THUMBPRINT__") {
+  throw "unexpected Ollama listener signer thumbprint: $($sig.SignerCertificate.Thumbprint)"
+}
+if ($subject -notmatch "CN=Ollama Inc\." -or $subject -notmatch "O=Ollama Inc\." -or $subject -notmatch "SERIALNUMBER=2713355") {
+  throw "unexpected Ollama listener signer: $subject"
+}
+if ($issuer -notmatch "CN=DigiCert G5 CS ECC SHA384 2021 CA1") {
+  throw "unexpected Ollama listener issuer: $issuer"
+}
+Write-Output $proc.Path
+"#
+    .replace(
+        "__OLLAMA_WINDOWS_SIGNER_THUMBPRINT__",
+        OLLAMA_WINDOWS_SIGNER_THUMBPRINT,
+    );
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .context("verify Ollama listener process")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "Ollama listener process verification failed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub struct IdentityReport {
+    pub version: String,
+    pub warning: Option<String>,
+}
+
+fn is_hard_identity_failure(message: &str) -> bool {
+    message.contains("not Ollama")
+        || message.contains("listener process is not ollama")
+        || message.contains("unexpected Ollama listener signer")
+        || message.contains("unexpected Ollama listener signer thumbprint")
+        || message.contains("unexpected Ollama listener issuer")
+        || message.contains("TeamIdentifier did not match")
+}
+
+/// Verify the process listening on localhost:11434. The `/api/version`
+/// response proves protocol shape; process checks add local identity.
+/// A known mismatch fails closed. Missing platform tooling or unsigned
+/// local installs return a warning that the dashboard can surface.
+pub async fn verify_identity_report() -> Result<IdentityReport> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
@@ -127,14 +249,37 @@ pub async fn verify_identity() -> Result<String> {
     if version.trim().is_empty() {
         anyhow::bail!("ollama /api/version returned an empty version string");
     }
-    if let Err(e) = verify_listener_process() {
-        let msg = e.to_string();
-        if msg.contains("not Ollama") {
-            return Err(e).context("Ollama process identity check failed");
+    let warning = match verify_listener_process() {
+        Ok(()) => None,
+        Err(e) => {
+            let msg = e.to_string();
+            if is_hard_identity_failure(&msg) {
+                return Err(e).context("Ollama process identity check failed");
+            }
+            let warning = format!(
+                "Ollama responded on 127.0.0.1:11434, but process identity was not fully verified: {e:#}"
+            );
+            log::warn!("{warning}");
+            Some(warning)
         }
-        log::warn!("Ollama process identity could not be fully verified: {e:#}");
+    };
+    Ok(IdentityReport {
+        version: version.to_string(),
+        warning,
+    })
+}
+
+pub async fn verify_identity_with_policy(allow_unverified: bool) -> Result<String> {
+    let report = verify_identity_report().await?;
+    if let Some(warning) = report.warning {
+        if !allow_unverified {
+            anyhow::bail!(
+                "Ollama identity was not fully verified and unverified Ollama is disabled: {warning}"
+            );
+        }
+        log::warn!("using unverified local Ollama by user setting: {warning}");
     }
-    Ok(version.to_string())
+    Ok(report.version)
 }
 
 #[derive(Serialize)]
@@ -185,7 +330,7 @@ pub fn system_prompt_for_lang(mode: PromptMode, lang: &str) -> Option<&'static s
 }
 
 pub async fn reformat(model: &str, transcript: &str, mode: PromptMode) -> Result<String> {
-    reformat_lang(model, transcript, mode, "").await
+    reformat_lang(model, transcript, mode, "", false).await
 }
 
 pub async fn reformat_lang(
@@ -193,6 +338,7 @@ pub async fn reformat_lang(
     transcript: &str,
     mode: PromptMode,
     lang: &str,
+    allow_unverified: bool,
 ) -> Result<String> {
     if transcript.trim().is_empty() {
         return Ok(String::new());
@@ -204,7 +350,7 @@ pub async fn reformat_lang(
 
     // Identity check before we POST the transcript. If something other
     // than Ollama is listening on 11434, treat as no LLM available.
-    verify_identity()
+    verify_identity_with_policy(allow_unverified)
         .await
         .context("Ollama identity check failed — refusing to POST transcript")?;
 

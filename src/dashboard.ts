@@ -30,6 +30,7 @@ interface Settings {
   hotkey: HotkeyChoice;
   vocabulary: string[];
   auto_paste: boolean;
+  allow_unverified_ollama: boolean;
   save_history: boolean;
 }
 
@@ -113,6 +114,8 @@ function renderSettings(settings: Settings) {
   ($("vad-toggle") as HTMLInputElement | null)!.checked = settings.vad_enabled;
   const autoPasteEl = $("autopaste-toggle") as HTMLInputElement | null;
   if (autoPasteEl) autoPasteEl.checked = settings.auto_paste;
+  const unverifiedOllamaEl = $("unverified-ollama-toggle") as HTMLInputElement | null;
+  if (unverifiedOllamaEl) unverifiedOllamaEl.checked = settings.allow_unverified_ollama;
   const saveHistoryEl = $("savehistory-toggle") as HTMLInputElement | null;
   if (saveHistoryEl) saveHistoryEl.checked = settings.save_history;
   const hotkeySelect = $("hotkey-select") as HTMLSelectElement | null;
@@ -215,6 +218,19 @@ async function safeInvoke<T = unknown>(
   }
 }
 
+async function requiredInvoke<T = unknown>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (err) {
+    console.error(`invoke ${cmd} failed:`, err);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(message);
+  }
+}
+
 async function refresh() {
   const data = await safeInvoke<DashboardData>("get_dashboard");
   if (!data) return;
@@ -267,9 +283,37 @@ function attachListeners() {
     await safeInvoke("set_auto_paste", { enabled: checked });
   });
 
+  $("unverified-ollama-toggle")?.addEventListener("change", async (e) => {
+    const toggle = e.target as HTMLInputElement;
+    const checked = toggle.checked;
+    toggle.disabled = true;
+    try {
+      await requiredInvoke("set_allow_unverified_ollama", { enabled: checked });
+      await refresh();
+      await refreshSetup();
+    } catch (err) {
+      toggle.checked = !checked;
+      window.alert(`Could not update Ollama trust setting:\n${String(err)}`);
+      await refresh();
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+
   $("savehistory-toggle")?.addEventListener("change", async (e) => {
-    const checked = (e.target as HTMLInputElement).checked;
-    await safeInvoke("set_save_history", { enabled: checked });
+    const toggle = e.target as HTMLInputElement;
+    const checked = toggle.checked;
+    toggle.disabled = true;
+    try {
+      await requiredInvoke("set_save_history", { enabled: checked });
+      await refresh();
+    } catch (err) {
+      toggle.checked = !checked;
+      window.alert(`Could not update history privacy setting:\n${String(err)}`);
+      await refresh();
+    } finally {
+      toggle.disabled = false;
+    }
   });
 
   // Prompt mode
@@ -321,9 +365,15 @@ function attachListeners() {
       return;
     }
     clearArmed = false;
-    await safeInvoke("clear_history");
-    await refresh();
-    if (clearBtn) flashButton(clearBtn, "Cleared", true);
+    try {
+      await requiredInvoke("clear_history");
+      await refresh();
+      if (clearBtn) flashButton(clearBtn, "Cleared", true);
+    } catch (err) {
+      await refresh();
+      if (clearBtn) flashButton(clearBtn, "Failed", false);
+      window.alert(`Could not erase history from disk:\n${String(err)}`);
+    }
   });
 
   $("quit-btn")?.addEventListener("click", async () => {
@@ -338,6 +388,8 @@ interface SetupStatus {
   ollama_running: boolean;
   ollama_model_pulled: boolean;
   ollama_model_name: string;
+  ollama_identity_warning: string | null;
+  allow_unverified_ollama: boolean;
   hotkey_configurable: boolean;
   runtime_hotkey_label: string;
 }
@@ -376,6 +428,7 @@ function showSetupBanner(
   actionsHTML: string,
   tone: "info" | "error" = "info",
 ) {
+  resetSetupProgress();
   const banner = $("setup-banner")!;
   banner.hidden = false;
   banner.classList.toggle("setup-error", tone === "error");
@@ -385,7 +438,17 @@ function showSetupBanner(
   actions.innerHTML = actionsHTML;
 }
 
+function resetSetupProgress() {
+  const progress = $("setup-progress");
+  const fill = $("setup-progress-fill") as HTMLDivElement | null;
+  const label = $("setup-progress-label");
+  if (progress) progress.hidden = true;
+  if (fill) fill.style.width = "0%";
+  if (label) label.textContent = "";
+}
+
 function showSetupFailure(title: string, detail: string, manualUrl?: string) {
+  resetSetupProgress();
   const manual = manualUrl
     ? `<a class="ghost-btn" href="${manualUrl}" target="_blank" rel="noreferrer">Manual install</a>`
     : "";
@@ -402,8 +465,7 @@ function hideSetupBanner() {
   const banner = $("setup-banner")!;
   banner.hidden = true;
   banner.classList.remove("setup-error");
-  const progress = $("setup-progress")!;
-  progress.hidden = true;
+  resetSetupProgress();
 }
 
 let setupRunning = false;
@@ -465,23 +527,50 @@ async function runSetup() {
   if (!status.ollama_running) {
     showSetupBanner(
       "Ollama is not running",
-      "Zerm needs Ollama (open-source, runs locally) to polish transcripts. Installing runs the official Ollama installer; you'll be asked to approve it.",
+      "Zerm needs Ollama (open-source, runs locally) to polish transcripts. Installing downloads the official release asset, verifies its hash and publisher where supported, then asks you to approve it.",
       `<button class="solid-btn" id="btn-install-ollama">Install Ollama</button>
        <a class="ghost-btn" href="https://ollama.com" target="_blank" rel="noreferrer">What is this?</a>`,
     );
     $("btn-install-ollama")?.addEventListener("click", async () => {
       const url = {
-        darwin: "https://ollama.com/download/Ollama-darwin.zip",
-        win32: "https://ollama.com/download/OllamaSetup.exe",
+        darwin: "https://github.com/ollama/ollama/releases/latest",
+        win32: "https://github.com/ollama/ollama/releases/latest",
         linux: "https://ollama.com/install.sh",
       };
+      const platformKey = IS_MAC
+        ? "darwin"
+        : navigator.platform.toLowerCase().includes("win")
+          ? "win32"
+          : "linux";
       const ok = window.confirm(
-        "This will download the official Ollama installer from ollama.com and launch it. " +
+        "This will download the official Ollama release asset and launch it after verification. " +
           "Continue?\n\n" +
-          `URL: ${url.darwin} (or the equivalent for your OS)\n` +
-          "The installer is signed/notarized by Ollama Inc. — you'll see a system prompt to confirm.",
+          `Source: ${url[platformKey]}\n` +
+          "Zerm verifies the GitHub release hash and the Ollama publisher signature where your OS supports it.",
       );
       if (ok) await autoInstallOllama();
+    });
+    return;
+  }
+
+  if (status.ollama_identity_warning && !status.allow_unverified_ollama) {
+    showSetupBanner(
+      "Verify local Ollama",
+      status.ollama_identity_warning,
+      `<button class="solid-btn" id="btn-retry-setup">Retry</button>
+       <button class="ghost-btn" id="btn-allow-unverified-ollama">Use unverified local Ollama</button>
+       <a class="ghost-btn" href="https://ollama.com/download" target="_blank" rel="noreferrer">Install official app</a>`,
+      "error",
+    );
+    $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
+    $("btn-allow-unverified-ollama")?.addEventListener("click", async () => {
+      const ok = window.confirm(
+        "This allows Zerm to send dictated transcripts to the local service on 127.0.0.1:11434 even when its process identity could not be fully verified. Continue?",
+      );
+      if (!ok) return;
+      await requiredInvoke("set_allow_unverified_ollama", { enabled: true });
+      await refresh();
+      await refreshSetup();
     });
     return;
   }
@@ -523,19 +612,35 @@ async function autoInstallOllama(): Promise<boolean> {
     "",
   );
   const progress = $("setup-progress")!;
+  const fill = $("setup-progress-fill") as HTMLDivElement;
   const label = $("setup-progress-label")!;
   progress.hidden = false;
+  fill.style.width = "0%";
   label.textContent = "Downloading…";
 
   let unlisten: (() => void) | null = null;
   try {
     const { listen: listenEvent } = await import("@tauri-apps/api/event");
-    unlisten = await listenEvent<string>(
+    type InstallProgress =
+      | string
+      | { status?: string; downloaded?: number; total?: number };
+    unlisten = await listenEvent<InstallProgress>(
       "zerm://ollama-install-progress",
       (event) => {
-        if (event.payload === "downloading") label.textContent = "Downloading installer…";
-        if (event.payload === "launching") label.textContent = "Launching installer…";
-        if (event.payload === "done") label.textContent = "Waiting for Ollama to start…";
+        const p = event.payload;
+        if (typeof p !== "string" && p.total && p.downloaded != null) {
+          const pct = Math.min(100, (p.downloaded / p.total) * 100);
+          fill.style.width = `${pct.toFixed(1)}%`;
+          label.textContent = `${formatBytes(p.downloaded)} / ${formatBytes(p.total)}`;
+          return;
+        }
+        const phase = typeof p === "string" ? p : p.status;
+        if (phase === "resolving") label.textContent = "Resolving latest release…";
+        if (phase === "downloading") label.textContent = "Downloading installer…";
+        if (phase === "verifying") label.textContent = "Verifying publisher…";
+        if (phase === "installing") label.textContent = "Installing…";
+        if (phase === "launching") label.textContent = "Launching installer…";
+        if (phase === "done") label.textContent = "Waiting for Ollama to start…";
       },
     );
     await setupInvoke("install_ollama");
@@ -623,6 +728,7 @@ async function downloadWhisper(): Promise<boolean> {
   const fill = $("setup-progress-fill")!;
   const label = $("setup-progress-label")!;
   progress.hidden = false;
+  (fill as HTMLDivElement).style.width = "0%";
   label.textContent = "Starting…";
 
   let lastUnlisten: (() => void) | null = null;

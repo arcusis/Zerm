@@ -24,8 +24,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: "release-${{ github.ref }}"
@@ -38,14 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -146,14 +144,14 @@ jobs:
         shell: bash
         run: git config --system core.longpaths true
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -321,25 +319,6 @@ jobs:
             }
             Write-Host "Verified $($artifact.Name): $($sig.SignerCertificate.Subject)"
           }
-
-  pages:
-    name: Deploy landing page
-    needs: preflight
-    if: ${{ github.ref_type != 'tag' }}
-    runs-on: ubuntu-latest
-    # GitHub Pages environment protection rejects tag refs. Release tags
-    # publish app artifacts only; branch/manual runs may deploy docs.
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs
-      - id: deploy
-        uses: actions/deploy-pages@v4
 
   publish:
     name: Publish release

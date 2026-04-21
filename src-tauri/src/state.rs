@@ -109,6 +109,11 @@ pub struct Settings {
     #[serde(default)]
     pub auto_paste: bool,
 
+    /// Allow sending transcripts/model-pull requests to a localhost Ollama
+    /// listener whose process identity could not be fully verified.
+    #[serde(default)]
+    pub allow_unverified_ollama: bool,
+
     /// Whether to save dictations to the history log. Defaults to false:
     /// dictation can contain secrets, client data, or private messages, so
     /// users must opt in before transcript/output text is persisted.
@@ -152,6 +157,7 @@ impl Default for Settings {
             // Auto-paste is OPT-IN. It can paste into the wrong window if the
             // user tabs away during the async Whisper+Ollama round trip.
             auto_paste: false,
+            allow_unverified_ollama: false,
             save_history: false,
         }
     }
