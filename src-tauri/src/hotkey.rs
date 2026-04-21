@@ -43,12 +43,12 @@ where
 
     let block = RcBlock::new(move |event_ptr: NonNull<NSEvent>| {
         let event = unsafe { event_ptr.as_ref() };
-        let key_code: u16 = unsafe { event.keyCode() };
+        let key_code: u16 = event.keyCode();
         let target_key = HOTKEY_KEY_CODE.load(Ordering::Relaxed);
         if key_code != target_key {
             return;
         }
-        let flags = unsafe { event.modifierFlags() };
+        let flags = event.modifierFlags();
         let target_flag = HOTKEY_FLAG_BIT.load(Ordering::Relaxed);
         let mod_held = (flags.0 & target_flag) != 0;
         let was = pressed_in.load(Ordering::SeqCst);
@@ -61,12 +61,8 @@ where
         }
     });
 
-    let monitor = unsafe {
-        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
-            NSEventMask::FlagsChanged,
-            &block,
-        )
-    };
+    let monitor =
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &block);
 
     if monitor.is_some() {
         // Leak the monitor so it lives for the app's lifetime.
@@ -87,17 +83,4 @@ where
          install tauri-plugin-global-shortcut and wire a key combo"
     );
     false
-}
-
-pub fn label_for_keycode(key_code: u16) -> &'static str {
-    match key_code {
-        61 => "Right Option",
-        58 => "Left Option",
-        54 => "Right Command",
-        60 => "Right Shift",
-        62 => "Right Control",
-        57 => "Caps Lock",
-        63 => "Fn",
-        _ => "Hotkey",
-    }
 }

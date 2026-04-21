@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
 use state::{DashboardData, HotkeyChoice, PersistentState, PillPosition, PromptMode};
 
@@ -50,7 +52,14 @@ const WHISPER_SMALL_MAX_BYTES: u64 = 500_000_000;
 const WHISPER_SMALL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin";
 const PILL_WIDTH: i32 = 240;
+const PILL_HEIGHT: i32 = 74;
 const STATE_FILE: &str = "zerm-state.json";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FocusIdentity {
+    pid: u32,
+    bundle_id: String,
+}
 
 #[derive(Clone, Serialize)]
 struct DonePayload {
@@ -64,6 +73,7 @@ struct Pipeline {
     capture: Arc<Mutex<Option<audio::CaptureHandle>>>,
     recording: Arc<AtomicBool>,
     active_job_id: Arc<AtomicU64>,
+    paste_target: Arc<Mutex<Option<FocusIdentity>>>,
     tray_anchor: Arc<Mutex<Option<PhysicalPosition<f64>>>>,
     persistent: Arc<Mutex<PersistentState>>,
     state_path: Arc<Mutex<Option<PathBuf>>>,
@@ -77,27 +87,41 @@ impl Pipeline {
             capture: Arc::new(Mutex::new(None)),
             recording: Arc::new(AtomicBool::new(false)),
             active_job_id: Arc::new(AtomicU64::new(0)),
+            paste_target: Arc::new(Mutex::new(None)),
             tray_anchor: Arc::new(Mutex::new(None)),
             persistent: Arc::new(Mutex::new(PersistentState::default())),
             state_path: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Serialize writes through a single mutex so two in-flight saves
-    /// can't interleave on the same file. The save itself uses the
-    /// atomic tempfile+rename path in state::PersistentState::save.
-    fn save_persistent(&self) {
+    /// Serialize state snapshots and writes in one ordered critical section.
+    /// The previous detached-thread version serialized filesystem writes but
+    /// could still let an older snapshot land after a newer setting.
+    fn save_persistent_result(&self, remove_backup: bool) -> Result<()> {
+        static SAVE_GUARD: once_cell::sync::Lazy<std::sync::Mutex<()>> =
+            once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
+
+        let _guard = SAVE_GUARD.lock().expect("save lock poisoned");
         let path = self.state_path.lock().clone();
         let snapshot = self.persistent.lock().clone();
         if let Some(p) = path {
-            static SAVE_GUARD: once_cell::sync::Lazy<std::sync::Mutex<()>> =
-                once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
-            std::thread::spawn(move || {
-                let _guard = SAVE_GUARD.lock().expect("save lock poisoned");
-                if let Err(e) = snapshot.save(&p) {
-                    log::error!("failed to save state: {e:#}");
-                }
-            });
+            snapshot.save(&p)?;
+            if remove_backup {
+                PersistentState::remove_backup(&p)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn save_persistent(&self) {
+        if let Err(e) = self.save_persistent_result(false) {
+            log::error!("failed to save state: {e:#}");
+        }
+    }
+
+    fn save_persistent_erasing_backup(&self) {
+        if let Err(e) = self.save_persistent_result(true) {
+            log::error!("failed to save state and erase backup: {e:#}");
         }
     }
 }
@@ -140,7 +164,7 @@ fn whisper_model_path(app: &AppHandle) -> PathBuf {
     // the missing-model banner with a download button.
     dirs.first()
         .cloned()
-        .unwrap_or_else(|| dev_models_dir())
+        .unwrap_or_else(dev_models_dir)
         .join("ggml-small.bin")
 }
 
@@ -188,15 +212,78 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn frontmost_focus_identity() -> Option<FocusIdentity> {
+    let script = r#"
+tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  set frontPid to unix id of frontApp
+  try
+    set frontBundle to bundle identifier of frontApp
+  on error
+    set frontBundle to ""
+  end try
+  return (frontPid as text) & tab & frontBundle
+end tell
+"#;
+    let out = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        log::warn!(
+            "auto-paste: could not read frontmost app: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut parts = stdout.trim().split('\t');
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    let bundle_id = parts.next().unwrap_or("").trim().to_string();
+    Some(FocusIdentity { pid, bundle_id })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn frontmost_focus_identity() -> Option<FocusIdentity> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn focus_still_matches(expected: &FocusIdentity) -> bool {
+    match frontmost_focus_identity() {
+        Some(current) if &current == expected => true,
+        Some(current) => {
+            log::warn!(
+                "auto-paste cancelled: focus changed from {:?} to {:?}",
+                expected,
+                current
+            );
+            false
+        }
+        None => {
+            log::warn!("auto-paste cancelled: could not verify focused app");
+            false
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focus_still_matches(_expected: &FocusIdentity) -> bool {
+    false
+}
+
 /// Send a Cmd+V keystroke to the currently focused application via
 /// AppleScript / System Events. We never grab focus ourselves (the pill
 /// has `focus: false`), so the previously focused app is still the
 /// recipient. If nothing is focused for text input the keystroke is a
 /// no-op.
 #[cfg(target_os = "macos")]
-fn send_paste_keystroke() {
-    let script =
-        "tell application \"System Events\" to keystroke \"v\" using command down";
+fn send_paste_keystroke(expected: FocusIdentity) {
+    if !focus_still_matches(&expected) {
+        return;
+    }
+    let script = "tell application \"System Events\" to keystroke \"v\" using command down";
     match std::process::Command::new("osascript")
         .args(["-e", script])
         .output()
@@ -214,7 +301,7 @@ fn send_paste_keystroke() {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn send_paste_keystroke() {
+fn send_paste_keystroke(_expected: FocusIdentity) {
     // TODO: cross-platform keystroke synthesis (Win: SendInput; Linux: xdotool/wtype)
     log::debug!("auto-paste: not implemented on this platform yet");
 }
@@ -273,15 +360,16 @@ fn open_dashboard_window(app: &AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    let result = WebviewWindowBuilder::new(app, "dashboard", WebviewUrl::App("dashboard.html".into()))
-        .title("Zerm")
-        .inner_size(820.0, 560.0)
-        .min_inner_size(640.0, 460.0)
-        .center()
-        .resizable(true)
-        .decorations(true)
-        .visible(true)
-        .build();
+    let result =
+        WebviewWindowBuilder::new(app, "dashboard", WebviewUrl::App("dashboard.html".into()))
+            .title("Zerm")
+            .inner_size(820.0, 560.0)
+            .min_inner_size(640.0, 460.0)
+            .center()
+            .resizable(true)
+            .decorations(true)
+            .visible(true)
+            .build();
     if let Err(e) = result {
         emit_error(app, format!("failed to open dashboard: {e:#}"));
     }
@@ -318,6 +406,16 @@ fn handle_toggle(app: &AppHandle, pipeline: &Pipeline) {
 }
 
 fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
+    if pipeline.whisper.lock().is_none() {
+        pipeline.recording.store(false, Ordering::SeqCst);
+        emit_error(
+            app,
+            "Whisper is still loading. Open the dashboard to finish setup.",
+        );
+        open_dashboard_window(app);
+        return;
+    }
+
     pipeline.audio_buffer.lock().clear();
 
     // Invalidate any in-flight previous recording so its eventual paste
@@ -327,6 +425,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
     let job_id = NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst);
     CURRENT_JOB_ID.store(job_id, Ordering::SeqCst);
     pipeline.active_job_id.store(job_id, Ordering::SeqCst);
+    *pipeline.paste_target.lock() = frontmost_focus_identity();
 
     let vad_enabled = pipeline.persistent.lock().settings.vad_enabled;
     let app_for_stop = app.clone();
@@ -357,8 +456,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
             let app_for_level = app.clone();
             let recording_flag = pipeline.recording.clone();
             tauri::async_runtime::spawn(async move {
-                let mut interval =
-                    tokio::time::interval(std::time::Duration::from_millis(33));
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
                 while recording_flag.load(Ordering::SeqCst) {
                     interval.tick().await;
                     let lvl = *level.lock();
@@ -370,6 +468,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
         }
         Err(e) => {
             pipeline.recording.store(false, Ordering::SeqCst);
+            *pipeline.paste_target.lock() = None;
             emit_error(app, format!("audio capture failed: {e:#}"));
         }
     }
@@ -406,36 +505,47 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
         (p.settings.prompt_mode, p.settings.vocabulary.join(", "))
     };
 
+    let job = ProcessJob {
+        raw,
+        sample_rate,
+        channels,
+        prompt_mode,
+        vocabulary,
+        job_id,
+    };
+
     tauri::async_runtime::spawn(async move {
-        let result = process(
-            &app_clone,
-            whisper,
-            raw,
-            sample_rate,
-            channels,
-            pipeline_for_model,
-            prompt_mode,
-            vocabulary,
-            job_id,
-        )
-        .await;
+        let result = process(&app_clone, whisper, pipeline_for_model, job).await;
         if let Err(e) = result {
             emit_error(&app_clone, format!("processing failed: {e:#}"));
         }
     });
 }
 
-async fn process(
-    app: &AppHandle,
-    whisper: Arc<Mutex<Option<whisper::Whisper>>>,
+struct ProcessJob {
     raw: Vec<f32>,
     sample_rate: u32,
     channels: u16,
-    pipeline: Arc<Pipeline>,
     prompt_mode: PromptMode,
     vocabulary: String,
     job_id: u64,
+}
+
+async fn process(
+    app: &AppHandle,
+    whisper: Arc<Mutex<Option<whisper::Whisper>>>,
+    pipeline: Arc<Pipeline>,
+    job: ProcessJob,
 ) -> Result<()> {
+    let ProcessJob {
+        raw,
+        sample_rate,
+        channels,
+        prompt_mode,
+        vocabulary,
+        job_id,
+    } = job;
+
     if raw.len() < (sample_rate as usize) / 4 {
         log::warn!("audio too short ({} samples), skipping", raw.len());
         let _ = app.emit(
@@ -459,16 +569,15 @@ async fn process(
     } else {
         Some(format!("Vocabulary: {}", vocabulary.trim()))
     };
-    let (raw_transcript, detected_lang) = tauri::async_runtime::spawn_blocking(
-        move || -> Result<(String, String)> {
+    let (raw_transcript, detected_lang) =
+        tauri::async_runtime::spawn_blocking(move || -> Result<(String, String)> {
             let guard = whisper_for_blocking.lock();
             let w = guard
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("whisper model not loaded yet"))?;
             w.transcribe_with_options(&prepared, None, initial_prompt.as_deref())
-        },
-    )
-    .await??;
+        })
+        .await??;
 
     log::info!("detected language: {detected_lang}");
     let transcript = state::strip_whisper_tokens(&raw_transcript);
@@ -496,7 +605,7 @@ async fn process(
     log::info!("using llm model: {llm_model} (lang={detected_lang})");
 
     let output = if matches!(prompt_mode, PromptMode::Off)
-        && !ollama::system_prompt_for_lang(prompt_mode, &detected_lang).is_none()
+        && ollama::system_prompt_for_lang(prompt_mode, &detected_lang).is_some()
     {
         // Off mode on a non-Latin script still gets a bespoke minimal-
         // cleanup pass (the language-specific prompt already IS light-touch).
@@ -526,7 +635,9 @@ async fn process(
     // finishes silently.
     let still_current = CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id;
     if !still_current {
-        log::info!("job {job_id} is stale (newer recording started); skipping clipboard + history + paste");
+        log::info!(
+            "job {job_id} is stale (newer recording started); skipping clipboard + history + paste"
+        );
         return Ok(());
     }
 
@@ -547,7 +658,12 @@ async fn process(
         // Re-check inside the delay window — user may have Cmd-tabbed
         // during the 70ms and triggered another recording.
         if CURRENT_JOB_ID.load(Ordering::SeqCst) == job_id {
-            tauri::async_runtime::spawn_blocking(send_paste_keystroke);
+            let paste_target = pipeline.paste_target.lock().clone();
+            if let Some(expected) = paste_target {
+                tauri::async_runtime::spawn_blocking(move || send_paste_keystroke(expected));
+            } else {
+                log::warn!("auto-paste cancelled: focused app was not captured at recording start");
+            }
         }
     }
 
@@ -569,7 +685,8 @@ async fn process(
 fn build_tray(app: &tauri::App, pipeline: Arc<Pipeline>) -> tauri::Result<()> {
     let app_handle = app.handle().clone();
 
-    let toggle_item = MenuItem::with_id(app, "toggle", "Start / Stop Recording", true, None::<&str>)?;
+    let toggle_item =
+        MenuItem::with_id(app, "toggle", "Start / Stop Recording", true, None::<&str>)?;
     let dashboard_item =
         MenuItem::with_id(app, "dashboard", "Open Zerm Dashboard…", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
@@ -640,6 +757,36 @@ fn anchor_from_rect(rect: &tauri::Rect) -> Option<PhysicalPosition<f64>> {
         x: px + sw / 2.0,
         y: py + sh,
     })
+}
+
+fn clamp_pill_position(window: &WebviewWindow, pos: PillPosition) -> PillPosition {
+    let Ok(monitors) = window.available_monitors() else {
+        return pos;
+    };
+    let Some(monitor) = monitors.first() else {
+        return pos;
+    };
+
+    for monitor in &monitors {
+        let origin = monitor.position();
+        let size = monitor.size();
+        let max_x = origin.x + size.width as i32;
+        let max_y = origin.y + size.height as i32;
+        let visible_x = pos.x + PILL_WIDTH > origin.x && pos.x < max_x;
+        let visible_y = pos.y + PILL_HEIGHT > origin.y && pos.y < max_y;
+        if visible_x && visible_y {
+            return pos;
+        }
+    }
+
+    let origin = monitor.position();
+    let size = monitor.size();
+    let max_x = (origin.x + size.width as i32 - PILL_WIDTH).max(origin.x);
+    let max_y = (origin.y + size.height as i32 - PILL_HEIGHT).max(origin.y);
+    PillPosition {
+        x: pos.x.clamp(origin.x, max_x),
+        y: pos.y.clamp(origin.y, max_y),
+    }
 }
 
 /// Gate every dashboard-only command behind a window-label check.
@@ -728,8 +875,19 @@ fn set_save_history(
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     require_dashboard(&window)?;
-    state.persistent.lock().settings.save_history = enabled;
-    state.save_persistent();
+    {
+        let mut p = state.persistent.lock();
+        p.settings.save_history = enabled;
+        if !enabled {
+            p.history.clear();
+            p.stats = state::Stats::default();
+        }
+    }
+    if enabled {
+        state.save_persistent();
+    } else {
+        state.save_persistent_erasing_backup();
+    }
     emit_dashboard_update(&app);
     Ok(())
 }
@@ -763,13 +921,23 @@ fn set_hotkey(
     state: tauri::State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     require_dashboard(&window)?;
-    let choice = HotkeyChoice::from_key(&key).ok_or_else(|| format!("unknown hotkey: {key}"))?;
-    state.persistent.lock().settings.hotkey = choice;
-    state.save_persistent();
-    hotkey::set_hotkey(choice.key_code(), choice.flag_bit());
-    log::info!("hotkey changed to {}", choice.label());
-    emit_dashboard_update(&app);
-    Ok(())
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = key;
+        return Err("custom modifier-only hotkeys are only supported on macOS; use Ctrl+Shift+Space on this platform".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let choice =
+            HotkeyChoice::from_key(&key).ok_or_else(|| format!("unknown hotkey: {key}"))?;
+        state.persistent.lock().settings.hotkey = choice;
+        state.save_persistent();
+        hotkey::set_hotkey(choice.key_code(), choice.flag_bit());
+        log::info!("hotkey changed to {}", choice.label());
+        emit_dashboard_update(&app);
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -793,9 +961,7 @@ fn add_vocabulary_term(
             .any(|t| t.eq_ignore_ascii_case(&trimmed));
         if !already {
             p.settings.vocabulary.push(trimmed);
-            p.settings
-                .vocabulary
-                .sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+            p.settings.vocabulary.sort_by_key(|a| a.to_lowercase());
         }
     }
     state.save_persistent();
@@ -845,7 +1011,7 @@ fn clear_history(
         p.history.clear();
         p.stats = state::Stats::default();
     }
-    state.save_persistent();
+    state.save_persistent_erasing_backup();
     emit_dashboard_update(&app);
     Ok(())
 }
@@ -865,7 +1031,14 @@ fn copy_history_entry(
         .find(|e| e.timestamp == timestamp)
         .cloned();
     match entry {
-        Some(e) => copy_to_clipboard(&e.output).map_err(|err| err.to_string()),
+        Some(e) => {
+            let text = if e.output.is_empty() {
+                e.transcript
+            } else {
+                e.output
+            };
+            copy_to_clipboard(&text).map_err(|err| err.to_string())
+        }
         None => Err("history entry not found".into()),
     }
 }
@@ -879,11 +1052,7 @@ fn quit_app(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn set_pill_position(
-    x: i32,
-    y: i32,
-    state: tauri::State<'_, Arc<Pipeline>>,
-) -> Result<(), String> {
+fn set_pill_position(x: i32, y: i32, state: tauri::State<'_, Arc<Pipeline>>) -> Result<(), String> {
     state.persistent.lock().pill_position = Some(PillPosition { x, y });
     state.save_persistent();
     Ok(())
@@ -904,10 +1073,13 @@ fn open_dashboard(app: AppHandle) {
 #[derive(Clone, Serialize)]
 struct SetupStatus {
     whisper_model_present: bool,
+    whisper_loaded: bool,
     whisper_model_path: Option<String>,
     ollama_running: bool,
     ollama_model_pulled: bool,
     ollama_model_name: String,
+    hotkey_configurable: bool,
+    runtime_hotkey_label: String,
 }
 
 #[tauri::command]
@@ -915,6 +1087,10 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
     require_dashboard(&window)?;
     let path = whisper_model_path(&app);
     let whisper_model_present = path.exists();
+    let whisper_loaded = app
+        .try_state::<Arc<Pipeline>>()
+        .map(|state| state.whisper.lock().is_some())
+        .unwrap_or(false);
     // Match runtime resolution: env var overrides, otherwise persisted setting,
     // otherwise default. Previously this only honoured the env var so setup
     // could report-and-pull one model while the runtime used another.
@@ -930,39 +1106,49 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .ok();
-    let (ollama_running, ollama_model_pulled) = match client {
-        Some(c) => match c.get("http://localhost:11434/api/tags").send().await {
+    let ollama_identity_ok = ollama::verify_identity().await.is_ok();
+    let (ollama_running, ollama_model_pulled) = match (client, ollama_identity_ok) {
+        (Some(c), true) => match c.get("http://127.0.0.1:11434/api/tags").send().await {
             Ok(resp) if resp.status().is_success() => {
                 let pulled = resp
                     .json::<serde_json::Value>()
                     .await
                     .ok()
                     .and_then(|v| {
-                        v.get("models")
-                            .and_then(|m| m.as_array())
-                            .map(|arr| {
-                                arr.iter().any(|m| {
-                                    m.get("name")
-                                        .and_then(|n| n.as_str())
-                                        .map(|n| n == model_name || n.starts_with(&format!("{model_name}:")))
-                                        .unwrap_or(false)
-                                })
+                        v.get("models").and_then(|m| m.as_array()).map(|arr| {
+                            arr.iter().any(|m| {
+                                m.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|n| {
+                                        n == model_name || n.starts_with(&format!("{model_name}:"))
+                                    })
+                                    .unwrap_or(false)
                             })
+                        })
                     })
                     .unwrap_or(false);
                 (true, pulled)
             }
             _ => (false, false),
         },
-        None => (false, false),
+        _ => (false, false),
     };
 
     Ok(SetupStatus {
         whisper_model_present,
+        whisper_loaded,
         whisper_model_path: Some(path.display().to_string()),
         ollama_running,
         ollama_model_pulled,
         ollama_model_name: model_name,
+        hotkey_configurable: cfg!(target_os = "macos"),
+        runtime_hotkey_label: if cfg!(target_os = "macos") {
+            app.try_state::<Arc<Pipeline>>()
+                .map(|state| state.persistent.lock().settings.hotkey.label().to_string())
+                .unwrap_or_else(|| "Right Option".to_string())
+        } else {
+            "Ctrl+Shift+Space".to_string()
+        },
     })
 }
 
@@ -997,6 +1183,77 @@ struct GhAsset {
 struct GhRelease {
     tag_name: String,
     assets: Vec<GhAsset>,
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_app_signature(app_path: &str) -> Result<(), String> {
+    let verify = std::process::Command::new("codesign")
+        .args(["--verify", "--deep", "--strict", "--verbose=2", app_path])
+        .output()
+        .map_err(|e| format!("codesign verify: {e}"))?;
+    if !verify.status.success() {
+        return Err(format!(
+            "codesign verify failed: {}",
+            String::from_utf8_lossy(&verify.stderr)
+        ));
+    }
+
+    let details = std::process::Command::new("codesign")
+        .args(["-dv", "--verbose=4", app_path])
+        .output()
+        .map_err(|e| format!("codesign details: {e}"))?;
+    let codesign_text = String::from_utf8_lossy(&details.stderr);
+    if !codesign_text.contains("Authority=Developer ID Application") {
+        return Err("Ollama.app is not signed with a Developer ID Application certificate".into());
+    }
+    let team_id = codesign_text
+        .lines()
+        .find_map(|line| line.strip_prefix("TeamIdentifier="))
+        .map(str::trim)
+        .filter(|team| !team.is_empty())
+        .ok_or_else(|| "Ollama.app signature has no TeamIdentifier".to_string())?;
+
+    let gatekeeper = std::process::Command::new("spctl")
+        .args(["-a", "-vv", "-t", "exec", app_path])
+        .output()
+        .map_err(|e| format!("spctl: {e}"))?;
+    if !gatekeeper.status.success() {
+        return Err(format!(
+            "Gatekeeper rejected Ollama.app: {}{}",
+            String::from_utf8_lossy(&gatekeeper.stdout),
+            String::from_utf8_lossy(&gatekeeper.stderr)
+        ));
+    }
+
+    log::info!("verified Ollama.app signature, TeamIdentifier={team_id}");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn verify_windows_installer_signature(installer_path: &std::path::Path) -> Result<(), String> {
+    let script = format!(
+        "$s = Get-AuthenticodeSignature -LiteralPath '{}'; \
+         if ($s.Status -ne 'Valid') {{ throw \"Authenticode status: $($s.Status)\" }}; \
+         if ($s.SignerCertificate.Subject -notmatch 'Ollama') {{ throw \"Unexpected signer: $($s.SignerCertificate.Subject)\" }}; \
+         Write-Output $s.SignerCertificate.Subject",
+        installer_path.display().to_string().replace('\'', "''")
+    );
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|e| format!("powershell signature check: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "Ollama installer signature check failed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    log::info!(
+        "verified Ollama installer Authenticode signer: {}",
+        String::from_utf8_lossy(&out.stdout).trim()
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -1156,15 +1413,18 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
         #[cfg(target_os = "macos")]
         {
             let status = std::process::Command::new("unzip")
-                .args(["-o", installer_path.to_str().unwrap(), "-d", "/Applications/"])
+                .args([
+                    "-o",
+                    installer_path.to_str().unwrap(),
+                    "-d",
+                    "/Applications/",
+                ])
                 .status()
                 .map_err(|e| format!("unzip: {e}"))?;
             if !status.success() {
                 return Err(format!("unzip exited {status}"));
             }
-            // Gatekeeper now validates the app's signature + notarization
-            // ticket before code runs; our SHA-256 check guaranteed the
-            // zip on disk is the one GitHub published.
+            verify_macos_app_signature("/Applications/Ollama.app")?;
             let _ = std::process::Command::new("open")
                 .arg("/Applications/Ollama.app")
                 .spawn();
@@ -1172,9 +1432,7 @@ async fn install_ollama(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 
         #[cfg(target_os = "windows")]
         {
-            // UAC shows the Authenticode signer ("Ollama Inc.") before
-            // the installer is allowed to elevate. Combined with the
-            // digest check above, authenticity is covered.
+            verify_windows_installer_signature(&installer_path)?;
             std::process::Command::new("cmd")
                 .args(["/C", "start", "", installer_path.to_str().unwrap()])
                 .spawn()
@@ -1206,7 +1464,7 @@ async fn pull_ollama_model(
         .map_err(|e| format!("client: {e}"))?;
 
     let resp = client
-        .post("http://localhost:11434/api/pull")
+        .post("http://127.0.0.1:11434/api/pull")
         .json(&serde_json::json!({ "name": model, "stream": true }))
         .send()
         .await
@@ -1246,8 +1504,7 @@ async fn download_whisper_model(
 
     const FILENAME: &str = "ggml-small.bin";
 
-    let dir = user_models_dir(&app)
-        .ok_or_else(|| "could not resolve app data dir".to_string())?;
+    let dir = user_models_dir(&app).ok_or_else(|| "could not resolve app data dir".to_string())?;
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| format!("create dir: {e}"))?;
@@ -1262,7 +1519,6 @@ async fn download_whisper_model(
         .suffix(".part")
         .tempfile_in(&dir)
         .map_err(|e| format!("tempfile: {e}"))?;
-    let tmp_path = tmp_file.path().to_path_buf();
 
     let resp = reqwest::get(WHISPER_SMALL_URL)
         .await
@@ -1282,7 +1538,10 @@ async fn download_whisper_model(
     let total = resp.content_length().unwrap_or(0);
     let _ = app.emit(
         "zerm://whisper-download-progress",
-        DownloadProgress { downloaded: 0, total },
+        DownloadProgress {
+            downloaded: 0,
+            total,
+        },
     );
 
     let std_tmp = tmp_file.reopen().map_err(|e| format!("reopen: {e}"))?;
@@ -1335,11 +1594,15 @@ async fn download_whisper_model(
 
     let _ = app.emit(
         "zerm://whisper-download-progress",
-        DownloadProgress { downloaded: total, total },
+        DownloadProgress {
+            downloaded: total,
+            total,
+        },
     );
 
     let pipeline = app.state::<Arc<Pipeline>>().inner().clone();
     let whisper_arc = pipeline.whisper.clone();
+    let app_for_ready = app.clone();
     let dest_for_load = dest.clone();
     std::thread::spawn(move || {
         log::info!("reloading whisper model from {dest_for_load:?}");
@@ -1348,9 +1611,13 @@ async fn download_whisper_model(
                 let silence: Vec<f32> = vec![0.0; 16_000];
                 let _ = w.transcribe(&silence);
                 *whisper_arc.lock() = Some(w);
+                let _ = app_for_ready.emit(READY_EVENT, ());
                 log::info!("whisper ready (post-download)");
             }
-            Err(e) => log::error!("whisper post-download load failed: {e:#}"),
+            Err(e) => emit_error(
+                &app_for_ready,
+                format!("whisper post-download load failed: {e:#}"),
+            ),
         }
     });
 
@@ -1433,6 +1700,7 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 enable_window_drag(&window);
                 if let Some(pos) = pipeline_for_setup.persistent.lock().pill_position {
+                    let pos = clamp_pill_position(&window, pos);
                     let _ = window.set_position(tauri::Position::Physical(
                         PhysicalPosition { x: pos.x, y: pos.y },
                     ));

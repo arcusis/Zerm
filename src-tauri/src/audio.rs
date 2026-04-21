@@ -116,9 +116,7 @@ where
                     let take = data.len().min(available);
                     let converted: Vec<f32> = data[..take]
                         .iter()
-                        .map(|s| {
-                            ((*s as f32) - (u16::MAX as f32 / 2.0)) / (u16::MAX as f32 / 2.0)
-                        })
+                        .map(|s| ((*s as f32) - (u16::MAX as f32 / 2.0)) / (u16::MAX as f32 / 2.0))
                         .collect();
                     *level_for_stream.lock() = compute_rms(&converted);
                     buf.extend(converted);
@@ -149,8 +147,7 @@ where
         let _ = ready_tx.send(Ok(()));
 
         // VAD loop: wake every VAD_TICK_MS, evaluate recent audio chunk
-        let frames_per_tick =
-            (sample_rate as u64 * channels as u64 * VAD_TICK_MS / 1000) as usize;
+        let frames_per_tick = (sample_rate as u64 * channels as u64 * VAD_TICK_MS / 1000) as usize;
         let silence_ticks_required = (SILENCE_DURATION_MS / VAD_TICK_MS) as u32;
         let no_speech_ticks_required = (NO_SPEECH_TIMEOUT_MS / VAD_TICK_MS) as u32;
         let mut speech_detected = false;
@@ -159,7 +156,10 @@ where
         let mut last_pos: usize = 0;
 
         loop {
-            if stop_rx.recv_timeout(Duration::from_millis(VAD_TICK_MS)).is_ok() {
+            if stop_rx
+                .recv_timeout(Duration::from_millis(VAD_TICK_MS))
+                .is_ok()
+            {
                 break;
             }
 
@@ -209,9 +209,7 @@ where
                 // Still waiting for the first syllable.
                 no_speech_ticks += 1;
                 if no_speech_ticks >= no_speech_ticks_required {
-                    log::info!(
-                        "no speech detected in {NO_SPEECH_TIMEOUT_MS}ms; auto-stopping"
-                    );
+                    log::info!("no speech detected in {NO_SPEECH_TIMEOUT_MS}ms; auto-stopping");
                     drop(stream);
                     on_stop(StopReason::NoSpeech);
                     return;

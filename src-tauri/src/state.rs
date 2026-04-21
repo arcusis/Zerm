@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const HISTORY_LIMIT: usize = 100;
 
@@ -18,25 +18,21 @@ pub struct HistoryEntry {
     pub output: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PromptMode {
     Off,
     #[serde(alias = "agent")]
+    #[default]
     Developer,
     Conversational,
     Professional,
 }
 
-impl Default for PromptMode {
-    fn default() -> Self {
-        PromptMode::Developer
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HotkeyChoice {
+    #[default]
     RightOption,
     LeftOption,
     RightCommand,
@@ -44,12 +40,6 @@ pub enum HotkeyChoice {
     RightControl,
     CapsLock,
     Fn,
-}
-
-impl Default for HotkeyChoice {
-    fn default() -> Self {
-        HotkeyChoice::RightOption
-    }
 }
 
 impl HotkeyChoice {
@@ -119,15 +109,12 @@ pub struct Settings {
     #[serde(default)]
     pub auto_paste: bool,
 
-    /// Whether to save dictations to the history log. Defaults to true
-    /// (otherwise the History tab would be empty for most users). Users
-    /// who dictate sensitive material can flip this off to prevent any
-    /// transcript/output from being written to disk.
-    #[serde(default = "default_save_history")]
+    /// Whether to save dictations to the history log. Defaults to false:
+    /// dictation can contain secrets, client data, or private messages, so
+    /// users must opt in before transcript/output text is persisted.
+    #[serde(default)]
     pub save_history: bool,
 }
-
-fn default_save_history() -> bool { true }
 
 // Migrate from old String-typed vocabulary to Vec<String> seamlessly
 fn deserialize_vocabulary<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -165,7 +152,7 @@ impl Default for Settings {
             // Auto-paste is OPT-IN. It can paste into the wrong window if the
             // user tabs away during the async Whisper+Ollama round trip.
             auto_paste: false,
-            save_history: true,
+            save_history: false,
         }
     }
 }
@@ -196,6 +183,7 @@ pub struct DashboardData {
 }
 
 impl PersistentState {
+    #[cfg(test)]
     pub fn load(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
@@ -212,7 +200,11 @@ impl PersistentState {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let serialized = serde_json::to_string_pretty(self)?;
+        let mut disk_state = self.clone();
+        if !disk_state.settings.save_history {
+            disk_state.history.clear();
+        }
+        let serialized = serde_json::to_string_pretty(&disk_state)?;
         let tmp = path.with_extension("json.tmp");
         {
             let mut f = std::fs::File::create(&tmp)?;
@@ -236,6 +228,19 @@ impl PersistentState {
         Ok(())
     }
 
+    pub fn backup_path(path: &Path) -> PathBuf {
+        path.with_extension("json.bak")
+    }
+
+    pub fn remove_backup(path: &Path) -> Result<()> {
+        let bak = Self::backup_path(path);
+        match std::fs::remove_file(&bak) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn load_with_backup(path: &Path) -> Self {
         if let Ok(s) = std::fs::read_to_string(path) {
             if let Ok(state) = serde_json::from_str::<Self>(&s) {
@@ -243,7 +248,7 @@ impl PersistentState {
             }
             log::warn!("state file at {path:?} failed to parse; trying .bak");
         }
-        let bak = path.with_extension("json.bak");
+        let bak = Self::backup_path(path);
         if let Ok(s) = std::fs::read_to_string(&bak) {
             if let Ok(state) = serde_json::from_str::<Self>(&s) {
                 log::info!("recovered state from {bak:?}");
@@ -371,5 +376,40 @@ mod tests {
             s.record(format!("t{i}"), format!("o{i}"));
         }
         assert_eq!(s.history.len(), HISTORY_LIMIT);
+    }
+
+    #[test]
+    fn save_omits_history_when_history_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zerm-state.json");
+        let mut s = PersistentState::default();
+        s.record("secret transcript".to_string(), "secret output".to_string());
+        s.settings.save_history = false;
+
+        s.save(&path).unwrap();
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("secret transcript"));
+        assert!(!raw.contains("secret output"));
+        let loaded = PersistentState::load(&path);
+        assert!(loaded.history.is_empty());
+    }
+
+    #[test]
+    fn backup_can_be_removed_after_privacy_erase() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zerm-state.json");
+        let mut s = PersistentState::default();
+        s.settings.save_history = true;
+        s.record("secret transcript".to_string(), "secret output".to_string());
+        s.save(&path).unwrap();
+
+        s.history.clear();
+        s.settings.save_history = false;
+        s.save(&path).unwrap();
+        assert!(PersistentState::backup_path(&path).exists());
+
+        PersistentState::remove_backup(&path).unwrap();
+        assert!(!PersistentState::backup_path(&path).exists());
     }
 }

@@ -134,7 +134,7 @@
                   <option value="fn">Fn</option>
                 </select>
               </div>
-              <p class="field-hint">
+              <p class="field-hint" id="hotkey-hint">
                 Tap once to start. Tap again or stay silent to stop.
               </p>
             </div>
@@ -177,8 +177,8 @@
 
             <div class="field">
               <label class="checkbox-row">
-                <input id="savehistory-toggle" type="checkbox" checked />
-                <span>Save dictations to History <em>(turn off if dictating sensitive material)</em></span>
+                <input id="savehistory-toggle" type="checkbox" />
+                <span>Save dictations to History <em>(off by default for privacy)</em></span>
               </label>
             </div>
 
@@ -252,7 +252,7 @@
                   machine. Your microphone audio, raw transcripts, and final
                   outputs never leave the device. The only network call is
                   to your local Ollama instance at
-                  <code>localhost:11434</code>.
+                  <code>127.0.0.1:11434</code>.
                 </p>
                 <p>
                   <strong>At first-run setup:</strong> Zerm downloads the

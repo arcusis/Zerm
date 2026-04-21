@@ -49,6 +49,9 @@ const HOTKEY_LABELS: Record<HotkeyChoice, { kbd: string; label: string }> = {
   fn: { kbd: "fn", label: "Fn" },
 };
 
+const IS_MAC = navigator.platform.toLowerCase().includes("mac");
+const FIXED_HOTKEY_LABEL = "Ctrl+Shift+Space";
+
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T | null;
 
@@ -112,14 +115,38 @@ function renderSettings(settings: Settings) {
   if (autoPasteEl) autoPasteEl.checked = settings.auto_paste;
   const saveHistoryEl = $("savehistory-toggle") as HTMLInputElement | null;
   if (saveHistoryEl) saveHistoryEl.checked = settings.save_history;
-  ($("hotkey-select") as HTMLSelectElement | null)!.value = settings.hotkey;
+  const hotkeySelect = $("hotkey-select") as HTMLSelectElement | null;
+  if (hotkeySelect) {
+    if (IS_MAC) {
+      hotkeySelect.disabled = false;
+      hotkeySelect.value = settings.hotkey;
+    } else {
+      let fixed = hotkeySelect.querySelector<HTMLOptionElement>('option[value="fixed_combo"]');
+      if (!fixed) {
+        fixed = document.createElement("option");
+        fixed.value = "fixed_combo";
+        fixed.textContent = FIXED_HOTKEY_LABEL;
+        hotkeySelect.prepend(fixed);
+      }
+      hotkeySelect.value = "fixed_combo";
+      hotkeySelect.disabled = true;
+    }
+  }
 
-  const meta = HOTKEY_LABELS[settings.hotkey];
+  const meta = IS_MAC
+    ? HOTKEY_LABELS[settings.hotkey]
+    : { kbd: "Ctrl ⇧ Space", label: FIXED_HOTKEY_LABEL };
   if (meta) {
     const kbd = document.querySelector<HTMLElement>(".hotkey-pill kbd");
     if (kbd) kbd.textContent = meta.kbd;
     const label = $("hotkey-label");
     if (label) label.textContent = meta.label;
+    const hint = $("hotkey-hint");
+    if (hint) {
+      hint.textContent = IS_MAC
+        ? "Tap once to start. Tap again or stay silent to stop."
+        : "Windows and Linux currently use the fixed Ctrl+Shift+Space shortcut.";
+    }
   }
 
   document.querySelectorAll<HTMLButtonElement>(".mode-btn").forEach((btn) => {
@@ -223,6 +250,7 @@ function setupTabs() {
 function attachListeners() {
   // Hotkey
   $("hotkey-select")?.addEventListener("change", async (e) => {
+    if (!IS_MAC) return;
     const key = (e.target as HTMLSelectElement).value;
     const result = await safeInvoke("set_hotkey", { key });
     if (result !== null) await refresh();
@@ -305,10 +333,13 @@ function attachListeners() {
 
 interface SetupStatus {
   whisper_model_present: boolean;
+  whisper_loaded: boolean;
   whisper_model_path: string | null;
   ollama_running: boolean;
   ollama_model_pulled: boolean;
   ollama_model_name: string;
+  hotkey_configurable: boolean;
+  runtime_hotkey_label: string;
 }
 
 function formatBytes(n: number): string {
@@ -318,18 +349,59 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-function showSetupBanner(title: string, detail: string, actionsHTML: string) {
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
+async function setupInvoke<T = unknown>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (err) {
+    throw new Error(errorMessage(err));
+  }
+}
+
+function showSetupBanner(
+  title: string,
+  detail: string,
+  actionsHTML: string,
+  tone: "info" | "error" = "info",
+) {
   const banner = $("setup-banner")!;
   banner.hidden = false;
+  banner.classList.toggle("setup-error", tone === "error");
   $("setup-title")!.textContent = title;
   $("setup-detail")!.textContent = detail;
   const actions = $("setup-actions")!;
   actions.innerHTML = actionsHTML;
 }
 
+function showSetupFailure(title: string, detail: string, manualUrl?: string) {
+  const manual = manualUrl
+    ? `<a class="ghost-btn" href="${manualUrl}" target="_blank" rel="noreferrer">Manual install</a>`
+    : "";
+  showSetupBanner(
+    title,
+    detail,
+    `<button class="solid-btn" id="btn-retry-setup">Retry</button>${manual}`,
+    "error",
+  );
+  $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
+}
+
 function hideSetupBanner() {
   const banner = $("setup-banner")!;
   banner.hidden = true;
+  banner.classList.remove("setup-error");
   const progress = $("setup-progress")!;
   progress.hidden = true;
 }
@@ -341,20 +413,50 @@ async function refreshSetup() {
   setupRunning = true;
   try {
     await runSetup();
+  } catch (err) {
+    showSetupFailure("Setup check failed", errorMessage(err));
   } finally {
     setupRunning = false;
   }
 }
 
 async function runSetup() {
-  const status = await safeInvoke<SetupStatus>("check_setup");
-  if (!status) return;
+  const status = await setupInvoke<SetupStatus>("check_setup");
 
   // 1. Whisper — auto-download, no click needed
   if (!status.whisper_model_present) {
-    await downloadWhisper();
-    await poll(() => checkWhisperReady(), 1500, 60);
+    const downloaded = await downloadWhisper();
+    if (!downloaded) return;
+    const loaded = await poll(() => checkWhisperReady(), 1500, 60);
+    if (!loaded) {
+      showSetupFailure(
+        "Whisper did not finish loading",
+        "The model downloaded, but Zerm could not confirm it is ready in memory.",
+        "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+      );
+      return;
+    }
     await runSetup();
+    return;
+  }
+
+  if (!status.whisper_loaded) {
+    showSetupBanner(
+      "Loading Whisper model",
+      "Zerm found the model file and is loading it into memory.",
+      `<button class="ghost-btn" id="btn-retry-setup">Retry</button>`,
+    );
+    $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
+    const loaded = await poll(() => checkWhisperReady(), 1500, 40);
+    if (loaded) {
+      await runSetup();
+    } else {
+      showSetupFailure(
+        "Whisper is still not ready",
+        "The model file exists, but the backend has not reported a loaded Whisper pipeline.",
+        "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+      );
+    }
     return;
   }
 
@@ -388,8 +490,8 @@ async function runSetup() {
   //    LOCAL-only network call (ollama's /api/pull, which Ollama itself
   //    fetches from its library). Safe to kick automatically.
   if (!status.ollama_model_pulled) {
-    await autoPullModel(status.ollama_model_name);
-    await runSetup();
+    const pulled = await autoPullModel(status.ollama_model_name);
+    if (pulled) await runSetup();
     return;
   }
 
@@ -397,8 +499,8 @@ async function runSetup() {
 }
 
 async function checkWhisperReady(): Promise<boolean> {
-  const s = await safeInvoke<SetupStatus>("check_setup");
-  return !!s && s.whisper_model_present;
+  const s = await setupInvoke<SetupStatus>("check_setup");
+  return s.whisper_model_present && s.whisper_loaded;
 }
 
 async function poll<T>(
@@ -414,7 +516,7 @@ async function poll<T>(
   return null;
 }
 
-async function autoInstallOllama() {
+async function autoInstallOllama(): Promise<boolean> {
   showSetupBanner(
     "Installing Ollama",
     "Zerm is downloading the Ollama installer. You may see a system prompt — approve it.",
@@ -425,9 +527,10 @@ async function autoInstallOllama() {
   progress.hidden = false;
   label.textContent = "Downloading…";
 
+  let unlisten: (() => void) | null = null;
   try {
     const { listen: listenEvent } = await import("@tauri-apps/api/event");
-    const unlisten = await listenEvent<string>(
+    unlisten = await listenEvent<string>(
       "zerm://ollama-install-progress",
       (event) => {
         if (event.payload === "downloading") label.textContent = "Downloading installer…";
@@ -435,37 +538,37 @@ async function autoInstallOllama() {
         if (event.payload === "done") label.textContent = "Waiting for Ollama to start…";
       },
     );
-    const result = await safeInvoke("install_ollama");
-    unlisten();
+    await setupInvoke("install_ollama");
 
-    if (result !== null) {
-      // Wait up to ~2 minutes for Ollama to be running
-      showSetupBanner(
-        "Finishing Ollama install",
-        "Zerm is waiting for the Ollama service to come online…",
-        "",
-      );
-      const ok = await poll(async () => {
-        const s = await safeInvoke<SetupStatus>("check_setup");
-        return !!s && s.ollama_running;
-      }, 3000, 40);
-      if (ok) {
-        await runSetup();
-      } else {
-        showSetupBanner(
-          "Ollama didn't start automatically",
-          "Open the Ollama app manually, then click Retry.",
-          `<button class="solid-btn" id="btn-retry-setup">Retry</button>`,
-        );
-        $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
-      }
+    // Wait up to ~2 minutes for Ollama to be running
+    showSetupBanner(
+      "Finishing Ollama install",
+      "Zerm is waiting for the Ollama service to come online.",
+      "",
+    );
+    const ok = await poll(async () => {
+      const s = await setupInvoke<SetupStatus>("check_setup");
+      return s.ollama_running;
+    }, 3000, 40);
+    if (ok) {
+      await runSetup();
+      return true;
     }
+    showSetupFailure(
+      "Ollama did not start automatically",
+      "Open the Ollama app manually, then retry setup.",
+      "https://ollama.com/download",
+    );
+    return false;
   } catch (err) {
-    console.warn("ollama install failed", err);
+    showSetupFailure("Ollama install failed", errorMessage(err), "https://ollama.com/download");
+    return false;
+  } finally {
+    if (unlisten) unlisten();
   }
 }
 
-async function autoPullModel(modelName: string) {
+async function autoPullModel(modelName: string): Promise<boolean> {
   showSetupBanner(
     `Pulling ${modelName}`,
     "Zerm is pulling the language model into your local Ollama (one-time).",
@@ -478,9 +581,10 @@ async function autoPullModel(modelName: string) {
   fill.style.width = "0%";
   label.textContent = "Starting…";
 
+  let unlisten: (() => void) | null = null;
   try {
     const { listen: listenEvent } = await import("@tauri-apps/api/event");
-    const unlisten = await listenEvent<{
+    unlisten = await listenEvent<{
       status?: string;
       completed?: number;
       total?: number;
@@ -494,16 +598,24 @@ async function autoPullModel(modelName: string) {
         label.textContent = p.status;
       }
     });
-    await safeInvoke("pull_ollama_model", { model: modelName });
-    unlisten();
+    await setupInvoke("pull_ollama_model", { model: modelName });
+    return true;
   } catch (err) {
-    console.warn("ollama pull failed", err);
+    showSetupFailure(
+      `Could not pull ${modelName}`,
+      errorMessage(err),
+      `https://ollama.com/library/${encodeURIComponent(modelName.split(":")[0])}`,
+    );
+    return false;
+  } finally {
+    if (unlisten) unlisten();
   }
 }
 
-async function downloadWhisper() {
+async function downloadWhisper(): Promise<boolean> {
   const banner = $("setup-banner")!;
   banner.hidden = false;
+  banner.classList.remove("setup-error");
   $("setup-title")!.textContent = "Downloading Whisper model";
   $("setup-detail")!.textContent = "This is a one-time ~466 MB download.";
   $("setup-actions")!.innerHTML = "";
@@ -531,7 +643,7 @@ async function downloadWhisper() {
     );
     lastUnlisten = unlisten;
 
-    const path = await safeInvoke<string>("download_whisper_model");
+    const path = await setupInvoke<string>("download_whisper_model");
     if (path) {
       $("setup-title")!.textContent = "Whisper model installed";
       $("setup-detail")!.textContent = "Loading the model into memory…";
@@ -539,7 +651,16 @@ async function downloadWhisper() {
       setTimeout(() => {
         void refreshSetup();
       }, 1500);
+      return true;
     }
+    return false;
+  } catch (err) {
+    showSetupFailure(
+      "Whisper download failed",
+      errorMessage(err),
+      "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+    );
+    return false;
   } finally {
     if (lastUnlisten) lastUnlisten();
   }

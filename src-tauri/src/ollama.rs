@@ -7,24 +7,6 @@ const HEBREW_PROMPT: &str = include_str!("prompt_he.txt");
 const RUSSIAN_PROMPT: &str = include_str!("prompt_ru.txt");
 const NONLATIN_PROMPT: &str = include_str!("prompt_nonlatin.txt");
 
-const MINIMAL_CLEANUP_PROMPT: &str = "You are an extremely conservative transcript cleaner for a voice dictation. Your ONLY job is to fix obvious transcription errors and punctuation.
-
-NON-NEGOTIABLE RULES:
-- Do NOT translate. Output in the EXACT same language as the input. If the input is in Hebrew, output in Hebrew. If Russian, Russian. If Arabic, Arabic. Never switch language.
-- Do NOT change the speaker's words, replace synonyms, or paraphrase. Keep their exact word choice.
-- Do NOT add greetings, sign-offs, commentary, opinions, or anything the speaker didn't say.
-- Do NOT remove or summarise content. Length must stay roughly the same.
-- Do NOT moralise, censor, soften, or sanitise. Preserve profanity, slang, attitude, opinions.
-
-ONLY fix:
-- obvious typos and mishearings (wrong homophones, mangled proper nouns)
-- missing punctuation (commas, periods, question marks)
-- obvious repetitions (\"the the cat\", \"he he went\")
-- glaring filler words (uh, um) — only when clearly fillers, not content
-
-If you are not 100% sure something is an error, leave it exactly as-is. When in doubt, do nothing.
-
-Output the cleaned text only. No preamble. No explanation.";
 const CONVERSATIONAL_PROMPT: &str = "You are a light-touch editor for voice dictation. The speaker is dictating a casual chat message (Slack, WhatsApp, iMessage, Discord, Teams). Produce text the speaker could send as-is.
 
 PRESERVE their wording. Do NOT paraphrase, shorten, or rephrase unless the raw transcript is genuinely unreadable. Their voice is the point. Keep their hedges, their typos-of-phrasing, their slang, their rambling, their tone. Length of the output should match the length of the input.
@@ -73,8 +55,47 @@ DO NOT:
 
 Output the prose ONLY. No preamble.";
 
-const ENDPOINT: &str = "http://localhost:11434/api/generate";
-const VERSION_ENDPOINT: &str = "http://localhost:11434/api/version";
+const ENDPOINT: &str = "http://127.0.0.1:11434/api/generate";
+const VERSION_ENDPOINT: &str = "http://127.0.0.1:11434/api/version";
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn verify_listener_process() -> Result<()> {
+    let out = std::process::Command::new("lsof")
+        .args(["-nP", "-iTCP:11434", "-sTCP:LISTEN", "-Fpc"])
+        .output()
+        .context("run lsof")?;
+    if !out.status.success() {
+        anyhow::bail!("lsof exited {}", out.status);
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut pid: Option<String> = None;
+    let mut command: Option<String> = None;
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix('p') {
+            pid = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix('c') {
+            command = Some(rest.to_string());
+            break;
+        }
+    }
+
+    let command = command.ok_or_else(|| anyhow::anyhow!("no listener command found"))?;
+    if command.eq_ignore_ascii_case("ollama") {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "port 11434 is owned by '{}' (pid {:?}), not Ollama",
+        command,
+        pid
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn verify_listener_process() -> Result<()> {
+    anyhow::bail!("listener process verification is not implemented on this platform")
+}
 
 /// Verify that the process listening on localhost:11434 is actually
 /// Ollama and not some random service that bound the port first. We
@@ -98,9 +119,20 @@ pub async fn verify_identity() -> Result<String> {
     let version = body
         .get("version")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("service on 11434 did not return an Ollama-shaped /api/version response"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "service on 11434 did not return an Ollama-shaped /api/version response"
+            )
+        })?;
     if version.trim().is_empty() {
         anyhow::bail!("ollama /api/version returned an empty version string");
+    }
+    if let Err(e) = verify_listener_process() {
+        let msg = e.to_string();
+        if msg.contains("not Ollama") {
+            return Err(e).context("Ollama process identity check failed");
+        }
+        log::warn!("Ollama process identity could not be fully verified: {e:#}");
     }
     Ok(version.to_string())
 }
@@ -146,59 +178,10 @@ pub fn system_prompt_for_lang(mode: PromptMode, lang: &str) -> Option<&'static s
         "he" => Some(HEBREW_PROMPT),
         "ru" => Some(RUSSIAN_PROMPT),
         // Non-Latin scripts that don't have a bespoke prompt yet.
-        "ar" | "fa" | "ur" | "zh" | "ja" | "ko" | "th" | "hi" | "bn" | "el" | "ka" | "hy" | "am" | "ti" => {
-            Some(NONLATIN_PROMPT)
-        }
+        "ar" | "fa" | "ur" | "zh" | "ja" | "ko" | "th" | "hi" | "bn" | "el" | "ka" | "hy"
+        | "am" | "ti" => Some(NONLATIN_PROMPT),
         _ => system_prompt_for(mode),
     }
-}
-
-pub fn minimal_cleanup_prompt() -> &'static str {
-    MINIMAL_CLEANUP_PROMPT
-}
-
-pub async fn reformat_with_system(
-    model: &str,
-    transcript: &str,
-    system: &str,
-) -> Result<String> {
-    if transcript.trim().is_empty() {
-        return Ok(String::new());
-    }
-    verify_identity()
-        .await
-        .context("Ollama identity check failed — refusing to POST transcript")?;
-    let req = GenerateRequest {
-        model,
-        prompt: transcript,
-        system,
-        stream: false,
-        options: Options {
-            temperature: 0.15,
-            num_predict: 4096,
-        },
-    };
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .context("build http client")?;
-
-    let resp = client
-        .post(ENDPOINT)
-        .json(&req)
-        .send()
-        .await
-        .with_context(|| format!("post {ENDPOINT}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("ollama returned {status}: {body}");
-    }
-
-    let parsed: GenerateResponse = resp.json().await.context("parse ollama response")?;
-    Ok(parsed.response.trim().to_string())
 }
 
 pub async fn reformat(model: &str, transcript: &str, mode: PromptMode) -> Result<String> {
