@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const HISTORY_LIMIT: usize = 100;
@@ -506,7 +507,7 @@ fn default_power_profiles() -> Vec<PowerModeProfile> {
     vec![PowerModeProfile::default()]
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PillPosition {
     pub x: i32,
     pub y: i32,
@@ -522,6 +523,8 @@ pub struct PersistentState {
     pub settings: Settings,
     #[serde(default)]
     pub pill_position: Option<PillPosition>,
+    #[serde(default)]
+    pub pill_positions_by_monitor: BTreeMap<String, PillPosition>,
 }
 
 #[derive(Clone, Debug, Serialize)]

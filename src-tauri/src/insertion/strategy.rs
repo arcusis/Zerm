@@ -422,6 +422,7 @@ fn default_rules() -> Vec<AppStrategyRule> {
             "macos-browser-and-electron",
             [Platform::Macos],
             [
+                "com.apple.Safari",
                 "company.thebrowser.Browser",
                 "com.google.Chrome",
                 "com.microsoft.edgemac",

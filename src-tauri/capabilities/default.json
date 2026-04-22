@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main", "dashboard"],
-  "permissions": ["core:default", "global-shortcut:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "global-shortcut:default"
+  ]
 }

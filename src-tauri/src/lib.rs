@@ -9,13 +9,17 @@ mod whisper;
 use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 use insertion::{
@@ -67,6 +71,24 @@ const STATE_FILE: &str = "zerm-state.json";
 struct FocusIdentity {
     pid: i32,
     bundle_id: String,
+    app_name: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct CapturedPasteTarget {
+    identity: FocusIdentity,
+    #[cfg(target_os = "macos")]
+    focused_element: Option<MacAxElement>,
+    #[cfg(target_os = "macos")]
+    initial_text: Option<String>,
+    #[cfg(target_os = "macos")]
+    role: Option<String>,
+    #[cfg(target_os = "macos")]
+    subrole: Option<String>,
+    #[cfg(target_os = "macos")]
+    ax_value_readable: bool,
+    #[cfg(target_os = "macos")]
+    target_center: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Serialize)]
@@ -121,13 +143,407 @@ impl InsertionDiagnostic {
     }
 }
 
+#[derive(Clone, Debug)]
+enum TextClipboardSnapshot {
+    Text(String),
+    NonTextOrUnavailable,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct MacAxElement {
+    ptr: core_foundation::base::CFTypeRef,
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl Send for MacAxElement {}
+
+#[cfg(target_os = "macos")]
+impl Clone for MacAxElement {
+    fn clone(&self) -> Self {
+        let retained = unsafe { core_foundation::base::CFRetain(self.ptr) };
+        Self { ptr: retained }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for MacAxElement {
+    fn drop(&mut self) {
+        unsafe { core_foundation::base::CFRelease(self.ptr) };
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl MacAxElement {
+    unsafe fn from_create_rule(ptr: core_foundation::base::CFTypeRef) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(Self { ptr })
+        }
+    }
+
+    fn as_ax(&self) -> AxUiElementRef {
+        self.ptr as AxUiElementRef
+    }
+}
+
+fn native_debug_log_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        PathBuf::from(home)
+            .join("Library")
+            .join("Logs")
+            .join("Zerm")
+            .join("native-debug.log"),
+    )
+}
+
+const NATIVE_DEBUG_LOG_MAX_BYTES: u64 = 1024 * 1024;
+const NATIVE_DEBUG_LOG_ROTATED_NAME: &str = "native-debug.log.1";
+
+fn native_debug_log(message: impl AsRef<str>) {
+    static LOG_GUARD: once_cell::sync::Lazy<std::sync::Mutex<()>> =
+        once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
+
+    let Some(path) = native_debug_log_path() else {
+        return;
+    };
+    let _guard = LOG_GUARD.lock().expect("native debug log lock poisoned");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if std::fs::metadata(&path)
+        .map(|metadata| metadata.len() > NATIVE_DEBUG_LOG_MAX_BYTES)
+        .unwrap_or(false)
+    {
+        let rotated = path.with_file_name(NATIVE_DEBUG_LOG_ROTATED_NAME);
+        let _ = std::fs::remove_file(&rotated);
+        let _ = std::fs::rename(&path, rotated);
+    }
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(
+            file,
+            "[{} pid={}] {}",
+            millis,
+            std::process::id(),
+            message.as_ref()
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+struct NativePillPanel {
+    panel: usize,
+}
+
+#[cfg(target_os = "macos")]
+static NATIVE_PILL_PANEL: once_cell::sync::Lazy<std::sync::Mutex<Option<NativePillPanel>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+fn format_focus_identity(identity: Option<&FocusIdentity>) -> String {
+    match identity {
+        Some(identity) => format!(
+            "pid={} bundle_id={} app_name={}",
+            identity.pid,
+            identity.bundle_id,
+            identity.app_name.as_deref().unwrap_or("<unknown>")
+        ),
+        None => "<none>".to_string(),
+    }
+}
+
+fn current_binary_path_string() -> String {
+    std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|err| format!("<current_exe failed: {err}>"))
+}
+
+fn window_frame_string(window: &WebviewWindow) -> String {
+    let pos = window.outer_position();
+    let size = window.outer_size();
+    match (pos, size) {
+        (Ok(pos), Ok(size)) => format!(
+            "coordinate_space=tauri_physical_pixels x={} y={} width={} height={}",
+            pos.x, pos.y, size.width, size.height
+        ),
+        (pos, size) => format!("position={pos:?} size={size:?}"),
+    }
+}
+
+fn monitor_key(monitor: &Monitor) -> String {
+    let origin = monitor.position();
+    let size = monitor.size();
+    format!(
+        "name={:?};physical_origin=({},{});physical_size={}x{};scale={}",
+        monitor.name(),
+        origin.x,
+        origin.y,
+        size.width,
+        size.height,
+        monitor.scale_factor()
+    )
+}
+
+fn monitor_string(monitor: &Monitor) -> String {
+    let origin = monitor.position();
+    let size = monitor.size();
+    let scale = monitor.scale_factor();
+    format!(
+        "key=\"{}\" coordinate_space=tauri_physical_pixels origin=({}, {}) size={}x{} scale_factor={} logical_origin=({:.2}, {:.2}) logical_size={:.2}x{:.2}",
+        monitor_key(monitor),
+        origin.x,
+        origin.y,
+        size.width,
+        size.height,
+        scale,
+        origin.x as f64 / scale,
+        origin.y as f64 / scale,
+        size.width as f64 / scale,
+        size.height as f64 / scale
+    )
+}
+
+fn monitor_contains_physical_point(monitor: &Monitor, x: f64, y: f64) -> bool {
+    let origin = monitor.position();
+    let size = monitor.size();
+    x >= origin.x as f64
+        && x < (origin.x + size.width as i32) as f64
+        && y >= origin.y as f64
+        && y < (origin.y + size.height as i32) as f64
+}
+
+fn monitor_contains_logical_point(monitor: &Monitor, x: f64, y: f64) -> bool {
+    let origin = monitor.position();
+    let size = monitor.size();
+    let scale = monitor.scale_factor();
+    let min_x = origin.x as f64 / scale;
+    let min_y = origin.y as f64 / scale;
+    let max_x = min_x + size.width as f64 / scale;
+    let max_y = min_y + size.height as f64 / scale;
+    x >= min_x && x < max_x && y >= min_y && y < max_y
+}
+
+fn monitor_containing_physical_point(window: &WebviewWindow, x: f64, y: f64) -> Option<Monitor> {
+    window
+        .available_monitors()
+        .ok()?
+        .into_iter()
+        .find(|monitor| monitor_contains_physical_point(monitor, x, y))
+}
+
+fn monitor_from_logical_point(window: &WebviewWindow, x: f64, y: f64) -> Option<Monitor> {
+    window.monitor_from_point(x, y).ok().flatten().or_else(|| {
+        window
+            .available_monitors()
+            .ok()?
+            .into_iter()
+            .find(|monitor| monitor_contains_logical_point(monitor, x, y))
+    })
+}
+
+fn monitor_from_physical_point(window: &WebviewWindow, x: f64, y: f64) -> Option<Monitor> {
+    monitor_containing_physical_point(window, x, y)
+        .or_else(|| window.monitor_from_point(x, y).ok().flatten())
+}
+
+fn monitor_string_from_physical_point(window: &WebviewWindow, x: f64, y: f64) -> String {
+    let physical_match = monitor_containing_physical_point(window, x, y);
+    let normalized_api_result = physical_match.as_ref().and_then(|monitor| {
+        let scale = monitor.scale_factor();
+        window
+            .monitor_from_point(x / scale, y / scale)
+            .ok()
+            .flatten()
+    });
+
+    if let Some(monitor) = physical_match {
+        return format!(
+            "{} resolved_by=physical_pixel_bounds monitor_from_point_input=logical_points({:.2}, {:.2}) monitor_from_point_result={}",
+            monitor_string(&monitor),
+            x / monitor.scale_factor(),
+            y / monitor.scale_factor(),
+            normalized_api_result
+                .as_ref()
+                .map(monitor_key)
+                .unwrap_or_else(|| "<none>".to_string())
+        );
+    }
+
+    match window.monitor_from_point(x, y) {
+        Ok(Some(monitor)) => {
+            format!(
+                "{} resolved_by=monitor_from_point_fallback input_assumed=logical_points({x:.2}, {y:.2})",
+                monitor_string(&monitor)
+            )
+        }
+        Ok(None) => "<no monitor at physical/logical point>".to_string(),
+        Err(err) => format!("<monitor_from_point failed: {err}>"),
+    }
+}
+
+fn monitor_string_from_logical_point(window: &WebviewWindow, x: f64, y: f64) -> String {
+    match monitor_from_logical_point(window, x, y) {
+        Some(monitor) => format!(
+            "{} resolved_by=logical_point input=macos_logical_points({x:.2}, {y:.2})",
+            monitor_string(&monitor)
+        ),
+        None => "<no monitor at logical point>".to_string(),
+    }
+}
+
+fn pill_screen_string(window: &WebviewWindow) -> String {
+    match (window.outer_position(), window.outer_size()) {
+        (Ok(pos), Ok(size)) => monitor_string_from_physical_point(
+            window,
+            pos.x as f64 + size.width as f64 / 2.0,
+            pos.y as f64 + size.height as f64 / 2.0,
+        ),
+        _ => "<pill frame unavailable>".to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn class_getName(cls: *const objc2::runtime::AnyClass) -> *const std::os::raw::c_char;
+}
+
+#[cfg(target_os = "macos")]
+fn objc_class(name: &'static [u8]) -> Option<&'static objc2::runtime::AnyClass> {
+    let name = std::ffi::CStr::from_bytes_with_nul(name).ok()?;
+    objc2::runtime::AnyClass::get(name)
+}
+
+#[cfg(target_os = "macos")]
+fn appkit_class_name(obj: *mut objc2::runtime::AnyObject) -> String {
+    use objc2::msg_send;
+
+    if obj.is_null() {
+        return "<null>".to_string();
+    }
+    unsafe {
+        let cls: *const objc2::runtime::AnyClass = msg_send![obj, class];
+        if cls.is_null() {
+            return "<no class>".to_string();
+        }
+        let name = class_getName(cls);
+        if name.is_null() {
+            return "<class name unavailable>".to_string();
+        }
+        std::ffi::CStr::from_ptr(name)
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn appkit_window_debug_info(label: &str, obj: *mut objc2::runtime::AnyObject) -> String {
+    use objc2::{msg_send, sel};
+
+    if obj.is_null() {
+        return format!("{label}_window=<null>");
+    }
+    unsafe {
+        let panel_class = objc_class(b"NSPanel\0");
+        let is_panel = panel_class
+            .map(|class| msg_send![obj, isKindOfClass: class])
+            .unwrap_or(false);
+        let class_name = appkit_class_name(obj);
+        let level: i64 = msg_send![obj, level];
+        let style_mask: u64 = msg_send![obj, styleMask];
+        let collection_behavior: u64 = msg_send![obj, collectionBehavior];
+        let can_become_key: bool = msg_send![obj, canBecomeKeyWindow];
+        let can_become_main: bool = msg_send![obj, canBecomeMainWindow];
+        let is_visible: bool = msg_send![obj, isVisible];
+        let responds_to_active_space: bool =
+            msg_send![obj, respondsToSelector: sel!(isOnActiveSpace)];
+        let is_on_active_space = if responds_to_active_space {
+            let value: bool = msg_send![obj, isOnActiveSpace];
+            Some(value)
+        } else {
+            None
+        };
+        let non_activating_panel = 1 << 7;
+        let hud_window = 1 << 13;
+        let can_join_all_spaces = 1 << 0;
+        let stationary = 1 << 4;
+        let full_screen_auxiliary = 1 << 8;
+        let ignores_cycle = 1 << 6;
+        format!(
+            "{label}_window_class={} {label}_is_kind_of_NSPanel={} {label}_level={} {label}_styleMask={} {label}_nonactivating_panel_bit={} {label}_hud_window_bit={} {label}_collectionBehavior={} {label}_can_join_all_spaces={} {label}_stationary={} {label}_full_screen_auxiliary={} {label}_ignores_cycle={} {label}_canBecomeKeyWindow={} {label}_canBecomeMainWindow={} {label}_isVisible={} {label}_isOnActiveSpace={:?}",
+            class_name,
+            is_panel,
+            level,
+            style_mask,
+            (style_mask & non_activating_panel) != 0,
+            (style_mask & hud_window) != 0,
+            collection_behavior,
+            (collection_behavior & can_join_all_spaces) != 0,
+            (collection_behavior & stationary) != 0,
+            (collection_behavior & full_screen_auxiliary) != 0,
+            (collection_behavior & ignores_cycle) != 0,
+            can_become_key,
+            can_become_main,
+            is_visible,
+            is_on_active_space
+        )
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn appkit_window_frame_info(label: &str, obj: *mut objc2::runtime::AnyObject) -> String {
+    use objc2::msg_send;
+
+    if obj.is_null() {
+        return format!("{label}_frame=<null>");
+    }
+    unsafe {
+        let frame: objc2_foundation::NSRect = msg_send![obj, frame];
+        format!(
+            "{label}_frame_coordinate_space=appkit_logical_points {label}_frame_x={:.2} {label}_frame_y={:.2} {label}_frame_width={:.2} {label}_frame_height={:.2}",
+            frame.origin.x, frame.origin.y, frame.size.width, frame.size.height
+        )
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_window_debug_info(_window: &WebviewWindow) -> String {
+    "<unsupported platform>".to_string()
+}
+
+fn target_screen_string(window: &WebviewWindow, pipeline: Option<&Pipeline>) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(target) = pipeline.and_then(|state| state.paste_target.lock().as_ref().cloned())
+        else {
+            return "<no captured target>".to_string();
+        };
+        let Some((x, y)) = target.target_center else {
+            return "<captured target has no AX geometry>".to_string();
+        };
+        monitor_string_from_logical_point(window, x, y)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        let _ = pipeline;
+        "<unsupported platform>".to_string()
+    }
+}
+
 struct Pipeline {
     whisper: Arc<Mutex<Option<whisper::Whisper>>>,
     audio_buffer: Arc<Mutex<Vec<f32>>>,
     capture: Arc<Mutex<Option<audio::CaptureHandle>>>,
     recording: Arc<AtomicBool>,
     active_job_id: Arc<AtomicU64>,
-    paste_target: Arc<Mutex<Option<FocusIdentity>>>,
+    paste_target: Arc<Mutex<Option<CapturedPasteTarget>>>,
     last_insertion: Arc<Mutex<Option<InsertionDiagnostic>>>,
     tray_anchor: Arc<Mutex<Option<PhysicalPosition<f64>>>>,
     persistent: Arc<Mutex<PersistentState>>,
@@ -287,7 +703,7 @@ fn maybe_run_auto_paste_self_test() {
         std::process::exit(2);
     }
     std::thread::sleep(std::time::Duration::from_millis(250));
-    let Some(target) = frontmost_focus_identity() else {
+    let Some(target) = capture_paste_target() else {
         eprintln!("auto-paste self-test could not find a non-Zerm focused app");
         std::process::exit(3);
     };
@@ -306,6 +722,29 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
+fn snapshot_text_clipboard() -> Result<TextClipboardSnapshot> {
+    let mut clipboard = arboard::Clipboard::new()?;
+    match clipboard.get_text() {
+        Ok(text) => Ok(TextClipboardSnapshot::Text(text)),
+        Err(e) => {
+            log::info!("clipboard preservation: previous clipboard was not readable text: {e}");
+            Ok(TextClipboardSnapshot::NonTextOrUnavailable)
+        }
+    }
+}
+
+fn restore_text_clipboard(snapshot: TextClipboardSnapshot) -> Result<()> {
+    match snapshot {
+        TextClipboardSnapshot::Text(text) => copy_to_clipboard(&text),
+        TextClipboardSnapshot::NonTextOrUnavailable => {
+            log::info!(
+                "clipboard preservation: leaving output on clipboard because previous contents were not readable text"
+            );
+            Ok(())
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn frontmost_focus_identity() -> Option<FocusIdentity> {
     use objc2_app_kit::NSWorkspace;
@@ -320,11 +759,16 @@ fn frontmost_focus_identity() -> Option<FocusIdentity> {
         .bundleIdentifier()
         .map(|value| value.to_string())
         .unwrap_or_default();
+    let app_name = app.localizedName().map(|value| value.to_string());
     if pid == std::process::id() as i32 || bundle_id == "com.arcusis.zerm" {
         log::warn!("auto-paste: Zerm was focused at recording start; no external paste target");
         return None;
     }
-    Some(FocusIdentity { pid, bundle_id })
+    Some(FocusIdentity {
+        pid,
+        bundle_id,
+        app_name,
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -400,247 +844,435 @@ extern "C" {
 }
 
 #[cfg(target_os = "macos")]
-fn insert_text_via_accessibility(expected: &FocusIdentity, text: &str) -> Result<(), String> {
-    use core_foundation::base::{CFGetTypeID, CFRange, CFRelease, CFTypeID, CFTypeRef, TCFType};
-    use core_foundation::string::{CFString, CFStringRef};
-    use std::ffi::c_void;
-    use std::time::{Duration, Instant};
+type AxError = i32;
+#[cfg(target_os = "macos")]
+type AxValueRef = *const std::ffi::c_void;
+#[cfg(target_os = "macos")]
+type AxUiElementRef = *const std::ffi::c_void;
+#[cfg(target_os = "macos")]
+type AxValueType = u32;
 
-    type AXError = i32;
-    type AXValueRef = *const c_void;
-    type AXUIElementRef = *const c_void;
-    type AXValueType = u32;
-    const AX_ERROR_SUCCESS: AXError = 0;
-    const AX_VALUE_CF_RANGE_TYPE: AXValueType = 4;
+#[cfg(target_os = "macos")]
+const AX_ERROR_SUCCESS: AxError = 0;
+#[cfg(target_os = "macos")]
+const AX_VALUE_CF_RANGE_TYPE: AxValueType = 4;
+#[cfg(target_os = "macos")]
+const AX_VALUE_CGPOINT_TYPE: AxValueType = 1;
+#[cfg(target_os = "macos")]
+const AX_VALUE_CGSIZE_TYPE: AxValueType = 2;
 
-    extern "C" {
-        fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
-        fn AXUIElementCreateSystemWide() -> AXUIElementRef;
-        fn AXUIElementCopyAttributeValue(
-            element: AXUIElementRef,
-            attribute: CFStringRef,
-            value: *mut CFTypeRef,
-        ) -> AXError;
-        fn AXUIElementSetAttributeValue(
-            element: AXUIElementRef,
-            attribute: CFStringRef,
-            value: CFTypeRef,
-        ) -> AXError;
-        fn AXValueCreate(value_type: AXValueType, value: *const c_void) -> AXValueRef;
-        fn AXValueGetTypeID() -> CFTypeID;
-        fn AXValueGetType(value: AXValueRef) -> AXValueType;
-        fn AXValueGetValue(
-            value: AXValueRef,
-            value_type: AXValueType,
-            out_value: *mut c_void,
-        ) -> std::ffi::c_uchar;
-    }
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct AxPoint {
+    x: f64,
+    y: f64,
+}
 
-    unsafe fn copy_attr(element: AXUIElementRef, attr: &CFString) -> Result<CFTypeRef, AXError> {
-        let mut value: CFTypeRef = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value);
-        if err == AX_ERROR_SUCCESS && !value.is_null() {
-            Ok(value)
-        } else {
-            if !value.is_null() {
-                CFRelease(value);
-            }
-            Err(err)
-        }
-    }
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct AxSize {
+    width: f64,
+    height: f64,
+}
 
-    unsafe fn set_attr(
-        element: AXUIElementRef,
-        attr: &CFString,
-        value: CFTypeRef,
-    ) -> Result<(), AXError> {
-        let err = AXUIElementSetAttributeValue(element, attr.as_concrete_TypeRef(), value);
-        if err == AX_ERROR_SUCCESS {
-            Ok(())
-        } else {
-            Err(err)
-        }
-    }
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn AXUIElementCreateApplication(pid: i32) -> AxUiElementRef;
+    fn AXUIElementCopyAttributeValue(
+        element: AxUiElementRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: *mut core_foundation::base::CFTypeRef,
+    ) -> AxError;
+    fn AXUIElementSetAttributeValue(
+        element: AxUiElementRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: core_foundation::base::CFTypeRef,
+    ) -> AxError;
+    fn AXValueCreate(value_type: AxValueType, value: *const std::ffi::c_void) -> AxValueRef;
+    fn AXValueGetTypeID() -> core_foundation::base::CFTypeID;
+    fn AXValueGetType(value: AxValueRef) -> AxValueType;
+    fn AXValueGetValue(
+        value: AxValueRef,
+        value_type: AxValueType,
+        out_value: *mut std::ffi::c_void,
+    ) -> std::ffi::c_uchar;
+}
 
-    unsafe fn copy_string_attr(element: AXUIElementRef, attr: &CFString) -> Result<String, String> {
-        let value = copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
-        if CFGetTypeID(value) != CFString::type_id() {
-            let actual = CFGetTypeID(value);
-            CFRelease(value);
-            return Err(format!("attribute is not a string (CFTypeID {actual})"));
-        }
-        let value = CFString::wrap_under_create_rule(value as CFStringRef);
-        Ok(value.to_string())
-    }
+#[cfg(target_os = "macos")]
+fn ax_attr(name: &str) -> core_foundation::string::CFString {
+    core_foundation::string::CFString::new(name)
+}
 
-    unsafe fn copy_range_attr(element: AXUIElementRef, attr: &CFString) -> Result<CFRange, String> {
-        let value = copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
-        if CFGetTypeID(value) != AXValueGetTypeID()
-            || AXValueGetType(value as AXValueRef) != AX_VALUE_CF_RANGE_TYPE
-        {
-            let actual = CFGetTypeID(value);
-            CFRelease(value);
-            return Err(format!(
-                "attribute is not an AX CFRange (CFTypeID {actual})"
-            ));
-        }
+#[cfg(target_os = "macos")]
+unsafe fn ax_copy_attr(
+    element: AxUiElementRef,
+    attr: &core_foundation::string::CFString,
+) -> Result<core_foundation::base::CFTypeRef, AxError> {
+    use core_foundation::base::TCFType;
 
-        let mut range = CFRange {
-            location: 0,
-            length: 0,
-        };
-        let ok = AXValueGetValue(
-            value as AXValueRef,
-            AX_VALUE_CF_RANGE_TYPE,
-            &mut range as *mut CFRange as *mut c_void,
-        ) != 0;
-        CFRelease(value);
-        if ok {
-            Ok(range)
-        } else {
-            Err("could not decode AXSelectedTextRange".to_string())
-        }
-    }
-
-    fn replace_utf16_range(current: &str, range: CFRange, replacement: &str) -> Option<String> {
-        if range.location < 0 || range.length < 0 {
-            return None;
-        }
-        let mut units: Vec<u16> = current.encode_utf16().collect();
-        let start = range.location as usize;
-        let length = range.length as usize;
-        let end = start.checked_add(length)?;
-        if start > units.len() || end > units.len() {
-            return None;
-        }
-        units.splice(start..end, replacement.encode_utf16());
-        String::from_utf16(&units).ok()
-    }
-
-    unsafe fn set_cursor_after_insert(
-        element: AXUIElementRef,
-        selected_text_range_attr: &CFString,
-        start: isize,
-        inserted_text: &str,
-    ) {
-        let cursor = CFRange {
-            location: start + inserted_text.encode_utf16().count() as isize,
-            length: 0,
-        };
-        let value = AXValueCreate(
-            AX_VALUE_CF_RANGE_TYPE,
-            &cursor as *const CFRange as *const c_void,
-        );
+    let mut value: core_foundation::base::CFTypeRef = std::ptr::null();
+    let err = AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value);
+    if err == AX_ERROR_SUCCESS && !value.is_null() {
+        Ok(value)
+    } else {
         if !value.is_null() {
-            let _ = set_attr(element, selected_text_range_attr, value as CFTypeRef);
-            CFRelease(value as CFTypeRef);
+            core_foundation::base::CFRelease(value);
         }
+        Err(err)
     }
+}
 
-    unsafe fn insert_via_value(
-        element: AXUIElementRef,
-        text: &str,
-        value_attr: &CFString,
-        selected_text_range_attr: &CFString,
-    ) -> Result<(), String> {
-        let current = copy_string_attr(element, value_attr)?;
-        let range = copy_range_attr(element, selected_text_range_attr)?;
-        let next = replace_utf16_range(&current, range, text)
-            .ok_or_else(|| "selected text range is outside AXValue".to_string())?;
-        let replacement = CFString::new(&next);
-        set_attr(element, value_attr, replacement.as_CFTypeRef())
-            .map_err(|e| format!("focused element rejected AXValue update (AXError {e})"))?;
-        set_cursor_after_insert(element, selected_text_range_attr, range.location, text);
+#[cfg(target_os = "macos")]
+unsafe fn ax_set_attr(
+    element: AxUiElementRef,
+    attr: &core_foundation::string::CFString,
+    value: core_foundation::base::CFTypeRef,
+) -> Result<(), AxError> {
+    use core_foundation::base::TCFType;
+
+    let err = AXUIElementSetAttributeValue(element, attr.as_concrete_TypeRef(), value);
+    if err == AX_ERROR_SUCCESS {
         Ok(())
+    } else {
+        Err(err)
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ax_copy_string_attr(
+    element: AxUiElementRef,
+    attr: &core_foundation::string::CFString,
+) -> Result<String, String> {
+    use core_foundation::base::{CFGetTypeID, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
+
+    let value = ax_copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
+    if CFGetTypeID(value) != CFString::type_id() {
+        let actual = CFGetTypeID(value);
+        core_foundation::base::CFRelease(value);
+        return Err(format!("attribute is not a string (CFTypeID {actual})"));
+    }
+    let value = CFString::wrap_under_create_rule(value as CFStringRef);
+    Ok(value.to_string())
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ax_copy_range_attr(
+    element: AxUiElementRef,
+    attr: &core_foundation::string::CFString,
+) -> Result<core_foundation::base::CFRange, String> {
+    use core_foundation::base::CFGetTypeID;
+
+    let value = ax_copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
+    if CFGetTypeID(value) != AXValueGetTypeID()
+        || AXValueGetType(value as AxValueRef) != AX_VALUE_CF_RANGE_TYPE
+    {
+        let actual = CFGetTypeID(value);
+        core_foundation::base::CFRelease(value);
+        return Err(format!(
+            "attribute is not an AX CFRange (CFTypeID {actual})"
+        ));
     }
 
-    unsafe fn focused_from(
-        element: AXUIElementRef,
-        focused_attr: &CFString,
-    ) -> Result<CFTypeRef, AXError> {
-        copy_attr(element, focused_attr)
+    let mut range = core_foundation::base::CFRange {
+        location: 0,
+        length: 0,
+    };
+    let ok = AXValueGetValue(
+        value as AxValueRef,
+        AX_VALUE_CF_RANGE_TYPE,
+        &mut range as *mut core_foundation::base::CFRange as *mut std::ffi::c_void,
+    ) != 0;
+    core_foundation::base::CFRelease(value);
+    if ok {
+        Ok(range)
+    } else {
+        Err("could not decode AXSelectedTextRange".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ax_copy_point_attr(
+    element: AxUiElementRef,
+    attr: &core_foundation::string::CFString,
+) -> Result<AxPoint, String> {
+    use core_foundation::base::CFGetTypeID;
+
+    let value = ax_copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
+    if CFGetTypeID(value) != AXValueGetTypeID()
+        || AXValueGetType(value as AxValueRef) != AX_VALUE_CGPOINT_TYPE
+    {
+        let actual = CFGetTypeID(value);
+        core_foundation::base::CFRelease(value);
+        return Err(format!(
+            "attribute is not an AX CGPoint (CFTypeID {actual})"
+        ));
     }
 
-    let app = unsafe { AXUIElementCreateApplication(expected.pid) };
+    let mut point = AxPoint { x: 0.0, y: 0.0 };
+    let ok = AXValueGetValue(
+        value as AxValueRef,
+        AX_VALUE_CGPOINT_TYPE,
+        &mut point as *mut AxPoint as *mut std::ffi::c_void,
+    ) != 0;
+    core_foundation::base::CFRelease(value);
+    if ok {
+        Ok(point)
+    } else {
+        Err("could not decode AXPosition".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ax_copy_size_attr(
+    element: AxUiElementRef,
+    attr: &core_foundation::string::CFString,
+) -> Result<AxSize, String> {
+    use core_foundation::base::CFGetTypeID;
+
+    let value = ax_copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
+    if CFGetTypeID(value) != AXValueGetTypeID()
+        || AXValueGetType(value as AxValueRef) != AX_VALUE_CGSIZE_TYPE
+    {
+        let actual = CFGetTypeID(value);
+        core_foundation::base::CFRelease(value);
+        return Err(format!("attribute is not an AX CGSize (CFTypeID {actual})"));
+    }
+
+    let mut size = AxSize {
+        width: 0.0,
+        height: 0.0,
+    };
+    let ok = AXValueGetValue(
+        value as AxValueRef,
+        AX_VALUE_CGSIZE_TYPE,
+        &mut size as *mut AxSize as *mut std::ffi::c_void,
+    ) != 0;
+    core_foundation::base::CFRelease(value);
+    if ok {
+        Ok(size)
+    } else {
+        Err("could not decode AXSize".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn ax_target_center(element: &MacAxElement) -> Option<(f64, f64)> {
+    let position_attr = ax_attr("AXPosition");
+    let size_attr = ax_attr("AXSize");
+    let position = unsafe { ax_copy_point_attr(element.as_ax(), &position_attr).ok()? };
+    let size = unsafe { ax_copy_size_attr(element.as_ax(), &size_attr).ok()? };
+    Some((
+        position.x + (size.width / 2.0),
+        position.y + (size.height / 2.0),
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn ax_read_text(element: &MacAxElement) -> Option<String> {
+    let value_attr = ax_attr("AXValue");
+    unsafe { ax_copy_string_attr(element.as_ax(), &value_attr).ok() }
+}
+
+#[cfg(target_os = "macos")]
+fn ax_text_has_new_insert(before: Option<&str>, after: &str, inserted: &str) -> bool {
+    if inserted.is_empty() || after.is_empty() {
+        return false;
+    }
+    let before_count = before
+        .map(|value| value.matches(inserted).count())
+        .unwrap_or(0);
+    after.matches(inserted).count() > before_count
+}
+
+#[cfg(target_os = "macos")]
+fn ax_verify_inserted(
+    element: &MacAxElement,
+    before: Option<&str>,
+    inserted: &str,
+) -> Result<(), String> {
+    let after = ax_read_text(element)
+        .ok_or_else(|| "could not verify insertion because AXValue is unreadable".to_string())?;
+    let changed = before != Some(after.as_str());
+    if changed && (ax_text_has_new_insert(before, &after, inserted) || after.ends_with(inserted)) {
+        Ok(())
+    } else {
+        Err("AXValue did not contain the inserted text after insertion".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn replace_utf16_range(
+    current: &str,
+    range: core_foundation::base::CFRange,
+    replacement: &str,
+) -> Option<String> {
+    if range.location < 0 || range.length < 0 {
+        return None;
+    }
+    let mut units: Vec<u16> = current.encode_utf16().collect();
+    let start = range.location as usize;
+    let length = range.length as usize;
+    let end = start.checked_add(length)?;
+    if start > units.len() || end > units.len() {
+        return None;
+    }
+    units.splice(start..end, replacement.encode_utf16());
+    String::from_utf16(&units).ok()
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ax_set_cursor_after_insert(
+    element: AxUiElementRef,
+    selected_text_range_attr: &core_foundation::string::CFString,
+    start: isize,
+    inserted_text: &str,
+) {
+    let cursor = core_foundation::base::CFRange {
+        location: start + inserted_text.encode_utf16().count() as isize,
+        length: 0,
+    };
+    let value = AXValueCreate(
+        AX_VALUE_CF_RANGE_TYPE,
+        &cursor as *const core_foundation::base::CFRange as *const std::ffi::c_void,
+    );
+    if !value.is_null() {
+        let _ = ax_set_attr(
+            element,
+            selected_text_range_attr,
+            value as core_foundation::base::CFTypeRef,
+        );
+        core_foundation::base::CFRelease(value as core_foundation::base::CFTypeRef);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn ax_is_secure_field(role: Option<&str>, subrole: Option<&str>) -> bool {
+    role.is_some_and(|value| value.to_ascii_lowercase().contains("secure"))
+        || subrole.is_some_and(|value| value.to_ascii_lowercase().contains("secure"))
+}
+
+#[cfg(target_os = "macos")]
+fn capture_focused_ax_element(identity: &FocusIdentity) -> Option<MacAxElement> {
+    let app = unsafe { AXUIElementCreateApplication(identity.pid) };
     if app.is_null() {
-        return Err(format!(
-            "could not create accessibility element for target app pid {}",
-            expected.pid
-        ));
+        log::warn!(
+            "auto-paste: could not create AX application for pid {}",
+            identity.pid
+        );
+        return None;
     }
-    let system = unsafe { AXUIElementCreateSystemWide() };
-    if system.is_null() {
-        unsafe { CFRelease(app as CFTypeRef) };
-        return Err("could not create system accessibility element".to_string());
+    let focused_attr = ax_attr("AXFocusedUIElement");
+    let focused = unsafe { ax_copy_attr(app, &focused_attr).ok() };
+    unsafe { core_foundation::base::CFRelease(app as core_foundation::base::CFTypeRef) };
+    focused.and_then(|ptr| unsafe { MacAxElement::from_create_rule(ptr) })
+}
+
+#[cfg(target_os = "macos")]
+fn capture_paste_target() -> Option<CapturedPasteTarget> {
+    let identity = frontmost_focus_identity()?;
+    let focused_element = capture_focused_ax_element(&identity);
+    let role_attr = ax_attr("AXRole");
+    let subrole_attr = ax_attr("AXSubrole");
+    let role = focused_element
+        .as_ref()
+        .and_then(|element| unsafe { ax_copy_string_attr(element.as_ax(), &role_attr).ok() });
+    let subrole = focused_element
+        .as_ref()
+        .and_then(|element| unsafe { ax_copy_string_attr(element.as_ax(), &subrole_attr).ok() });
+    if ax_is_secure_field(role.as_deref(), subrole.as_deref()) {
+        log::warn!(
+            "auto-paste: refusing to capture secure field in {:?}",
+            identity
+        );
+        return None;
+    }
+    let initial_text = focused_element.as_ref().and_then(ax_read_text);
+    let ax_value_readable = initial_text.is_some();
+    let target_center = focused_element.as_ref().and_then(ax_target_center);
+    native_debug_log(format!(
+        "capture target={} ax_role={:?} ax_subrole={:?} focused_element_captured={} ax_value_readable={} ax_target_center={:?} ax_coordinate_space=macos_accessibility_logical_points",
+        format_focus_identity(Some(&identity)),
+        role,
+        subrole,
+        focused_element.is_some(),
+        ax_value_readable,
+        target_center
+    ));
+    log::info!(
+        "auto-paste: captured target pid={} bundle={} role={:?} subrole={:?} readable_text={}",
+        identity.pid,
+        identity.bundle_id,
+        role,
+        subrole,
+        initial_text.is_some()
+    );
+    Some(CapturedPasteTarget {
+        identity,
+        focused_element,
+        initial_text,
+        role,
+        subrole,
+        ax_value_readable,
+        target_center,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_paste_target() -> Option<CapturedPasteTarget> {
+    frontmost_focus_identity().map(|identity| CapturedPasteTarget { identity })
+}
+
+#[cfg(target_os = "macos")]
+fn insert_text_via_captured_accessibility(
+    target: &CapturedPasteTarget,
+    text: &str,
+) -> Result<(), String> {
+    use core_foundation::base::TCFType;
+
+    let element = target
+        .focused_element
+        .as_ref()
+        .ok_or_else(|| "no focused AX element was captured at recording start".to_string())?;
+    if ax_is_secure_field(target.role.as_deref(), target.subrole.as_deref()) {
+        return Err("captured target is a secure field".to_string());
     }
 
-    let focused_attr = CFString::new("AXFocusedUIElement");
-    let selected_text_attr = CFString::new("AXSelectedText");
-    let selected_text_range_attr = CFString::new("AXSelectedTextRange");
-    let value_attr = CFString::new("AXValue");
-    let replacement = CFString::new(text);
-
-    let mut last_copy_err = AX_ERROR_SUCCESS;
-    let mut focused: CFTypeRef = std::ptr::null();
-    let deadline = Instant::now() + Duration::from_millis(900);
-    while Instant::now() < deadline {
-        match unsafe { focused_from(app, &focused_attr) } {
-            Ok(value) => {
-                focused = value;
-                break;
-            }
-            Err(err) => last_copy_err = err,
-        }
-        match unsafe { focused_from(system, &focused_attr) } {
-            Ok(value) => {
-                focused = value;
-                break;
-            }
-            Err(err) => last_copy_err = err,
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-
-    unsafe {
-        CFRelease(app as CFTypeRef);
-        CFRelease(system as CFTypeRef);
-    }
-
-    if focused.is_null() {
-        return Err(format!(
-            "could not read focused accessibility element (AXError {last_copy_err})"
-        ));
-    }
+    let selected_text_attr = ax_attr("AXSelectedText");
+    let selected_text_range_attr = ax_attr("AXSelectedTextRange");
+    let value_attr = ax_attr("AXValue");
+    let replacement = core_foundation::string::CFString::new(text);
+    let before = ax_read_text(element).or_else(|| target.initial_text.clone());
 
     let selected_text_result = unsafe {
-        set_attr(
-            focused as AXUIElementRef,
+        ax_set_attr(
+            element.as_ax(),
             &selected_text_attr,
             replacement.as_CFTypeRef(),
         )
     };
     if selected_text_result.is_ok() {
-        unsafe { CFRelease(focused) };
-        return Ok(());
+        return direct_ax_success_or_verify(target, element, before.as_deref(), text);
     }
 
-    let value_result = unsafe {
-        insert_via_value(
-            focused as AXUIElementRef,
-            text,
-            &value_attr,
+    let current = unsafe { ax_copy_string_attr(element.as_ax(), &value_attr)? };
+    let range = unsafe { ax_copy_range_attr(element.as_ax(), &selected_text_range_attr)? };
+    let next = replace_utf16_range(&current, range, text)
+        .ok_or_else(|| "selected text range is outside AXValue".to_string())?;
+    let replacement = core_foundation::string::CFString::new(&next);
+    unsafe {
+        ax_set_attr(element.as_ax(), &value_attr, replacement.as_CFTypeRef())
+            .map_err(|e| format!("captured element rejected AXValue update (AXError {e})"))?;
+        ax_set_cursor_after_insert(
+            element.as_ax(),
             &selected_text_range_attr,
-        )
-    };
-    unsafe { CFRelease(focused) };
-
-    match value_result {
-        Ok(()) => Ok(()),
-        Err(value_err) => Err(format!(
-            "focused element rejected direct text insertion (AXSelectedText AXError {}, AXValue fallback: {value_err})",
-            selected_text_result.err().unwrap_or_default()
-        )),
+            range.location,
+            text,
+        );
     }
+    direct_ax_success_or_verify(target, element, Some(&current), text)
 }
 
 fn auto_paste_permission_message() -> String {
@@ -837,7 +1469,10 @@ fn input_permission_status() -> InputPermissionStatus {
 
 #[cfg(target_os = "macos")]
 fn focus_is_target(expected: &FocusIdentity) -> bool {
-    matches!(frontmost_focus_identity(), Some(current) if &current == expected)
+    matches!(
+        frontmost_focus_identity(),
+        Some(current) if current.pid == expected.pid && current.bundle_id == expected.bundle_id
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -898,6 +1533,9 @@ fn send_paste_via_core_graphics() -> bool {
         Ok(source) => source,
         Err(()) => {
             log::warn!("auto-paste: could not create CoreGraphics event source");
+            native_debug_log(
+                "paste Cmd+V CoreGraphics sent=false error=\"could not create event source\"",
+            );
             return false;
         }
     };
@@ -907,6 +1545,9 @@ fn send_paste_via_core_graphics() -> bool {
         Ok(event) => event,
         Err(()) => {
             log::warn!("auto-paste: could not create Cmd+V key-down event");
+            native_debug_log(
+                "paste Cmd+V CoreGraphics sent=false error=\"could not create key-down event\"",
+            );
             return false;
         }
     };
@@ -914,6 +1555,9 @@ fn send_paste_via_core_graphics() -> bool {
         Ok(event) => event,
         Err(()) => {
             log::warn!("auto-paste: could not create Cmd+V key-up event");
+            native_debug_log(
+                "paste Cmd+V CoreGraphics sent=false error=\"could not create key-up event\"",
+            );
             return false;
         }
     };
@@ -924,6 +1568,7 @@ fn send_paste_via_core_graphics() -> bool {
     key_down.post(CGEventTapLocation::HID);
     std::thread::sleep(Duration::from_millis(20));
     key_up.post(CGEventTapLocation::HID);
+    native_debug_log("paste Cmd+V CoreGraphics sent=true");
     true
 }
 
@@ -934,17 +1579,31 @@ fn send_paste_via_system_events() -> bool {
         .args(["-e", script])
         .output()
     {
-        Ok(out) if out.status.success() => true,
+        Ok(out) if out.status.success() => {
+            native_debug_log("paste Cmd+V SystemEvents sent=true");
+            true
+        }
         Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
             log::warn!(
                 "auto-paste: System Events paste failed: {}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+                stdout,
+                stderr
             );
+            native_debug_log(format!(
+                "paste Cmd+V SystemEvents sent=false status={:?} stdout={:?} stderr={:?}",
+                out.status.code(),
+                stdout,
+                stderr
+            ));
             false
         }
         Err(e) => {
             log::warn!("auto-paste: failed to launch System Events paste: {e}");
+            native_debug_log(format!(
+                "paste Cmd+V SystemEvents sent=false launch_error={e}"
+            ));
             false
         }
     }
@@ -966,42 +1625,145 @@ fn insertion_plan_for_target(expected: &FocusIdentity, text: &str) -> InsertionP
 #[cfg(target_os = "macos")]
 fn execute_macos_insertion_strategy(
     strategy: InsertionStrategy,
-    expected: &FocusIdentity,
+    target: &CapturedPasteTarget,
     text: &str,
 ) -> Result<(), String> {
     match strategy {
         InsertionStrategy::MacAccessibilityFocusedValue
         | InsertionStrategy::MacAccessibilitySelectedText => {
-            insert_text_via_accessibility(expected, text)
+            insert_text_via_captured_accessibility(target, text)
         }
         InsertionStrategy::MacClipboardKeystroke => {
-            if send_paste_via_core_graphics() {
-                Ok(())
-            } else {
-                Err("CoreGraphics Cmd+V event post failed".to_string())
-            }
+            verified_clipboard_paste_to_captured_target(target, text, send_paste_via_core_graphics)
         }
         InsertionStrategy::MacSystemEventsKeystroke => {
-            if send_paste_via_system_events() {
-                Ok(())
-            } else {
-                Err("System Events Cmd+V fallback failed".to_string())
-            }
+            verified_clipboard_paste_to_captured_target(target, text, send_paste_via_system_events)
         }
         other => Err(format!("strategy {other:?} is not implemented on macOS")),
     }
 }
 
 #[cfg(target_os = "macos")]
+fn verified_clipboard_paste_to_captured_target(
+    target: &CapturedPasteTarget,
+    text: &str,
+    paste: fn() -> bool,
+) -> Result<(), String> {
+    use std::time::{Duration, Instant};
+
+    let element = target.focused_element.as_ref();
+    let before = element
+        .and_then(ax_read_text)
+        .or_else(|| target.initial_text.clone());
+    if !paste() {
+        return Err("paste event could not be posted".to_string());
+    }
+
+    if let Some(element) = element {
+        let deadline = Instant::now() + Duration::from_millis(1_800);
+        while Instant::now() < deadline {
+            if let Some(after) = ax_read_text(element) {
+                if ax_text_has_new_insert(before.as_deref(), &after, text) {
+                    return Ok(());
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    if macos_target_has_known_clipboard_paste(&target.identity) {
+        std::thread::sleep(Duration::from_millis(500));
+        if focus_is_target(&target.identity) {
+            log::info!(
+                "auto-paste: accepting clipboard paste for known macOS target {} after focus stayed on captured app",
+                target.identity.bundle_id
+            );
+            return Ok(());
+        }
+        return Err(
+            "paste event was posted but focus left the captured target before confirmation"
+                .to_string(),
+        );
+    }
+
+    Err(
+        "paste event was posted but the captured AX element did not contain the inserted text"
+            .to_string(),
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_target_has_known_clipboard_paste(identity: &FocusIdentity) -> bool {
+    matches!(
+        identity.bundle_id.as_str(),
+        "com.apple.Safari"
+            | "company.thebrowser.Browser"
+            | "com.google.Chrome"
+            | "com.microsoft.edgemac"
+            | "com.brave.Browser"
+            | "com.tinyspeck.slackmacgap"
+            | "com.hnc.Discord"
+            | "com.microsoft.VSCode"
+            | "com.todesktop.230313mzl4w4u92"
+            | "com.apple.Terminal"
+            | "com.googlecode.iterm2"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_target_is_direct_ax_class(identity: &FocusIdentity) -> bool {
+    matches!(
+        identity.bundle_id.as_str(),
+        "com.apple.TextEdit" | "com.apple.Notes" | "com.apple.mail" | "com.apple.iWork.Pages"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn direct_ax_success_or_verify(
+    target: &CapturedPasteTarget,
+    element: &MacAxElement,
+    before: Option<&str>,
+    inserted: &str,
+) -> Result<(), String> {
+    match ax_verify_inserted(element, before, inserted) {
+        Ok(()) => Ok(()),
+        Err(err) if macos_target_is_direct_ax_class(&target.identity) => {
+            log::info!(
+                "auto-paste: accepting direct AX insertion for known native target {} after AX set succeeded but verification was limited: {}",
+                target.identity.bundle_id,
+                err
+            );
+            Ok(())
+        }
+        Err(err) => Err(format!(
+            "direct insertion was accepted but could not be verified; refusing paste fallback to avoid duplicate text ({err})"
+        )),
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn send_paste_to_target(
-    expected: FocusIdentity,
+    target: CapturedPasteTarget,
     text: &str,
 ) -> Result<InsertionDiagnostic, String> {
     if !auto_paste_is_ready() {
+        native_debug_log(format!(
+            "paste aborted AXIsProcessTrusted=false target={}",
+            format_focus_identity(Some(&target.identity))
+        ));
         return Err(auto_paste_permission_message());
     }
 
-    let plan = insertion_plan_for_target(&expected, text);
+    let plan = insertion_plan_for_target(&target.identity, text);
+    native_debug_log(format!(
+        "paste plan target={} captured_ax_role={:?} captured_ax_subrole={:?} captured_ax_value_readable={} chosen_insertion_strategies={:?} unavailable_reason={:?}",
+        format_focus_identity(Some(&target.identity)),
+        target.role.as_deref(),
+        target.subrole.as_deref(),
+        target.ax_value_readable,
+        plan.strategies,
+        plan.unavailable_reason
+    ));
     if !plan.available() {
         return Err(format!(
             "Auto-paste could not choose an insertion strategy: {:?}",
@@ -1009,39 +1771,68 @@ fn send_paste_to_target(
         ));
     }
 
-    if !activate_paste_target(&expected) {
+    if !activate_paste_target(&target.identity) {
+        native_debug_log(format!(
+            "paste focus_restore_failed target={} frontmost_before_paste={}",
+            format_focus_identity(Some(&target.identity)),
+            format_focus_identity(frontmost_focus_identity().as_ref())
+        ));
         return Err(format!(
             "Auto-paste could not refocus the app that was active when recording started ({:?}).",
-            expected
+            target.identity
         ));
     }
 
     let mut failures = Vec::new();
     for strategy in plan.strategies {
-        match execute_macos_insertion_strategy(strategy, &expected, text) {
+        native_debug_log(format!(
+            "paste strategy begin strategy={strategy:?} target={} frontmost_immediately_before_paste={}",
+            format_focus_identity(Some(&target.identity)),
+            format_focus_identity(frontmost_focus_identity().as_ref())
+        ));
+        match execute_macos_insertion_strategy(strategy, &target, text) {
             Ok(()) => {
-                log::info!("auto-paste inserted with strategy {strategy:?}");
+                log::info!("auto-paste strategy {strategy:?} completed");
+                native_debug_log(format!(
+                    "paste strategy success strategy={strategy:?} target={} frontmost_immediately_after_paste={}",
+                    format_focus_identity(Some(&target.identity)),
+                    format_focus_identity(frontmost_focus_identity().as_ref())
+                ));
                 return Ok(InsertionDiagnostic::pasted(
-                    &expected,
+                    &target.identity,
                     format!("{strategy:?}"),
                 ));
             }
             Err(e) => {
                 log::warn!("auto-paste strategy {strategy:?} failed: {e}");
+                native_debug_log(format!(
+                    "paste strategy failure strategy={strategy:?} target={} error={e} frontmost_immediately_after_paste={}",
+                    format_focus_identity(Some(&target.identity)),
+                    format_focus_identity(frontmost_focus_identity().as_ref())
+                ));
+                if e.contains("refusing paste fallback") {
+                    return Err(e);
+                }
                 failures.push(format!("{strategy:?}: {e}"));
             }
         }
     }
 
-    Err(format!(
+    let message = format!(
         "Auto-paste failed after trying planned strategies. {}",
         failures.join(" | ")
-    ))
+    );
+    native_debug_log(format!(
+        "paste failed target={} failures={failures:?} frontmost_immediately_after_paste={}",
+        format_focus_identity(Some(&target.identity)),
+        format_focus_identity(frontmost_focus_identity().as_ref())
+    ));
+    Err(message)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn send_paste_to_target(
-    _expected: FocusIdentity,
+    _target: CapturedPasteTarget,
     _text: &str,
 ) -> Result<InsertionDiagnostic, String> {
     // TODO: cross-platform keystroke synthesis (Win: SendInput; Linux: xdotool/wtype)
@@ -1066,38 +1857,362 @@ fn show_pill(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    let pipeline = app
+        .try_state::<Arc<Pipeline>>()
+        .map(|state| state.inner().clone());
     let dispatch_window = window.clone();
     let pill_window = window.clone();
+    let dispatch_pipeline = pipeline.clone();
     if let Err(e) = dispatch_window.run_on_main_thread(move || {
-        present_pill_window(&pill_window);
+        present_pill_window(&pill_window, dispatch_pipeline.as_deref());
     }) {
         log::warn!("pill: could not dispatch presentation to main thread: {e:#}");
-        present_pill_window(&window);
+        present_pill_window(&window, pipeline.as_deref());
     }
 }
 
-fn present_pill_window(window: &WebviewWindow) {
+fn raise_pill(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let dispatch_window = window.clone();
+    let pill_window = window.clone();
+    if let Err(e) = dispatch_window.run_on_main_thread(move || {
+        #[cfg(target_os = "macos")]
+        {
+            raise_native_pill_panel(&pill_window);
+        }
+        #[cfg(not(target_os = "macos"))]
+        raise_pill_window(&pill_window);
+    }) {
+        log::warn!("pill: could not dispatch raise to main thread: {e:#}");
+        #[cfg(target_os = "macos")]
+        {
+            raise_native_pill_panel(&window);
+        }
+        #[cfg(not(target_os = "macos"))]
+        raise_pill_window(&window);
+    }
+}
+
+fn present_pill_window(window: &WebviewWindow, pipeline: Option<&Pipeline>) {
+    native_debug_log(format!(
+        "pill show begin window_frame_before_show=\"{}\" frontmost_before_showing_pill={}",
+        window_frame_string(window),
+        format_focus_identity(frontmost_focus_identity().as_ref())
+    ));
+    position_pill_if_needed(window, pipeline);
+    #[cfg(target_os = "macos")]
+    {
+        present_native_pill_panel(window);
+        native_debug_log(format!(
+            "pill show end window_frame_after_show=\"{}\" frontmost_after_showing_pill={} target_screen=\"{}\" pill_screen=\"{}\" macos_visible_overlay=native_NSPanel",
+            window_frame_string(window),
+            format_focus_identity(frontmost_focus_identity().as_ref()),
+            target_screen_string(window, pipeline),
+            pill_screen_string(window)
+        ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        raise_pill_window(window);
+        let _ = window.show();
+        raise_pill_window(window);
+        native_debug_log(format!(
+        "pill show end window_frame_after_show=\"{}\" frontmost_after_showing_pill={} target_screen=\"{}\" pill_screen=\"{}\" {}",
+        window_frame_string(window),
+        format_focus_identity(frontmost_focus_identity().as_ref()),
+        target_screen_string(window, pipeline),
+        pill_screen_string(window),
+        macos_window_debug_info(window)
+    ));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn raise_pill_window(window: &WebviewWindow) {
     let _ = window.set_visible_on_all_workspaces(true);
     let _ = window.set_always_on_top(true);
-    configure_pill_window(window);
-    if let Some(pos) = pill_position_for_active_screen(window) {
-        let _ = window.set_position(tauri::Position::Physical(PhysicalPosition {
-            x: pos.x,
-            y: pos.y,
-        }));
-    }
-    let _ = window.show();
     configure_pill_window(window);
     order_pill_front(window);
 }
 
-fn pill_position_for_active_screen(window: &WebviewWindow) -> Option<PillPosition> {
-    let cursor = window.cursor_position().ok();
-    let monitor = cursor
-        .and_then(|pos| window.monitor_from_point(pos.x, pos.y).ok().flatten())
-        .or_else(|| window.current_monitor().ok().flatten())
-        .or_else(|| window.primary_monitor().ok().flatten())?;
+#[cfg(target_os = "macos")]
+fn configure_native_pill_panel(panel: *mut objc2::runtime::AnyObject) {
+    use objc2::msg_send;
 
+    if panel.is_null() {
+        return;
+    }
+    unsafe {
+        let collection_behavior: u64 = (1 << 0) | (1 << 3) | (1 << 4) | (1 << 6) | (1 << 8);
+        let overlay_window_level: i64 = 1000;
+        let _: () = msg_send![panel, setCollectionBehavior: collection_behavior];
+        let _: () = msg_send![panel, setLevel: overlay_window_level];
+        let _: () = msg_send![panel, setHidesOnDeactivate: false];
+        let _: () = msg_send![panel, setCanHide: false];
+        let _: () = msg_send![panel, setMovable: true];
+        let _: () = msg_send![panel, setMovableByWindowBackground: true];
+        let _: () = msg_send![panel, setReleasedWhenClosed: false];
+        let _: () = msg_send![panel, setOpaque: false];
+        if let Some(color_class) = objc_class(b"NSColor\0") {
+            let clear_color: *mut objc2::runtime::AnyObject = msg_send![color_class, clearColor];
+            let _: () = msg_send![panel, setBackgroundColor: clear_color];
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_pill_panel_for_window(window: &WebviewWindow) -> Option<*mut objc2::runtime::AnyObject> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    if let Some(existing) = *NATIVE_PILL_PANEL
+        .lock()
+        .expect("native pill panel lock poisoned")
+    {
+        return Some(existing.panel as *mut AnyObject);
+    }
+
+    let source = window.ns_window().ok()?;
+    if source.is_null() {
+        return None;
+    }
+    let source_window: *mut AnyObject = source.cast();
+    let panel_class = objc_class(b"NSPanel\0")?;
+
+    unsafe {
+        let frame: objc2_foundation::NSRect = msg_send![source_window, frame];
+        let style_mask: u64 = (1 << 7) | (1 << 13);
+        let panel_alloc: *mut AnyObject = msg_send![panel_class, alloc];
+        if panel_alloc.is_null() {
+            return None;
+        }
+        let panel: *mut AnyObject = msg_send![
+            panel_alloc,
+            initWithContentRect: frame,
+            styleMask: style_mask,
+            backing: 2_u64,
+            defer: false
+        ];
+        if panel.is_null() {
+            return None;
+        }
+
+        configure_native_pill_panel(panel);
+
+        let content_view: *mut AnyObject = msg_send![source_window, contentView];
+        if !content_view.is_null() {
+            let _: () = msg_send![panel, setContentView: content_view];
+            native_debug_log("native pill panel reparented Tauri webview contentView into NSPanel");
+        } else {
+            native_debug_log(
+                "native pill panel created without Tauri contentView; source contentView was null",
+            );
+        }
+
+        *NATIVE_PILL_PANEL
+            .lock()
+            .expect("native pill panel lock poisoned") = Some(NativePillPanel {
+            panel: panel as usize,
+        });
+        native_debug_log(format!(
+            "native pill panel created {} {} source_window=\"{}\" source_frame=\"{}\"",
+            appkit_window_debug_info("native_panel", panel),
+            appkit_window_frame_info("native_panel", panel),
+            appkit_window_debug_info("tauri_source", source_window),
+            appkit_window_frame_info("tauri_source", source_window)
+        ));
+        Some(panel)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn present_native_pill_panel(window: &WebviewWindow) {
+    use objc2::msg_send;
+
+    let Some(panel) = native_pill_panel_for_window(window) else {
+        native_debug_log("native pill panel show failed; could not create NSPanel");
+        return;
+    };
+    native_debug_log("native pill panel show step=sync_frame_skipped reason=\"panel created at positioned source frame; setFrame crashed AppKit runtime\"");
+    native_debug_log("native pill panel show step=configure_begin");
+    configure_native_pill_panel(panel);
+    native_debug_log("native pill panel show step=configure_end");
+    native_debug_log("native pill panel show step=order_front_begin");
+    unsafe {
+        let _: () = msg_send![panel, orderFrontRegardless];
+    }
+    native_debug_log("native pill panel show step=order_front_end");
+    native_debug_log("native pill panel show step=source_order_out_skipped reason=\"orderOut crashed after webview reparent\"");
+    native_debug_log(format!(
+        "native pill panel show step=complete visible_overlay=native_NSPanel {} {}",
+        appkit_window_debug_info("native_panel", panel),
+        appkit_window_frame_info("native_panel", panel)
+    ));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn present_native_pill_panel(_window: &WebviewWindow) {}
+
+#[cfg(target_os = "macos")]
+fn raise_native_pill_panel(window: &WebviewWindow) {
+    use objc2::msg_send;
+
+    let Some(panel) = native_pill_panel_for_window(window) else {
+        return;
+    };
+    native_debug_log("native pill panel raise step=sync_frame_skipped reason=\"panel created at positioned source frame; setFrame crashed AppKit runtime\"");
+    configure_native_pill_panel(panel);
+    unsafe {
+        let _: () = msg_send![panel, orderFrontRegardless];
+    }
+    native_debug_log(format!(
+        "native pill panel raise {} {}",
+        appkit_window_debug_info("native_panel", panel),
+        appkit_window_frame_info("native_panel", panel)
+    ));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn raise_native_pill_panel(_window: &WebviewWindow) {}
+
+#[cfg(target_os = "macos")]
+fn hide_native_pill_panel() {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Some(panel) = *NATIVE_PILL_PANEL
+        .lock()
+        .expect("native pill panel lock poisoned")
+    else {
+        return;
+    };
+    let panel = panel.panel as *mut AnyObject;
+    unsafe {
+        let _: () = msg_send![panel, orderOut: std::ptr::null_mut::<AnyObject>()];
+    }
+    native_debug_log(format!(
+        "native pill panel hide {} {}",
+        appkit_window_debug_info("native_panel", panel),
+        appkit_window_frame_info("native_panel", panel)
+    ));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_native_pill_panel() {}
+
+fn position_pill_if_needed(window: &WebviewWindow, pipeline: Option<&Pipeline>) {
+    let Some(target_monitor) = pill_target_monitor(window, pipeline) else {
+        native_debug_log("pill position set_position_called=false skipped_reason=\"no target/current/primary monitor available\"");
+        return;
+    };
+    let target_monitor_key = monitor_key(&target_monitor);
+    let (legacy_saved, per_monitor_saved) = pipeline
+        .map(|state| {
+            let persistent = state.persistent.lock();
+            (
+                persistent.pill_position,
+                persistent
+                    .pill_positions_by_monitor
+                    .get(&target_monitor_key)
+                    .copied(),
+            )
+        })
+        .unwrap_or((None, None));
+
+    let (pos, reason) = if let Some(saved) =
+        per_monitor_saved.filter(|pos| pill_position_is_visible_on_monitor(*pos, &target_monitor))
+    {
+        (saved, "saved position for focused target monitor")
+    } else if let Some(saved) =
+        legacy_saved.filter(|pos| pill_position_is_visible_on_monitor(*pos, &target_monitor))
+    {
+        (
+            saved,
+            "legacy saved position belongs to focused target monitor",
+        )
+    } else {
+        (
+            default_pill_position_for_monitor(&target_monitor),
+            "no valid saved position for focused target monitor",
+        )
+    };
+
+    let pos = clamp_pill_position_to_monitor(pos, &target_monitor);
+    if current_pill_position(window) == Some(pos) {
+        native_debug_log(format!(
+            "pill position set_position_called=false skipped_reason=\"already at desired position\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels",
+            monitor_string(&target_monitor)
+        ));
+    } else {
+        let result = window.set_position(tauri::Position::Physical(PhysicalPosition {
+            x: pos.x,
+            y: pos.y,
+        }));
+        native_debug_log(format!(
+            "pill position set_position_called=true reason=\"{reason}\" target_monitor=\"{}\" requested_position={pos:?} coordinate_space=tauri_physical_pixels saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} result={result:?}",
+            monitor_string(&target_monitor)
+        ));
+    }
+}
+
+fn current_pill_position(window: &WebviewWindow) -> Option<PillPosition> {
+    let pos = window.outer_position().ok()?;
+    Some(PillPosition { x: pos.x, y: pos.y })
+}
+
+fn pill_target_monitor(window: &WebviewWindow, pipeline: Option<&Pipeline>) -> Option<Monitor> {
+    #[cfg(target_os = "macos")]
+    if let Some((x, y)) = pipeline.and_then(|state| {
+        state
+            .paste_target
+            .lock()
+            .as_ref()
+            .and_then(|target| target.target_center)
+    }) {
+        if let Some(monitor) = monitor_from_logical_point(window, x, y) {
+            native_debug_log(format!(
+                "pill target monitor source=captured_AX_target coordinate_space=macos_logical_points point=({x:.2}, {y:.2}) monitor=\"{}\"",
+                monitor_string(&monitor)
+            ));
+            return Some(monitor);
+        }
+        native_debug_log(format!(
+            "pill target monitor source=captured_AX_target coordinate_space=macos_logical_points point=({x:.2}, {y:.2}) monitor=<none>"
+        ));
+    }
+
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+}
+
+fn pill_position_is_visible_on_monitor(pos: PillPosition, monitor: &Monitor) -> bool {
+    let origin = monitor.position();
+    let size = monitor.size();
+    let max_x = origin.x + size.width as i32;
+    let max_y = origin.y + size.height as i32;
+    pos.x + PILL_WIDTH > origin.x
+        && pos.x < max_x
+        && pos.y + PILL_HEIGHT > origin.y
+        && pos.y < max_y
+}
+
+fn pill_position_is_visible(window: &WebviewWindow, pos: PillPosition) -> bool {
+    let Ok(monitors) = window.available_monitors() else {
+        return false;
+    };
+
+    monitors
+        .iter()
+        .any(|monitor| pill_position_is_visible_on_monitor(pos, monitor))
+}
+
+fn default_pill_position_for_monitor(monitor: &Monitor) -> PillPosition {
     let origin = monitor.position();
     let size = monitor.size();
     let min_x = origin.x;
@@ -1105,10 +2220,21 @@ fn pill_position_for_active_screen(window: &WebviewWindow) -> Option<PillPositio
     let max_x = (origin.x + size.width as i32 - PILL_WIDTH).max(min_x);
     let max_y = (origin.y + size.height as i32 - PILL_HEIGHT).max(min_y);
 
-    Some(PillPosition {
+    PillPosition {
         x: (min_x + ((size.width as i32 - PILL_WIDTH) / 2).max(0)).clamp(min_x, max_x),
         y: (min_y + 28.min((size.height as i32 - PILL_HEIGHT).max(0))).clamp(min_y, max_y),
-    })
+    }
+}
+
+fn clamp_pill_position_to_monitor(pos: PillPosition, monitor: &Monitor) -> PillPosition {
+    let origin = monitor.position();
+    let size = monitor.size();
+    let max_x = (origin.x + size.width as i32 - PILL_WIDTH).max(origin.x);
+    let max_y = (origin.y + size.height as i32 - PILL_HEIGHT).max(origin.y);
+    PillPosition {
+        x: pos.x.clamp(origin.x, max_x),
+        y: pos.y.clamp(origin.y, max_y),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1123,16 +2249,8 @@ fn configure_pill_window(window: &WebviewWindow) {
     }
     unsafe {
         let obj: *mut AnyObject = ptr.cast();
-        // A normal Tauri NSWindow can be "shown" while still being occluded by
-        // a macOS full-screen Space. The critical flag is FullScreenAuxiliary;
-        // CanJoinAllApplications is mutually exclusive with it and does not
-        // make this HUD visible over full-screen apps.
-        let collection_behavior: u64 = (1 << 0) | (1 << 3) | (1 << 4) | (1 << 6) | (1 << 8);
-        let overlay_window_level: i64 = 102;
-        let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
-        let _: () = msg_send![obj, setLevel: overlay_window_level];
-        let _: () = msg_send![obj, setHidesOnDeactivate: false];
-        let _: () = msg_send![obj, setCanHide: false];
+        // The visible macOS pill is a real NSPanel. Keep the Tauri NSWindow as
+        // the hidden webview/event host; do not try to convert it into a panel.
         let _: () = msg_send![obj, setMovable: true];
         let _: () = msg_send![obj, setMovableByWindowBackground: true];
     }
@@ -1141,26 +2259,11 @@ fn configure_pill_window(window: &WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 fn configure_pill_window(_window: &WebviewWindow) {}
 
-#[cfg(target_os = "macos")]
-fn order_pill_front(window: &WebviewWindow) {
-    use objc2::msg_send;
-    use objc2::runtime::AnyObject;
-    let Ok(ptr) = window.ns_window() else {
-        return;
-    };
-    if ptr.is_null() {
-        return;
-    }
-    unsafe {
-        let obj: *mut AnyObject = ptr.cast();
-        let _: () = msg_send![obj, orderFrontRegardless];
-    }
-}
-
 #[cfg(not(target_os = "macos"))]
 fn order_pill_front(_window: &WebviewWindow) {}
 
 fn hide_pill(app: &AppHandle) {
+    hide_native_pill_panel();
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -1218,7 +2321,27 @@ fn handle_toggle(app: &AppHandle, pipeline: &Pipeline) {
 }
 
 fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
+    let frontmost_before_press = frontmost_focus_identity();
+    native_debug_log(format!(
+        "recording cycle begin app_bundle_id={} binary_path=\"{}\" AXIsProcessTrusted={} frontmost_app_before_hotkey_press={} frontmost_app_before_showing_pill={}",
+        app.config().identifier.as_str(),
+        current_binary_path_string(),
+        accessibility_is_trusted(),
+        format_focus_identity(frontmost_before_press.as_ref()),
+        format_focus_identity(frontmost_focus_identity().as_ref())
+    ));
+    let target_at_press = capture_paste_target();
+    if target_at_press.is_none() {
+        native_debug_log(
+            "capture target=<none> focused_element_captured=false ax_value_readable=false",
+        );
+    }
+    *pipeline.paste_target.lock() = target_at_press.clone();
     show_pill(app);
+    native_debug_log(format!(
+        "recording cycle after_showing_pill frontmost_app_after_showing_pill={}",
+        format_focus_identity(frontmost_focus_identity().as_ref())
+    ));
     if pipeline.whisper.lock().is_none() {
         pipeline.recording.store(false, Ordering::SeqCst);
         emit_error(
@@ -1238,7 +2361,6 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
     let job_id = NEXT_JOB_ID.fetch_add(1, Ordering::SeqCst);
     CURRENT_JOB_ID.store(job_id, Ordering::SeqCst);
     pipeline.active_job_id.store(job_id, Ordering::SeqCst);
-    *pipeline.paste_target.lock() = frontmost_focus_identity();
 
     let vad_enabled = pipeline.persistent.lock().settings.vad_enabled;
     let app_for_stop = app.clone();
@@ -1275,7 +2397,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
                     interval.tick().await;
                     ticks = ticks.wrapping_add(1);
                     if ticks.is_multiple_of(30) {
-                        show_pill(&app_for_level);
+                        raise_pill(&app_for_level);
                     }
                     let lvl = *level.lock();
                     let _ = app_for_level.emit(AUDIO_LEVEL_EVENT, lvl);
@@ -1490,12 +2612,6 @@ async fn process(
         return Ok(());
     }
 
-    copy_to_clipboard(&output)
-        .map_err(|e| anyhow!("clipboard write failed; skipping auto-paste/history/done: {e:#}"))?;
-    pipeline.set_last_insertion(InsertionDiagnostic::copied(
-        "Transcript output was copied to the clipboard.",
-    ));
-
     let (auto_paste, save_history) = app
         .try_state::<Arc<Pipeline>>()
         .map(|s| {
@@ -1503,6 +2619,20 @@ async fn process(
             (p.settings.auto_paste, p.settings.save_history)
         })
         .unwrap_or((false, true));
+
+    let clipboard_snapshot = if auto_paste && !output.is_empty() {
+        Some(snapshot_text_clipboard().map_err(|e| {
+            anyhow!("clipboard snapshot failed; skipping auto-paste/history/done: {e:#}")
+        })?)
+    } else {
+        None
+    };
+
+    copy_to_clipboard(&output)
+        .map_err(|e| anyhow!("clipboard write failed; skipping auto-paste/history/done: {e:#}"))?;
+    pipeline.set_last_insertion(InsertionDiagnostic::copied(
+        "Transcript output was copied to the clipboard.",
+    ));
 
     let mut pasted = false;
     let mut paste_failed_message: Option<String> = None;
@@ -1524,20 +2654,29 @@ async fn process(
                 let output_for_paste = output.clone();
                 let app_for_paste = app.clone();
                 match tauri::async_runtime::spawn_blocking(move || {
-                    let expected = captured_target
-                        .or_else(frontmost_focus_identity)
-                        .ok_or_else(|| {
+                    let target = captured_target.ok_or_else(|| {
                             "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.".to_string()
                         })?;
-                    let diagnostic = send_paste_to_target(expected.clone(), &output_for_paste)?;
+                    let diagnostic = send_paste_to_target(target, &output_for_paste)?;
                     Ok::<InsertionDiagnostic, String>(diagnostic)
                 })
                 .await
                 {
                     Ok(Ok(diagnostic)) => {
-                        pasted = true;
+                        pasted = diagnostic.confirmed;
+                        if diagnostic.confirmed {
+                            if let Some(snapshot) = clipboard_snapshot.clone() {
+                                if let Err(e) = restore_text_clipboard(snapshot) {
+                                    log::warn!(
+                                        "clipboard preservation: failed to restore previous clipboard after paste: {e:#}"
+                                    );
+                                }
+                            }
+                        }
                         pipeline.set_last_insertion(diagnostic.clone());
-                        let _ = app_for_paste.emit(PASTED_EVENT, diagnostic);
+                        if diagnostic.confirmed {
+                            let _ = app_for_paste.emit(PASTED_EVENT, diagnostic);
+                        }
                     }
                     Ok(Err(msg)) => {
                         pipeline.set_last_insertion(InsertionDiagnostic::failed(
@@ -1680,29 +2819,22 @@ fn clamp_pill_position(window: &WebviewWindow, pos: PillPosition) -> PillPositio
     let Ok(monitors) = window.available_monitors() else {
         return pos;
     };
-    let Some(monitor) = monitors.first() else {
-        return pos;
-    };
 
-    for monitor in &monitors {
-        let origin = monitor.position();
-        let size = monitor.size();
-        let max_x = origin.x + size.width as i32;
-        let max_y = origin.y + size.height as i32;
-        let visible_x = pos.x + PILL_WIDTH > origin.x && pos.x < max_x;
-        let visible_y = pos.y + PILL_HEIGHT > origin.y && pos.y < max_y;
-        if visible_x && visible_y {
-            return pos;
-        }
+    if pill_position_is_visible(window, pos) {
+        return pos;
     }
 
-    let origin = monitor.position();
-    let size = monitor.size();
-    let max_x = (origin.x + size.width as i32 - PILL_WIDTH).max(origin.x);
-    let max_y = (origin.y + size.height as i32 - PILL_HEIGHT).max(origin.y);
-    PillPosition {
-        x: pos.x.clamp(origin.x, max_x),
-        y: pos.y.clamp(origin.y, max_y),
+    let monitor = monitor_from_physical_point(
+        window,
+        pos.x as f64 + PILL_WIDTH as f64 / 2.0,
+        pos.y as f64 + PILL_HEIGHT as f64 / 2.0,
+    )
+    .or_else(|| monitors.first().cloned());
+
+    if let Some(monitor) = monitor {
+        clamp_pill_position_to_monitor(pos, &monitor)
+    } else {
+        pos
     }
 }
 
@@ -2034,8 +3166,31 @@ fn set_pill_position(
 ) -> Result<(), String> {
     require_pill(&window)?;
     let pos = clamp_pill_position(&window, PillPosition { x, y });
-    state.persistent.lock().pill_position = Some(pos);
+    let monitor = monitor_containing_physical_point(
+        &window,
+        pos.x as f64 + PILL_WIDTH as f64 / 2.0,
+        pos.y as f64 + PILL_HEIGHT as f64 / 2.0,
+    );
+    {
+        let mut persistent = state.persistent.lock();
+        persistent.pill_position = Some(pos);
+        if let Some(monitor) = monitor.as_ref() {
+            persistent
+                .pill_positions_by_monitor
+                .insert(monitor_key(monitor), pos);
+        }
+    }
     state.save_persistent();
+    native_debug_log(format!(
+        "pill drag position_persisted requested=({}, {}) saved={pos:?} coordinate_space=tauri_physical_pixels saved_monitor=\"{}\" pill_screen=\"{}\"",
+        x,
+        y,
+        monitor
+            .as_ref()
+            .map(monitor_string)
+            .unwrap_or_else(|| "<none>".to_string()),
+        pill_screen_string(&window)
+    ));
     Ok(())
 }
 
@@ -2046,6 +3201,13 @@ fn get_pill_position(
 ) -> Result<Option<PillPosition>, String> {
     require_dashboard(&window)?;
     Ok(state.persistent.lock().pill_position)
+}
+
+#[tauri::command]
+fn log_pill_drag_error(window: tauri::WebviewWindow, error: String) -> Result<(), String> {
+    require_pill(&window)?;
+    native_debug_log(format!("pill drag startDragging_error_exact={error:?}"));
+    Ok(())
 }
 
 #[tauri::command]
@@ -2817,6 +3979,7 @@ pub fn run() {
             open_input_permission_settings,
             set_pill_position,
             get_pill_position,
+            log_pill_drag_error,
             check_setup,
             download_whisper_model,
             install_ollama,
@@ -2824,6 +3987,15 @@ pub fn run() {
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
+            native_debug_log(format!(
+                "app launch app_bundle_id={} binary_path=\"{}\" AXIsProcessTrusted={} log_path=\"{}\"",
+                app_handle.config().identifier.as_str(),
+                current_binary_path_string(),
+                accessibility_is_trusted(),
+                native_debug_log_path()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<unavailable>".to_string())
+            ));
 
             // Load persistent state from app data dir
             if let Ok(dir) = app.path().app_data_dir() {
@@ -2847,8 +4019,8 @@ pub fn run() {
                 log::error!("failed to build tray: {e:#}");
             }
 
-            // Enable native macOS drag-by-background on the pill window,
-            // then restore its saved position if any.
+            // Apply native window traits, then restore the saved pill position.
+            // Frontend pointer handling starts cross-platform dragging.
             if let Some(window) = app.get_webview_window("main") {
                 configure_pill_window(&window);
                 if let Some(pos) = pipeline_for_setup.persistent.lock().pill_position {
@@ -2944,16 +4116,20 @@ pub fn run() {
                 }
             }
 
-            // Open the dashboard automatically so the user can see the app
-            let app_for_dash = app_handle.clone();
             let input_permission = input_permission_status();
             if input_permission.required && !input_permission.granted {
                 emit_error(&app_handle, input_permission.detail.clone());
             }
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                open_dashboard_window(&app_for_dash);
-            });
+            let should_open_dashboard =
+                (input_permission.required && !input_permission.granted)
+                    || !whisper_model_path(&app_handle).exists();
+            if should_open_dashboard {
+                let app_for_dash = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    open_dashboard_window(&app_for_dash);
+                });
+            }
 
             Ok(())
         })

@@ -130,22 +130,50 @@ async function init() {
   labelEl = document.querySelector<HTMLSpanElement>(".label");
   setState("ready");
 
-  // Drag is handled by Rust: NSWindow.movableByWindowBackground = true
-  // (set in lib.rs setup) makes the entire transparent window draggable.
+  const win = getCurrentWindow();
+  const pillEl = document.querySelector<HTMLElement>(".pill");
+
+  pillEl?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    void win.startDragging().catch((err) => {
+      const exactErrorText =
+        err instanceof Error
+          ? `${err.name}: ${err.message}${err.stack ? `\n${err.stack}` : ""}`
+          : String(err);
+      console.warn("pill drag failed", err);
+      void invoke("log_pill_drag_error", { error: exactErrorText }).catch(
+        (logErr) => {
+          console.warn("pill drag error log failed", logErr);
+        },
+      );
+    });
+  });
 
   // Persist the pill's position whenever the user moves it. Debounced so we
   // don't spam disk during a drag.
-  const win = getCurrentWindow();
   let saveTimer: number | null = null;
+  const saveCurrentPosition = (x: number, y: number) => {
+    void invoke("set_pill_position", {
+      x,
+      y,
+    });
+  };
+  const saveOuterPosition = () => {
+    void win
+      .outerPosition()
+      .then((position) => saveCurrentPosition(position.x, position.y))
+      .catch((err) => {
+        console.warn("pill position save failed", err);
+      });
+  };
   void win.onMoved((event) => {
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
-      void invoke("set_pill_position", {
-        x: event.payload.x,
-        y: event.payload.y,
-      });
+      saveCurrentPosition(event.payload.x, event.payload.y);
     }, 350);
   });
+  window.addEventListener("pointerup", saveOuterPosition);
 
   const bars = Array.from(
     document.querySelectorAll<HTMLDivElement>("#spectrum .bar"),
