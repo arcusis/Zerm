@@ -242,6 +242,12 @@ struct NativePillPanel {
     panel: usize,
 }
 
+#[derive(Clone)]
+struct PillPlacement {
+    position: PillPosition,
+    monitor: Monitor,
+}
+
 #[cfg(target_os = "macos")]
 static NATIVE_PILL_PANEL: once_cell::sync::Lazy<std::sync::Mutex<Option<NativePillPanel>>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
@@ -327,6 +333,31 @@ fn monitor_contains_logical_point(monitor: &Monitor, x: f64, y: f64) -> bool {
     let max_x = min_x + size.width as f64 / scale;
     let max_y = min_y + size.height as f64 / scale;
     x >= min_x && x < max_x && y >= min_y && y < max_y
+}
+
+#[cfg(target_os = "macos")]
+fn appkit_panel_frame_for_physical_top_left(
+    pos: PillPosition,
+    monitor: &Monitor,
+    width: f64,
+    height: f64,
+) -> objc2_foundation::NSRect {
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    let origin = monitor.position();
+    let size = monitor.size();
+    let scale = monitor.scale_factor();
+    let monitor_min_y = origin.y as f64 / scale;
+    let monitor_height = size.height as f64 / scale;
+    let top_y = pos.y as f64 / scale;
+    let relative_top_y = top_y - monitor_min_y;
+    NSRect::new(
+        NSPoint::new(
+            pos.x as f64 / scale,
+            monitor_min_y + monitor_height - relative_top_y - height,
+        ),
+        NSSize::new(width, height),
+    )
 }
 
 fn monitor_containing_physical_point(window: &WebviewWindow, x: f64, y: f64) -> Option<Monitor> {
@@ -1901,10 +1932,10 @@ fn present_pill_window(window: &WebviewWindow, pipeline: Option<&Pipeline>) {
         window_frame_string(window),
         format_focus_identity(frontmost_focus_identity().as_ref())
     ));
-    position_pill_if_needed(window, pipeline);
+    let placement = position_pill_if_needed(window, pipeline);
     #[cfg(target_os = "macos")]
     {
-        present_native_pill_panel(window);
+        present_native_pill_panel(window, placement.as_ref());
         native_debug_log(format!(
             "pill show end window_frame_after_show=\"{}\" frontmost_after_showing_pill={} target_screen=\"{}\" pill_screen=\"{}\" macos_visible_overlay=native_NSPanel",
             window_frame_string(window),
@@ -1964,7 +1995,10 @@ fn configure_native_pill_panel(panel: *mut objc2::runtime::AnyObject) {
 }
 
 #[cfg(target_os = "macos")]
-fn native_pill_panel_for_window(window: &WebviewWindow) -> Option<*mut objc2::runtime::AnyObject> {
+fn native_pill_panel_for_window(
+    window: &WebviewWindow,
+    placement: Option<&PillPlacement>,
+) -> Option<*mut objc2::runtime::AnyObject> {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -1972,6 +2006,13 @@ fn native_pill_panel_for_window(window: &WebviewWindow) -> Option<*mut objc2::ru
         .lock()
         .expect("native pill panel lock poisoned")
     {
+        if let Some(placement) = placement {
+            native_debug_log(format!(
+                "native pill panel reuse frame_sync_skipped reason=\"existing NSPanel frame changes previously crashed AppKit\" desired_position={:?} target_monitor=\"{}\"",
+                placement.position,
+                monitor_string(&placement.monitor)
+            ));
+        }
         return Some(existing.panel as *mut AnyObject);
     }
 
@@ -1983,7 +2024,17 @@ fn native_pill_panel_for_window(window: &WebviewWindow) -> Option<*mut objc2::ru
     let panel_class = objc_class(b"NSPanel\0")?;
 
     unsafe {
-        let frame: objc2_foundation::NSRect = msg_send![source_window, frame];
+        let source_frame: objc2_foundation::NSRect = msg_send![source_window, frame];
+        let frame = placement
+            .map(|placement| {
+                appkit_panel_frame_for_physical_top_left(
+                    placement.position,
+                    &placement.monitor,
+                    source_frame.size.width,
+                    source_frame.size.height,
+                )
+            })
+            .unwrap_or(source_frame);
         let style_mask: u64 = (1 << 7) | (1 << 13);
         let panel_alloc: *mut AnyObject = msg_send![panel_class, alloc];
         if panel_alloc.is_null() {
@@ -2029,10 +2080,10 @@ fn native_pill_panel_for_window(window: &WebviewWindow) -> Option<*mut objc2::ru
 }
 
 #[cfg(target_os = "macos")]
-fn present_native_pill_panel(window: &WebviewWindow) {
+fn present_native_pill_panel(window: &WebviewWindow, placement: Option<&PillPlacement>) {
     use objc2::msg_send;
 
-    let Some(panel) = native_pill_panel_for_window(window) else {
+    let Some(panel) = native_pill_panel_for_window(window, placement) else {
         native_debug_log("native pill panel show failed; could not create NSPanel");
         return;
     };
@@ -2060,7 +2111,7 @@ fn present_native_pill_panel(_window: &WebviewWindow) {}
 fn raise_native_pill_panel(window: &WebviewWindow) {
     use objc2::msg_send;
 
-    let Some(panel) = native_pill_panel_for_window(window) else {
+    let Some(panel) = native_pill_panel_for_window(window, None) else {
         return;
     };
     native_debug_log("native pill panel raise step=sync_frame_skipped reason=\"panel created at positioned source frame; setFrame crashed AppKit runtime\"");
@@ -2103,10 +2154,13 @@ fn hide_native_pill_panel() {
 #[cfg(not(target_os = "macos"))]
 fn hide_native_pill_panel() {}
 
-fn position_pill_if_needed(window: &WebviewWindow, pipeline: Option<&Pipeline>) {
+fn position_pill_if_needed(
+    window: &WebviewWindow,
+    pipeline: Option<&Pipeline>,
+) -> Option<PillPlacement> {
     let Some(target_monitor) = pill_target_monitor(window, pipeline) else {
         native_debug_log("pill position set_position_called=false skipped_reason=\"no target/current/primary monitor available\"");
-        return;
+        return None;
     };
     let target_monitor_key = monitor_key(&target_monitor);
     let (legacy_saved, per_monitor_saved) = pipeline
@@ -2141,23 +2195,41 @@ fn position_pill_if_needed(window: &WebviewWindow, pipeline: Option<&Pipeline>) 
     };
 
     let pos = clamp_pill_position_to_monitor(pos, &target_monitor);
-    if current_pill_position(window) == Some(pos) {
+    let placement = PillPlacement {
+        position: pos,
+        monitor: target_monitor.clone(),
+    };
+    #[cfg(target_os = "macos")]
+    {
         native_debug_log(format!(
-            "pill position set_position_called=false skipped_reason=\"already at desired position\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels",
+            "pill position set_position_called=false skipped_reason=\"macos native NSPanel owns frame; moving Tauri source window crashes after webview reparent\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels",
             monitor_string(&target_monitor)
         ));
-    } else {
-        let result = window.set_position(tauri::Position::Physical(PhysicalPosition {
-            x: pos.x,
-            y: pos.y,
-        }));
-        native_debug_log(format!(
-            "pill position set_position_called=true reason=\"{reason}\" target_monitor=\"{}\" requested_position={pos:?} coordinate_space=tauri_physical_pixels saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} result={result:?}",
-            monitor_string(&target_monitor)
-        ));
+        Some(placement)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        if current_pill_position(window) == Some(pos) {
+            native_debug_log(format!(
+                "pill position set_position_called=false skipped_reason=\"already at desired position\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels",
+                monitor_string(&target_monitor)
+            ));
+        } else {
+            let result = window.set_position(tauri::Position::Physical(PhysicalPosition {
+                x: pos.x,
+                y: pos.y,
+            }));
+            native_debug_log(format!(
+                "pill position set_position_called=true reason=\"{reason}\" target_monitor=\"{}\" requested_position={pos:?} coordinate_space=tauri_physical_pixels saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} result={result:?}",
+                monitor_string(&target_monitor)
+            ));
+        }
+        Some(placement)
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn current_pill_position(window: &WebviewWindow) -> Option<PillPosition> {
     let pos = window.outer_position().ok()?;
     Some(PillPosition { x: pos.x, y: pos.y })
@@ -4023,6 +4095,11 @@ pub fn run() {
             // Frontend pointer handling starts cross-platform dragging.
             if let Some(window) = app.get_webview_window("main") {
                 configure_pill_window(&window);
+                #[cfg(target_os = "macos")]
+                {
+                    native_debug_log("startup pill source position restore skipped on macOS; native NSPanel owns visible pill frame");
+                }
+                #[cfg(not(target_os = "macos"))]
                 if let Some(pos) = pipeline_for_setup.persistent.lock().pill_position {
                     let pos = clamp_pill_position(&window, pos);
                     let _ = window.set_position(tauri::Position::Physical(
