@@ -261,7 +261,7 @@ fn frontmost_focus_identity() -> Option<FocusIdentity> {
         .bundleIdentifier()
         .map(|value| value.to_string())
         .unwrap_or_default();
-    if bundle_id == "com.arcusis.zerm" {
+    if pid == std::process::id() as i32 || bundle_id == "com.arcusis.zerm" {
         log::warn!("auto-paste: Zerm was focused at recording start; no external paste target");
         return None;
     }
@@ -302,18 +302,8 @@ fn accessibility_is_trusted() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn input_control_is_ready() -> bool {
-    accessibility_is_trusted() || INPUT_MONITOR_READY.load(Ordering::SeqCst)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn input_control_is_ready() -> bool {
-    true
-}
-
-#[cfg(target_os = "macos")]
 fn auto_paste_is_ready() -> bool {
-    input_control_is_ready()
+    accessibility_is_trusted()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -328,16 +318,21 @@ extern "C" {
 }
 
 #[cfg(target_os = "macos")]
-fn insert_text_via_accessibility(text: &str) -> Result<(), String> {
-    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+fn insert_text_via_accessibility(expected: &FocusIdentity, text: &str) -> Result<(), String> {
+    use core_foundation::base::{CFGetTypeID, CFRange, CFRelease, CFTypeID, CFTypeRef, TCFType};
     use core_foundation::string::{CFString, CFStringRef};
     use std::ffi::c_void;
+    use std::time::{Duration, Instant};
 
     type AXError = i32;
+    type AXValueRef = *const c_void;
     type AXUIElementRef = *const c_void;
+    type AXValueType = u32;
     const AX_ERROR_SUCCESS: AXError = 0;
+    const AX_VALUE_CF_RANGE_TYPE: AXValueType = 4;
 
     extern "C" {
+        fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
         fn AXUIElementCreateSystemWide() -> AXUIElementRef;
         fn AXUIElementCopyAttributeValue(
             element: AXUIElementRef,
@@ -349,43 +344,220 @@ fn insert_text_via_accessibility(text: &str) -> Result<(), String> {
             attribute: CFStringRef,
             value: CFTypeRef,
         ) -> AXError;
+        fn AXValueCreate(value_type: AXValueType, value: *const c_void) -> AXValueRef;
+        fn AXValueGetTypeID() -> CFTypeID;
+        fn AXValueGetType(value: AXValueRef) -> AXValueType;
+        fn AXValueGetValue(
+            value: AXValueRef,
+            value_type: AXValueType,
+            out_value: *mut c_void,
+        ) -> std::ffi::c_uchar;
     }
 
+    unsafe fn copy_attr(element: AXUIElementRef, attr: &CFString) -> Result<CFTypeRef, AXError> {
+        let mut value: CFTypeRef = std::ptr::null();
+        let err = AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value);
+        if err == AX_ERROR_SUCCESS && !value.is_null() {
+            Ok(value)
+        } else {
+            if !value.is_null() {
+                CFRelease(value);
+            }
+            Err(err)
+        }
+    }
+
+    unsafe fn set_attr(
+        element: AXUIElementRef,
+        attr: &CFString,
+        value: CFTypeRef,
+    ) -> Result<(), AXError> {
+        let err = AXUIElementSetAttributeValue(element, attr.as_concrete_TypeRef(), value);
+        if err == AX_ERROR_SUCCESS {
+            Ok(())
+        } else {
+            Err(err)
+        }
+    }
+
+    unsafe fn copy_string_attr(element: AXUIElementRef, attr: &CFString) -> Result<String, String> {
+        let value = copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
+        if CFGetTypeID(value) != CFString::type_id() {
+            let actual = CFGetTypeID(value);
+            CFRelease(value);
+            return Err(format!("attribute is not a string (CFTypeID {actual})"));
+        }
+        let value = CFString::wrap_under_create_rule(value as CFStringRef);
+        Ok(value.to_string())
+    }
+
+    unsafe fn copy_range_attr(element: AXUIElementRef, attr: &CFString) -> Result<CFRange, String> {
+        let value = copy_attr(element, attr).map_err(|e| format!("AXError {e}"))?;
+        if CFGetTypeID(value) != AXValueGetTypeID()
+            || AXValueGetType(value as AXValueRef) != AX_VALUE_CF_RANGE_TYPE
+        {
+            let actual = CFGetTypeID(value);
+            CFRelease(value);
+            return Err(format!(
+                "attribute is not an AX CFRange (CFTypeID {actual})"
+            ));
+        }
+
+        let mut range = CFRange {
+            location: 0,
+            length: 0,
+        };
+        let ok = AXValueGetValue(
+            value as AXValueRef,
+            AX_VALUE_CF_RANGE_TYPE,
+            &mut range as *mut CFRange as *mut c_void,
+        ) != 0;
+        CFRelease(value);
+        if ok {
+            Ok(range)
+        } else {
+            Err("could not decode AXSelectedTextRange".to_string())
+        }
+    }
+
+    fn replace_utf16_range(current: &str, range: CFRange, replacement: &str) -> Option<String> {
+        if range.location < 0 || range.length < 0 {
+            return None;
+        }
+        let mut units: Vec<u16> = current.encode_utf16().collect();
+        let start = range.location as usize;
+        let length = range.length as usize;
+        let end = start.checked_add(length)?;
+        if start > units.len() || end > units.len() {
+            return None;
+        }
+        units.splice(start..end, replacement.encode_utf16());
+        String::from_utf16(&units).ok()
+    }
+
+    unsafe fn set_cursor_after_insert(
+        element: AXUIElementRef,
+        selected_text_range_attr: &CFString,
+        start: isize,
+        inserted_text: &str,
+    ) {
+        let cursor = CFRange {
+            location: start + inserted_text.encode_utf16().count() as isize,
+            length: 0,
+        };
+        let value = AXValueCreate(
+            AX_VALUE_CF_RANGE_TYPE,
+            &cursor as *const CFRange as *const c_void,
+        );
+        if !value.is_null() {
+            let _ = set_attr(element, selected_text_range_attr, value as CFTypeRef);
+            CFRelease(value as CFTypeRef);
+        }
+    }
+
+    unsafe fn insert_via_value(
+        element: AXUIElementRef,
+        text: &str,
+        value_attr: &CFString,
+        selected_text_range_attr: &CFString,
+    ) -> Result<(), String> {
+        let current = copy_string_attr(element, value_attr)?;
+        let range = copy_range_attr(element, selected_text_range_attr)?;
+        let next = replace_utf16_range(&current, range, text)
+            .ok_or_else(|| "selected text range is outside AXValue".to_string())?;
+        let replacement = CFString::new(&next);
+        set_attr(element, value_attr, replacement.as_CFTypeRef())
+            .map_err(|e| format!("focused element rejected AXValue update (AXError {e})"))?;
+        set_cursor_after_insert(element, selected_text_range_attr, range.location, text);
+        Ok(())
+    }
+
+    unsafe fn focused_from(
+        element: AXUIElementRef,
+        focused_attr: &CFString,
+    ) -> Result<CFTypeRef, AXError> {
+        copy_attr(element, focused_attr)
+    }
+
+    let app = unsafe { AXUIElementCreateApplication(expected.pid) };
+    if app.is_null() {
+        return Err(format!(
+            "could not create accessibility element for target app pid {}",
+            expected.pid
+        ));
+    }
     let system = unsafe { AXUIElementCreateSystemWide() };
     if system.is_null() {
+        unsafe { CFRelease(app as CFTypeRef) };
         return Err("could not create system accessibility element".to_string());
     }
 
     let focused_attr = CFString::new("AXFocusedUIElement");
     let selected_text_attr = CFString::new("AXSelectedText");
+    let selected_text_range_attr = CFString::new("AXSelectedTextRange");
+    let value_attr = CFString::new("AXValue");
     let replacement = CFString::new(text);
-    let mut focused: CFTypeRef = std::ptr::null();
-    let copy_err = unsafe {
-        AXUIElementCopyAttributeValue(system, focused_attr.as_concrete_TypeRef(), &mut focused)
-    };
-    unsafe { CFRelease(system as CFTypeRef) };
 
-    if copy_err != AX_ERROR_SUCCESS || focused.is_null() {
+    let mut last_copy_err = AX_ERROR_SUCCESS;
+    let mut focused: CFTypeRef = std::ptr::null();
+    let deadline = Instant::now() + Duration::from_millis(900);
+    while Instant::now() < deadline {
+        match unsafe { focused_from(app, &focused_attr) } {
+            Ok(value) => {
+                focused = value;
+                break;
+            }
+            Err(err) => last_copy_err = err,
+        }
+        match unsafe { focused_from(system, &focused_attr) } {
+            Ok(value) => {
+                focused = value;
+                break;
+            }
+            Err(err) => last_copy_err = err,
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    unsafe {
+        CFRelease(app as CFTypeRef);
+        CFRelease(system as CFTypeRef);
+    }
+
+    if focused.is_null() {
         return Err(format!(
-            "could not read focused accessibility element (AXError {copy_err})"
+            "could not read focused accessibility element (AXError {last_copy_err})"
         ));
     }
 
-    let set_err = unsafe {
-        AXUIElementSetAttributeValue(
+    let selected_text_result = unsafe {
+        set_attr(
             focused as AXUIElementRef,
-            selected_text_attr.as_concrete_TypeRef(),
+            &selected_text_attr,
             replacement.as_CFTypeRef(),
+        )
+    };
+    if selected_text_result.is_ok() {
+        unsafe { CFRelease(focused) };
+        return Ok(());
+    }
+
+    let value_result = unsafe {
+        insert_via_value(
+            focused as AXUIElementRef,
+            text,
+            &value_attr,
+            &selected_text_range_attr,
         )
     };
     unsafe { CFRelease(focused) };
 
-    if set_err == AX_ERROR_SUCCESS {
-        Ok(())
-    } else {
-        Err(format!(
-            "focused element rejected direct text insertion (AXError {set_err})"
-        ))
+    match value_result {
+        Ok(()) => Ok(()),
+        Err(value_err) => Err(format!(
+            "focused element rejected direct text insertion (AXSelectedText AXError {}, AXValue fallback: {value_err})",
+            selected_text_result.err().unwrap_or_default()
+        )),
     }
 }
 
@@ -422,7 +594,7 @@ struct InputPermissionStatus {
 fn input_permission_status() -> InputPermissionStatus {
     #[cfg(target_os = "macos")]
     {
-        let granted = input_control_is_ready();
+        let granted = accessibility_is_trusted();
         InputPermissionStatus {
             required: true,
             granted,
@@ -479,6 +651,7 @@ fn focus_is_target(_expected: &FocusIdentity) -> bool {
 #[cfg(target_os = "macos")]
 fn activate_paste_target(expected: &FocusIdentity) -> bool {
     use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    use std::time::{Duration, Instant};
 
     if focus_is_target(expected) {
         return true;
@@ -497,7 +670,13 @@ fn activate_paste_target(expected: &FocusIdentity) -> bool {
     // constant directly. On current macOS it still improves reliability for
     // LSUIElement/menu-bar style apps returning focus to a normal app.
     if app.activateWithOptions(NSApplicationActivationOptions(0b11)) {
-        std::thread::sleep(std::time::Duration::from_millis(180));
+        let deadline = Instant::now() + Duration::from_millis(900);
+        while Instant::now() < deadline {
+            if focus_is_target(expected) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     if focus_is_target(expected) {
@@ -587,7 +766,7 @@ fn send_paste_to_target(expected: FocusIdentity, text: &str) -> Result<(), Strin
         ));
     }
 
-    match insert_text_via_accessibility(text) {
+    match insert_text_via_accessibility(&expected, text) {
         Ok(()) => {
             log::info!("auto-paste inserted text via focused accessibility element");
             return Ok(());
@@ -637,12 +816,14 @@ fn show_pill(app: &AppHandle, _pipeline: &Pipeline) {
         return;
     };
     // Don't reposition — the user may have dragged the pill to a preferred spot.
+    // AppKit window configuration is applied during setup; calling it here can
+    // run from a Tokio worker thread during hotkey handling.
     let _ = window.show();
     let _ = window.set_always_on_top(true);
 }
 
 #[cfg(target_os = "macos")]
-fn enable_window_drag(window: &WebviewWindow) {
+fn configure_pill_window(window: &WebviewWindow) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
     let Ok(ptr) = window.ns_window() else {
@@ -653,13 +834,22 @@ fn enable_window_drag(window: &WebviewWindow) {
     }
     unsafe {
         let obj: *mut AnyObject = ptr.cast();
+        // Tauri's always-on-top flag is not enough for macOS full-screen
+        // Spaces. These AppKit bits let the pill join every Space and appear
+        // as an auxiliary overlay above full-screen apps.
+        let collection_behavior: u64 = (1 << 0) | (1 << 4) | (1 << 8);
+        let status_window_level: i64 = 25;
+        let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
+        let _: () = msg_send![obj, setLevel: status_window_level];
+        let _: () = msg_send![obj, setHidesOnDeactivate: false];
+        let _: () = msg_send![obj, setCanHide: false];
         let _: () = msg_send![obj, setMovable: true];
         let _: () = msg_send![obj, setMovableByWindowBackground: true];
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn enable_window_drag(_window: &WebviewWindow) {}
+fn configure_pill_window(_window: &WebviewWindow) {}
 
 fn hide_pill(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -2269,7 +2459,7 @@ pub fn run() {
             // Enable native macOS drag-by-background on the pill window,
             // then restore its saved position if any.
             if let Some(window) = app.get_webview_window("main") {
-                enable_window_drag(&window);
+                configure_pill_window(&window);
                 if let Some(pos) = pipeline_for_setup.persistent.lock().pill_position {
                     let pos = clamp_pill_position(&window, pos);
                     let _ = window.set_position(tauri::Position::Physical(
