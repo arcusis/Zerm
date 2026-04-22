@@ -1,6 +1,8 @@
 mod audio;
 mod hotkey;
+pub mod insertion;
 mod ollama;
+pub mod platform;
 mod state;
 mod whisper;
 
@@ -24,6 +26,7 @@ const RECORDING_EVENT: &str = "zerm://recording-start";
 const PROCESSING_EVENT: &str = "zerm://processing-start";
 const TRANSCRIPT_EVENT: &str = "zerm://transcript";
 const DONE_EVENT: &str = "zerm://done";
+const PASTED_EVENT: &str = "zerm://pasted";
 const DASHBOARD_UPDATED_EVENT: &str = "zerm://dashboard-updated";
 const AUDIO_LEVEL_EVENT: &str = "zerm://audio-level";
 
@@ -66,6 +69,51 @@ struct FocusIdentity {
 struct DonePayload {
     transcript: String,
     output: String,
+    copied: bool,
+    pasted: bool,
+    state: String,
+}
+
+#[derive(Clone, Serialize)]
+struct InsertionDiagnostic {
+    strategy: String,
+    status: String,
+    detail: String,
+    target_bundle_id: Option<String>,
+    confirmed: bool,
+}
+
+impl InsertionDiagnostic {
+    fn copied(detail: impl Into<String>) -> Self {
+        Self {
+            strategy: "clipboard_copy".to_string(),
+            status: "copied".to_string(),
+            detail: detail.into(),
+            target_bundle_id: None,
+            confirmed: true,
+        }
+    }
+
+    fn pasted(target: &FocusIdentity) -> Self {
+        Self {
+            strategy: "macos_accessibility_or_keystroke".to_string(),
+            status: "pasted".to_string(),
+            detail: "Auto-paste completed against the target captured when recording started."
+                .to_string(),
+            target_bundle_id: Some(target.bundle_id.clone()),
+            confirmed: true,
+        }
+    }
+
+    fn failed(strategy: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            strategy: strategy.into(),
+            status: "failed".to_string(),
+            detail: detail.into(),
+            target_bundle_id: None,
+            confirmed: false,
+        }
+    }
 }
 
 struct Pipeline {
@@ -75,6 +123,7 @@ struct Pipeline {
     recording: Arc<AtomicBool>,
     active_job_id: Arc<AtomicU64>,
     paste_target: Arc<Mutex<Option<FocusIdentity>>>,
+    last_insertion: Arc<Mutex<Option<InsertionDiagnostic>>>,
     tray_anchor: Arc<Mutex<Option<PhysicalPosition<f64>>>>,
     persistent: Arc<Mutex<PersistentState>>,
     state_path: Arc<Mutex<Option<PathBuf>>>,
@@ -89,6 +138,7 @@ impl Pipeline {
             recording: Arc::new(AtomicBool::new(false)),
             active_job_id: Arc::new(AtomicU64::new(0)),
             paste_target: Arc::new(Mutex::new(None)),
+            last_insertion: Arc::new(Mutex::new(None)),
             tray_anchor: Arc::new(Mutex::new(None)),
             persistent: Arc::new(Mutex::new(PersistentState::default())),
             state_path: Arc::new(Mutex::new(None)),
@@ -127,6 +177,10 @@ impl Pipeline {
 
     fn save_persistent_erasing_backup(&self) -> Result<()> {
         self.save_persistent_result(true)
+    }
+
+    fn set_last_insertion(&self, diagnostic: InsertionDiagnostic) {
+        *self.last_insertion.lock() = Some(diagnostic);
     }
 }
 
@@ -611,6 +665,73 @@ struct InputPermissionStatus {
     title: String,
     detail: String,
     settings_label: String,
+}
+
+#[derive(Clone, Serialize)]
+struct AppSigningStatus {
+    status: String,
+    authority: Option<String>,
+    team_identifier: Option<String>,
+    identifier: Option<String>,
+    path: Option<String>,
+    detail: Option<String>,
+    warning: Option<String>,
+    trusted: Option<bool>,
+    stable_tcc_identity: Option<bool>,
+    notarized: Option<bool>,
+}
+
+fn app_signing_status() -> Option<AppSigningStatus> {
+    #[cfg(target_os = "macos")]
+    {
+        let diagnostics = platform::macos_permissions::collect_macos_permission_diagnostics();
+        let authority = diagnostics.codesign.authorities.first().cloned();
+        let signature_kind = diagnostics.tcc_identity.signature_kind.clone();
+        let status = match signature_kind {
+            platform::macos_permissions::SignatureKind::DeveloperId => {
+                "Developer ID signed".to_string()
+            }
+            platform::macos_permissions::SignatureKind::AppleDevelopment => {
+                "Apple development signed".to_string()
+            }
+            platform::macos_permissions::SignatureKind::AppleSigned => "Apple signed".to_string(),
+            platform::macos_permissions::SignatureKind::AdHoc => "Ad-hoc local build".to_string(),
+            platform::macos_permissions::SignatureKind::UnsignedOrRejected => {
+                "Unsigned or rejected".to_string()
+            }
+            platform::macos_permissions::SignatureKind::Unknown => "Unknown signing".to_string(),
+        };
+        let warning = diagnostics
+            .tcc_identity
+            .repair_hint
+            .clone()
+            .or_else(|| macos_signature_permission_note().map(|note| note.trim().to_string()));
+        let detail = diagnostics.codesign.format.clone().or_else(|| {
+            diagnostics
+                .codesign
+                .signature
+                .as_ref()
+                .map(|signature| format!("Signature={signature}"))
+        });
+
+        Some(AppSigningStatus {
+            status,
+            authority,
+            team_identifier: diagnostics.tcc_identity.team_identifier,
+            identifier: diagnostics.tcc_identity.bundle_id,
+            path: diagnostics.bundle_path.or(diagnostics.executable_path),
+            detail,
+            warning,
+            trusted: Some(diagnostics.accessibility_trusted),
+            stable_tcc_identity: Some(diagnostics.tcc_identity.stable_for_tcc),
+            notarized: None,
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 fn input_permission_status() -> InputPermissionStatus {
@@ -1165,6 +1286,9 @@ async fn process(
             DonePayload {
                 transcript: String::new(),
                 output: String::new(),
+                copied: false,
+                pasted: false,
+                state: "ready".to_string(),
             },
         );
         return Ok(());
@@ -1204,6 +1328,9 @@ async fn process(
             DonePayload {
                 transcript: String::new(),
                 output: String::new(),
+                copied: false,
+                pasted: false,
+                state: "ready".to_string(),
             },
         );
         return Ok(());
@@ -1271,6 +1398,9 @@ async fn process(
 
     copy_to_clipboard(&output)
         .map_err(|e| anyhow!("clipboard write failed; skipping auto-paste/history/done: {e:#}"))?;
+    pipeline.set_last_insertion(InsertionDiagnostic::copied(
+        "Transcript output was copied to the clipboard.",
+    ));
 
     let (auto_paste, save_history) = app
         .try_state::<Arc<Pipeline>>()
@@ -1280,9 +1410,15 @@ async fn process(
         })
         .unwrap_or((false, true));
 
+    let mut pasted = false;
     if auto_paste && !output.is_empty() {
         if !auto_paste_is_ready() {
-            emit_error(app, auto_paste_permission_message());
+            let message = auto_paste_permission_message();
+            pipeline.set_last_insertion(InsertionDiagnostic::failed(
+                "auto_paste_permission",
+                message.clone(),
+            ));
+            emit_error(app, message);
         } else {
             tokio::time::sleep(std::time::Duration::from_millis(70)).await;
             // Re-check inside the delay window — user may have Cmd-tabbed
@@ -1297,14 +1433,33 @@ async fn process(
                         .ok_or_else(|| {
                             "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.".to_string()
                         })?;
-                    send_paste_to_target(expected, &output_for_paste)
+                    send_paste_to_target(expected.clone(), &output_for_paste)?;
+                    Ok::<FocusIdentity, String>(expected)
                 })
                 .await
                 {
-                    Ok(Ok(())) => {}
-                    Ok(Err(msg)) => emit_error(&app_for_paste, msg),
+                    Ok(Ok(target)) => {
+                        pasted = true;
+                        pipeline.set_last_insertion(InsertionDiagnostic::pasted(&target));
+                        let _ = app_for_paste.emit(
+                            PASTED_EVENT,
+                            InsertionDiagnostic::pasted(&target),
+                        );
+                    }
+                    Ok(Err(msg)) => {
+                        pipeline.set_last_insertion(InsertionDiagnostic::failed(
+                            "auto_paste",
+                            msg.clone(),
+                        ));
+                        emit_error(&app_for_paste, msg);
+                    }
                     Err(e) => {
-                        emit_error(&app_for_paste, format!("auto-paste task failed: {e:#}"))
+                        let message = format!("auto-paste task failed: {e:#}");
+                        pipeline.set_last_insertion(InsertionDiagnostic::failed(
+                            "auto_paste_task",
+                            message.clone(),
+                        ));
+                        emit_error(&app_for_paste, message)
                     }
                 }
             }
@@ -1322,7 +1477,16 @@ async fn process(
     }
     emit_dashboard_update(app);
 
-    let _ = app.emit(DONE_EVENT, DonePayload { transcript, output });
+    let _ = app.emit(
+        DONE_EVENT,
+        DonePayload {
+            transcript,
+            output,
+            copied: true,
+            pasted,
+            state: if pasted { "pasted" } else { "copied" }.to_string(),
+        },
+    );
     Ok(())
 }
 
@@ -1806,6 +1970,9 @@ struct SetupStatus {
     hotkey_configurable: bool,
     runtime_hotkey_label: String,
     input_permission: InputPermissionStatus,
+    auto_paste_ready: bool,
+    app_signing: Option<AppSigningStatus>,
+    last_insertion: Option<InsertionDiagnostic>,
 }
 
 #[tauri::command]
@@ -1868,6 +2035,10 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
         _ => (false, false),
     };
 
+    let last_insertion = app
+        .try_state::<Arc<Pipeline>>()
+        .and_then(|state| state.last_insertion.lock().clone());
+
     Ok(SetupStatus {
         whisper_model_present,
         whisper_loaded,
@@ -1886,6 +2057,9 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
             "Ctrl+Shift+Space".to_string()
         },
         input_permission: input_permission_status(),
+        auto_paste_ready: auto_paste_is_ready(),
+        app_signing: app_signing_status(),
+        last_insertion,
     })
 }
 

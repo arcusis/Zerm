@@ -241,6 +241,21 @@ cargo install cargo-audit --locked
 The RustSec audit line matches the release workflow's current ignore list for
 known advisories.
 
+Native writing-layer checks for Accessibility, app signing, auto-paste, the
+full-screen pill, and platform paste support live in
+[docs/native-writing-layer-verification.md](./docs/native-writing-layer-verification.md).
+The helper script is read-only by default:
+
+```sh
+scripts/verify-native-writing-layer.sh
+```
+
+Use strict mode for release artifacts:
+
+```sh
+scripts/verify-native-writing-layer.sh --app /Applications/Zerm.app --strict-release
+```
+
 ## Contributing
 
 Issues and pull requests are welcome.

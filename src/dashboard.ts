@@ -111,6 +111,7 @@ function renderHistory(history: HistoryEntry[]) {
 }
 
 function renderSettings(settings: Settings) {
+  currentSettings = settings;
   ($("vad-toggle") as HTMLInputElement | null)!.checked = settings.vad_enabled;
   const autoPasteEl = $("autopaste-toggle") as HTMLInputElement | null;
   if (autoPasteEl) autoPasteEl.checked = settings.auto_paste;
@@ -157,6 +158,7 @@ function renderSettings(settings: Settings) {
   });
 
   renderVocabulary(settings.vocabulary);
+  renderSetupDiagnostics(lastSetupStatus);
 }
 
 function renderVocabulary(terms: string[]) {
@@ -412,6 +414,51 @@ interface SetupStatus {
     detail: string;
     settings_label: string;
   };
+  app_signing?: SigningSummary | null;
+  signing?: SigningSummary | null;
+  signing_summary?: SigningSummary | null;
+  auto_paste_ready?: boolean | null;
+  automation_permission?: SetupPermissionStatus | null;
+  last_insertion?: InsertionDiagnostic | null;
+  insertion?: InsertionDiagnostic | null;
+  diagnostics?: Record<string, unknown> | null;
+}
+
+interface SetupPermissionStatus {
+  required?: boolean;
+  granted?: boolean;
+  title?: string;
+  detail?: string;
+  settings_label?: string;
+}
+
+interface SigningSummary {
+  status?: string | null;
+  authority?: string | string[] | null;
+  team_identifier?: string | null;
+  teamIdentifier?: string | null;
+  identifier?: string | null;
+  path?: string | null;
+  detail?: string | null;
+  warning?: string | null;
+  trusted?: boolean | null;
+  stable_tcc_identity?: boolean | null;
+  stableTccIdentity?: boolean | null;
+  notarized?: boolean | null;
+}
+
+interface InsertionDiagnostic {
+  strategy?: string | null;
+  status?: string | null;
+  detail?: string | null;
+  target_app?: string | null;
+  targetApp?: string | null;
+  target_bundle_id?: string | null;
+  targetBundleId?: string | null;
+  confirmed?: boolean | null;
+  error?: string | null;
+  timestamp?: number | string | null;
+  at?: number | string | null;
 }
 
 function formatBytes(n: number): string {
@@ -440,6 +487,350 @@ async function setupInvoke<T = unknown>(
   } catch (err) {
     throw new Error(errorMessage(err));
   }
+}
+
+let currentSettings: Settings | null = null;
+let lastSetupStatus: SetupStatus | null = null;
+let lastSetupCheckedAt: Date | null = null;
+
+function boolLabel(value: boolean | null | undefined): string {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "Unknown";
+}
+
+function shortenPath(path: string | null | undefined): string {
+  if (!path) return "Not reported";
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  if (parts.length <= 4) return path;
+  return `…/${parts.slice(-3).join("/")}`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function setupRecord(status: SetupStatus): Record<string, unknown> {
+  return status as unknown as Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
+function booleanFromUnknown(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function findRecord(status: SetupStatus, keys: string[]): Record<string, unknown> | null {
+  const root = setupRecord(status);
+  for (const key of keys) {
+    const direct = optionalRecord(root[key]);
+    if (direct) return direct;
+  }
+  const diagnostics = optionalRecord(root.diagnostics);
+  if (!diagnostics) return null;
+  for (const key of keys) {
+    const nested = optionalRecord(diagnostics[key]);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function firstString(record: Record<string, unknown> | null, keys: string[]): string | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = stringFromUnknown(record[key]);
+    if (value) return value;
+  }
+  return null;
+}
+
+function firstBoolean(record: Record<string, unknown> | null, keys: string[]): boolean | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = booleanFromUnknown(record[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function detectSigningSummary(status: SetupStatus): {
+  label: string;
+  detail: string;
+  tone: "ok" | "warn" | "neutral";
+} {
+  const signing = findRecord(status, ["app_signing", "signing", "signing_summary"]);
+  const statusText = firstString(signing, ["status", "summary", "state"]);
+  const authority = firstString(signing, ["authority", "certificate", "signer"]);
+  const teamId = firstString(signing, ["team_identifier", "teamIdentifier", "team_id"]);
+  const warning = firstString(signing, ["warning", "detail", "message"]);
+  const stableTcc = firstBoolean(signing, ["stable_tcc_identity", "stableTccIdentity"]);
+  const trusted = firstBoolean(signing, ["trusted", "valid"]);
+  const detail = status.input_permission.detail;
+
+  if (statusText || authority || teamId || warning || stableTcc !== null || trusted !== null) {
+    const label = statusText ?? (trusted === false ? "Needs attention" : "Reported");
+    const parts = [
+      teamId ? `Team ${teamId}` : null,
+      authority ?? null,
+      stableTcc === false ? "TCC identity may change between installs" : null,
+      warning ?? null,
+    ].filter((part): part is string => Boolean(part));
+    return {
+      label,
+      detail: parts.join(" · ") || "Backend reported signing metadata without details.",
+      tone: trusted === false || stableTcc === false || warning ? "warn" : "ok",
+    };
+  }
+
+  if (detail.includes("not Developer ID signed") || detail.includes("stale Accessibility toggle")) {
+    return {
+      label: "Ad-hoc or unsigned local build",
+      detail:
+        "macOS can show Zerm enabled while the current rebuilt binary is not trusted. Remove and re-add the installed app, or use a Developer ID signed build.",
+      tone: "warn",
+    };
+  }
+
+  return {
+    label: "Not reported",
+    detail: "The backend has not exposed signing metadata for this build yet.",
+    tone: "neutral",
+  };
+}
+
+function detectInsertionDiagnostic(status: SetupStatus): {
+  label: string;
+  detail: string;
+  tone: "ok" | "warn" | "neutral";
+} {
+  const insertion = findRecord(status, ["last_insertion", "insertion", "lastInsertion"]);
+  const strategy = firstString(insertion, ["strategy", "method"]);
+  const state = firstString(insertion, ["status", "state"]);
+  const error = firstString(insertion, ["error", "failure"]);
+  const detail = firstString(insertion, ["detail", "message"]);
+  const target =
+    firstString(insertion, ["target_app", "targetApp", "app"]) ??
+    firstString(insertion, ["target_bundle_id", "targetBundleId", "bundle_id"]);
+  const confirmed = firstBoolean(insertion, ["confirmed", "pasted", "success"]);
+
+  if (!insertion) {
+    return {
+      label: "Awaiting backend report",
+      detail:
+        "No last insertion strategy/status has been reported yet. This panel is ready for TextInjector diagnostics.",
+      tone: "neutral",
+    };
+  }
+
+  const label = state ?? strategy ?? (confirmed === true ? "Inserted" : "Reported");
+  const parts = [
+    strategy ? `Strategy: ${strategy}` : null,
+    target ? `Target: ${target}` : null,
+    confirmed !== null ? `Confirmed: ${boolLabel(confirmed)}` : null,
+    error ?? detail ?? null,
+  ].filter((part): part is string => Boolean(part));
+  return {
+    label,
+    detail: parts.join(" · ") || "Insertion diagnostics were reported without details.",
+    tone: error || confirmed === false ? "warn" : confirmed === true ? "ok" : "neutral",
+  };
+}
+
+function diagnosticsRow(
+  label: string,
+  value: string,
+  detail: string,
+  tone: "ok" | "warn" | "neutral" = "neutral",
+): string {
+  return `
+    <div class="diagnostic-row diagnostic-${tone}">
+      <span class="diagnostic-dot" aria-hidden="true"></span>
+      <div class="diagnostic-copy">
+        <span class="diagnostic-label">${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+        <span>${escapeHtml(detail)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function ensureDiagnosticsSurface(): HTMLElement | null {
+  let panel = $("diagnostics-panel");
+  if (panel) return panel;
+
+  const settings = document.querySelector<HTMLElement>(".settings");
+  if (!settings) return null;
+
+  panel = document.createElement("section");
+  panel.id = "diagnostics-panel";
+  panel.className = "diagnostics-panel";
+  panel.innerHTML = `
+    <header class="diagnostics-header">
+      <div>
+        <span class="eyebrow">Diagnostics</span>
+        <h3>Setup and insertion</h3>
+      </div>
+      <button id="diagnostics-refresh" class="ghost-btn" type="button">Recheck</button>
+    </header>
+    <div id="diagnostics-grid" class="diagnostics-grid"></div>
+    <div id="diagnostics-actions" class="diagnostics-actions"></div>
+    <p id="diagnostics-note" class="diagnostics-note"></p>
+  `;
+  settings.appendChild(panel);
+  $("diagnostics-refresh")?.addEventListener("click", async () => {
+    await refresh();
+    await refreshSetup();
+  });
+  return panel;
+}
+
+function setDiagnosticsRefreshing(refreshing: boolean) {
+  const btn = $("diagnostics-refresh") as HTMLButtonElement | null;
+  if (!btn) return;
+  btn.disabled = refreshing;
+  btn.textContent = refreshing ? "Checking…" : "Recheck";
+}
+
+function renderSetupDiagnostics(status: SetupStatus | null, failure?: string) {
+  const panel = ensureDiagnosticsSurface();
+  const grid = $("diagnostics-grid");
+  const actions = $("diagnostics-actions");
+  const note = $("diagnostics-note");
+  if (!panel || !grid || !actions || !note) return;
+
+  if (!status) {
+    grid.innerHTML = diagnosticsRow(
+      "Setup",
+      failure ? "Check failed" : "Checking…",
+      failure ?? "Waiting for the backend setup status.",
+      failure ? "warn" : "neutral",
+    );
+    actions.innerHTML = "";
+    note.textContent = "";
+    return;
+  }
+
+  const signing = detectSigningSummary(status);
+  const insertion = detectInsertionDiagnostic(status);
+  const inputGranted = status.input_permission.granted;
+  const autoPasteEnabled = currentSettings?.auto_paste === true;
+  const backendAutoPasteReady = status.auto_paste_ready;
+  const automation = status.automation_permission ?? null;
+  const automationRequired = automation?.required === true;
+  const automationGranted = automation?.granted === true;
+  const autoPasteReady =
+    backendAutoPasteReady ??
+    (autoPasteEnabled && (!status.input_permission.required || inputGranted));
+
+  grid.innerHTML = [
+    diagnosticsRow(
+      "Accessibility",
+      inputGranted ? "Allowed" : status.input_permission.required ? "Needs permission" : "Not required",
+      status.input_permission.detail,
+      inputGranted || !status.input_permission.required ? "ok" : "warn",
+    ),
+    diagnosticsRow(
+      "Auto-paste",
+      autoPasteEnabled ? (autoPasteReady ? "Enabled and ready" : "Enabled, blocked") : "Off",
+      backendAutoPasteReady === false
+        ? "Backend reports auto-paste is not ready."
+        : autoPasteEnabled
+          ? "Zerm will insert into the app focused when recording starts."
+          : "Enable auto-paste when you want Zerm to insert text automatically.",
+      autoPasteEnabled && !autoPasteReady ? "warn" : autoPasteReady ? "ok" : "neutral",
+    ),
+    diagnosticsRow(
+      "Automation",
+      automationRequired ? boolLabel(automationGranted) : "Not reported",
+      automation?.detail ??
+        "Only shown when the backend reports a separate Automation permission requirement.",
+      automationRequired && !automationGranted ? "warn" : automationRequired ? "ok" : "neutral",
+    ),
+    diagnosticsRow("App signing", signing.label, signing.detail, signing.tone),
+    diagnosticsRow(
+      "Insertion",
+      insertion.label,
+      insertion.detail,
+      insertion.tone,
+    ),
+    diagnosticsRow(
+      "Whisper",
+      status.whisper_loaded
+        ? "Loaded"
+        : status.whisper_model_present
+          ? "Installed, loading"
+          : "Missing",
+      shortenPath(status.whisper_model_path),
+      status.whisper_loaded ? "ok" : "warn",
+    ),
+    diagnosticsRow(
+      "Ollama",
+      status.ollama_running
+        ? status.ollama_model_pulled
+          ? "Ready"
+          : "Model missing"
+        : "Not running",
+      status.ollama_identity_warning ??
+        `${status.ollama_model_name} · unverified local service ${boolLabel(status.allow_unverified_ollama)}`,
+      status.ollama_running && status.ollama_model_pulled && !status.ollama_identity_warning
+        ? "ok"
+        : "warn",
+    ),
+    diagnosticsRow(
+      "Hotkey",
+      status.runtime_hotkey_label,
+      status.hotkey_configurable
+        ? "This shortcut is configurable on macOS."
+        : "This platform uses the fixed runtime shortcut.",
+      "neutral",
+    ),
+  ].join("");
+
+  actions.innerHTML = "";
+  if (status.input_permission.required && !inputGranted) {
+    const openBtn = document.createElement("button");
+    openBtn.className = "solid-btn";
+    openBtn.type = "button";
+    openBtn.textContent = status.input_permission.settings_label;
+    openBtn.addEventListener("click", async () => {
+      await safeInvoke("open_input_permission_settings");
+      startPermissionRecheck();
+      void refreshSetup();
+    });
+
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "ghost-btn";
+    retryBtn.type = "button";
+    retryBtn.textContent = "Recheck now";
+    retryBtn.addEventListener("click", () => void refreshSetup());
+    actions.append(openBtn, retryBtn);
+  }
+
+  note.textContent = lastSetupCheckedAt
+    ? `Last checked ${lastSetupCheckedAt.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })}.`
+    : "";
 }
 
 function showSetupBanner(
@@ -489,6 +880,7 @@ function hideSetupBanner() {
 }
 
 let setupRunning = false;
+let setupRefreshQueued = false;
 let permissionPollTimer: number | null = null;
 
 function startPermissionRecheck() {
@@ -505,19 +897,33 @@ function stopPermissionRecheck() {
 }
 
 async function refreshSetup() {
-  if (setupRunning) return;
+  if (setupRunning) {
+    setupRefreshQueued = true;
+    return;
+  }
   setupRunning = true;
+  setDiagnosticsRefreshing(true);
   try {
     await runSetup();
   } catch (err) {
-    showSetupFailure("Setup check failed", errorMessage(err));
+    const message = errorMessage(err);
+    renderSetupDiagnostics(lastSetupStatus, message);
+    showSetupFailure("Setup check failed", message);
   } finally {
     setupRunning = false;
+    setDiagnosticsRefreshing(false);
+    if (setupRefreshQueued) {
+      setupRefreshQueued = false;
+      window.setTimeout(() => void refreshSetup(), 0);
+    }
   }
 }
 
 async function runSetup() {
   const status = await setupInvoke<SetupStatus>("check_setup");
+  lastSetupStatus = status;
+  lastSetupCheckedAt = new Date();
+  renderSetupDiagnostics(status);
 
   // 1. Whisper — auto-download, no click needed
   if (!status.whisper_model_present) {
@@ -562,12 +968,13 @@ async function runSetup() {
       status.input_permission.title,
       status.input_permission.detail,
       `<button class="solid-btn" id="btn-open-input-permissions">${status.input_permission.settings_label}</button>
-       <button class="ghost-btn" id="btn-retry-setup">Retry</button>`,
+       <button class="ghost-btn" id="btn-retry-setup">Recheck now</button>`,
       "error",
     );
     $("btn-open-input-permissions")?.addEventListener("click", async () => {
       await safeInvoke("open_input_permission_settings");
       startPermissionRecheck();
+      void refreshSetup();
     });
     $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
     return;
@@ -832,9 +1239,15 @@ async function downloadWhisper(): Promise<boolean> {
 async function init() {
   setupTabs();
   attachListeners();
-  window.addEventListener("focus", () => void refreshSetup());
+  window.addEventListener("focus", () => {
+    void refresh();
+    void refreshSetup();
+  });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void refreshSetup();
+    if (!document.hidden) {
+      void refresh();
+      void refreshSetup();
+    }
   });
   await refresh();
   void refreshSetup();
@@ -843,6 +1256,7 @@ async function init() {
       renderStats(event.payload.stats);
       renderHistory(event.payload.history);
       renderSettings(event.payload.settings);
+      void refreshSetup();
     });
   } catch (err) {
     console.warn("listen failed:", err);

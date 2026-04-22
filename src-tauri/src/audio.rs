@@ -7,11 +7,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[path = "vad.rs"]
+mod vad;
+
+pub use vad::{StopReason, VadConfig, VadDecision, VadDiagnostics, VadEngine};
+
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
-const SILENCE_RMS_THRESHOLD: f32 = 0.01;
-const SPEECH_RMS_THRESHOLD: f32 = 0.02;
-const SILENCE_DURATION_MS: u64 = 1500;
-const VAD_TICK_MS: u64 = 100;
 
 /// Absolute cap on raw interleaved samples. 24M f32 samples is about 96 MB
 /// before mono/resample processing allocates its working buffers.
@@ -31,18 +32,8 @@ pub struct CaptureHandle {
     pub sample_rate: u32,
     pub channels: u16,
     pub level: Arc<Mutex<f32>>,
-}
-
-/// Why the capture ended on its own (not via the explicit stop channel).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopReason {
-    /// VAD detected sustained silence after speech.
-    Silence,
-    /// Max recording length reached — stop regardless of VAD state.
-    HardLimit,
-    /// Recording started but no speech was ever detected within
-    /// NO_SPEECH_TIMEOUT_MS. Likely an accidental hotkey press.
-    NoSpeech,
+    #[allow(dead_code)]
+    pub diagnostics: Arc<Mutex<VadDiagnostics>>,
 }
 
 pub fn start_capture<F>(buffer: Arc<Mutex<Vec<f32>>>, on_stop: F) -> Result<CaptureHandle>
@@ -69,6 +60,17 @@ where
     let buffer_for_thread = buffer.clone();
     let level = Arc::new(Mutex::new(0.0_f32));
     let level_for_thread = level.clone();
+    let vad_config = VadConfig {
+        no_speech_timeout_ms: NO_SPEECH_TIMEOUT_MS,
+        ..VadConfig::default()
+    };
+    let diagnostics = Arc::new(Mutex::new(
+        VadEngine::new(vad_config.clone(), sample_rate, channels)
+            .diagnostics()
+            .clone(),
+    ));
+    let vad_tick_ms = vad_config.tick_ms;
+    let diagnostics_for_thread = diagnostics.clone();
 
     thread::spawn(move || {
         let buffer_for_stream = buffer_for_thread.clone();
@@ -145,18 +147,18 @@ where
         // RECORDING_EVENT.
         let _ = ready_tx.send(Ok(()));
 
-        // VAD loop: wake every VAD_TICK_MS, evaluate recent audio chunk
-        let frames_per_tick = (sample_rate as u64 * channels as u64 * VAD_TICK_MS / 1000) as usize;
-        let silence_ticks_required = (SILENCE_DURATION_MS / VAD_TICK_MS) as u32;
-        let no_speech_ticks_required = (NO_SPEECH_TIMEOUT_MS / VAD_TICK_MS) as u32;
-        let mut speech_detected = false;
-        let mut silence_ticks: u32 = 0;
-        let mut no_speech_ticks: u32 = 0;
+        // VAD loop: wake every tick, evaluate recent audio chunk. The
+        // engine still preserves the current fixed-threshold behavior, while
+        // exposing calibration, pre-roll/post-roll, and stop diagnostics for
+        // the richer recorder HUD work.
+        let mut vad = VadEngine::new(vad_config, sample_rate, channels);
+        *diagnostics_for_thread.lock() = vad.diagnostics().clone();
+        let frames_per_tick = vad.frames_per_tick(sample_rate, channels);
         let mut last_pos: usize = 0;
 
         loop {
             if stop_rx
-                .recv_timeout(Duration::from_millis(VAD_TICK_MS))
+                .recv_timeout(Duration::from_millis(vad_tick_ms))
                 .is_ok()
             {
                 break;
@@ -174,6 +176,8 @@ where
                 log::warn!(
                     "max sample count ({max_samples}) reached (duration cap {MAX_RECORDING_SECS}s, absolute cap {MAX_SAMPLES}); auto-stopping"
                 );
+                vad.force_stop(StopReason::HardLimit);
+                *diagnostics_for_thread.lock() = vad.diagnostics().clone();
                 drop(stream);
                 on_stop(StopReason::HardLimit);
                 return;
@@ -188,29 +192,26 @@ where
                 let buf = buffer_for_len_cap.lock();
                 compute_rms(&buf[chunk_start..snapshot_len])
             };
+            let appended_samples = snapshot_len.saturating_sub(last_pos);
             last_pos = snapshot_len;
 
-            if rms >= SPEECH_RMS_THRESHOLD {
-                speech_detected = true;
-                silence_ticks = 0;
-                no_speech_ticks = 0;
-            } else if speech_detected && rms < SILENCE_RMS_THRESHOLD {
-                silence_ticks += 1;
-                if silence_ticks >= silence_ticks_required {
-                    log::info!("VAD: silence detected, auto-stopping");
-                    drop(stream);
-                    on_stop(StopReason::Silence);
-                    return;
+            match vad.observe(rms, appended_samples) {
+                VadDecision::Continue => {
+                    *diagnostics_for_thread.lock() = vad.diagnostics().clone();
                 }
-            } else if speech_detected {
-                silence_ticks = silence_ticks.saturating_sub(1);
-            } else {
-                // Still waiting for the first syllable.
-                no_speech_ticks += 1;
-                if no_speech_ticks >= no_speech_ticks_required {
-                    log::info!("no speech detected in {NO_SPEECH_TIMEOUT_MS}ms; auto-stopping");
+                VadDecision::Stop(reason) => {
+                    *diagnostics_for_thread.lock() = vad.diagnostics().clone();
+                    match reason {
+                        StopReason::Silence => log::info!("VAD: silence detected, auto-stopping"),
+                        StopReason::NoSpeech => {
+                            log::info!(
+                                "no speech detected in {NO_SPEECH_TIMEOUT_MS}ms; auto-stopping"
+                            );
+                        }
+                        StopReason::HardLimit => {}
+                    }
                     drop(stream);
-                    on_stop(StopReason::NoSpeech);
+                    on_stop(reason);
                     return;
                 }
             }
@@ -229,6 +230,7 @@ where
             sample_rate,
             channels,
             level,
+            diagnostics,
         }),
         Ok(Err(e)) => Err(anyhow!("audio capture failed to start: {e}")),
         Err(_) => Err(anyhow!("audio capture startup timed out")),

@@ -2,32 +2,126 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-type State = "ready" | "listening" | "processing" | "done" | "error";
+type HudState =
+  | "ready"
+  | "listening"
+  | "processing"
+  | "slow-processing"
+  | "copied"
+  | "pasted"
+  | "no-target"
+  | "permission-needed"
+  | "failed"
+  | "retry-available";
 
-const LABELS: Record<State, string> = {
+type HudPayload =
+  | string
+  | {
+      label?: string;
+      message?: string;
+      reason?: string;
+      state?: HudState;
+      pasted?: boolean;
+      copied?: boolean;
+      retryAvailable?: boolean;
+    };
+
+const LABELS: Record<HudState, string> = {
   ready: "Ready",
-  listening: "Listening…",
-  processing: "Thinking…",
-  done: "Copied",
-  error: "Error",
+  listening: "Listening...",
+  processing: "Thinking...",
+  "slow-processing": "Still working...",
+  copied: "Copied",
+  pasted: "Pasted",
+  "no-target": "No target",
+  "permission-needed": "Permission needed",
+  failed: "Failed",
+  "retry-available": "Retry available",
+};
+
+const TRANSIENT_MS: Partial<Record<HudState, number>> = {
+  copied: 1400,
+  pasted: 1400,
+  "no-target": 2400,
+  failed: 4000,
+  "retry-available": 4000,
 };
 
 let overlayEl: HTMLElement | null = null;
 let labelEl: HTMLSpanElement | null = null;
 let doneTimer: number | null = null;
 
-function setState(state: State, label?: string) {
+function clearDoneTimer() {
+  if (doneTimer !== null) {
+    clearTimeout(doneTimer);
+    doneTimer = null;
+  }
+}
+
+function readablePayload(payload: HudPayload | undefined, fallback: string) {
+  const raw =
+    typeof payload === "string"
+      ? payload
+      : payload?.label ?? payload?.message ?? payload?.reason ?? fallback;
+  const clean = raw.replace(/\s+/g, " ").trim();
+  if (!clean) return fallback;
+  return clean.length > 56 ? `${clean.slice(0, 53)}...` : clean;
+}
+
+function setState(state: HudState, label?: string) {
   if (!overlayEl || !labelEl) return;
+  clearDoneTimer();
   overlayEl.dataset.state = state;
+  overlayEl.dataset.busy =
+    state === "listening" ||
+    state === "processing" ||
+    state === "slow-processing"
+      ? "true"
+      : "false";
   labelEl.textContent = label ?? LABELS[state];
 }
 
-function fadeOutAfter(ms: number) {
-  if (doneTimer !== null) clearTimeout(doneTimer);
+function fadeOutAfter(ms: number, hide = true) {
+  clearDoneTimer();
   doneTimer = window.setTimeout(() => {
     setState("ready");
-    void invoke("pill_done");
+    if (hide) {
+      void invoke("pill_done");
+    }
   }, ms);
+}
+
+function setTransientState(
+  state: HudState,
+  payload?: HudPayload,
+  fallback = LABELS[state],
+) {
+  setState(state, readablePayload(payload, fallback));
+  const ms = TRANSIENT_MS[state];
+  if (ms !== undefined) {
+    fadeOutAfter(ms);
+  }
+}
+
+function stateFromDonePayload(payload: HudPayload | undefined): HudState {
+  if (payload && typeof payload === "object") {
+    if (payload.state === "pasted" || payload.pasted) return "pasted";
+    if (payload.state === "copied" || payload.copied) return "copied";
+  }
+  return "copied";
+}
+
+async function listenMany<T>(
+  eventNames: string[],
+  handler: (payload: T) => void,
+) {
+  await Promise.all(
+    eventNames.map((eventName) =>
+      listen<T>(eventName, (event) => {
+        handler(event.payload);
+      }),
+    ),
+  );
 }
 
 async function init() {
@@ -83,35 +177,105 @@ async function init() {
     });
   });
 
-  await listen<void>("zerm://ready", () => {
+  await listenMany<void>(["zerm://ready", "zerm://idle"], () => {
     setState("ready");
   });
 
-  await listen<void>("zerm://recording-start", () => {
-    if (doneTimer !== null) {
-      clearTimeout(doneTimer);
-      doneTimer = null;
-    }
-    setState("listening");
+  await listenMany<void>(
+    ["zerm://recording-start", "zerm://listening", "zerm://listen-start"],
+    () => {
+      setState("listening");
+    },
+  );
+
+  await listenMany<void>(
+    ["zerm://processing-start", "zerm://processing", "zerm://transcribing"],
+    () => {
+      setState("processing");
+    },
+  );
+
+  await listenMany<void>(
+    [
+      "zerm://slow-processing",
+      "zerm://processing-slow",
+      "zerm://long-processing",
+    ],
+    () => {
+      setState("slow-processing");
+    },
+  );
+
+  await listenMany<HudPayload>(["zerm://copied", "zerm://copy-done"], (payload) => {
+    setTransientState("copied", payload);
   });
 
-  await listen<void>("zerm://processing-start", () => {
+  await listenMany<HudPayload>(["zerm://pasted", "zerm://paste-done"], (payload) => {
+    setTransientState("pasted", payload);
+  });
+
+  await listenMany<HudPayload>(
+    ["zerm://no-target", "zerm://paste-no-target"],
+    (payload) => {
+      setTransientState("no-target", payload);
+    },
+  );
+
+  await listenMany<HudPayload>(
+    [
+      "zerm://permission-needed",
+      "zerm://accessibility-needed",
+      "zerm://paste-permission-needed",
+    ],
+    (payload) => {
+      setState("permission-needed", readablePayload(payload, LABELS["permission-needed"]));
+    },
+  );
+
+  await listenMany<HudPayload>(
+    ["zerm://retry-available", "zerm://paste-retry-available"],
+    (payload) => {
+      setTransientState("retry-available", payload);
+    },
+  );
+
+  await listen<HudPayload>("zerm://hud-state", (event) => {
+    const payload = event.payload;
+    if (payload && typeof payload === "object" && payload.state) {
+      const state = payload.state;
+      if (state === "permission-needed") {
+        setState(state, readablePayload(payload, LABELS[state]));
+        return;
+      }
+      setTransientState(state, payload);
+    }
+  });
+
+  await listen<void>("zerm://recording-stop", () => {
     setState("processing");
+  });
+
+  await listen<void>("zerm://recording-cancelled", () => {
+    setState("ready");
+    fadeOutAfter(300);
   });
 
   await listen<string>("zerm://transcript", () => {
     // Payload is dictated text — may contain secrets. Do NOT log.
   });
 
-  await listen<{ transcript: string; output: string }>("zerm://done", () => {
+  await listen<HudPayload>("zerm://done", (event) => {
     // Payload contains cleaned output. Do NOT log.
-    setState("done");
-    fadeOutAfter(1500);
+    const state = stateFromDonePayload(event.payload);
+    setTransientState(state, event.payload);
   });
 
-  await listen<string>("zerm://error", (event) => {
-    setState("error", String(event.payload).slice(0, 80));
-    fadeOutAfter(4000);
+  await listenMany<HudPayload>(["zerm://error", "zerm://failed"], (payload) => {
+    if (payload && typeof payload === "object" && payload.retryAvailable) {
+      setTransientState("retry-available", payload);
+      return;
+    }
+    setTransientState("failed", payload, LABELS.failed);
   });
 }
 

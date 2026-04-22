@@ -92,6 +92,326 @@ impl HotkeyChoice {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileTriggerKind {
+    #[default]
+    BundleId,
+    AppName,
+    WindowTitle,
+    BrowserDomain,
+    UrlPrefix,
+    Language,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileMatchMode {
+    #[default]
+    Exact,
+    Contains,
+    Prefix,
+    Suffix,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProfileTrigger {
+    #[serde(default)]
+    pub kind: ProfileTriggerKind,
+    #[serde(default)]
+    pub pattern: String,
+    #[serde(default)]
+    pub match_mode: ProfileMatchMode,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProfilePrivacyOverrides {
+    #[serde(default)]
+    pub capture_app_context: Option<bool>,
+    #[serde(default)]
+    pub capture_window_title: Option<bool>,
+    #[serde(default)]
+    pub capture_browser_url: Option<bool>,
+    #[serde(default)]
+    pub capture_selected_text: Option<bool>,
+    #[serde(default)]
+    pub capture_field_text: Option<bool>,
+    #[serde(default)]
+    pub save_history: Option<bool>,
+    #[serde(default)]
+    pub allow_auto_send: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PowerModeProfile {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default)]
+    pub triggers: Vec<ProfileTrigger>,
+    #[serde(default)]
+    pub prompt_mode: Option<PromptMode>,
+    #[serde(default)]
+    pub transcription_model_id: Option<String>,
+    #[serde(default)]
+    pub rewrite_model_id: Option<String>,
+    #[serde(default)]
+    pub language_hint: Option<String>,
+    #[serde(default)]
+    pub auto_paste: Option<bool>,
+    #[serde(default)]
+    pub auto_send: bool,
+    #[serde(default)]
+    pub vocabulary_replacement_ids: Vec<String>,
+    #[serde(default)]
+    pub privacy: ProfilePrivacyOverrides,
+}
+
+impl Default for PowerModeProfile {
+    fn default() -> Self {
+        Self {
+            id: "default".to_string(),
+            name: "Default".to_string(),
+            enabled: true,
+            priority: 0,
+            triggers: Vec::new(),
+            prompt_mode: None,
+            transcription_model_id: None,
+            rewrite_model_id: None,
+            language_hint: None,
+            auto_paste: None,
+            auto_send: false,
+            vocabulary_replacement_ids: Vec::new(),
+            privacy: ProfilePrivacyOverrides::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProvider {
+    #[default]
+    WhisperCpp,
+    Ollama,
+    Native,
+    External,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRole {
+    #[default]
+    Transcription,
+    Rewrite,
+    Cleanup,
+    Vad,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCapabilityLevel {
+    Low,
+    #[default]
+    Medium,
+    High,
+    VeryHigh,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelDescriptor {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub provider: ModelProvider,
+    #[serde(default)]
+    pub role: ModelRole,
+    #[serde(default)]
+    pub default_model: bool,
+    #[serde(default)]
+    pub recommended: bool,
+    #[serde(default)]
+    pub multilingual: bool,
+    #[serde(default)]
+    pub languages: Vec<String>,
+    #[serde(default)]
+    pub speed: ModelCapabilityLevel,
+    #[serde(default)]
+    pub accuracy: ModelCapabilityLevel,
+    #[serde(default)]
+    pub memory_mb: Option<u32>,
+    #[serde(default)]
+    pub disk_mb: Option<u32>,
+    #[serde(default)]
+    pub download_url: Option<String>,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub local_filename: Option<String>,
+    #[serde(default)]
+    pub ollama_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelCatalog {
+    #[serde(default)]
+    pub transcription: Vec<ModelDescriptor>,
+    #[serde(default)]
+    pub rewrite: Vec<ModelDescriptor>,
+}
+
+impl Default for ModelCatalog {
+    fn default() -> Self {
+        Self {
+            transcription: vec![ModelDescriptor {
+                id: "whisper-small".to_string(),
+                display_name: "Whisper small".to_string(),
+                provider: ModelProvider::WhisperCpp,
+                role: ModelRole::Transcription,
+                default_model: true,
+                recommended: true,
+                multilingual: true,
+                languages: Vec::new(),
+                speed: ModelCapabilityLevel::Medium,
+                accuracy: ModelCapabilityLevel::Medium,
+                memory_mb: Some(1024),
+                disk_mb: Some(466),
+                download_url: None,
+                sha256: None,
+                local_filename: Some("ggml-small.bin".to_string()),
+                ollama_name: None,
+            }],
+            rewrite: vec![
+                ModelDescriptor {
+                    id: "gemma3-4b".to_string(),
+                    display_name: "Gemma 3 4B".to_string(),
+                    provider: ModelProvider::Ollama,
+                    role: ModelRole::Rewrite,
+                    default_model: true,
+                    recommended: true,
+                    multilingual: false,
+                    languages: vec!["en".to_string()],
+                    speed: ModelCapabilityLevel::Medium,
+                    accuracy: ModelCapabilityLevel::Medium,
+                    memory_mb: Some(4096),
+                    disk_mb: None,
+                    download_url: None,
+                    sha256: None,
+                    local_filename: None,
+                    ollama_name: Some("gemma3:4b".to_string()),
+                },
+                ModelDescriptor {
+                    id: "aya-expanse-8b".to_string(),
+                    display_name: "Aya Expanse 8B".to_string(),
+                    provider: ModelProvider::Ollama,
+                    role: ModelRole::Rewrite,
+                    default_model: false,
+                    recommended: true,
+                    multilingual: true,
+                    languages: vec![
+                        "he".to_string(),
+                        "ru".to_string(),
+                        "ja".to_string(),
+                        "ko".to_string(),
+                        "zh".to_string(),
+                    ],
+                    speed: ModelCapabilityLevel::Low,
+                    accuracy: ModelCapabilityLevel::High,
+                    memory_mb: Some(8192),
+                    disk_mb: None,
+                    download_url: None,
+                    sha256: None,
+                    local_filename: None,
+                    ollama_name: Some("aya-expanse:8b".to_string()),
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VocabularyReplacementEntry {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub find: String,
+    #[serde(default)]
+    pub replace: String,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[serde(default = "default_true")]
+    pub whole_word: bool,
+    #[serde(default)]
+    pub profile_ids: Vec<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+impl Default for VocabularyReplacementEntry {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            enabled: true,
+            find: String::new(),
+            replace: String::new(),
+            case_sensitive: false,
+            whole_word: true,
+            profile_ids: Vec::new(),
+            notes: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrivacyFlags {
+    #[serde(default = "default_true")]
+    pub capture_app_context: bool,
+    #[serde(default)]
+    pub capture_window_title: bool,
+    #[serde(default)]
+    pub capture_browser_url: bool,
+    #[serde(default)]
+    pub capture_selected_text: bool,
+    #[serde(default)]
+    pub capture_field_text: bool,
+    #[serde(default = "default_true")]
+    pub allow_auto_profile_matching: bool,
+    #[serde(default)]
+    pub allow_auto_learn_vocabulary: bool,
+    #[serde(default)]
+    pub include_transcripts_in_diagnostics: bool,
+    #[serde(default)]
+    pub allow_secure_field_context: bool,
+}
+
+impl Default for PrivacyFlags {
+    fn default() -> Self {
+        Self {
+            capture_app_context: true,
+            capture_window_title: false,
+            capture_browser_url: false,
+            capture_selected_text: false,
+            capture_field_text: false,
+            allow_auto_profile_matching: true,
+            allow_auto_learn_vocabulary: false,
+            include_transcripts_in_diagnostics: false,
+            allow_secure_field_context: false,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub llm_model: String,
@@ -119,6 +439,20 @@ pub struct Settings {
     /// users must opt in before transcript/output text is persisted.
     #[serde(default)]
     pub save_history: bool,
+
+    /// App-aware power-mode profiles. These are scaffolded for native
+    /// integration; existing runtime behavior continues to use the legacy
+    /// top-level settings until the pipeline opts into profile resolution.
+    #[serde(default = "default_power_profiles")]
+    pub profiles: Vec<PowerModeProfile>,
+    #[serde(default)]
+    pub active_profile_id: Option<String>,
+    #[serde(default)]
+    pub model_catalog: ModelCatalog,
+    #[serde(default)]
+    pub vocabulary_replacements: Vec<VocabularyReplacementEntry>,
+    #[serde(default)]
+    pub privacy: PrivacyFlags,
 }
 
 // Migrate from old String-typed vocabulary to Vec<String> seamlessly
@@ -159,8 +493,17 @@ impl Default for Settings {
             auto_paste: false,
             allow_unverified_ollama: false,
             save_history: false,
+            profiles: default_power_profiles(),
+            active_profile_id: None,
+            model_catalog: ModelCatalog::default(),
+            vocabulary_replacements: Vec::new(),
+            privacy: PrivacyFlags::default(),
         }
     }
+}
+
+fn default_power_profiles() -> Vec<PowerModeProfile> {
+    vec![PowerModeProfile::default()]
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -417,5 +760,145 @@ mod tests {
 
         PersistentState::remove_backup(&path).unwrap();
         assert!(!PersistentState::backup_path(&path).exists());
+    }
+
+    #[test]
+    fn legacy_settings_load_with_new_profile_defaults() {
+        let raw = r#"{
+            "stats": {
+                "words_transcribed": 0,
+                "words_generated": 0,
+                "generation_count": 0
+            },
+            "history": [],
+            "settings": {
+                "llm_model": "gemma3:4b",
+                "vad_enabled": true,
+                "prompt_mode": "developer",
+                "hotkey": "right_option",
+                "vocabulary": "Zerm, Arc browser",
+                "auto_paste": false,
+                "allow_unverified_ollama": false,
+                "save_history": false
+            }
+        }"#;
+
+        let state: PersistentState = serde_json::from_str(raw).unwrap();
+
+        assert_eq!(
+            state.settings.vocabulary,
+            vec!["Zerm".to_string(), "Arc browser".to_string()]
+        );
+        assert_eq!(state.settings.profiles.len(), 1);
+        assert_eq!(state.settings.profiles[0].id, "default");
+        assert!(state
+            .settings
+            .model_catalog
+            .transcription
+            .iter()
+            .any(|model| model.id == "whisper-small" && model.default_model));
+        assert!(state
+            .settings
+            .model_catalog
+            .rewrite
+            .iter()
+            .any(|model| model.ollama_name.as_deref() == Some("gemma3:4b")));
+        assert!(state.settings.vocabulary_replacements.is_empty());
+        assert!(state.settings.privacy.capture_app_context);
+        assert!(!state.settings.privacy.capture_field_text);
+    }
+
+    #[test]
+    fn profile_scaffold_round_trips() {
+        let mut state = PersistentState::default();
+        state.settings.active_profile_id = Some("slack".to_string());
+        state.settings.profiles.push(PowerModeProfile {
+            id: "slack".to_string(),
+            name: "Slack".to_string(),
+            enabled: true,
+            priority: 20,
+            triggers: vec![ProfileTrigger {
+                kind: ProfileTriggerKind::BundleId,
+                pattern: "com.tinyspeck.slackmacgap".to_string(),
+                match_mode: ProfileMatchMode::Exact,
+            }],
+            prompt_mode: Some(PromptMode::Conversational),
+            transcription_model_id: Some("whisper-small".to_string()),
+            rewrite_model_id: Some("gemma3-4b".to_string()),
+            language_hint: None,
+            auto_paste: Some(true),
+            auto_send: false,
+            vocabulary_replacement_ids: vec!["zerm-brand".to_string()],
+            privacy: ProfilePrivacyOverrides {
+                capture_app_context: Some(true),
+                capture_window_title: Some(false),
+                capture_browser_url: None,
+                capture_selected_text: Some(false),
+                capture_field_text: Some(false),
+                save_history: Some(false),
+                allow_auto_send: Some(false),
+            },
+        });
+        state
+            .settings
+            .vocabulary_replacements
+            .push(VocabularyReplacementEntry {
+                id: "zerm-brand".to_string(),
+                enabled: true,
+                find: "zerm".to_string(),
+                replace: "Zerm".to_string(),
+                case_sensitive: false,
+                whole_word: true,
+                profile_ids: vec!["slack".to_string()],
+                notes: Some("Brand capitalization".to_string()),
+            });
+
+        let json = serde_json::to_string(&state).unwrap();
+        let round_tripped: PersistentState = serde_json::from_str(&json).unwrap();
+
+        let profile = round_tripped
+            .settings
+            .profiles
+            .iter()
+            .find(|profile| profile.id == "slack")
+            .unwrap();
+        assert_eq!(profile.prompt_mode, Some(PromptMode::Conversational));
+        assert_eq!(profile.auto_paste, Some(true));
+        assert_eq!(profile.triggers[0].kind, ProfileTriggerKind::BundleId);
+        assert_eq!(
+            round_tripped.settings.vocabulary_replacements[0].replace,
+            "Zerm"
+        );
+    }
+
+    #[test]
+    fn partial_profile_and_replacement_json_uses_defaults() {
+        let profile: PowerModeProfile = serde_json::from_str(r#"{"id":"code","name":"Code"}"#)
+            .expect("partial profile should load");
+        let replacement: VocabularyReplacementEntry =
+            serde_json::from_str(r#"{"find":"api","replace":"API"}"#)
+                .expect("partial replacement should load");
+
+        assert!(profile.enabled);
+        assert!(profile.triggers.is_empty());
+        assert_eq!(profile.privacy, ProfilePrivacyOverrides::default());
+        assert!(replacement.enabled);
+        assert!(replacement.whole_word);
+        assert!(!replacement.case_sensitive);
+    }
+
+    #[test]
+    fn privacy_defaults_are_local_first() {
+        let privacy = PrivacyFlags::default();
+
+        assert!(privacy.capture_app_context);
+        assert!(privacy.allow_auto_profile_matching);
+        assert!(!privacy.capture_window_title);
+        assert!(!privacy.capture_browser_url);
+        assert!(!privacy.capture_selected_text);
+        assert!(!privacy.capture_field_text);
+        assert!(!privacy.allow_auto_learn_vocabulary);
+        assert!(!privacy.include_transcripts_in_diagnostics);
+        assert!(!privacy.allow_secure_field_context);
     }
 }

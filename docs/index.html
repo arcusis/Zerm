@@ -27,6 +27,7 @@
       </a>
       <nav class="topbar-nav" aria-label="Primary navigation">
         <a href="#download">Download</a>
+        <a href="#native">Native layer</a>
         <a href="#privacy">Privacy</a>
         <a href="https://github.com/arcusis/Zerm" rel="noreferrer">GitHub</a>
       </nav>
@@ -98,8 +99,41 @@
         </div>
         <div>
           <strong>Auditable</strong>
-          <span>Tauri 2, Rust, TypeScript, and MIT license.</span>
+          <span>Tauri 2, Rust, TypeScript, diagnostics, and MIT license.</span>
         </div>
+      </section>
+
+      <section id="native" class="section native-layer">
+        <div class="section-head">
+          <p class="kicker">Native writing layer</p>
+          <h2>Built around the OS behaviors that make dictation reliable.</h2>
+          <p>
+            Zerm is moving beyond transcription plus clipboard copy. The app now
+            tracks setup diagnostics, insertion state, Accessibility trust, app
+            signing, and the floating recorder HUD as first-class product
+            surfaces.
+          </p>
+        </div>
+
+        <div class="native-grid">
+          <div>
+            <span>01</span>
+            <strong>macOS auto-paste</strong>
+            <p>Uses Accessibility insertion with keyboard-event fallback, visible permission diagnostics, and signed prerelease checks for stable trust.</p>
+          </div>
+          <div>
+            <span>02</span>
+            <strong>Full-screen recorder pill</strong>
+            <p>The recorder overlay is hardened for full-screen Spaces, display changes, and explicit copied, pasted, permission, and failure states.</p>
+          </div>
+          <div>
+            <span>03</span>
+            <strong>Cross-platform plan</strong>
+            <p>Windows, Linux X11, and Linux Wayland have explicit strategy boundaries so unsupported paste paths are not presented as working.</p>
+          </div>
+        </div>
+
+        <a class="text-link" href="https://github.com/arcusis/Zerm/blob/Production/docs/native-writing-layer-verification.md">Read native verification checklist</a>
       </section>
 
       <section id="download" class="section">
@@ -164,9 +198,9 @@
             <li>Clearing history removes the backup state file too.</li>
             <li>Setup downloads are bounded and verified where possible.</li>
             <li>Existing Linux Ollama listeners are treated as unverified unless explicitly allowed.</li>
-            <li>macOS auto-paste uses native keyboard events and never changes focus.</li>
+            <li>macOS auto-paste uses Accessibility insertion with native key-event fallback.</li>
             <li>Stable macOS and Windows releases require signing secrets before publishing; Linux artifacts ship with SHA-256 checksums instead of signing.</li>
-            <li>Prerelease builds may be unsigned.</li>
+            <li>Prerelease macOS alpha builds are signed and notarized when release secrets are available.</li>
           </ul>
         </div>
       </section>

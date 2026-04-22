@@ -543,7 +543,7 @@ body.on-history .stats { display: grid; }
   display: flex;
   flex-direction: column;
   gap: 22px;
-  max-width: 580px;
+  max-width: 760px;
 }
 
 .field {
@@ -565,6 +565,127 @@ body.on-history .stats { display: grid; }
   color: var(--paper-quiet);
   line-height: 1.4;
   letter-spacing: -0.08px;
+}
+
+/* ────────────────────── Diagnostics ────────────────────── */
+
+.diagnostics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.diagnostics-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagnostics-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diagnostics-header .eyebrow {
+  padding: 0;
+}
+
+.diagnostics-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--paper);
+  letter-spacing: -0.18px;
+}
+
+.diagnostics-header .ghost-btn:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.diagnostic-row {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.diagnostic-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--paper-quiet);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+}
+
+.diagnostic-ok .diagnostic-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.12);
+}
+
+.diagnostic-warn .diagnostic-dot {
+  background: var(--red);
+  box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.12);
+}
+
+.diagnostic-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.diagnostic-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--paper-quiet);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.diagnostic-copy strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+  letter-spacing: -0.08px;
+}
+
+.diagnostic-copy span:last-child {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--paper-dim);
+  letter-spacing: -0.08px;
+}
+
+.diagnostics-note {
+  font-size: 11px;
+  color: var(--paper-quiet);
+  letter-spacing: -0.08px;
+}
+
+.diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diagnostics-actions:empty {
+  display: none;
 }
 
 /* ────────────────────── Inputs ────────────────────── */
@@ -1024,5 +1145,11 @@ input[type="checkbox"]:checked::after {
   .tab-panel.active { animation: none; }
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .diagnostics-grid {
+    grid-template-columns: 1fr;
   }
 }
