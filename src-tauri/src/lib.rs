@@ -582,6 +582,22 @@ fn open_accessibility_settings() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn macos_signature_permission_note() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let out = std::process::Command::new("/usr/bin/codesign")
+        .args(["-dv", "--verbose=4"])
+        .arg(exe)
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stderr);
+    if text.contains("Signature=adhoc") || !text.contains("TeamIdentifier=") {
+        Some(" This installed build is not Developer ID signed, so macOS can show a stale Accessibility toggle that does not apply to the current binary. Install a signed production build, or remove and re-add /Applications/Zerm.app after this exact build is installed.".to_string())
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct InputPermissionStatus {
     required: bool,
@@ -595,11 +611,19 @@ fn input_permission_status() -> InputPermissionStatus {
     #[cfg(target_os = "macos")]
     {
         let granted = accessibility_is_trusted();
+        let detail = if granted {
+            "Zerm can control the focused app for the hotkey and auto-paste.".to_string()
+        } else {
+            format!(
+                "Zerm needs macOS Accessibility permission for the hotkey and auto-paste. Allow /Applications/Zerm.app in System Settings -> Privacy & Security -> Accessibility, then return to Zerm.{}",
+                macos_signature_permission_note().unwrap_or_default()
+            )
+        };
         InputPermissionStatus {
             required: true,
             granted,
             title: "Allow Accessibility".to_string(),
-            detail: "Zerm needs macOS Accessibility permission for the hotkey and auto-paste after this app build was installed. If this app was just replaced, remove and re-add /Applications/Zerm.app.".to_string(),
+            detail,
             settings_label: "Open Accessibility Settings".to_string(),
         }
     }
@@ -815,15 +839,110 @@ fn show_pill(app: &AppHandle, _pipeline: &Pipeline) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    // Don't reposition — the user may have dragged the pill to a preferred spot.
-    // AppKit window configuration is applied during setup; calling it here can
-    // run from a Tokio worker thread during hotkey handling.
+    let saved_position = _pipeline.persistent.lock().pill_position;
+    let dispatch_window = window.clone();
+    let pill_window = window.clone();
+    if let Err(e) = dispatch_window.run_on_main_thread(move || {
+        present_pill_window(&pill_window, saved_position);
+    }) {
+        log::warn!("pill: could not dispatch presentation to main thread: {e:#}");
+        present_pill_window(&window, saved_position);
+    }
+}
+
+fn present_pill_window(window: &WebviewWindow, saved_position: Option<PillPosition>) {
+    configure_pill_window(window);
+    let _ = window.set_visible_on_all_workspaces(true);
+    if let Some(pos) = pill_position_for_active_screen(window, saved_position) {
+        let _ = window.set_position(tauri::Position::Physical(PhysicalPosition {
+            x: pos.x,
+            y: pos.y,
+        }));
+    }
     let _ = window.show();
     let _ = window.set_always_on_top(true);
+    order_pill_front(window);
+}
+
+fn pill_position_for_active_screen(
+    window: &WebviewWindow,
+    saved_position: Option<PillPosition>,
+) -> Option<PillPosition> {
+    let cursor = window.cursor_position().ok();
+    let monitor = cursor
+        .and_then(|pos| window.monitor_from_point(pos.x, pos.y).ok().flatten())
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten())?;
+
+    let origin = monitor.position();
+    let size = monitor.size();
+    let min_x = origin.x;
+    let min_y = origin.y;
+    let max_x = (origin.x + size.width as i32 - PILL_WIDTH).max(min_x);
+    let max_y = (origin.y + size.height as i32 - PILL_HEIGHT).max(min_y);
+
+    if let Some(pos) = saved_position {
+        let in_monitor = pos.x + PILL_WIDTH > min_x
+            && pos.x < origin.x + size.width as i32
+            && pos.y + PILL_HEIGHT > min_y
+            && pos.y < origin.y + size.height as i32;
+        if in_monitor {
+            return Some(PillPosition {
+                x: pos.x.clamp(min_x, max_x),
+                y: pos.y.clamp(min_y, max_y),
+            });
+        }
+    }
+
+    Some(PillPosition {
+        x: min_x + ((size.width as i32 - PILL_WIDTH) / 2).max(0),
+        y: min_y + 40.min((size.height as i32 - PILL_HEIGHT).max(0)),
+    })
 }
 
 #[cfg(target_os = "macos")]
 fn configure_pill_window(window: &WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let obj: *mut AnyObject = ptr.cast();
+        let process_info = NSProcessInfo::processInfo();
+        let can_join_all_apps =
+            process_info.isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
+                majorVersion: 13,
+                minorVersion: 0,
+                patchVersion: 0,
+            });
+        let fullscreen_behavior: u64 = if can_join_all_apps {
+            // macOS 13+: Apple's modern behavior for floating/system overlays
+            // across Stage Manager and full-screen app Spaces.
+            1 << 18
+        } else {
+            1 << 8
+        };
+        let collection_behavior: u64 = (1 << 0) | (1 << 4) | (1 << 6) | fullscreen_behavior;
+        let overlay_window_level: i64 = 102;
+        let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
+        let _: () = msg_send![obj, setLevel: overlay_window_level];
+        let _: () = msg_send![obj, setHidesOnDeactivate: false];
+        let _: () = msg_send![obj, setCanHide: false];
+        let _: () = msg_send![obj, setMovable: true];
+        let _: () = msg_send![obj, setMovableByWindowBackground: true];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_pill_window(_window: &WebviewWindow) {}
+
+#[cfg(target_os = "macos")]
+fn order_pill_front(window: &WebviewWindow) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
     let Ok(ptr) = window.ns_window() else {
@@ -834,22 +953,12 @@ fn configure_pill_window(window: &WebviewWindow) {
     }
     unsafe {
         let obj: *mut AnyObject = ptr.cast();
-        // Tauri's always-on-top flag is not enough for macOS full-screen
-        // Spaces. These AppKit bits let the pill join every Space and appear
-        // as an auxiliary overlay above full-screen apps.
-        let collection_behavior: u64 = (1 << 0) | (1 << 4) | (1 << 8);
-        let status_window_level: i64 = 25;
-        let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
-        let _: () = msg_send![obj, setLevel: status_window_level];
-        let _: () = msg_send![obj, setHidesOnDeactivate: false];
-        let _: () = msg_send![obj, setCanHide: false];
-        let _: () = msg_send![obj, setMovable: true];
-        let _: () = msg_send![obj, setMovableByWindowBackground: true];
+        let _: () = msg_send![obj, orderFrontRegardless];
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn configure_pill_window(_window: &WebviewWindow) {}
+fn order_pill_front(_window: &WebviewWindow) {}
 
 fn hide_pill(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {

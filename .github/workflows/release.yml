@@ -197,8 +197,8 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Require signing secrets for stable releases
-        if: ${{ !contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') }}
+      - name: Require signing secrets for release artifacts
+        if: ${{ runner.os == 'macOS' || runner.os == 'Windows' }}
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -210,15 +210,15 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            test -n "$APPLE_CERTIFICATE" || { echo "::error::APPLE_CERTIFICATE is required for stable macOS releases"; exit 1; }
-            test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::APPLE_CERTIFICATE_PASSWORD is required for stable macOS releases"; exit 1; }
-            test -n "$APPLE_ID" || { echo "::error::APPLE_ID is required for stable macOS notarization"; exit 1; }
-            test -n "$APPLE_PASSWORD" || { echo "::error::APPLE_PASSWORD is required for stable macOS notarization"; exit 1; }
-            test -n "$APPLE_TEAM_ID" || { echo "::error::APPLE_TEAM_ID is required for stable macOS notarization"; exit 1; }
+            test -n "$APPLE_CERTIFICATE" || { echo "::error::APPLE_CERTIFICATE is required for macOS releases"; exit 1; }
+            test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::APPLE_CERTIFICATE_PASSWORD is required for macOS releases"; exit 1; }
+            test -n "$APPLE_ID" || { echo "::error::APPLE_ID is required for macOS notarization"; exit 1; }
+            test -n "$APPLE_PASSWORD" || { echo "::error::APPLE_PASSWORD is required for macOS notarization"; exit 1; }
+            test -n "$APPLE_TEAM_ID" || { echo "::error::APPLE_TEAM_ID is required for macOS notarization"; exit 1; }
           fi
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            test -n "$WINDOWS_CERTIFICATE" || { echo "::error::WINDOWS_CERTIFICATE is required for stable Windows releases"; exit 1; }
-            test -n "$WINDOWS_CERTIFICATE_PASSWORD" || { echo "::error::WINDOWS_CERTIFICATE_PASSWORD is required for stable Windows releases"; exit 1; }
+            test -n "$WINDOWS_CERTIFICATE" || { echo "::error::WINDOWS_CERTIFICATE is required for Windows releases"; exit 1; }
+            test -n "$WINDOWS_CERTIFICATE_PASSWORD" || { echo "::error::WINDOWS_CERTIFICATE_PASSWORD is required for Windows releases"; exit 1; }
           fi
 
       - name: Import Windows signing certificate
@@ -248,20 +248,13 @@ jobs:
       - name: Build Tauri app
         shell: bash
         env:
-          APPLE_CERTIFICATE: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_ID: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ (!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc')) && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           args="${{ matrix.args }}"
-          is_prerelease=false
-          case "${{ github.ref_name }}" in
-            *-alpha*|*-beta*|*-rc*) is_prerelease=true ;;
-          esac
-          if [[ "${{ runner.os }}" == "macOS" && "$is_prerelease" == "true" ]]; then
-            args="$args --no-sign"
-          fi
           pnpm tauri build $args
 
       - name: Upload release artifacts
@@ -285,7 +278,7 @@ jobs:
             --clobber
 
       - name: Verify macOS signing and notarization
-        if: ${{ runner.os == 'macOS' && !contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') }}
+        if: ${{ runner.os == 'macOS' }}
         shell: bash
         run: |
           mapfile -t apps < <(find src-tauri/target -maxdepth 8 -path '*/release/bundle/macos/*.app' -print)
@@ -302,7 +295,7 @@ jobs:
           done
 
       - name: Verify Windows Authenticode signatures
-        if: ${{ runner.os == 'Windows' && !contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') }}
+        if: ${{ runner.os == 'Windows' }}
         shell: pwsh
         run: |
           $artifacts = Get-ChildItem -Path src-tauri\target -Recurse -Include *.exe,*.msi
@@ -351,10 +344,9 @@ jobs:
           + Linux), speak, stop talking. Text lands in your clipboard.
 
           ## Notes
-          - Stable macOS builds are signed and notarized with Developer ID.
-          - Stable Windows installers are Authenticode signed.
-          - Prereleases may be unsigned; stable releases fail CI if signing
-            credentials are not configured.
+          - macOS builds are signed and notarized with Developer ID, including prereleases.
+          - Windows installers are Authenticode signed, including prereleases.
+          - Release jobs fail if signing credentials are not configured.
           - Linux .AppImage built on Ubuntu 22.04.
           - SHA-256 checksums are attached as `SHA256SUMS.txt`.
 

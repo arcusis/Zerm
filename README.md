@@ -63,9 +63,10 @@ Download the latest build from the
 | Windows | `.msi` or `.exe` | Ctrl+Shift+Space |
 | Linux | `.deb` or `.AppImage` | Ctrl+Shift+Space |
 
-Stable macOS and Windows releases are expected to be signed. Linux release
-artifacts are published with SHA-256 checksums instead of platform signing.
-Prerelease builds may be unsigned while the project is still moving quickly.
+macOS releases, including prereleases, are Developer ID signed and notarized so
+macOS Accessibility and Automation grants stay attached across updates. Windows
+installers are Authenticode signed. Linux release artifacts are published with
+SHA-256 checksums instead of platform signing.
 
 ## First-run Setup
 
@@ -273,10 +274,9 @@ The release workflow runs preflight checks, creates a draft GitHub Release,
 builds platform artifacts, uploads them, and publishes only after every matrix
 job succeeds.
 
-Stable tags such as `v0.1.0` require Apple and Windows signing secrets in the
-GitHub repository. Linux release artifacts are published with SHA-256 checksums
-rather than platform signing. Prerelease tags such as `v0.1.0-alpha.16` can
-publish unsigned artifacts.
+Release tags, including prerelease tags such as `v0.1.0-alpha.16`, require
+Apple and Windows signing secrets in the GitHub repository. Linux release
+artifacts are published with SHA-256 checksums rather than platform signing.
 
 The website deploys separately from `docs/` on pushes to the `Production`
 branch or through manual workflow dispatch.

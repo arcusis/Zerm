@@ -489,6 +489,20 @@ function hideSetupBanner() {
 }
 
 let setupRunning = false;
+let permissionPollTimer: number | null = null;
+
+function startPermissionRecheck() {
+  if (permissionPollTimer !== null) return;
+  permissionPollTimer = window.setInterval(() => {
+    if (!document.hidden) void refreshSetup();
+  }, 1000);
+}
+
+function stopPermissionRecheck() {
+  if (permissionPollTimer === null) return;
+  clearInterval(permissionPollTimer);
+  permissionPollTimer = null;
+}
 
 async function refreshSetup() {
   if (setupRunning) return;
@@ -543,6 +557,7 @@ async function runSetup() {
   }
 
   if (status.input_permission.required && !status.input_permission.granted) {
+    startPermissionRecheck();
     showSetupBanner(
       status.input_permission.title,
       status.input_permission.detail,
@@ -552,10 +567,12 @@ async function runSetup() {
     );
     $("btn-open-input-permissions")?.addEventListener("click", async () => {
       await safeInvoke("open_input_permission_settings");
+      startPermissionRecheck();
     });
     $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
     return;
   }
+  stopPermissionRecheck();
 
   // 2. Ollama — require explicit user click before downloading and
   //    executing a third-party installer. Never silent.
@@ -815,6 +832,10 @@ async function downloadWhisper(): Promise<boolean> {
 async function init() {
   setupTabs();
   attachListeners();
+  window.addEventListener("focus", () => void refreshSetup());
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void refreshSetup();
+  });
   await refresh();
   void refreshSetup();
   try {
