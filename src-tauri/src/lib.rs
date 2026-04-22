@@ -18,6 +18,10 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
+use insertion::{
+    AppContext as InsertionAppContext, InsertionPlan, InsertionRequest, InsertionStrategy,
+    Platform as InsertionPlatform, StrategySelector,
+};
 use state::{DashboardData, HotkeyChoice, PersistentState, PillPosition, PromptMode};
 
 const READY_EVENT: &str = "zerm://ready";
@@ -72,6 +76,7 @@ struct DonePayload {
     copied: bool,
     pasted: bool,
     state: String,
+    message: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -94,9 +99,9 @@ impl InsertionDiagnostic {
         }
     }
 
-    fn pasted(target: &FocusIdentity) -> Self {
+    fn pasted(target: &FocusIdentity, strategy: impl Into<String>) -> Self {
         Self {
-            strategy: "macos_accessibility_or_keystroke".to_string(),
+            strategy: strategy.into(),
             status: "pasted".to_string(),
             detail: "Auto-paste completed against the target captured when recording started."
                 .to_string(),
@@ -287,7 +292,7 @@ fn maybe_run_auto_paste_self_test() {
         std::process::exit(3);
     };
     match send_paste_to_target(target, &text) {
-        Ok(()) => std::process::exit(0),
+        Ok(_) => std::process::exit(0),
         Err(e) => {
             eprintln!("auto-paste self-test failed: {e}");
             std::process::exit(4);
@@ -336,6 +341,47 @@ fn accessibility_is_trusted() -> bool {
 fn accessibility_is_trusted() -> bool {
     true
 }
+
+#[cfg(target_os = "macos")]
+fn request_accessibility_trust_prompt() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFStringRef;
+
+    unsafe extern "C" {
+        static kAXTrustedCheckOptionPrompt: CFStringRef;
+        fn AXIsProcessTrustedWithOptions(
+            options: core_foundation::dictionary::CFDictionaryRef,
+        ) -> std::ffi::c_uchar;
+    }
+
+    let prompt_key = unsafe {
+        core_foundation::string::CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt)
+    };
+    let prompt_value = CFBoolean::true_value();
+    let options = CFDictionary::from_CFType_pairs(&[(prompt_key, prompt_value)]);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0 }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_accessibility_trust_prompt() -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn prompt_for_input_permission_if_needed() {
+    if accessibility_is_trusted() {
+        return;
+    }
+    reset_stale_macos_input_permissions();
+    if !request_accessibility_trust_prompt() {
+        log::info!("macOS Accessibility prompt requested; waiting for user approval");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prompt_for_input_permission_if_needed() {}
 
 #[cfg(target_os = "macos")]
 fn auto_paste_is_ready() -> bool {
@@ -905,9 +951,62 @@ fn send_paste_via_system_events() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn send_paste_to_target(expected: FocusIdentity, text: &str) -> Result<(), String> {
+fn insertion_plan_for_target(expected: &FocusIdentity, text: &str) -> InsertionPlan {
+    let request = InsertionRequest::new(
+        text,
+        Some(
+            InsertionAppContext::new(InsertionPlatform::Macos)
+                .with_app_id(expected.bundle_id.clone())
+                .with_focused_text_input(true),
+        ),
+    );
+    StrategySelector::default().select_plan(&request)
+}
+
+#[cfg(target_os = "macos")]
+fn execute_macos_insertion_strategy(
+    strategy: InsertionStrategy,
+    expected: &FocusIdentity,
+    text: &str,
+) -> Result<(), String> {
+    match strategy {
+        InsertionStrategy::MacAccessibilityFocusedValue
+        | InsertionStrategy::MacAccessibilitySelectedText => {
+            insert_text_via_accessibility(expected, text)
+        }
+        InsertionStrategy::MacClipboardKeystroke => {
+            if send_paste_via_core_graphics() {
+                Ok(())
+            } else {
+                Err("CoreGraphics Cmd+V event post failed".to_string())
+            }
+        }
+        InsertionStrategy::MacSystemEventsKeystroke => {
+            if send_paste_via_system_events() {
+                Ok(())
+            } else {
+                Err("System Events Cmd+V fallback failed".to_string())
+            }
+        }
+        other => Err(format!("strategy {other:?} is not implemented on macOS")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_paste_to_target(
+    expected: FocusIdentity,
+    text: &str,
+) -> Result<InsertionDiagnostic, String> {
     if !auto_paste_is_ready() {
         return Err(auto_paste_permission_message());
+    }
+
+    let plan = insertion_plan_for_target(&expected, text);
+    if !plan.available() {
+        return Err(format!(
+            "Auto-paste could not choose an insertion strategy: {:?}",
+            plan.unavailable_reason
+        ));
     }
 
     if !activate_paste_target(&expected) {
@@ -917,32 +1016,34 @@ fn send_paste_to_target(expected: FocusIdentity, text: &str) -> Result<(), Strin
         ));
     }
 
-    match insert_text_via_accessibility(&expected, text) {
-        Ok(()) => {
-            log::info!("auto-paste inserted text via focused accessibility element");
-            return Ok(());
+    let mut failures = Vec::new();
+    for strategy in plan.strategies {
+        match execute_macos_insertion_strategy(strategy, &expected, text) {
+            Ok(()) => {
+                log::info!("auto-paste inserted with strategy {strategy:?}");
+                return Ok(InsertionDiagnostic::pasted(
+                    &expected,
+                    format!("{strategy:?}"),
+                ));
+            }
+            Err(e) => {
+                log::warn!("auto-paste strategy {strategy:?} failed: {e}");
+                failures.push(format!("{strategy:?}: {e}"));
+            }
         }
-        Err(e) => {
-            log::warn!("auto-paste direct accessibility insertion failed: {e}");
-        }
     }
 
-    if send_paste_via_core_graphics() {
-        log::info!("auto-paste sent via CoreGraphics fallback");
-        return Ok(());
-    }
-
-    // System Events requires a separate Automation grant, so keep it last.
-    if send_paste_via_system_events() {
-        log::info!("auto-paste sent via System Events fallback");
-        return Ok(());
-    }
-
-    Err("Auto-paste could not synthesize Cmd+V after refocusing the target app.".to_string())
+    Err(format!(
+        "Auto-paste failed after trying planned strategies. {}",
+        failures.join(" | ")
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn send_paste_to_target(_expected: FocusIdentity, _text: &str) -> Result<(), String> {
+fn send_paste_to_target(
+    _expected: FocusIdentity,
+    _text: &str,
+) -> Result<InsertionDiagnostic, String> {
     // TODO: cross-platform keystroke synthesis (Win: SendInput; Linux: xdotool/wtype)
     log::debug!("auto-paste: not implemented on this platform yet");
     Err("Auto-paste keystroke synthesis is not implemented on this platform yet.".to_string())
@@ -1117,6 +1218,7 @@ fn handle_toggle(app: &AppHandle, pipeline: &Pipeline) {
 }
 
 fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
+    show_pill(app);
     if pipeline.whisper.lock().is_none() {
         pipeline.recording.store(false, Ordering::SeqCst);
         emit_error(
@@ -1279,6 +1381,7 @@ async fn process(
                 copied: false,
                 pasted: false,
                 state: "ready".to_string(),
+                message: None,
             },
         );
         return Ok(());
@@ -1321,6 +1424,7 @@ async fn process(
                 copied: false,
                 pasted: false,
                 state: "ready".to_string(),
+                message: None,
             },
         );
         return Ok(());
@@ -1401,6 +1505,7 @@ async fn process(
         .unwrap_or((false, true));
 
     let mut pasted = false;
+    let mut paste_failed_message: Option<String> = None;
     if auto_paste && !output.is_empty() {
         if !auto_paste_is_ready() {
             let message = auto_paste_permission_message();
@@ -1409,6 +1514,7 @@ async fn process(
                 message.clone(),
             ));
             emit_error(app, message);
+            paste_failed_message = Some(auto_paste_permission_message());
         } else {
             tokio::time::sleep(std::time::Duration::from_millis(70)).await;
             // Re-check inside the delay window — user may have Cmd-tabbed
@@ -1423,18 +1529,15 @@ async fn process(
                         .ok_or_else(|| {
                             "Auto-paste needs another app focused before recording starts. Focus the text field you want to paste into, then press the hotkey.".to_string()
                         })?;
-                    send_paste_to_target(expected.clone(), &output_for_paste)?;
-                    Ok::<FocusIdentity, String>(expected)
+                    let diagnostic = send_paste_to_target(expected.clone(), &output_for_paste)?;
+                    Ok::<InsertionDiagnostic, String>(diagnostic)
                 })
                 .await
                 {
-                    Ok(Ok(target)) => {
+                    Ok(Ok(diagnostic)) => {
                         pasted = true;
-                        pipeline.set_last_insertion(InsertionDiagnostic::pasted(&target));
-                        let _ = app_for_paste.emit(
-                            PASTED_EVENT,
-                            InsertionDiagnostic::pasted(&target),
-                        );
+                        pipeline.set_last_insertion(diagnostic.clone());
+                        let _ = app_for_paste.emit(PASTED_EVENT, diagnostic);
                     }
                     Ok(Err(msg)) => {
                         pipeline.set_last_insertion(InsertionDiagnostic::failed(
@@ -1442,6 +1545,10 @@ async fn process(
                             msg.clone(),
                         ));
                         emit_error(&app_for_paste, msg);
+                        paste_failed_message = Some(
+                            "Auto-paste failed. The text was copied, but it was not inserted."
+                                .to_string(),
+                        );
                     }
                     Err(e) => {
                         let message = format!("auto-paste task failed: {e:#}");
@@ -1449,7 +1556,11 @@ async fn process(
                             "auto_paste_task",
                             message.clone(),
                         ));
-                        emit_error(&app_for_paste, message)
+                        emit_error(&app_for_paste, message);
+                        paste_failed_message = Some(
+                            "Auto-paste failed. The text was copied, but it was not inserted."
+                                .to_string(),
+                        );
                     }
                 }
             }
@@ -1474,7 +1585,15 @@ async fn process(
             output,
             copied: true,
             pasted,
-            state: if pasted { "pasted" } else { "copied" }.to_string(),
+            state: if pasted {
+                "pasted"
+            } else if paste_failed_message.is_some() {
+                "failed"
+            } else {
+                "copied"
+            }
+            .to_string(),
+            message: paste_failed_message,
         },
     );
     Ok(())
@@ -1674,7 +1793,7 @@ fn set_auto_paste(
         #[cfg(target_os = "macos")]
         {
             if !auto_paste_is_ready() {
-                reset_stale_macos_input_permissions();
+                prompt_for_input_permission_if_needed();
                 let _ = open_accessibility_settings();
                 return Err(auto_paste_permission_message());
             }
@@ -2713,6 +2832,11 @@ pub fn run() {
                 *pipeline_for_setup.persistent.lock() = loaded;
                 *pipeline_for_setup.state_path.lock() = Some(path);
                 log::info!("state dir: {dir:?}");
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                prompt_for_input_permission_if_needed();
             }
 
             // Apply saved hotkey choice

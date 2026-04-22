@@ -105,6 +105,7 @@ function setTransientState(
 
 function stateFromDonePayload(payload: HudPayload | undefined): HudState {
   if (payload && typeof payload === "object") {
+    if (payload.state && payload.state in LABELS) return payload.state;
     if (payload.state === "pasted" || payload.pasted) return "pasted";
     if (payload.state === "copied" || payload.copied) return "copied";
   }
