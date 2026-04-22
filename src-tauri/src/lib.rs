@@ -1014,7 +1014,6 @@ fn pill_position_for_active_screen(window: &WebviewWindow) -> Option<PillPositio
 fn configure_pill_window(window: &WebviewWindow) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
-    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
     let Ok(ptr) = window.ns_window() else {
         return;
     };
@@ -1023,20 +1022,11 @@ fn configure_pill_window(window: &WebviewWindow) {
     }
     unsafe {
         let obj: *mut AnyObject = ptr.cast();
-        let process_info = NSProcessInfo::processInfo();
-        let can_join_all_apps =
-            process_info.isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
-                majorVersion: 13,
-                minorVersion: 0,
-                patchVersion: 0,
-            });
-        let collection_behavior: u64 = if can_join_all_apps {
-            // macOS 13+: this is mutually exclusive with the older full-screen
-            // modes and is intended for floating/system overlays.
-            (1 << 18) | (1 << 3) | (1 << 6)
-        } else {
-            (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8)
-        };
+        // A normal Tauri NSWindow can be "shown" while still being occluded by
+        // a macOS full-screen Space. The critical flag is FullScreenAuxiliary;
+        // CanJoinAllApplications is mutually exclusive with it and does not
+        // make this HUD visible over full-screen apps.
+        let collection_behavior: u64 = (1 << 0) | (1 << 3) | (1 << 4) | (1 << 6) | (1 << 8);
         let overlay_window_level: i64 = 102;
         let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
         let _: () = msg_send![obj, setLevel: overlay_window_level];
