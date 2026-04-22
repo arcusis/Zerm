@@ -278,24 +278,6 @@ fn accessibility_is_trusted() -> bool {
     unsafe { AXIsProcessTrusted() != 0 }
 }
 
-#[cfg(target_os = "macos")]
-fn request_accessibility_trust() -> bool {
-    use core_foundation::base::TCFType;
-    use core_foundation::boolean::CFBoolean;
-    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
-    use core_foundation::string::CFString;
-
-    extern "C" {
-        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> std::ffi::c_uchar;
-    }
-
-    let prompt_key = CFString::new("AXTrustedCheckOptionPrompt");
-    let prompt_value = CFBoolean::true_value();
-    let options =
-        CFDictionary::from_CFType_pairs(&[(prompt_key.as_CFType(), prompt_value.as_CFType())]);
-    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0 }
-}
-
 #[cfg(not(target_os = "macos"))]
 fn accessibility_is_trusted() -> bool {
     true
@@ -564,7 +546,7 @@ fn insert_text_via_accessibility(expected: &FocusIdentity, text: &str) -> Result
 fn auto_paste_permission_message() -> String {
     #[cfg(target_os = "macos")]
     {
-        "Auto-paste needs macOS Accessibility permission. Allow Zerm in System Settings -> Privacy & Security -> Accessibility, then reopen or retry Zerm.".to_string()
+        "Auto-paste needs macOS Accessibility permission. Use Open Accessibility Settings from Zerm, then enable /Applications/Zerm.app and retry.".to_string()
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -598,6 +580,30 @@ fn macos_signature_permission_note() -> Option<String> {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn macos_installed_build_has_unstable_tcc_identity() -> bool {
+    macos_signature_permission_note().is_some()
+}
+
+#[cfg(target_os = "macos")]
+fn reset_stale_macos_input_permissions() {
+    if accessibility_is_trusted() || !macos_installed_build_has_unstable_tcc_identity() {
+        return;
+    }
+    for service in ["Accessibility", "AppleEvents"] {
+        match std::process::Command::new("/usr/bin/tccutil")
+            .args(["reset", service, "com.arcusis.zerm"])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                log::info!("reset stale macOS {service} TCC entry for com.arcusis.zerm")
+            }
+            Ok(status) => log::warn!("tccutil reset {service} exited with {status}"),
+            Err(e) => log::warn!("could not run tccutil reset {service}: {e}"),
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct InputPermissionStatus {
     required: bool,
@@ -615,7 +621,7 @@ fn input_permission_status() -> InputPermissionStatus {
             "Zerm can control the focused app for the hotkey and auto-paste.".to_string()
         } else {
             format!(
-                "Zerm needs macOS Accessibility permission for the hotkey and auto-paste. Allow /Applications/Zerm.app in System Settings -> Privacy & Security -> Accessibility, then return to Zerm.{}",
+                "Zerm needs macOS Accessibility permission for the hotkey and auto-paste. Click Open Accessibility Settings, then enable /Applications/Zerm.app and return to Zerm.{}",
                 macos_signature_permission_note().unwrap_or_default()
             )
         };
@@ -800,15 +806,14 @@ fn send_paste_to_target(expected: FocusIdentity, text: &str) -> Result<(), Strin
         }
     }
 
-    // Prefer System Events first because osascript returns a real status when
-    // macOS blocks the paste. CoreGraphics can silently drop synthetic events.
-    if send_paste_via_system_events() {
-        log::info!("auto-paste sent via System Events");
+    if send_paste_via_core_graphics() {
+        log::info!("auto-paste sent via CoreGraphics fallback");
         return Ok(());
     }
 
-    if send_paste_via_core_graphics() {
-        log::info!("auto-paste sent via CoreGraphics fallback");
+    // System Events requires a separate Automation grant, so keep it last.
+    if send_paste_via_system_events() {
+        log::info!("auto-paste sent via System Events fallback");
         return Ok(());
     }
 
@@ -835,39 +840,36 @@ fn emit_dashboard_update(app: &AppHandle) {
     }
 }
 
-fn show_pill(app: &AppHandle, _pipeline: &Pipeline) {
+fn show_pill(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    let saved_position = _pipeline.persistent.lock().pill_position;
     let dispatch_window = window.clone();
     let pill_window = window.clone();
     if let Err(e) = dispatch_window.run_on_main_thread(move || {
-        present_pill_window(&pill_window, saved_position);
+        present_pill_window(&pill_window);
     }) {
         log::warn!("pill: could not dispatch presentation to main thread: {e:#}");
-        present_pill_window(&window, saved_position);
+        present_pill_window(&window);
     }
 }
 
-fn present_pill_window(window: &WebviewWindow, saved_position: Option<PillPosition>) {
-    configure_pill_window(window);
+fn present_pill_window(window: &WebviewWindow) {
     let _ = window.set_visible_on_all_workspaces(true);
-    if let Some(pos) = pill_position_for_active_screen(window, saved_position) {
+    let _ = window.set_always_on_top(true);
+    configure_pill_window(window);
+    if let Some(pos) = pill_position_for_active_screen(window) {
         let _ = window.set_position(tauri::Position::Physical(PhysicalPosition {
             x: pos.x,
             y: pos.y,
         }));
     }
     let _ = window.show();
-    let _ = window.set_always_on_top(true);
+    configure_pill_window(window);
     order_pill_front(window);
 }
 
-fn pill_position_for_active_screen(
-    window: &WebviewWindow,
-    saved_position: Option<PillPosition>,
-) -> Option<PillPosition> {
+fn pill_position_for_active_screen(window: &WebviewWindow) -> Option<PillPosition> {
     let cursor = window.cursor_position().ok();
     let monitor = cursor
         .and_then(|pos| window.monitor_from_point(pos.x, pos.y).ok().flatten())
@@ -881,22 +883,9 @@ fn pill_position_for_active_screen(
     let max_x = (origin.x + size.width as i32 - PILL_WIDTH).max(min_x);
     let max_y = (origin.y + size.height as i32 - PILL_HEIGHT).max(min_y);
 
-    if let Some(pos) = saved_position {
-        let in_monitor = pos.x + PILL_WIDTH > min_x
-            && pos.x < origin.x + size.width as i32
-            && pos.y + PILL_HEIGHT > min_y
-            && pos.y < origin.y + size.height as i32;
-        if in_monitor {
-            return Some(PillPosition {
-                x: pos.x.clamp(min_x, max_x),
-                y: pos.y.clamp(min_y, max_y),
-            });
-        }
-    }
-
     Some(PillPosition {
-        x: min_x + ((size.width as i32 - PILL_WIDTH) / 2).max(0),
-        y: min_y + 40.min((size.height as i32 - PILL_HEIGHT).max(0)),
+        x: (min_x + ((size.width as i32 - PILL_WIDTH) / 2).max(0)).clamp(min_x, max_x),
+        y: (min_y + 28.min((size.height as i32 - PILL_HEIGHT).max(0))).clamp(min_y, max_y),
     })
 }
 
@@ -920,14 +909,13 @@ fn configure_pill_window(window: &WebviewWindow) {
                 minorVersion: 0,
                 patchVersion: 0,
             });
-        let fullscreen_behavior: u64 = if can_join_all_apps {
-            // macOS 13+: Apple's modern behavior for floating/system overlays
-            // across Stage Manager and full-screen app Spaces.
-            1 << 18
+        let collection_behavior: u64 = if can_join_all_apps {
+            // macOS 13+: this is mutually exclusive with the older full-screen
+            // modes and is intended for floating/system overlays.
+            (1 << 18) | (1 << 3) | (1 << 6)
         } else {
-            1 << 8
+            (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8)
         };
-        let collection_behavior: u64 = (1 << 0) | (1 << 4) | (1 << 6) | fullscreen_behavior;
         let overlay_window_level: i64 = 102;
         let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
         let _: () = msg_send![obj, setLevel: overlay_window_level];
@@ -1061,7 +1049,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
         Ok(handle) => {
             let level = handle.level.clone();
             *pipeline.capture.lock() = Some(handle);
-            show_pill(app, pipeline);
+            show_pill(app);
             let _ = app.emit(RECORDING_EVENT, ());
 
             // Spawn audio-level emitter at ~30fps while recording
@@ -1069,8 +1057,13 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
             let recording_flag = pipeline.recording.clone();
             tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
+                let mut ticks = 0_u32;
                 while recording_flag.load(Ordering::SeqCst) {
                     interval.tick().await;
+                    ticks = ticks.wrapping_add(1);
+                    if ticks.is_multiple_of(30) {
+                        show_pill(&app_for_level);
+                    }
                     let lvl = *level.lock();
                     let _ = app_for_level.emit(AUDIO_LEVEL_EVENT, lvl);
                 }
@@ -1526,7 +1519,8 @@ fn set_auto_paste(
     if enabled {
         #[cfg(target_os = "macos")]
         {
-            if !auto_paste_is_ready() && !request_accessibility_trust() {
+            if !auto_paste_is_ready() {
+                reset_stale_macos_input_permissions();
                 let _ = open_accessibility_settings();
                 return Err(auto_paste_permission_message());
             }
@@ -1793,7 +1787,7 @@ fn open_input_permission_settings(window: tauri::WebviewWindow) -> Result<(), St
     require_dashboard(&window)?;
     #[cfg(target_os = "macos")]
     {
-        let _ = request_accessibility_trust();
+        reset_stale_macos_input_permissions();
         open_accessibility_settings()?;
     }
     Ok(())
