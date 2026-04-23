@@ -1642,14 +1642,13 @@ fn send_paste_via_system_events() -> bool {
 
 #[cfg(target_os = "macos")]
 fn insertion_plan_for_target(expected: &FocusIdentity, text: &str) -> InsertionPlan {
-    let request = InsertionRequest::new(
-        text,
-        Some(
-            InsertionAppContext::new(InsertionPlatform::Macos)
-                .with_app_id(expected.bundle_id.clone())
-                .with_focused_text_input(true),
-        ),
-    );
+    let mut context = InsertionAppContext::new(InsertionPlatform::Macos)
+        .with_app_id(expected.bundle_id.clone())
+        .with_focused_text_input(true);
+    if let Some(app_name) = expected.app_name.clone() {
+        context = context.with_app_name(app_name);
+    }
+    let request = InsertionRequest::new(text, Some(context));
     StrategySelector::default().select_plan(&request)
 }
 
@@ -1738,6 +1737,12 @@ fn macos_target_has_known_clipboard_paste(identity: &FocusIdentity) -> bool {
             | "com.todesktop.230313mzl4w4u92"
             | "com.apple.Terminal"
             | "com.googlecode.iterm2"
+            | "dev.warp.Warp-Stable"
+            | "net.kovidgoyal.kitty"
+            | "com.mitchellh.ghostty"
+            | "com.github.wez.wezterm"
+            | "org.alacritty"
+            | "com.cmuxterm.app"
     )
 }
 
@@ -4149,6 +4154,13 @@ pub fn run() {
             let app_for_hotkey = app_handle.clone();
             let pipeline_for_hotkey = pipeline_for_setup.clone();
             let installed = hotkey::install(move |pressed| {
+                native_debug_log(format!(
+                    "hotkey event pressed={} app_bundle_id={} AXIsProcessTrusted={} frontmost_app={}",
+                    pressed,
+                    app_for_hotkey.config().identifier.as_str(),
+                    accessibility_is_trusted(),
+                    format_focus_identity(frontmost_focus_identity().as_ref())
+                ));
                 if pressed {
                     let app = app_for_hotkey.clone();
                     let pipeline = pipeline_for_hotkey.clone();
@@ -4159,11 +4171,23 @@ pub fn run() {
             });
             if installed {
                 INPUT_MONITOR_READY.store(true, Ordering::SeqCst);
+                native_debug_log(format!(
+                    "hotkey monitor installed=true hotkey_label=\"{}\" app_bundle_id={} AXIsProcessTrusted={}",
+                    hotkey_choice.label(),
+                    app_handle.config().identifier.as_str(),
+                    accessibility_is_trusted()
+                ));
                 log::info!(
                     "zerm started. Tap {} to record. Click tray icon for dashboard.",
                     hotkey_choice.label()
                 );
             } else if cfg!(target_os = "macos") {
+                native_debug_log(format!(
+                    "hotkey monitor installed=false hotkey_label=\"{}\" app_bundle_id={} AXIsProcessTrusted={}",
+                    hotkey_choice.label(),
+                    app_handle.config().identifier.as_str(),
+                    accessibility_is_trusted()
+                ));
                 emit_error(
                     &app_handle,
                     "Hotkey monitor failed. Grant Accessibility in System Settings → Privacy & Security.",

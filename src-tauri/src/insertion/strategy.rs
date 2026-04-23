@@ -456,8 +456,21 @@ fn default_rules() -> Vec<AppStrategyRule> {
                 "com.googlecode.iterm2",
                 "dev.warp.Warp-Stable",
                 "net.kovidgoyal.kitty",
+                "com.mitchellh.ghostty",
+                "com.github.wez.wezterm",
+                "org.alacritty",
+                "com.cmuxterm.app",
             ],
-            ["terminal", "iterm", "warp", "kitty"],
+            [
+                "terminal",
+                "iterm",
+                "warp",
+                "kitty",
+                "ghostty",
+                "wezterm",
+                "alacritty",
+                "cmux",
+            ],
             [InsertionStrategy::MacClipboardKeystroke],
             PasteConfirmation::ClipboardConsumed,
         ),
@@ -581,6 +594,32 @@ mod tests {
 
         assert_eq!(plan.matched_rule, Some("macos-browser-and-electron"));
         assert_eq!(plan.strategies[0], InsertionStrategy::MacClipboardKeystroke);
+    }
+
+    #[test]
+    fn selects_clipboard_only_for_terminal_like_macos_apps() {
+        let request = InsertionRequest::new(
+            "hello",
+            Some(
+                AppContext::new(Platform::Macos)
+                    .with_app_id("com.cmuxterm.app")
+                    .with_app_name("cmux")
+                    .with_focused_text_input(true),
+            ),
+        );
+
+        let plan = selector().select_plan(&request);
+
+        assert!(plan.available());
+        assert_eq!(plan.matched_rule, Some("macos-terminal"));
+        assert_eq!(
+            plan.strategies,
+            vec![InsertionStrategy::MacClipboardKeystroke]
+        );
+        assert_eq!(
+            plan.expected_confirmation,
+            PasteConfirmation::ClipboardConsumed
+        );
     }
 
     #[test]
