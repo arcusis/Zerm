@@ -48,6 +48,8 @@ The default script mode is read-only. The interactive auto-paste self-test requi
 
 - Commit focused changes.
 - Push to `origin Production`.
+- For prerelease tags (`-alpha`, `-beta`, `-rc`), keep macOS signing enabled but allow `pnpm tauri build --skip-stapling` in CI so Apple notarization polling outages do not kill the release after signing succeeded.
+- Stable releases should still require full signing credentials and should still block on notarization/stapling and Windows Authenticode verification.
 - Do not spend time continuously monitoring CI unless explicitly requested. The user prefers to report CI failures back if they matter.
 
 ## Notebook Audit

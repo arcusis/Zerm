@@ -15,6 +15,7 @@ Recent production work centered on privacy hardening, setup UX, local app rebuil
 
 ## Notable Shipped Changes
 
+- Release pipeline now treats prerelease CI differently from stable releases: macOS prereleases use Tauri `--skip-stapling` after signing so Apple notarization polling outages do not fail the build, and Windows prereleases can publish unsigned installers when signing secrets are absent.
 - macOS signed builds now carry the audio-input entitlement required for microphone capture under hardened runtime.
 - The app now separates Accessibility permission, Microphone permission, selected input device, capture level, STT, and insertion diagnostics.
 - Right Option capture has a CoreGraphics event-tap fallback for side-specific modifier keys.
