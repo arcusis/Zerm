@@ -1703,13 +1703,27 @@ fn verified_clipboard_paste_to_captured_target(
 
     if macos_target_has_known_clipboard_paste(&target.identity) {
         std::thread::sleep(Duration::from_millis(500));
-        if focus_is_target(&target.identity) {
+        let frontmost_after_paste = frontmost_focus_identity();
+        if frontmost_after_paste.as_ref().is_some_and(|current| {
+            current.pid == target.identity.pid && current.bundle_id == target.identity.bundle_id
+        }) || frontmost_after_paste.is_none()
+        {
             log::info!(
                 "auto-paste: accepting clipboard paste for known macOS target {} after focus stayed on captured app",
                 target.identity.bundle_id
             );
+            native_debug_log(format!(
+                "paste known_clipboard_target accepted target={} frontmost_after_paste={} confirmation=known_app_clipboard_paste",
+                format_focus_identity(Some(&target.identity)),
+                format_focus_identity(frontmost_after_paste.as_ref())
+            ));
             return Ok(());
         }
+        native_debug_log(format!(
+            "paste known_clipboard_target rejected target={} frontmost_after_paste={}",
+            format_focus_identity(Some(&target.identity)),
+            format_focus_identity(frontmost_after_paste.as_ref())
+        ));
         return Err(
             "paste event was posted but focus left the captured target before confirmation"
                 .to_string(),
@@ -2012,10 +2026,13 @@ fn native_pill_panel_for_window(
         .expect("native pill panel lock poisoned")
     {
         if let Some(placement) = placement {
+            let panel = existing.panel as *mut AnyObject;
+            sync_native_pill_panel_frame(window, panel, placement);
             native_debug_log(format!(
-                "native pill panel reuse frame_sync_skipped reason=\"existing NSPanel frame changes previously crashed AppKit\" desired_position={:?} target_monitor=\"{}\"",
+                "native pill panel reuse frame_synced desired_position={:?} target_monitor=\"{}\" {}",
                 placement.position,
-                monitor_string(&placement.monitor)
+                monitor_string(&placement.monitor),
+                appkit_window_frame_info("native_panel", panel)
             ));
         }
         return Some(existing.panel as *mut AnyObject);
@@ -2085,6 +2102,56 @@ fn native_pill_panel_for_window(
 }
 
 #[cfg(target_os = "macos")]
+fn sync_native_pill_panel_frame(
+    window: &WebviewWindow,
+    panel: *mut objc2::runtime::AnyObject,
+    placement: &PillPlacement,
+) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    if panel.is_null() {
+        return;
+    }
+    let Some(source) = window.ns_window().ok() else {
+        native_debug_log(
+            "native pill panel frame sync skipped reason=\"source ns_window unavailable\"",
+        );
+        return;
+    };
+    if source.is_null() {
+        native_debug_log("native pill panel frame sync skipped reason=\"source ns_window null\"");
+        return;
+    }
+
+    unsafe {
+        let source_window: *mut AnyObject = source.cast();
+        let source_frame: objc2_foundation::NSRect = msg_send![source_window, frame];
+        let frame = appkit_panel_frame_for_physical_top_left(
+            placement.position,
+            &placement.monitor,
+            source_frame.size.width,
+            source_frame.size.height,
+        );
+        native_debug_log(format!(
+            "native pill panel frame sync begin desired_position={:?} target_monitor=\"{}\" target_frame_coordinate_space=appkit_logical_points target_frame_x={:.2} target_frame_y={:.2} target_frame_width={:.2} target_frame_height={:.2} before=\"{}\"",
+            placement.position,
+            monitor_string(&placement.monitor),
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height,
+            appkit_window_frame_info("native_panel", panel)
+        ));
+        let _: () = msg_send![panel, setFrame: frame, display: true];
+        native_debug_log(format!(
+            "native pill panel frame sync end after=\"{}\"",
+            appkit_window_frame_info("native_panel", panel)
+        ));
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn present_native_pill_panel(window: &WebviewWindow, placement: Option<&PillPlacement>) {
     use objc2::msg_send;
 
@@ -2092,7 +2159,13 @@ fn present_native_pill_panel(window: &WebviewWindow, placement: Option<&PillPlac
         native_debug_log("native pill panel show failed; could not create NSPanel");
         return;
     };
-    native_debug_log("native pill panel show step=sync_frame_skipped reason=\"panel created at positioned source frame; setFrame crashed AppKit runtime\"");
+    if let Some(placement) = placement {
+        sync_native_pill_panel_frame(window, panel, placement);
+    } else {
+        native_debug_log(
+            "native pill panel show step=sync_frame_skipped reason=\"no placement available\"",
+        );
+    }
     native_debug_log("native pill panel show step=configure_begin");
     configure_native_pill_panel(panel);
     native_debug_log("native pill panel show step=configure_end");
@@ -2119,7 +2192,7 @@ fn raise_native_pill_panel(window: &WebviewWindow) {
     let Some(panel) = native_pill_panel_for_window(window, None) else {
         return;
     };
-    native_debug_log("native pill panel raise step=sync_frame_skipped reason=\"panel created at positioned source frame; setFrame crashed AppKit runtime\"");
+    native_debug_log("native pill panel raise step=no_frame_change reason=\"raise must not reposition visible pill\"");
     configure_native_pill_panel(panel);
     unsafe {
         let _: () = msg_send![panel, orderFrontRegardless];
@@ -2459,6 +2532,10 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
 
     match result {
         Ok(handle) => {
+            native_debug_log(format!(
+                "audio capture started sample_rate={} channels={}",
+                handle.sample_rate, handle.channels
+            ));
             let level = handle.level.clone();
             *pipeline.capture.lock() = Some(handle);
             show_pill(app);
@@ -2486,6 +2563,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
         Err(e) => {
             pipeline.recording.store(false, Ordering::SeqCst);
             *pipeline.paste_target.lock() = None;
+            native_debug_log(format!("audio capture failed error={e:#}"));
             emit_error(app, format!("audio capture failed: {e:#}"));
         }
     }
@@ -2510,6 +2588,13 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
     let job_id = pipeline.active_job_id.load(Ordering::SeqCst);
 
     let raw = std::mem::take(&mut *pipeline.audio_buffer.lock());
+    native_debug_log(format!(
+        "audio capture stopped raw_samples={} sample_rate={} channels={} approx_seconds={:.3}",
+        raw.len(),
+        sample_rate,
+        channels,
+        raw.len() as f64 / (sample_rate as f64 * channels.max(1) as f64)
+    ));
     let app_clone = app.clone();
     let whisper = pipeline.whisper.clone();
     let pipeline_for_model = Arc::clone(
@@ -2572,6 +2657,13 @@ async fn process(
 
     if raw.len() < (sample_rate as usize) / 4 {
         log::warn!("audio too short ({} samples), skipping", raw.len());
+        native_debug_log(format!(
+            "audio processing skipped reason=too_short raw_samples={} sample_rate={} channels={} min_samples={}",
+            raw.len(),
+            sample_rate,
+            channels,
+            (sample_rate as usize) / 4
+        ));
         let _ = app.emit(
             DONE_EVENT,
             DonePayload {
