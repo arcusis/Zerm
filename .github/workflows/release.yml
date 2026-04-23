@@ -295,6 +295,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          retry() {
+            local attempts="$1"
+            shift
+            local n=1
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ "$n" -ge "$attempts" ]]; then
+                return 1
+              fi
+              sleep $((n * 5))
+              n=$((n + 1))
+            done
+          }
           artifacts=()
           while IFS= read -r -d '' artifact; do
             artifacts+=("$artifact")
@@ -310,9 +325,17 @@ jobs:
             echo "::error::No release artifacts found"
             exit 1
           fi
-          gh release upload "${{ github.ref_name }}" "${artifacts[@]}" \
-            --repo ${{ github.repository }} \
-            --clobber
+          existing_assets="$(gh release view "${{ github.ref_name }}" --repo ${{ github.repository }} --json assets --jq '.assets[].name' || true)"
+          for artifact in "${artifacts[@]}"; do
+            asset_name="$(basename "$artifact")"
+            if grep -Fxq "$asset_name" <<<"$existing_assets"; then
+              retry 3 gh release delete-asset "${{ github.ref_name }}" "$asset_name" \
+                --repo ${{ github.repository }} \
+                --yes
+            fi
+            retry 3 gh release upload "${{ github.ref_name }}" "$artifact" \
+              --repo ${{ github.repository }}
+          done
 
       - name: Verify macOS signing
         if: ${{ runner.os == 'macOS' }}
@@ -427,8 +450,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          retry() {
+            local attempts="$1"
+            shift
+            local n=1
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+              if [[ "$n" -ge "$attempts" ]]; then
+                return 1
+              fi
+              sleep $((n * 5))
+              n=$((n + 1))
+            done
+          }
           mkdir -p release-assets
-          gh release download "${{ github.ref_name }}" \
+          retry 3 gh release download "${{ github.ref_name }}" \
             --repo ${{ github.repository }} \
             --dir release-assets \
             --clobber
@@ -437,9 +475,13 @@ jobs:
           find . -maxdepth 1 -type f -print0 \
             | sort -z \
             | xargs -0 sha256sum > SHA256SUMS.txt
-          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt \
-            --repo ${{ github.repository }} \
-            --clobber
+          if gh release view "${{ github.ref_name }}" --repo ${{ github.repository }} --json assets --jq '.assets[].name' | grep -Fxq 'SHA256SUMS.txt'; then
+            retry 3 gh release delete-asset "${{ github.ref_name }}" SHA256SUMS.txt \
+              --repo ${{ github.repository }} \
+              --yes
+          fi
+          retry 3 gh release upload "${{ github.ref_name }}" SHA256SUMS.txt \
+            --repo ${{ github.repository }}
 
       - name: Promote draft to published
         env:
