@@ -14,7 +14,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
@@ -37,6 +37,7 @@ const DONE_EVENT: &str = "zerm://done";
 const PASTED_EVENT: &str = "zerm://pasted";
 const DASHBOARD_UPDATED_EVENT: &str = "zerm://dashboard-updated";
 const AUDIO_LEVEL_EVENT: &str = "zerm://audio-level";
+const TAP_TO_TOGGLE_THRESHOLD_MS: u128 = 250;
 
 // Set before calling app.exit(0) so the RunEvent::ExitRequested handler
 // below knows this is an intentional quit, not a last-window-closed event.
@@ -542,6 +543,22 @@ fn appkit_window_frame_info(label: &str, obj: *mut objc2::runtime::AnyObject) ->
     }
 }
 
+#[cfg(target_os = "macos")]
+fn macos_window_debug_info(window: &WebviewWindow) -> String {
+    let Ok(ptr) = window.ns_window() else {
+        return "tauri_pill_window=<ns_window unavailable>".to_string();
+    };
+    if ptr.is_null() {
+        return "tauri_pill_window=<null ns_window>".to_string();
+    }
+    let obj: *mut objc2::runtime::AnyObject = ptr.cast();
+    format!(
+        "{} {}",
+        appkit_window_debug_info("tauri_pill", obj),
+        appkit_window_frame_info("tauri_pill", obj)
+    )
+}
+
 #[cfg(not(target_os = "macos"))]
 fn macos_window_debug_info(_window: &WebviewWindow) -> String {
     "<unsupported platform>".to_string()
@@ -568,14 +585,136 @@ fn target_screen_string(window: &WebviewWindow, pipeline: Option<&Pipeline>) -> 
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordingLifecycle {
+    Idle,
+    Starting {
+        stop_requested: bool,
+        started_at: Instant,
+    },
+    Recording {
+        started_at: Instant,
+    },
+    Stopping,
+    Processing {
+        job_id: u64,
+    },
+}
+
+impl RecordingLifecycle {
+    fn label(self) -> &'static str {
+        match self {
+            RecordingLifecycle::Idle => "idle",
+            RecordingLifecycle::Starting { .. } => "starting",
+            RecordingLifecycle::Recording { .. } => "recording",
+            RecordingLifecycle::Stopping => "stopping",
+            RecordingLifecycle::Processing { .. } => "processing",
+        }
+    }
+
+    fn audio_level_active(self) -> bool {
+        matches!(
+            self,
+            RecordingLifecycle::Recording { .. } | RecordingLifecycle::Stopping
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordingAction {
+    Start,
+    Stop,
+    PendingStop,
+    KeepRecording,
+    Ignore,
+}
+
+fn request_toggle_transition(lifecycle: &mut RecordingLifecycle) -> RecordingAction {
+    match *lifecycle {
+        RecordingLifecycle::Idle | RecordingLifecycle::Processing { .. } => {
+            *lifecycle = RecordingLifecycle::Starting {
+                stop_requested: false,
+                started_at: Instant::now(),
+            };
+            RecordingAction::Start
+        }
+        RecordingLifecycle::Starting {
+            ref mut stop_requested,
+            ..
+        } => {
+            *stop_requested = true;
+            RecordingAction::PendingStop
+        }
+        RecordingLifecycle::Recording { .. } => {
+            *lifecycle = RecordingLifecycle::Stopping;
+            RecordingAction::Stop
+        }
+        RecordingLifecycle::Stopping => RecordingAction::Ignore,
+    }
+}
+
+fn request_press_transition(lifecycle: &mut RecordingLifecycle) -> RecordingAction {
+    match *lifecycle {
+        RecordingLifecycle::Idle | RecordingLifecycle::Processing { .. } => {
+            *lifecycle = RecordingLifecycle::Starting {
+                stop_requested: false,
+                started_at: Instant::now(),
+            };
+            RecordingAction::Start
+        }
+        RecordingLifecycle::Recording { .. } => {
+            *lifecycle = RecordingLifecycle::Stopping;
+            RecordingAction::Stop
+        }
+        _ => RecordingAction::Ignore,
+    }
+}
+
+fn request_release_transition(lifecycle: &mut RecordingLifecycle) -> RecordingAction {
+    match *lifecycle {
+        RecordingLifecycle::Starting {
+            ref mut stop_requested,
+            started_at,
+        } => {
+            if started_at.elapsed().as_millis() < TAP_TO_TOGGLE_THRESHOLD_MS {
+                return RecordingAction::KeepRecording;
+            }
+            *stop_requested = true;
+            RecordingAction::PendingStop
+        }
+        RecordingLifecycle::Recording { started_at } => {
+            if started_at.elapsed().as_millis() < TAP_TO_TOGGLE_THRESHOLD_MS {
+                return RecordingAction::KeepRecording;
+            }
+            *lifecycle = RecordingLifecycle::Stopping;
+            RecordingAction::Stop
+        }
+        _ => RecordingAction::Ignore,
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct CaptureDiagnostic {
+    status: String,
+    raw_samples: usize,
+    sample_rate: u32,
+    channels: u16,
+    approx_seconds: f64,
+    device_name: Option<String>,
+    sample_format: Option<String>,
+    peak_rms: Option<f32>,
+    detail: Option<String>,
+}
+
 struct Pipeline {
     whisper: Arc<Mutex<Option<whisper::Whisper>>>,
     audio_buffer: Arc<Mutex<Vec<f32>>>,
     capture: Arc<Mutex<Option<audio::CaptureHandle>>>,
-    recording: Arc<AtomicBool>,
+    lifecycle: Arc<Mutex<RecordingLifecycle>>,
     active_job_id: Arc<AtomicU64>,
     paste_target: Arc<Mutex<Option<CapturedPasteTarget>>>,
     last_insertion: Arc<Mutex<Option<InsertionDiagnostic>>>,
+    last_capture: Arc<Mutex<Option<CaptureDiagnostic>>>,
     tray_anchor: Arc<Mutex<Option<PhysicalPosition<f64>>>>,
     persistent: Arc<Mutex<PersistentState>>,
     state_path: Arc<Mutex<Option<PathBuf>>>,
@@ -587,10 +726,11 @@ impl Pipeline {
             whisper: Arc::new(Mutex::new(None)),
             audio_buffer: Arc::new(Mutex::new(Vec::with_capacity(48_000 * 30))),
             capture: Arc::new(Mutex::new(None)),
-            recording: Arc::new(AtomicBool::new(false)),
+            lifecycle: Arc::new(Mutex::new(RecordingLifecycle::Idle)),
             active_job_id: Arc::new(AtomicU64::new(0)),
             paste_target: Arc::new(Mutex::new(None)),
             last_insertion: Arc::new(Mutex::new(None)),
+            last_capture: Arc::new(Mutex::new(None)),
             tray_anchor: Arc::new(Mutex::new(None)),
             persistent: Arc::new(Mutex::new(PersistentState::default())),
             state_path: Arc::new(Mutex::new(None)),
@@ -633,6 +773,27 @@ impl Pipeline {
 
     fn set_last_insertion(&self, diagnostic: InsertionDiagnostic) {
         *self.last_insertion.lock() = Some(diagnostic);
+    }
+
+    fn lifecycle_label(&self) -> String {
+        self.lifecycle.lock().label().to_string()
+    }
+
+    fn set_idle(&self, reason: &str) {
+        *self.lifecycle.lock() = RecordingLifecycle::Idle;
+        native_debug_log(format!("recording lifecycle -> idle reason=\"{reason}\""));
+    }
+
+    fn finish_processing_job(&self, job_id: u64) {
+        let mut lifecycle = self.lifecycle.lock();
+        if matches!(*lifecycle, RecordingLifecycle::Processing { job_id: id } if id == job_id)
+            && self.active_job_id.load(Ordering::SeqCst) == job_id
+        {
+            *lifecycle = RecordingLifecycle::Idle;
+            native_debug_log(format!(
+                "recording lifecycle -> idle reason=\"processing finished\" job_id={job_id}"
+            ));
+        }
     }
 }
 
@@ -849,7 +1010,6 @@ fn prompt_for_input_permission_if_needed() {
     if accessibility_is_trusted() {
         return;
     }
-    reset_stale_macos_input_permissions();
     if !request_accessibility_trust_prompt() {
         log::info!("macOS Accessibility prompt requested; waiting for user approval");
     }
@@ -1328,6 +1488,15 @@ fn open_accessibility_settings() -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+fn open_microphone_settings() -> Result<(), String> {
+    std::process::Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .spawn()
+        .map_err(|e| format!("open Microphone settings: {e}"))?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn macos_signature_permission_note() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let out = std::process::Command::new("/usr/bin/codesign")
@@ -1340,30 +1509,6 @@ fn macos_signature_permission_note() -> Option<String> {
         Some(" This installed build is not Developer ID signed, so macOS can show a stale Accessibility toggle that does not apply to the current binary. Install a signed production build, or remove and re-add /Applications/Zerm.app after this exact build is installed.".to_string())
     } else {
         None
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn macos_installed_build_has_unstable_tcc_identity() -> bool {
-    macos_signature_permission_note().is_some()
-}
-
-#[cfg(target_os = "macos")]
-fn reset_stale_macos_input_permissions() {
-    if accessibility_is_trusted() || !macos_installed_build_has_unstable_tcc_identity() {
-        return;
-    }
-    for service in ["Accessibility", "AppleEvents"] {
-        match std::process::Command::new("/usr/bin/tccutil")
-            .args(["reset", service, "com.arcusis.zerm"])
-            .status()
-        {
-            Ok(status) if status.success() => {
-                log::info!("reset stale macOS {service} TCC entry for com.arcusis.zerm")
-            }
-            Ok(status) => log::warn!("tccutil reset {service} exited with {status}"),
-            Err(e) => log::warn!("could not run tccutil reset {service}: {e}"),
-        }
     }
 }
 
@@ -1443,6 +1588,95 @@ fn app_signing_status() -> Option<AppSigningStatus> {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MacosMicrophoneAuthorization {
+    NotDetermined,
+    Restricted,
+    Denied,
+    Authorized,
+    Unknown(i64),
+}
+
+#[cfg(target_os = "macos")]
+impl MacosMicrophoneAuthorization {
+    fn is_granted(self) -> bool {
+        matches!(self, MacosMicrophoneAuthorization::Authorized)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            MacosMicrophoneAuthorization::NotDetermined => "not requested",
+            MacosMicrophoneAuthorization::Restricted => "restricted",
+            MacosMicrophoneAuthorization::Denied => "denied",
+            MacosMicrophoneAuthorization::Authorized => "allowed",
+            MacosMicrophoneAuthorization::Unknown(_) => "unknown",
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_microphone_authorization_status() -> MacosMicrophoneAuthorization {
+    use objc2::msg_send;
+    use objc2_foundation::NSString;
+
+    let Some(class) = objc_class(b"AVCaptureDevice\0") else {
+        return MacosMicrophoneAuthorization::Unknown(-1);
+    };
+    let media_type = NSString::from_str("soun");
+    let raw: i64 = unsafe { msg_send![class, authorizationStatusForMediaType: &*media_type] };
+    match raw {
+        0 => MacosMicrophoneAuthorization::NotDetermined,
+        1 => MacosMicrophoneAuthorization::Restricted,
+        2 => MacosMicrophoneAuthorization::Denied,
+        3 => MacosMicrophoneAuthorization::Authorized,
+        other => MacosMicrophoneAuthorization::Unknown(other),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn request_macos_microphone_access() -> Result<bool, String> {
+    use block2::{DynBlock, RcBlock};
+    use objc2::msg_send;
+    use objc2::runtime::Bool;
+    use objc2_foundation::NSString;
+
+    let Some(class) = objc_class(b"AVCaptureDevice\0") else {
+        return Err("AVCaptureDevice class is unavailable".to_string());
+    };
+    let media_type = NSString::from_str("soun");
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let block = RcBlock::new(move |granted: Bool| {
+        let _ = tx.send(granted.as_bool());
+    });
+    let block: &DynBlock<dyn Fn(Bool) + 'static> = &block;
+    let _: () = unsafe {
+        msg_send![class, requestAccessForMediaType: &*media_type, completionHandler: block]
+    };
+    rx.recv_timeout(std::time::Duration::from_secs(60))
+        .map_err(|_| "timed out waiting for macOS microphone permission prompt".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn prompt_for_microphone_permission_if_needed() -> bool {
+    match macos_microphone_authorization_status() {
+        MacosMicrophoneAuthorization::Authorized => true,
+        MacosMicrophoneAuthorization::NotDetermined => {
+            std::thread::spawn(|| {
+                if let Err(e) = request_macos_microphone_access() {
+                    native_debug_log(format!("microphone permission request failed error={e}"));
+                }
+            });
+            false
+        }
+        _ => false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "AVFoundation", kind = "framework")]
+extern "C" {}
+
 fn input_permission_status() -> InputPermissionStatus {
     #[cfg(target_os = "macos")]
     {
@@ -1493,6 +1727,41 @@ fn input_permission_status() -> InputPermissionStatus {
             granted: true,
             title: "Input permissions ready".to_string(),
             detail: "This platform does not require an extra app-level input permission for Zerm's current input setup.".to_string(),
+            settings_label: "Open Settings".to_string(),
+        }
+    }
+}
+
+fn microphone_permission_status() -> InputPermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let status = macos_microphone_authorization_status();
+        let granted = status.is_granted();
+        let detail = if granted {
+            "Zerm can read audio from the selected microphone.".to_string()
+        } else {
+            format!(
+                "Zerm needs macOS Microphone permission before speech can be captured. Current status: {}. Open Microphone Settings, enable /Applications/Zerm.app, then retry.",
+                status.label()
+            )
+        };
+        InputPermissionStatus {
+            required: true,
+            granted,
+            title: "Allow Microphone".to_string(),
+            detail,
+            settings_label: "Open Microphone Settings".to_string(),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        InputPermissionStatus {
+            required: false,
+            granted: true,
+            title: "Microphone ready".to_string(),
+            detail: "No extra app-level microphone permission is reported for this platform."
+                .to_string(),
             settings_label: "Open Settings".to_string(),
         }
     }
@@ -1930,7 +2199,11 @@ fn raise_pill(app: &AppHandle) {
     if let Err(e) = dispatch_window.run_on_main_thread(move || {
         #[cfg(target_os = "macos")]
         {
-            raise_native_pill_panel(&pill_window);
+            if native_pill_panel_enabled() {
+                raise_native_pill_panel(&pill_window);
+            } else {
+                raise_pill_window(&pill_window);
+            }
         }
         #[cfg(not(target_os = "macos"))]
         raise_pill_window(&pill_window);
@@ -1938,7 +2211,11 @@ fn raise_pill(app: &AppHandle) {
         log::warn!("pill: could not dispatch raise to main thread: {e:#}");
         #[cfg(target_os = "macos")]
         {
-            raise_native_pill_panel(&window);
+            if native_pill_panel_enabled() {
+                raise_native_pill_panel(&window);
+            } else {
+                raise_pill_window(&window);
+            }
         }
         #[cfg(not(target_os = "macos"))]
         raise_pill_window(&window);
@@ -1954,14 +2231,28 @@ fn present_pill_window(window: &WebviewWindow, pipeline: Option<&Pipeline>) {
     let placement = position_pill_if_needed(window, pipeline);
     #[cfg(target_os = "macos")]
     {
-        present_native_pill_panel(window, placement.as_ref());
-        native_debug_log(format!(
-            "pill show end window_frame_after_show=\"{}\" frontmost_after_showing_pill={} target_screen=\"{}\" pill_screen=\"{}\" macos_visible_overlay=native_NSPanel",
-            window_frame_string(window),
-            format_focus_identity(frontmost_focus_identity().as_ref()),
-            target_screen_string(window, pipeline),
-            pill_screen_string(window)
-        ));
+        if native_pill_panel_enabled() {
+            present_native_pill_panel(window, placement.as_ref());
+            native_debug_log(format!(
+                "pill show end window_frame_after_show=\"{}\" frontmost_after_showing_pill={} target_screen=\"{}\" pill_screen=\"{}\" macos_visible_overlay=native_NSPanel",
+                window_frame_string(window),
+                format_focus_identity(frontmost_focus_identity().as_ref()),
+                target_screen_string(window, pipeline),
+                pill_screen_string(window)
+            ));
+        } else {
+            raise_pill_window(window);
+            let _ = window.show();
+            raise_pill_window(window);
+            native_debug_log(format!(
+                "pill show end window_frame_after_show=\"{}\" frontmost_after_showing_pill={} target_screen=\"{}\" pill_screen=\"{}\" macos_visible_overlay=tauri_NSWindow {}",
+                window_frame_string(window),
+                format_focus_identity(frontmost_focus_identity().as_ref()),
+                target_screen_string(window, pipeline),
+                pill_screen_string(window),
+                macos_window_debug_info(window)
+            ));
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1980,12 +2271,28 @@ fn present_pill_window(window: &WebviewWindow, pipeline: Option<&Pipeline>) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn raise_pill_window(window: &WebviewWindow) {
     let _ = window.set_visible_on_all_workspaces(true);
     let _ = window.set_always_on_top(true);
     configure_pill_window(window);
     order_pill_front(window);
+}
+
+#[cfg(target_os = "macos")]
+fn native_pill_panel_enabled() -> bool {
+    std::env::var("ZERM_USE_NATIVE_PILL_PANEL")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn native_pill_panel_enabled() -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -2026,13 +2333,10 @@ fn native_pill_panel_for_window(
         .expect("native pill panel lock poisoned")
     {
         if let Some(placement) = placement {
-            let panel = existing.panel as *mut AnyObject;
-            sync_native_pill_panel_frame(window, panel, placement);
             native_debug_log(format!(
-                "native pill panel reuse frame_synced desired_position={:?} target_monitor=\"{}\" {}",
+                "native pill panel reuse step=sync_frame_skipped reason=\"frame sync intentionally skipped after webview reparent; source ns_window/frame reads and NSPanel setFrame are crash-prone\" desired_position={:?} target_monitor=\"{}\"",
                 placement.position,
-                monitor_string(&placement.monitor),
-                appkit_window_frame_info("native_panel", panel)
+                monitor_string(&placement.monitor)
             ));
         }
         return Some(existing.panel as *mut AnyObject);
@@ -2091,63 +2395,17 @@ fn native_pill_panel_for_window(
             panel: panel as usize,
         });
         native_debug_log(format!(
-            "native pill panel created {} {} source_window=\"{}\" source_frame=\"{}\"",
+            "native pill panel created at initial frame desired_position={:?} target_monitor=\"{}\" {} {} source_window=\"{}\" source_frame=\"{}\"",
+            placement.map(|placement| placement.position),
+            placement
+                .map(|placement| monitor_string(&placement.monitor))
+                .unwrap_or_else(|| "<none>".to_string()),
             appkit_window_debug_info("native_panel", panel),
             appkit_window_frame_info("native_panel", panel),
             appkit_window_debug_info("tauri_source", source_window),
             appkit_window_frame_info("tauri_source", source_window)
         ));
         Some(panel)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn sync_native_pill_panel_frame(
-    window: &WebviewWindow,
-    panel: *mut objc2::runtime::AnyObject,
-    placement: &PillPlacement,
-) {
-    use objc2::msg_send;
-    use objc2::runtime::AnyObject;
-
-    if panel.is_null() {
-        return;
-    }
-    let Some(source) = window.ns_window().ok() else {
-        native_debug_log(
-            "native pill panel frame sync skipped reason=\"source ns_window unavailable\"",
-        );
-        return;
-    };
-    if source.is_null() {
-        native_debug_log("native pill panel frame sync skipped reason=\"source ns_window null\"");
-        return;
-    }
-
-    unsafe {
-        let source_window: *mut AnyObject = source.cast();
-        let source_frame: objc2_foundation::NSRect = msg_send![source_window, frame];
-        let frame = appkit_panel_frame_for_physical_top_left(
-            placement.position,
-            &placement.monitor,
-            source_frame.size.width,
-            source_frame.size.height,
-        );
-        native_debug_log(format!(
-            "native pill panel frame sync begin desired_position={:?} target_monitor=\"{}\" target_frame_coordinate_space=appkit_logical_points target_frame_x={:.2} target_frame_y={:.2} target_frame_width={:.2} target_frame_height={:.2} before=\"{}\"",
-            placement.position,
-            monitor_string(&placement.monitor),
-            frame.origin.x,
-            frame.origin.y,
-            frame.size.width,
-            frame.size.height,
-            appkit_window_frame_info("native_panel", panel)
-        ));
-        let _: () = msg_send![panel, setFrame: frame, display: true];
-        native_debug_log(format!(
-            "native pill panel frame sync end after=\"{}\"",
-            appkit_window_frame_info("native_panel", panel)
-        ));
     }
 }
 
@@ -2160,7 +2418,11 @@ fn present_native_pill_panel(window: &WebviewWindow, placement: Option<&PillPlac
         return;
     };
     if let Some(placement) = placement {
-        sync_native_pill_panel_frame(window, panel, placement);
+        native_debug_log(format!(
+            "native pill panel show step=sync_frame_skipped reason=\"frame sync intentionally skipped after webview reparent; panel was created at initial frame and live NSPanel reposition is crash-prone\" desired_position={:?} target_monitor=\"{}\"",
+            placement.position,
+            monitor_string(&placement.monitor)
+        ));
     } else {
         native_debug_log(
             "native pill panel show step=sync_frame_skipped reason=\"no placement available\"",
@@ -2176,7 +2438,7 @@ fn present_native_pill_panel(window: &WebviewWindow, placement: Option<&PillPlac
     native_debug_log("native pill panel show step=order_front_end");
     native_debug_log("native pill panel show step=source_order_out_skipped reason=\"orderOut crashed after webview reparent\"");
     native_debug_log(format!(
-        "native pill panel show step=complete visible_overlay=native_NSPanel {} {}",
+        "native pill panel show complete visible_overlay=native_NSPanel {} {}",
         appkit_window_debug_info("native_panel", panel),
         appkit_window_frame_info("native_panel", panel)
     ));
@@ -2192,11 +2454,15 @@ fn raise_native_pill_panel(window: &WebviewWindow) {
     let Some(panel) = native_pill_panel_for_window(window, None) else {
         return;
     };
-    native_debug_log("native pill panel raise step=no_frame_change reason=\"raise must not reposition visible pill\"");
+    native_debug_log("native pill panel raise step=sync_frame_skipped reason=\"frame sync intentionally skipped after webview reparent; raise must not reposition visible pill\"");
+    native_debug_log("native pill panel raise step=configure_begin");
     configure_native_pill_panel(panel);
+    native_debug_log("native pill panel raise step=configure_end");
+    native_debug_log("native pill panel raise step=order_front_begin");
     unsafe {
         let _: () = msg_send![panel, orderFrontRegardless];
     }
+    native_debug_log("native pill panel raise step=order_front_end");
     native_debug_log(format!(
         "native pill panel raise {} {}",
         appkit_window_debug_info("native_panel", panel),
@@ -2254,23 +2520,10 @@ fn position_pill_if_needed(
         })
         .unwrap_or((None, None));
 
-    let (pos, reason) = if let Some(saved) =
-        per_monitor_saved.filter(|pos| pill_position_is_visible_on_monitor(*pos, &target_monitor))
-    {
-        (saved, "saved position for focused target monitor")
-    } else if let Some(saved) =
-        legacy_saved.filter(|pos| pill_position_is_visible_on_monitor(*pos, &target_monitor))
-    {
-        (
-            saved,
-            "legacy saved position belongs to focused target monitor",
-        )
-    } else {
-        (
-            default_pill_position_for_monitor(&target_monitor),
-            "no valid saved position for focused target monitor",
-        )
-    };
+    let (pos, reason) = (
+        default_pill_position_for_monitor(&target_monitor),
+        "primary-monitor fail-safe position",
+    );
 
     let pos = clamp_pill_position_to_monitor(pos, &target_monitor);
     let placement = PillPlacement {
@@ -2279,11 +2532,30 @@ fn position_pill_if_needed(
     };
     #[cfg(target_os = "macos")]
     {
-        native_debug_log(format!(
-            "pill position set_position_called=false skipped_reason=\"macos native NSPanel owns frame; moving Tauri source window crashes after webview reparent\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels",
-            monitor_string(&target_monitor)
-        ));
-        Some(placement)
+        if native_pill_panel_enabled() {
+            native_debug_log(format!(
+                "pill position set_position_called=false skipped_reason=\"macos native NSPanel owns frame; moving Tauri source window crashes after webview reparent\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels",
+                monitor_string(&target_monitor)
+            ));
+            Some(placement)
+        } else {
+            if current_pill_position(window) == Some(pos) {
+                native_debug_log(format!(
+                    "pill position set_position_called=false skipped_reason=\"already at desired position\" reason=\"{reason}\" target_monitor=\"{}\" saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} desired_position={pos:?} coordinate_space=tauri_physical_pixels macos_visible_overlay=tauri_NSWindow",
+                    monitor_string(&target_monitor)
+                ));
+            } else {
+                let result = window.set_position(tauri::Position::Physical(PhysicalPosition {
+                    x: pos.x,
+                    y: pos.y,
+                }));
+                native_debug_log(format!(
+                    "pill position set_position_called=true reason=\"{reason}\" target_monitor=\"{}\" requested_position={pos:?} coordinate_space=tauri_physical_pixels saved_for_target_monitor={per_monitor_saved:?} legacy_saved={legacy_saved:?} result={result:?} macos_visible_overlay=tauri_NSWindow",
+                    monitor_string(&target_monitor)
+                ));
+            }
+            Some(placement)
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -2307,7 +2579,6 @@ fn position_pill_if_needed(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn current_pill_position(window: &WebviewWindow) -> Option<PillPosition> {
     let pos = window.outer_position().ok()?;
     Some(PillPosition { x: pos.x, y: pos.y })
@@ -2315,22 +2586,17 @@ fn current_pill_position(window: &WebviewWindow) -> Option<PillPosition> {
 
 fn pill_target_monitor(window: &WebviewWindow, pipeline: Option<&Pipeline>) -> Option<Monitor> {
     #[cfg(target_os = "macos")]
-    if let Some((x, y)) = pipeline.and_then(|state| {
-        state
-            .paste_target
-            .lock()
-            .as_ref()
-            .and_then(|target| target.target_center)
-    }) {
-        if let Some(monitor) = monitor_from_logical_point(window, x, y) {
+    {
+        if let Some(monitor) = window.primary_monitor().ok().flatten() {
             native_debug_log(format!(
-                "pill target monitor source=captured_AX_target coordinate_space=macos_logical_points point=({x:.2}, {y:.2}) monitor=\"{}\"",
+                "pill target monitor source=primary_monitor_fail_safe monitor=\"{}\"",
                 monitor_string(&monitor)
             ));
             return Some(monitor);
         }
         native_debug_log(format!(
-            "pill target monitor source=captured_AX_target coordinate_space=macos_logical_points point=({x:.2}, {y:.2}) monitor=<none>"
+            "pill target monitor source=primary_monitor_fail_safe monitor=<none> fallback_to_current_or_captured pipeline_present={}",
+            pipeline.is_some()
         ));
     }
 
@@ -2399,15 +2665,44 @@ fn configure_pill_window(window: &WebviewWindow) {
     }
     unsafe {
         let obj: *mut AnyObject = ptr.cast();
-        // The visible macOS pill is a real NSPanel. Keep the Tauri NSWindow as
-        // the hidden webview/event host; do not try to convert it into a panel.
+        // The default macOS path uses the Tauri NSWindow directly. The old
+        // native NSPanel path remains opt-in because reparenting WebKit views
+        // has caused AppKit aborts on recent macOS builds.
+        let collection_behavior: u64 = (1 << 0) | (1 << 3) | (1 << 4) | (1 << 6) | (1 << 8);
+        let overlay_window_level: i64 = 1000;
+        let _: () = msg_send![obj, setCollectionBehavior: collection_behavior];
+        let _: () = msg_send![obj, setLevel: overlay_window_level];
+        let _: () = msg_send![obj, setHidesOnDeactivate: false];
+        let _: () = msg_send![obj, setCanHide: false];
         let _: () = msg_send![obj, setMovable: true];
         let _: () = msg_send![obj, setMovableByWindowBackground: true];
+        let _: () = msg_send![obj, setOpaque: false];
+        if let Some(color_class) = objc_class(b"NSColor\0") {
+            let clear_color: *mut AnyObject = msg_send![color_class, clearColor];
+            let _: () = msg_send![obj, setBackgroundColor: clear_color];
+        }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn configure_pill_window(_window: &WebviewWindow) {}
+
+#[cfg(target_os = "macos")]
+fn order_pill_front(window: &WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let obj: *mut AnyObject = ptr.cast();
+        let _: () = msg_send![obj, orderFrontRegardless];
+    }
+}
 
 #[cfg(not(target_os = "macos"))]
 fn order_pill_front(_window: &WebviewWindow) {}
@@ -2441,33 +2736,71 @@ fn open_dashboard_window(app: &AppHandle) {
 }
 
 fn handle_toggle(app: &AppHandle, pipeline: &Pipeline) {
-    // compare_exchange instead of fetch_xor: if the user manually stops
-    // at the exact moment VAD/hard-limit auto-stop fires, the two
-    // "stop" attempts must not compose into a net "start". Only the
-    // first one that actually observes the matching prior state wins;
-    // the loser is a no-op.
-    if pipeline
-        .recording
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok()
-    {
-        log::info!("toggle → start");
-        handle_press(app, pipeline);
-        return;
+    let action = {
+        let mut lifecycle = pipeline.lifecycle.lock();
+        request_toggle_transition(&mut lifecycle)
+    };
+
+    match action {
+        RecordingAction::Start => {
+            log::info!("toggle → start");
+            native_debug_log("recording lifecycle -> starting source=\"toggle\"");
+            handle_press(app, pipeline);
+        }
+        RecordingAction::Stop => {
+            log::info!("toggle → stop");
+            native_debug_log("recording lifecycle -> stopping source=\"toggle\"");
+            handle_release(app, pipeline);
+        }
+        RecordingAction::PendingStop => native_debug_log(
+            "toggle stop deferred reason=\"capture is still starting\" lifecycle=starting",
+        ),
+        RecordingAction::KeepRecording => native_debug_log(
+            "toggle release ignored reason=\"short tap means keep recording\" lifecycle=starting",
+        ),
+        RecordingAction::Ignore => {
+            native_debug_log("toggle ignored reason=\"recording lifecycle busy\"")
+        }
     }
-    if pipeline
-        .recording
-        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok()
-    {
-        log::info!("toggle → stop");
-        handle_release(app, pipeline);
-        return;
+}
+
+fn handle_hotkey_press(app: &AppHandle, pipeline: &Pipeline) {
+    let action = {
+        let mut lifecycle = pipeline.lifecycle.lock();
+        request_press_transition(&mut lifecycle)
+    };
+    match action {
+        RecordingAction::Start => {
+            native_debug_log("recording lifecycle -> starting source=\"hotkey_press\"");
+            handle_press(app, pipeline);
+        }
+        RecordingAction::Stop => {
+            native_debug_log("recording lifecycle -> stopping source=\"hotkey_press_toggle\"");
+            handle_release(app, pipeline);
+        }
+        _ => native_debug_log("hotkey press ignored reason=\"recording lifecycle busy\""),
     }
-    // Lost both races. Another toggle claimed whatever transition we
-    // were about to make; drop silently so auto-stop + manual-stop
-    // concurrent firings don't double-bounce.
-    log::debug!("toggle lost race, no-op");
+}
+
+fn handle_hotkey_release(app: &AppHandle, pipeline: &Pipeline) {
+    let action = {
+        let mut lifecycle = pipeline.lifecycle.lock();
+        request_release_transition(&mut lifecycle)
+    };
+
+    match action {
+        RecordingAction::Stop => {
+            native_debug_log("recording lifecycle -> stopping source=\"hotkey_release\"");
+            handle_release(app, pipeline);
+        }
+        RecordingAction::PendingStop => native_debug_log(
+            "hotkey release deferred reason=\"capture is still starting\" lifecycle=starting",
+        ),
+        RecordingAction::KeepRecording => native_debug_log(
+            "hotkey release ignored reason=\"short tap keeps recording; press hotkey again to stop\"",
+        ),
+        _ => native_debug_log("hotkey release ignored reason=\"recording was not active\""),
+    }
 }
 
 fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
@@ -2480,6 +2813,45 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
         format_focus_identity(frontmost_before_press.as_ref()),
         format_focus_identity(frontmost_focus_identity().as_ref())
     ));
+    let input_permission = input_permission_status();
+    if input_permission.required && !input_permission.granted {
+        pipeline.set_idle("input permission missing");
+        native_debug_log(format!(
+            "recording cycle aborted reason=\"input permission missing\" detail={:?}",
+            input_permission.detail
+        ));
+        emit_error(app, input_permission.detail);
+        open_dashboard_window(app);
+        #[cfg(target_os = "macos")]
+        {
+            prompt_for_input_permission_if_needed();
+            let _ = open_accessibility_settings();
+        }
+        return;
+    }
+    let mut microphone_permission = microphone_permission_status();
+    if microphone_permission.required && !microphone_permission.granted {
+        #[cfg(target_os = "macos")]
+        {
+            if prompt_for_microphone_permission_if_needed() {
+                microphone_permission = microphone_permission_status();
+            }
+        }
+    }
+    if microphone_permission.required && !microphone_permission.granted {
+        pipeline.set_idle("microphone permission missing");
+        native_debug_log(format!(
+            "recording cycle aborted reason=\"microphone permission missing\" detail={:?}",
+            microphone_permission.detail
+        ));
+        emit_error(app, microphone_permission.detail);
+        open_dashboard_window(app);
+        #[cfg(target_os = "macos")]
+        {
+            let _ = open_microphone_settings();
+        }
+        return;
+    }
     let target_at_press = capture_paste_target();
     if target_at_press.is_none() {
         native_debug_log(
@@ -2493,7 +2865,8 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
         format_focus_identity(frontmost_focus_identity().as_ref())
     ));
     if pipeline.whisper.lock().is_none() {
-        pipeline.recording.store(false, Ordering::SeqCst);
+        pipeline.set_idle("whisper not loaded");
+        *pipeline.paste_target.lock() = None;
         emit_error(
             app,
             "Whisper is still loading. Open the dashboard to finish setup.",
@@ -2512,42 +2885,79 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
     CURRENT_JOB_ID.store(job_id, Ordering::SeqCst);
     pipeline.active_job_id.store(job_id, Ordering::SeqCst);
 
-    let vad_enabled = pipeline.persistent.lock().settings.vad_enabled;
+    let (vad_enabled, input_device_name) = {
+        let settings = &pipeline.persistent.lock().settings;
+        (settings.vad_enabled, settings.input_device_name.clone())
+    };
     let app_for_stop = app.clone();
 
-    let result = audio::start_capture(pipeline.audio_buffer.clone(), move |reason| {
-        // The hard-length limit MUST stop the pipeline regardless of VAD
-        // setting — otherwise with VAD off we'd quietly drop the mic
-        // stream at 20min and leave the app marked "recording" forever.
-        if matches!(reason, audio::StopReason::Silence) && !vad_enabled {
-            return;
-        }
-        let app = app_for_stop.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Some(state) = app.try_state::<Arc<Pipeline>>() {
-                handle_toggle(&app, &state);
+    let result = audio::start_capture(
+        pipeline.audio_buffer.clone(),
+        input_device_name,
+        move |reason| {
+            // The hard-length limit MUST stop the pipeline regardless of VAD
+            // setting — otherwise with VAD off we'd quietly drop the mic
+            // stream at 20min and leave the app marked "recording" forever.
+            if matches!(reason, audio::StopReason::Silence) && !vad_enabled {
+                return;
             }
-        });
-    });
+            let app = app_for_stop.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(state) = app.try_state::<Arc<Pipeline>>() {
+                    handle_toggle(&app, &state);
+                }
+            });
+        },
+    );
 
     match result {
         Ok(handle) => {
             native_debug_log(format!(
-                "audio capture started sample_rate={} channels={}",
-                handle.sample_rate, handle.channels
+                "audio capture started device=\"{}\" sample_rate={} channels={} sample_format={}",
+                handle.device_name, handle.sample_rate, handle.channels, handle.sample_format
             ));
             let level = handle.level.clone();
-            *pipeline.capture.lock() = Some(handle);
+            let stop_requested = {
+                let mut lifecycle = pipeline.lifecycle.lock();
+                match *lifecycle {
+                    RecordingLifecycle::Starting { stop_requested, .. } => {
+                        *pipeline.capture.lock() = Some(handle);
+                        if stop_requested {
+                            *lifecycle = RecordingLifecycle::Stopping;
+                        } else {
+                            *lifecycle = RecordingLifecycle::Recording {
+                                started_at: Instant::now(),
+                            };
+                        }
+                        stop_requested
+                    }
+                    other => {
+                        native_debug_log(format!(
+                            "audio capture started after lifecycle moved away from starting lifecycle={}",
+                            other.label()
+                        ));
+                        let _ = handle.stop.send(());
+                        return;
+                    }
+                }
+            };
+            if stop_requested {
+                native_debug_log(
+                    "recording lifecycle -> stopping reason=\"release arrived during capture startup\"",
+                );
+                handle_release(app, pipeline);
+                return;
+            }
             show_pill(app);
             let _ = app.emit(RECORDING_EVENT, ());
 
             // Spawn audio-level emitter at ~30fps while recording
             let app_for_level = app.clone();
-            let recording_flag = pipeline.recording.clone();
+            let lifecycle = pipeline.lifecycle.clone();
             tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
                 let mut ticks = 0_u32;
-                while recording_flag.load(Ordering::SeqCst) {
+                while lifecycle.lock().audio_level_active() {
                     interval.tick().await;
                     ticks = ticks.wrapping_add(1);
                     if ticks.is_multiple_of(30) {
@@ -2561,7 +2971,7 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
             });
         }
         Err(e) => {
-            pipeline.recording.store(false, Ordering::SeqCst);
+            pipeline.set_idle("audio capture failed");
             *pipeline.paste_target.lock() = None;
             native_debug_log(format!("audio capture failed error={e:#}"));
             emit_error(app, format!("audio capture failed: {e:#}"));
@@ -2571,14 +2981,27 @@ fn handle_press(app: &AppHandle, pipeline: &Pipeline) {
 
 fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
     let capture = pipeline.capture.lock().take();
-    let (sample_rate, channels) = if let Some(handle) = capture {
-        let sr = handle.sample_rate;
-        let ch = handle.channels;
-        let _ = handle.stop.send(());
-        (sr, ch)
-    } else {
-        return;
-    };
+    let (sample_rate, channels, device_name, sample_format, peak_rms) =
+        if let Some(handle) = capture {
+            let sr = handle.sample_rate;
+            let ch = handle.channels;
+            let device_name = handle.device_name.clone();
+            let sample_format = handle.sample_format.clone();
+            let peak_rms = *handle.peak_level.lock();
+            let _ = handle.stop.send(());
+            (
+                sr,
+                ch,
+                Some(device_name),
+                Some(sample_format),
+                Some(peak_rms),
+            )
+        } else {
+            pipeline.set_idle("release without active capture");
+            *pipeline.paste_target.lock() = None;
+            native_debug_log("recording release ignored reason=\"capture handle was unavailable\"");
+            return;
+        };
 
     let _ = app.emit(PROCESSING_EVENT, ());
 
@@ -2588,12 +3011,38 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
     let job_id = pipeline.active_job_id.load(Ordering::SeqCst);
 
     let raw = std::mem::take(&mut *pipeline.audio_buffer.lock());
+    let peak = peak_rms.unwrap_or(0.0);
+    let silent_detail = if raw.len() >= (sample_rate as usize) / 4 && peak < 0.003 {
+        Some(format!(
+            "The selected microphone produced almost no signal (peak RMS {peak:.4}). Check macOS microphone input, selected device, mute state, or input level."
+        ))
+    } else {
+        None
+    };
+    *pipeline.last_capture.lock() = Some(CaptureDiagnostic {
+        status: if silent_detail.is_some() {
+            "silent".to_string()
+        } else {
+            "captured".to_string()
+        },
+        raw_samples: raw.len(),
+        sample_rate,
+        channels,
+        approx_seconds: raw.len() as f64 / (sample_rate as f64 * channels.max(1) as f64),
+        device_name: device_name.clone(),
+        sample_format: sample_format.clone(),
+        peak_rms,
+        detail: silent_detail,
+    });
     native_debug_log(format!(
-        "audio capture stopped raw_samples={} sample_rate={} channels={} approx_seconds={:.3}",
+        "audio capture stopped raw_samples={} sample_rate={} channels={} approx_seconds={:.3} device=\"{}\" sample_format=\"{}\" peak_rms={:.6}",
         raw.len(),
         sample_rate,
         channels,
-        raw.len() as f64 / (sample_rate as f64 * channels.max(1) as f64)
+        raw.len() as f64 / (sample_rate as f64 * channels.max(1) as f64),
+        device_name.as_deref().unwrap_or("<unknown>"),
+        sample_format.as_deref().unwrap_or("<unknown>"),
+        peak_rms.unwrap_or(0.0)
     ));
     let app_clone = app.clone();
     let whisper = pipeline.whisper.clone();
@@ -2621,11 +3070,16 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
         job_id,
     };
 
+    *pipeline.lifecycle.lock() = RecordingLifecycle::Processing { job_id };
+    native_debug_log(format!("recording lifecycle -> processing job_id={job_id}"));
+
+    let pipeline_for_finish = pipeline_for_model.clone();
     tauri::async_runtime::spawn(async move {
         let result = process(&app_clone, whisper, pipeline_for_model, job).await;
         if let Err(e) = result {
             emit_error(&app_clone, format!("processing failed: {e:#}"));
         }
+        pipeline_for_finish.finish_processing_job(job_id);
     });
 }
 
@@ -2657,6 +3111,16 @@ async fn process(
 
     if raw.len() < (sample_rate as usize) / 4 {
         log::warn!("audio too short ({} samples), skipping", raw.len());
+        if let Some(last) = pipeline.last_capture.lock().as_mut() {
+            if last.raw_samples == raw.len()
+                && last.sample_rate == sample_rate
+                && last.channels == channels
+            {
+                last.status = "too_short".to_string();
+                last.detail =
+                    Some("Recording was shorter than the minimum STT window.".to_string());
+            }
+        }
         native_debug_log(format!(
             "audio processing skipped reason=too_short raw_samples={} sample_rate={} channels={} min_samples={}",
             raw.len(),
@@ -3211,6 +3675,41 @@ fn set_hotkey(
 }
 
 #[tauri::command]
+fn list_audio_input_devices(
+    window: tauri::WebviewWindow,
+) -> Result<Vec<audio::AudioInputDevice>, String> {
+    require_dashboard(&window)?;
+    audio::input_devices().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_input_device(
+    window: tauri::WebviewWindow,
+    device_id: Option<String>,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    let normalized = device_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    if let Some(selected) = normalized.as_deref() {
+        let devices = audio::input_devices().map_err(|e| e.to_string())?;
+        if !devices.iter().any(|device| device.id == selected) {
+            return Err(format!("input device is not available: {selected}"));
+        }
+    }
+
+    state.persistent.lock().settings.input_device_name = normalized;
+    state.save_persistent();
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn add_vocabulary_term(
     window: tauri::WebviewWindow,
     term: String,
@@ -3387,14 +3886,57 @@ fn open_dashboard(app: AppHandle) {
 }
 
 #[tauri::command]
+fn toggle_recording_from_dashboard(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    handle_toggle(&app, &state);
+    Ok(())
+}
+
+#[tauri::command]
 fn open_input_permission_settings(window: tauri::WebviewWindow) -> Result<(), String> {
     require_dashboard(&window)?;
     #[cfg(target_os = "macos")]
     {
-        reset_stale_macos_input_permissions();
         open_accessibility_settings()?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn open_microphone_permission_settings(window: tauri::WebviewWindow) -> Result<(), String> {
+    require_dashboard(&window)?;
+    #[cfg(target_os = "macos")]
+    {
+        open_microphone_settings()?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn repair_macos_input_permissions(window: tauri::WebviewWindow) -> Result<(), String> {
+    require_dashboard(&window)?;
+    #[cfg(target_os = "macos")]
+    {
+        let report = platform::macos_permissions::reset_tcc_entries(
+            platform::macos_permissions::TccRepairRequest {
+                bundle_id: "com.arcusis.zerm".to_string(),
+                reset_accessibility: true,
+                reset_apple_events: true,
+            },
+        )?;
+        native_debug_log(format!("macOS input permission repair report={report:?}"));
+        open_accessibility_settings()?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("macOS input permission repair is only available on macOS".to_string())
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -3410,9 +3952,12 @@ struct SetupStatus {
     hotkey_configurable: bool,
     runtime_hotkey_label: String,
     input_permission: InputPermissionStatus,
+    microphone_permission: InputPermissionStatus,
     auto_paste_ready: bool,
     app_signing: Option<AppSigningStatus>,
     last_insertion: Option<InsertionDiagnostic>,
+    recording_lifecycle: String,
+    last_capture: Option<CaptureDiagnostic>,
 }
 
 #[tauri::command]
@@ -3478,6 +4023,10 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
     let last_insertion = app
         .try_state::<Arc<Pipeline>>()
         .and_then(|state| state.last_insertion.lock().clone());
+    let (recording_lifecycle, last_capture) = app
+        .try_state::<Arc<Pipeline>>()
+        .map(|state| (state.lifecycle_label(), state.last_capture.lock().clone()))
+        .unwrap_or_else(|| ("unavailable".to_string(), None));
 
     Ok(SetupStatus {
         whisper_model_present,
@@ -3497,9 +4046,12 @@ async fn check_setup(window: tauri::WebviewWindow, app: AppHandle) -> Result<Set
             "Ctrl+Shift+Space".to_string()
         },
         input_permission: input_permission_status(),
+        microphone_permission: microphone_permission_status(),
         auto_paste_ready: auto_paste_is_ready(),
         app_signing: app_signing_status(),
         last_insertion,
+        recording_lifecycle,
+        last_capture,
     })
 }
 
@@ -4138,6 +4690,8 @@ pub fn run() {
             set_save_history,
             set_prompt_mode,
             set_hotkey,
+            list_audio_input_devices,
+            set_input_device,
             add_vocabulary_term,
             remove_vocabulary_term,
             clear_vocabulary,
@@ -4145,7 +4699,10 @@ pub fn run() {
             copy_history_entry,
             quit_app,
             open_dashboard,
+            toggle_recording_from_dashboard,
             open_input_permission_settings,
+            open_microphone_permission_settings,
+            repair_macos_input_permissions,
             set_pill_position,
             get_pill_position,
             log_pill_drag_error,
@@ -4194,7 +4751,26 @@ pub fn run() {
                 configure_pill_window(&window);
                 #[cfg(target_os = "macos")]
                 {
-                    native_debug_log("startup pill source position restore skipped on macOS; native NSPanel owns visible pill frame");
+                    if native_pill_panel_enabled() {
+                        native_debug_log("startup pill source position restore skipped on macOS; native NSPanel owns visible pill frame");
+                    } else if let Some(primary) = window.primary_monitor().ok().flatten() {
+                        let pos = default_pill_position_for_monitor(&primary);
+                        let _ = window.set_position(tauri::Position::Physical(
+                            PhysicalPosition { x: pos.x, y: pos.y },
+                        ));
+                        {
+                            let mut persistent = pipeline_for_setup.persistent.lock();
+                            persistent.pill_position = Some(pos);
+                            persistent
+                                .pill_positions_by_monitor
+                                .insert(monitor_key(&primary), pos);
+                        }
+                        pipeline_for_setup.save_persistent();
+                        native_debug_log(format!(
+                            "startup pill source position reset on macOS via primary monitor fail-safe position={pos:?} monitor=\"{}\"",
+                            monitor_string(&primary)
+                        ));
+                    }
                 }
                 #[cfg(not(target_os = "macos"))]
                 if let Some(pos) = pipeline_for_setup.persistent.lock().pill_position {
@@ -4245,26 +4821,32 @@ pub fn run() {
             // Tap-to-toggle global hotkey
             let app_for_hotkey = app_handle.clone();
             let pipeline_for_hotkey = pipeline_for_setup.clone();
-            let installed = hotkey::install(move |pressed| {
+            let installed = hotkey::install(move |event| {
                 native_debug_log(format!(
-                    "hotkey event pressed={} app_bundle_id={} AXIsProcessTrusted={} frontmost_app={}",
-                    pressed,
+                    "hotkey event pressed={} backend={} key_code={} app_bundle_id={} AXIsProcessTrusted={} frontmost_app={}",
+                    event.pressed,
+                    event.backend,
+                    event.key_code,
                     app_for_hotkey.config().identifier.as_str(),
                     accessibility_is_trusted(),
                     format_focus_identity(frontmost_focus_identity().as_ref())
                 ));
-                if pressed {
-                    let app = app_for_hotkey.clone();
-                    let pipeline = pipeline_for_hotkey.clone();
-                    tauri::async_runtime::spawn(async move {
-                        handle_toggle(&app, &pipeline);
-                    });
-                }
+                let app = app_for_hotkey.clone();
+                let pipeline = pipeline_for_hotkey.clone();
+                tauri::async_runtime::spawn(async move {
+                    if event.pressed {
+                        handle_hotkey_press(&app, &pipeline);
+                    } else {
+                        handle_hotkey_release(&app, &pipeline);
+                    }
+                });
             });
-            if installed {
+            if installed.installed {
                 INPUT_MONITOR_READY.store(true, Ordering::SeqCst);
                 native_debug_log(format!(
-                    "hotkey monitor installed=true hotkey_label=\"{}\" app_bundle_id={} AXIsProcessTrusted={}",
+                    "hotkey monitor installed=true nsevent={} cgeventtap={} hotkey_label=\"{}\" app_bundle_id={} AXIsProcessTrusted={}",
+                    installed.nsevent,
+                    installed.cgeventtap,
                     hotkey_choice.label(),
                     app_handle.config().identifier.as_str(),
                     accessibility_is_trusted()
@@ -4275,7 +4857,9 @@ pub fn run() {
                 );
             } else if cfg!(target_os = "macos") {
                 native_debug_log(format!(
-                    "hotkey monitor installed=false hotkey_label=\"{}\" app_bundle_id={} AXIsProcessTrusted={}",
+                    "hotkey monitor installed=false nsevent={} cgeventtap={} hotkey_label=\"{}\" app_bundle_id={} AXIsProcessTrusted={}",
+                    installed.nsevent,
+                    installed.cgeventtap,
                     hotkey_choice.label(),
                     app_handle.config().identifier.as_str(),
                     accessibility_is_trusted()
@@ -4353,6 +4937,81 @@ mod tests {
         let err = pipeline.save_persistent_erasing_backup().unwrap_err();
 
         assert!(err.to_string().contains("state path is unavailable"));
+    }
+
+    #[test]
+    fn short_tap_during_starting_keeps_recording_for_toggle_mode() {
+        let mut lifecycle = RecordingLifecycle::Idle;
+
+        assert_eq!(
+            request_press_transition(&mut lifecycle),
+            RecordingAction::Start
+        );
+        assert_eq!(
+            request_release_transition(&mut lifecycle),
+            RecordingAction::KeepRecording
+        );
+        assert!(matches!(
+            lifecycle,
+            RecordingLifecycle::Starting {
+                stop_requested: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn long_hold_release_during_starting_is_deferred() {
+        let mut lifecycle = RecordingLifecycle::Starting {
+            stop_requested: false,
+            started_at: Instant::now() - std::time::Duration::from_millis(300),
+        };
+
+        assert_eq!(
+            request_release_transition(&mut lifecycle),
+            RecordingAction::PendingStop
+        );
+        assert!(matches!(
+            lifecycle,
+            RecordingLifecycle::Starting {
+                stop_requested: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn recording_release_moves_to_stopping_once() {
+        let mut lifecycle = RecordingLifecycle::Recording {
+            started_at: Instant::now() - std::time::Duration::from_millis(300),
+        };
+
+        assert_eq!(
+            request_release_transition(&mut lifecycle),
+            RecordingAction::Stop
+        );
+        assert_eq!(lifecycle, RecordingLifecycle::Stopping);
+        assert_eq!(
+            request_release_transition(&mut lifecycle),
+            RecordingAction::Ignore
+        );
+    }
+
+    #[test]
+    fn new_recording_can_start_while_previous_job_processes() {
+        let mut lifecycle = RecordingLifecycle::Processing { job_id: 7 };
+
+        assert_eq!(
+            request_press_transition(&mut lifecycle),
+            RecordingAction::Start
+        );
+        assert!(matches!(
+            lifecycle,
+            RecordingLifecycle::Starting {
+                stop_requested: false,
+                ..
+            }
+        ));
     }
 
     #[test]

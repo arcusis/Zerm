@@ -441,6 +441,10 @@ pub struct Settings {
     #[serde(default)]
     pub save_history: bool,
 
+    /// Preferred CPAL input device name. None means follow the OS default.
+    #[serde(default)]
+    pub input_device_name: Option<String>,
+
     /// App-aware power-mode profiles. These are scaffolded for native
     /// integration; existing runtime behavior continues to use the legacy
     /// top-level settings until the pipeline opts into profile resolution.
@@ -494,6 +498,7 @@ impl Default for Settings {
             auto_paste: false,
             allow_unverified_ollama: false,
             save_history: false,
+            input_device_name: None,
             profiles: default_power_profiles(),
             active_profile_id: None,
             model_catalog: ModelCatalog::default(),

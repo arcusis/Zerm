@@ -17,11 +17,23 @@ For macOS local app replacement:
 
 ```sh
 pnpm tauri build --bundles app
-codesign --force --deep --sign - --identifier com.arcusis.zerm src-tauri/target/release/bundle/macos/Zerm.app
+codesign --force --deep --options runtime \
+  --entitlements src-tauri/Entitlements.plist \
+  --sign 'Developer ID Application: Arcusis LTD (F9Z784RA6D)' \
+  src-tauri/target/release/bundle/macos/Zerm.app
 codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/Zerm.app
+codesign -d --entitlements :- src-tauri/target/release/bundle/macos/Zerm.app
 ```
 
 Then stop the running Zerm process, back up `/Applications/Zerm.app`, copy the new bundle with `ditto`, verify `/Applications/Zerm.app`, and launch it.
+
+Before declaring macOS recording fixed, verify all of these in `~/Library/Logs/Zerm/native-debug.log`:
+
+- Right Option emits `hotkey event pressed=true backend=cgeventtap key_code=61`.
+- Pill logs show `tauri_pill_isVisible=true` and `tauri_pill_isOnActiveSpace=Some(true)`.
+- Capture starts with a real device name, for example `audio capture started device="MacBook Pro Microphone"`.
+- Capture stops with nonzero `peak_rms`.
+- Insertion succeeds in a real text field, for example `paste strategy success ... app_name=Notes`.
 
 For native writing-layer regressions:
 

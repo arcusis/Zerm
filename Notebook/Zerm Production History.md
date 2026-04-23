@@ -15,6 +15,12 @@ Recent production work centered on privacy hardening, setup UX, local app rebuil
 
 ## Notable Shipped Changes
 
+- macOS signed builds now carry the audio-input entitlement required for microphone capture under hardened runtime.
+- The app now separates Accessibility permission, Microphone permission, selected input device, capture level, STT, and insertion diagnostics.
+- Right Option capture has a CoreGraphics event-tap fallback for side-specific modifier keys.
+- The pill is forced onto the primary monitor and configured as a high-level visible overlay to avoid off-screen/stale monitor placement.
+- Recording uses tap-to-toggle semantics: tap Right Option to start, tap again to stop; quick release no longer immediately stops capture.
+- Dashboard has a Start/Stop fallback and microphone picker.
 - Auto-paste failures are no longer silent.
 - Auto-paste enabling requests/checks Accessibility permission.
 - Auto-paste and hotkey readiness are separate concepts.
@@ -29,10 +35,10 @@ Recent production work centered on privacy hardening, setup UX, local app rebuil
 Local macOS builds have been installed by:
 
 - building with `pnpm tauri build --bundles app`,
-- ad-hoc signing with identifier `com.arcusis.zerm`,
+- Developer ID signing with `src-tauri/Entitlements.plist`,
 - replacing `/Applications/Zerm.app`,
 - launching `/Applications/Zerm.app`.
 
-Because these are rebuilt local app bundles, macOS may require Accessibility permission to be removed and re-added.
+Because these are rebuilt local app bundles, macOS may require Accessibility or Microphone permission to be reset and re-granted after entitlement/signing changes.
 
 Related: [[Zerm Verification Workflow]], [[Zerm Auto Paste]]

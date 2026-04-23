@@ -32,12 +32,21 @@ interface Settings {
   auto_paste: boolean;
   allow_unverified_ollama: boolean;
   save_history: boolean;
+  input_device_name: string | null;
 }
 
 interface DashboardData {
   stats: Stats;
   history: HistoryEntry[];
   settings: Settings;
+}
+
+interface AudioInputDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
+  sample_rates: number[];
+  channel_counts: number[];
 }
 
 const HOTKEY_LABELS: Record<HotkeyChoice, { kbd: string; label: string }> = {
@@ -148,10 +157,12 @@ function renderSettings(settings: Settings) {
     const hint = $("hotkey-hint");
     if (hint) {
       hint.textContent = IS_MAC
-        ? "Tap once to start. Tap again or stay silent to stop."
+        ? "Tap to start, tap again to stop. Hold for push-to-talk."
         : "Windows and Linux currently use the fixed Ctrl+Shift+Space shortcut.";
     }
   }
+
+  void renderInputDeviceSelect(settings);
 
   document.querySelectorAll<HTMLButtonElement>(".mode-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === settings.prompt_mode);
@@ -159,6 +170,55 @@ function renderSettings(settings: Settings) {
 
   renderVocabulary(settings.vocabulary);
   renderSetupDiagnostics(lastSetupStatus);
+}
+
+async function renderInputDeviceSelect(settings: Settings) {
+  const select = $("input-device-select") as HTMLSelectElement | null;
+  const hint = $("input-device-hint");
+  if (!select) return;
+
+  select.disabled = true;
+  const selected = settings.input_device_name ?? "";
+  try {
+    const devices = await setupInvoke<AudioInputDevice[]>("list_audio_input_devices");
+    select.innerHTML = "";
+
+    const systemDefault = document.createElement("option");
+    systemDefault.value = "";
+    const defaultDevice = devices.find((device) => device.is_default);
+    systemDefault.textContent = defaultDevice
+      ? `System default (${defaultDevice.name})`
+      : "System default";
+    select.appendChild(systemDefault);
+
+    for (const device of devices) {
+      const option = document.createElement("option");
+      option.value = device.id;
+      option.textContent = device.is_default ? `${device.name} (default)` : device.name;
+      select.appendChild(option);
+    }
+
+    if (selected && !devices.some((device) => device.id === selected)) {
+      const unavailable = document.createElement("option");
+      unavailable.value = selected;
+      unavailable.textContent = `${selected} (not available)`;
+      select.appendChild(unavailable);
+    }
+
+    select.value = selected;
+    select.disabled = false;
+    if (hint) {
+      hint.textContent = devices.length
+        ? selected
+          ? `Recording from ${selected}.`
+          : "Recording from the current macOS default input."
+        : "No microphone input devices were reported by macOS.";
+    }
+  } catch (err) {
+    select.innerHTML = `<option value="">Could not load microphones</option>`;
+    select.disabled = true;
+    if (hint) hint.textContent = errorMessage(err);
+  }
 }
 
 function renderVocabulary(terms: string[]) {
@@ -266,18 +326,68 @@ function setupTabs() {
 }
 
 function attachListeners() {
+  $("record-toggle-btn")?.addEventListener("click", async () => {
+    const btn = $("record-toggle-btn") as HTMLButtonElement | null;
+    if (btn) btn.disabled = true;
+    try {
+      await requiredInvoke("toggle_recording_from_dashboard");
+      await refreshSetup();
+    } catch (err) {
+      window.alert(`Could not toggle recording:\n${String(err)}`);
+      await refreshSetup();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
   // Hotkey
   $("hotkey-select")?.addEventListener("change", async (e) => {
     if (!IS_MAC) return;
-    const key = (e.target as HTMLSelectElement).value;
-    const result = await safeInvoke("set_hotkey", { key });
-    if (result !== null) await refresh();
+    const select = e.target as HTMLSelectElement;
+    const key = select.value;
+    select.disabled = true;
+    try {
+      await requiredInvoke("set_hotkey", { key });
+      await refresh();
+    } catch (err) {
+      window.alert(`Could not update hotkey:\n${String(err)}`);
+      await refresh();
+    } finally {
+      select.disabled = false;
+    }
+  });
+
+  $("input-device-select")?.addEventListener("change", async (e) => {
+    const select = e.target as HTMLSelectElement;
+    const deviceId = select.value || null;
+    select.disabled = true;
+    try {
+      await requiredInvoke("set_input_device", { deviceId });
+      await refresh();
+      await refreshSetup();
+    } catch (err) {
+      window.alert(`Could not update microphone:\n${String(err)}`);
+      await refresh();
+    } finally {
+      select.disabled = false;
+    }
   });
 
   // VAD
   $("vad-toggle")?.addEventListener("change", async (e) => {
-    const checked = (e.target as HTMLInputElement).checked;
-    await safeInvoke("set_vad_enabled", { enabled: checked });
+    const toggle = e.target as HTMLInputElement;
+    const checked = toggle.checked;
+    toggle.disabled = true;
+    try {
+      await requiredInvoke("set_vad_enabled", { enabled: checked });
+      await refresh();
+    } catch (err) {
+      toggle.checked = !checked;
+      window.alert(`Could not update VAD:\n${String(err)}`);
+      await refresh();
+    } finally {
+      toggle.disabled = false;
+    }
   });
 
   $("autopaste-toggle")?.addEventListener("change", async (e) => {
@@ -338,8 +448,13 @@ function attachListeners() {
       if (!mode) return;
       document.querySelectorAll(".mode-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      const result = await safeInvoke("set_prompt_mode", { mode });
-      if (result === null) await refresh();
+      try {
+        await requiredInvoke("set_prompt_mode", { mode });
+        await refresh();
+      } catch (err) {
+        window.alert(`Could not update prompt mode:\n${String(err)}`);
+        await refresh();
+      }
     });
   });
 
@@ -414,12 +529,21 @@ interface SetupStatus {
     detail: string;
     settings_label: string;
   };
+  microphone_permission: {
+    required: boolean;
+    granted: boolean;
+    title: string;
+    detail: string;
+    settings_label: string;
+  };
   app_signing?: SigningSummary | null;
   signing?: SigningSummary | null;
   signing_summary?: SigningSummary | null;
   auto_paste_ready?: boolean | null;
   automation_permission?: SetupPermissionStatus | null;
   last_insertion?: InsertionDiagnostic | null;
+  recording_lifecycle?: string | null;
+  last_capture?: CaptureDiagnostic | null;
   insertion?: InsertionDiagnostic | null;
   diagnostics?: Record<string, unknown> | null;
 }
@@ -459,6 +583,18 @@ interface InsertionDiagnostic {
   error?: string | null;
   timestamp?: number | string | null;
   at?: number | string | null;
+}
+
+interface CaptureDiagnostic {
+  status?: string | null;
+  raw_samples?: number | null;
+  sample_rate?: number | null;
+  channels?: number | null;
+  approx_seconds?: number | null;
+  device_name?: string | null;
+  sample_format?: string | null;
+  peak_rms?: number | null;
+  detail?: string | null;
 }
 
 function formatBytes(n: number): string {
@@ -654,6 +790,44 @@ function detectInsertionDiagnostic(status: SetupStatus): {
   };
 }
 
+function captureStatus(status: SetupStatus): {
+  label: string;
+  detail: string;
+  tone: "ok" | "warn" | "neutral";
+} {
+  const capture = status.last_capture;
+  if (!capture) {
+    return {
+      label: status.recording_lifecycle ?? "idle",
+      detail: "No capture has completed in this app session.",
+      tone: status.recording_lifecycle === "idle" ? "neutral" : "warn",
+    };
+  }
+  const seconds =
+    typeof capture.approx_seconds === "number"
+      ? `${capture.approx_seconds.toFixed(2)}s`
+      : "unknown duration";
+  const samples =
+    typeof capture.raw_samples === "number"
+      ? capture.raw_samples.toLocaleString()
+      : "unknown";
+  const peak =
+    typeof capture.peak_rms === "number"
+      ? `peak ${capture.peak_rms.toFixed(4)}`
+      : "peak unknown";
+  const device = capture.device_name ? `${capture.device_name} · ` : "";
+  const format = capture.sample_format ? ` · ${capture.sample_format}` : "";
+  return {
+    label: capture.status ?? "captured",
+    detail:
+      capture.detail ??
+      `${device}${seconds} · ${samples} samples · ${peak} · ${capture.sample_rate ?? "?"} Hz · ${
+        capture.channels ?? "?"
+      } channel${capture.channels === 1 ? "" : "s"}${format}`,
+    tone: capture.status === "too_short" || capture.status === "silent" ? "warn" : "ok",
+  };
+}
+
 function diagnosticsRow(
   label: string,
   value: string,
@@ -709,6 +883,19 @@ function setDiagnosticsRefreshing(refreshing: boolean) {
   btn.textContent = refreshing ? "Checking…" : "Recheck";
 }
 
+let lastRecordingLifecycle: string | null = null;
+
+function updateRecordButton() {
+  const btn = $("record-toggle-btn") as HTMLButtonElement | null;
+  if (!btn) return;
+  const active =
+    lastRecordingLifecycle === "starting" ||
+    lastRecordingLifecycle === "recording" ||
+    lastRecordingLifecycle === "stopping";
+  btn.textContent = active ? "Stop" : "Start";
+  btn.dataset.active = active ? "true" : "false";
+}
+
 function renderSetupDiagnostics(status: SetupStatus | null, failure?: string) {
   const panel = ensureDiagnosticsSurface();
   const grid = $("diagnostics-grid");
@@ -725,12 +912,18 @@ function renderSetupDiagnostics(status: SetupStatus | null, failure?: string) {
     );
     actions.innerHTML = "";
     note.textContent = "";
+    updateRecordButton();
     return;
   }
 
+  lastRecordingLifecycle = status.recording_lifecycle ?? null;
+  updateRecordButton();
+
   const signing = detectSigningSummary(status);
   const insertion = detectInsertionDiagnostic(status);
+  const capture = captureStatus(status);
   const inputGranted = status.input_permission.granted;
+  const microphoneGranted = status.microphone_permission.granted;
   const autoPasteEnabled = currentSettings?.auto_paste === true;
   const backendAutoPasteReady = status.auto_paste_ready;
   const automation = status.automation_permission ?? null;
@@ -746,6 +939,16 @@ function renderSetupDiagnostics(status: SetupStatus | null, failure?: string) {
       inputGranted ? "Allowed" : status.input_permission.required ? "Needs permission" : "Not required",
       status.input_permission.detail,
       inputGranted || !status.input_permission.required ? "ok" : "warn",
+    ),
+    diagnosticsRow(
+      "Microphone",
+      microphoneGranted
+        ? "Allowed"
+        : status.microphone_permission.required
+          ? "Needs permission"
+          : "Not required",
+      status.microphone_permission.detail,
+      microphoneGranted || !status.microphone_permission.required ? "ok" : "warn",
     ),
     diagnosticsRow(
       "Auto-paste",
@@ -802,12 +1005,35 @@ function renderSetupDiagnostics(status: SetupStatus | null, failure?: string) {
         : "This platform uses the fixed runtime shortcut.",
       "neutral",
     ),
+    diagnosticsRow(
+      "Recorder",
+      status.recording_lifecycle ?? "idle",
+      capture.detail,
+      capture.tone,
+    ),
   ].join("");
 
   actions.innerHTML = "";
   if (status.input_permission.required && !inputGranted) {
+    const repairBtn = document.createElement("button");
+    repairBtn.className = "solid-btn";
+    repairBtn.type = "button";
+    repairBtn.textContent = "Repair Accessibility";
+    repairBtn.addEventListener("click", async () => {
+      repairBtn.disabled = true;
+      try {
+        await requiredInvoke("repair_macos_input_permissions");
+        startPermissionRecheck();
+        void refreshSetup();
+      } catch (err) {
+        window.alert(`Could not repair macOS permissions:\n${String(err)}`);
+      } finally {
+        repairBtn.disabled = false;
+      }
+    });
+
     const openBtn = document.createElement("button");
-    openBtn.className = "solid-btn";
+    openBtn.className = "ghost-btn";
     openBtn.type = "button";
     openBtn.textContent = status.input_permission.settings_label;
     openBtn.addEventListener("click", async () => {
@@ -821,7 +1047,25 @@ function renderSetupDiagnostics(status: SetupStatus | null, failure?: string) {
     retryBtn.type = "button";
     retryBtn.textContent = "Recheck now";
     retryBtn.addEventListener("click", () => void refreshSetup());
-    actions.append(openBtn, retryBtn);
+    actions.append(repairBtn, openBtn, retryBtn);
+  }
+  if (status.microphone_permission.required && !microphoneGranted) {
+    const openMicBtn = document.createElement("button");
+    openMicBtn.className = "solid-btn";
+    openMicBtn.type = "button";
+    openMicBtn.textContent = status.microphone_permission.settings_label;
+    openMicBtn.addEventListener("click", async () => {
+      await safeInvoke("open_microphone_permission_settings");
+      startPermissionRecheck();
+      void refreshSetup();
+    });
+
+    const retryMicBtn = document.createElement("button");
+    retryMicBtn.className = "ghost-btn";
+    retryMicBtn.type = "button";
+    retryMicBtn.textContent = "Recheck microphone";
+    retryMicBtn.addEventListener("click", () => void refreshSetup());
+    actions.append(openMicBtn, retryMicBtn);
   }
 
   note.textContent = lastSetupCheckedAt
@@ -967,12 +1211,36 @@ async function runSetup() {
     showSetupBanner(
       status.input_permission.title,
       status.input_permission.detail,
-      `<button class="solid-btn" id="btn-open-input-permissions">${status.input_permission.settings_label}</button>
+      `<button class="solid-btn" id="btn-repair-input-permissions">Repair Accessibility</button>
+       <button class="ghost-btn" id="btn-open-input-permissions">${status.input_permission.settings_label}</button>
        <button class="ghost-btn" id="btn-retry-setup">Recheck now</button>`,
       "error",
     );
+    $("btn-repair-input-permissions")?.addEventListener("click", async () => {
+      await requiredInvoke("repair_macos_input_permissions");
+      startPermissionRecheck();
+      void refreshSetup();
+    });
     $("btn-open-input-permissions")?.addEventListener("click", async () => {
       await safeInvoke("open_input_permission_settings");
+      startPermissionRecheck();
+      void refreshSetup();
+    });
+    $("btn-retry-setup")?.addEventListener("click", () => void refreshSetup());
+    return;
+  }
+
+  if (status.microphone_permission.required && !status.microphone_permission.granted) {
+    startPermissionRecheck();
+    showSetupBanner(
+      status.microphone_permission.title,
+      status.microphone_permission.detail,
+      `<button class="solid-btn" id="btn-open-microphone-permissions">${status.microphone_permission.settings_label}</button>
+       <button class="ghost-btn" id="btn-retry-setup">Recheck now</button>`,
+      "error",
+    );
+    $("btn-open-microphone-permissions")?.addEventListener("click", async () => {
+      await safeInvoke("open_microphone_permission_settings");
       startPermissionRecheck();
       void refreshSetup();
     });

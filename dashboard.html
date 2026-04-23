@@ -19,6 +19,9 @@
         <kbd>⌥</kbd>
         <span id="hotkey-label">Right Option</span>
       </div>
+      <button id="record-toggle-btn" class="solid-btn" type="button">
+        Start
+      </button>
     </header>
 
     <div id="setup-banner" class="setup-banner" hidden>
@@ -136,6 +139,18 @@
               </div>
               <p class="field-hint" id="hotkey-hint">
                 Tap once to start. Tap again or stay silent to stop.
+              </p>
+            </div>
+
+            <div class="field">
+              <label class="field-label">Microphone</label>
+              <div class="field-control">
+                <select id="input-device-select" class="select">
+                  <option value="">System default</option>
+                </select>
+              </div>
+              <p class="field-hint" id="input-device-hint">
+                Select the microphone Zerm should record from.
               </p>
             </div>
 

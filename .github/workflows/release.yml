@@ -257,18 +257,43 @@ jobs:
           args="${{ matrix.args }}"
           pnpm tauri build $args
 
+      - name: Archive macOS dSYM
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p src-tauri/target/release-symbols
+          dsyms=()
+          while IFS= read -r -d '' dsym; do
+            dsyms+=("$dsym")
+          done < <(find src-tauri/target -type d -name '*.dSYM' -print0)
+          if [[ ${#dsyms[@]} -eq 0 ]]; then
+            echo "::error::No macOS dSYM bundle found"
+            exit 1
+          fi
+          staging="src-tauri/target/release-symbols/zerm-${{ matrix.target }}-dSYMs"
+          rm -rf "$staging"
+          mkdir -p "$staging"
+          for dsym in "${dsyms[@]}"; do
+            ditto "$dsym" "$staging/$(basename "$dsym")"
+          done
+          ditto -c -k "$staging" "src-tauri/target/release-symbols/zerm-${{ matrix.target }}.dSYM.zip"
+
       - name: Upload release artifacts
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mapfile -t artifacts < <(find src-tauri/target -type f \( \
+          artifacts=()
+          while IFS= read -r -d '' artifact; do
+            artifacts+=("$artifact")
+          done < <(find src-tauri/target -type f \( \
             -name '*.AppImage' -o \
             -name '*.deb' -o \
             -name '*.dmg' -o \
+            -name '*.dSYM.zip' -o \
             -name '*.msi' -o \
             -name '*.exe' \
-          \) -print)
+          \) -print0)
           if [[ ${#artifacts[@]} -eq 0 ]]; then
             echo "::error::No release artifacts found"
             exit 1
@@ -281,7 +306,10 @@ jobs:
         if: ${{ runner.os == 'macOS' }}
         shell: bash
         run: |
-          mapfile -t apps < <(find src-tauri/target -maxdepth 8 -path '*/release/bundle/macos/*.app' -print)
+          apps=()
+          while IFS= read -r -d '' app; do
+            apps+=("$app")
+          done < <(find src-tauri/target -maxdepth 8 -path '*/release/bundle/macos/*.app' -print0)
           if [[ ${#apps[@]} -eq 0 ]]; then
             echo "::error::No macOS .app bundle found for signing verification"
             exit 1
@@ -337,7 +365,7 @@ jobs:
              hands it to your OS's own signature check before it
              runs.
           4. Gemma 3 4B is then pulled through your local Ollama.
-          5. macOS: grant Accessibility permission when prompted.
+          5. macOS: grant Accessibility and Microphone permission when prompted.
 
           ## Use it
           Tap **Right Option** (macOS) / **Ctrl+Shift+Space** (Windows
@@ -345,6 +373,7 @@ jobs:
 
           ## Notes
           - macOS builds are signed and notarized with Developer ID, including prereleases.
+          - macOS builds include the audio-input entitlement required for microphone capture.
           - Windows installers are Authenticode signed, including prereleases.
           - Release jobs fail if signing credentials are not configured.
           - Linux .AppImage built on Ubuntu 22.04.

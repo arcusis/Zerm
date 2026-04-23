@@ -79,10 +79,24 @@ body { display: flex; flex-direction: column; }
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 12px;
   padding: 14px 22px;
   -webkit-app-region: drag;
   border-bottom: 1px solid var(--rule);
+}
+
+.topbar .brand { margin-right: auto; }
+
+#record-toggle-btn {
+  min-width: 74px;
+  -webkit-app-region: no-drag;
+}
+
+#record-toggle-btn[data-active="true"] {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.03)),
+    var(--red);
 }
 
 .brand {
@@ -886,6 +900,7 @@ input[type="checkbox"]:checked::after {
 
 .solid-btn:hover { filter: brightness(1.08); }
 .solid-btn:active { transform: scale(0.97); filter: brightness(0.94); }
+.solid-btn:disabled { cursor: default; filter: grayscale(0.3) opacity(0.65); }
 
 /* ────────────────────── Vocabulary ────────────────────── */
 

@@ -1,6 +1,6 @@
 # Zerm Notebook
 
-Last updated: 2026-04-22
+Last updated: 2026-04-23
 
 This notebook captures durable project context for Zerm. Start here, then follow the linked notes relevant to the task.
 
@@ -18,6 +18,6 @@ This notebook captures durable project context for Zerm. Start here, then follow
 
 - Branch: `Production`
 - Tracking: `origin/Production`
-- Latest shipped production fixes include `d8894ad Fix macOS overlay and signed prerelease trust` and `f6f4b21 Repair local macOS accessibility and pill presentation`.
-- The local `/Applications/Zerm.app` rebuilt during development is ad-hoc signed. That can make System Settings show an enabled Accessibility row while `AXIsProcessTrusted()` still reports the current binary as untrusted.
-- The current native-writing-layer update adds platform abstraction scaffolding, insertion strategy planning, dashboard diagnostics, VAD diagnostics, profile/model/vocabulary scaffolding, and verification docs/scripts.
+- Latest production recovery fixed macOS Right Option capture, pill visibility, microphone capture, and Notes insertion.
+- Developer ID signed macOS builds must include `com.apple.security.device.audio-input`; without it, System Settings can show Microphone enabled while AVFoundation/CPAL still produce denied or silent capture.
+- The current app records microphone device name, sample format, raw sample count, and peak RMS so silent input, wrong device selection, and STT failures can be separated.

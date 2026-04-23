@@ -57,7 +57,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.release]
-strip = true
+debug = "line-tables-only"
+split-debuginfo = "packed"
+strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "abort"

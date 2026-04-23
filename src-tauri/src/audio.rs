@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, SupportedStreamConfig};
 use parking_lot::Mutex;
+use serde::Serialize;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -27,29 +28,113 @@ pub const MAX_RECORDING_SECS: u64 = 5 * 60;
 /// MAX_SAMPLES is reached.
 const NO_SPEECH_TIMEOUT_MS: u64 = 10_000;
 
+#[derive(Clone, Debug, Serialize)]
+pub struct AudioInputDevice {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+    pub sample_rates: Vec<u32>,
+    pub channel_counts: Vec<u16>,
+}
+
 pub struct CaptureHandle {
     pub stop: Sender<()>,
     pub sample_rate: u32,
     pub channels: u16,
+    pub device_name: String,
+    pub sample_format: String,
     pub level: Arc<Mutex<f32>>,
+    pub peak_level: Arc<Mutex<f32>>,
     #[allow(dead_code)]
     pub diagnostics: Arc<Mutex<VadDiagnostics>>,
 }
 
-pub fn start_capture<F>(buffer: Arc<Mutex<Vec<f32>>>, on_stop: F) -> Result<CaptureHandle>
+pub fn input_devices() -> Result<Vec<AudioInputDevice>> {
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|device| device.name().ok());
+    let devices = host.input_devices().context("list input devices")?;
+    let mut infos = Vec::new();
+
+    for (index, device) in devices.enumerate() {
+        let name = device
+            .name()
+            .unwrap_or_else(|_| format!("<unknown input device {index}>"));
+        let mut sample_rates = Vec::new();
+        let mut channel_counts = Vec::new();
+        if let Ok(configs) = device.supported_input_configs() {
+            for config in configs {
+                sample_rates.push(config.min_sample_rate().0);
+                sample_rates.push(config.max_sample_rate().0);
+                channel_counts.push(config.channels());
+            }
+        }
+        sample_rates.sort_unstable();
+        sample_rates.dedup();
+        channel_counts.sort_unstable();
+        channel_counts.dedup();
+
+        infos.push(AudioInputDevice {
+            id: name.clone(),
+            is_default: default_name.as_deref() == Some(name.as_str()),
+            name,
+            sample_rates,
+            channel_counts,
+        });
+    }
+
+    Ok(infos)
+}
+
+pub fn start_capture<F>(
+    buffer: Arc<Mutex<Vec<f32>>>,
+    preferred_device_name: Option<String>,
+    on_stop: F,
+) -> Result<CaptureHandle>
 where
     F: Fn(StopReason) + Send + 'static,
 {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| anyhow!("no default input device"))?;
+    let preferred_device_name = preferred_device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    let device = if let Some(preferred) = preferred_device_name.as_deref() {
+        let mut found = None;
+        if let Ok(devices) = host.input_devices() {
+            for candidate in devices {
+                let candidate_name = candidate.name().unwrap_or_default();
+                if candidate_name == preferred {
+                    found = Some(candidate);
+                    break;
+                }
+            }
+        }
+        match found {
+            Some(device) => device,
+            None => {
+                log::warn!("selected input device not found: {preferred}; falling back to default");
+                host.default_input_device().ok_or_else(|| {
+                    anyhow!("selected input device not found and no default input device")
+                })?
+            }
+        }
+    } else {
+        host.default_input_device()
+            .ok_or_else(|| anyhow!("no default input device"))?
+    };
+    let device_name = device
+        .name()
+        .unwrap_or_else(|_| "<unknown input device>".to_string());
     let config: SupportedStreamConfig = device
         .default_input_config()
         .context("no default input config")?;
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
     let sample_format = config.sample_format();
+    let sample_format_label = format!("{sample_format:?}");
     let max_samples = max_samples_for_config(sample_rate, channels);
 
     let (stop_tx, stop_rx) = channel::<()>();
@@ -59,7 +144,9 @@ where
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<std::result::Result<(), String>>(1);
     let buffer_for_thread = buffer.clone();
     let level = Arc::new(Mutex::new(0.0_f32));
+    let peak_level = Arc::new(Mutex::new(0.0_f32));
     let level_for_thread = level.clone();
+    let peak_level_for_thread = peak_level.clone();
     let vad_config = VadConfig {
         no_speech_timeout_ms: NO_SPEECH_TIMEOUT_MS,
         ..VadConfig::default()
@@ -75,6 +162,7 @@ where
     thread::spawn(move || {
         let buffer_for_stream = buffer_for_thread.clone();
         let level_for_stream = level_for_thread.clone();
+        let peak_level_for_stream = peak_level_for_thread.clone();
         // Cap each write so a single extend_from_slice can't push the
         // buffer above MAX_SAMPLES even if the OS hands us a huge chunk.
         let buffer_for_len_cap = buffer_for_thread.clone();
@@ -88,7 +176,10 @@ where
                     let available = max_samples_for_stream.saturating_sub(buf.len());
                     let take = data.len().min(available);
                     buf.extend_from_slice(&data[..take]);
-                    *level_for_stream.lock() = compute_rms(&data[..take]);
+                    let rms = compute_rms(&data[..take]);
+                    *level_for_stream.lock() = rms;
+                    let mut peak = peak_level_for_stream.lock();
+                    *peak = peak.max(rms);
                 },
                 err_fn,
                 None,
@@ -97,13 +188,17 @@ where
                 &config.into(),
                 move |data: &[i16], _| {
                     let mut buf = buffer_for_stream.lock();
+                    let peak_level_for_stream = peak_level_for_stream.clone();
                     let available = max_samples_for_stream.saturating_sub(buf.len());
                     let take = data.len().min(available);
                     let converted: Vec<f32> = data[..take]
                         .iter()
                         .map(|s| (*s as f32) / (i16::MAX as f32))
                         .collect();
-                    *level_for_stream.lock() = compute_rms(&converted);
+                    let rms = compute_rms(&converted);
+                    *level_for_stream.lock() = rms;
+                    let mut peak = peak_level_for_stream.lock();
+                    *peak = peak.max(rms);
                     buf.extend(converted);
                 },
                 err_fn,
@@ -113,13 +208,17 @@ where
                 &config.into(),
                 move |data: &[u16], _| {
                     let mut buf = buffer_for_stream.lock();
+                    let peak_level_for_stream = peak_level_for_stream.clone();
                     let available = max_samples_for_stream.saturating_sub(buf.len());
                     let take = data.len().min(available);
                     let converted: Vec<f32> = data[..take]
                         .iter()
                         .map(|s| ((*s as f32) - (u16::MAX as f32 / 2.0)) / (u16::MAX as f32 / 2.0))
                         .collect();
-                    *level_for_stream.lock() = compute_rms(&converted);
+                    let rms = compute_rms(&converted);
+                    *level_for_stream.lock() = rms;
+                    let mut peak = peak_level_for_stream.lock();
+                    *peak = peak.max(rms);
                     buf.extend(converted);
                 },
                 err_fn,
@@ -229,7 +328,10 @@ where
             stop: stop_tx,
             sample_rate,
             channels,
+            device_name,
+            sample_format: sample_format_label,
             level,
+            peak_level,
             diagnostics,
         }),
         Ok(Err(e)) => Err(anyhow!("audio capture failed to start: {e}")),
