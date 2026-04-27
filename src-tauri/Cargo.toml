@@ -1,6 +1,6 @@
 [package]
 name = "zerm"
-version = "0.1.0"
+version = "1.0.0"
 description = "Developer voice-to-agent app"
 edition = "2021"
 
