@@ -5,307 +5,148 @@
 <h1 align="center">Zerm</h1>
 
 <p align="center">
-  Local voice-to-clipboard for developers. Tap a key, speak, paste.
+  Native macOS voice dictation, transcription, context-aware prompting, and auto-paste.
 </p>
 
 <p align="center">
   <a href="https://github.com/arcusis/Zerm/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/arcusis/Zerm/ci.yml?branch=Production&label=ci"></a>
   <a href="https://github.com/arcusis/Zerm/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/arcusis/Zerm?include_prereleases&label=release"></a>
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/arcusis/Zerm"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPLv3-blue"></a>
   <a href="https://arcusis.github.io/Zerm/"><img alt="Website" src="https://img.shields.io/badge/website-arcusis.github.io%2FZerm-111111"></a>
 </p>
 
-Zerm is a native desktop app that turns speech into clean text without sending
-your voice to a cloud service. It records from your microphone, transcribes with
-Whisper on your machine, optionally reformats the transcript through your local
-Ollama model, and writes the result to your clipboard.
+Zerm is a native macOS application for turning speech into clean text quickly.
+It records from your microphone, transcribes with local and cloud-capable
+engines, applies optional enhancement prompts, understands the active app or
+website through Power Mode, and can paste the result directly at your cursor.
 
-It is built for people who use voice as an input method for coding agents,
-Slack, email, notes, pull request reviews, and long-form writing.
+## Attribution
+
+Zerm is based on the open-source project
+[VoiceInk](https://github.com/Beingpax/VoiceInk) by
+[Beingpax](https://github.com/Beingpax). VoiceInk provided the foundation for
+the native macOS app architecture, dictation workflow, transcription pipeline,
+Power Mode concept, model management, and many supporting services.
+
+This repository is not trying to hide that lineage. Zerm is a modified GPLv3
+derivative adapted for Arcusis branding, product direction, and ongoing
+development. We keep the GPLv3 license, preserve attribution, and link back to
+the upstream project so users and contributors can inspect the original work.
+
+Additional attribution details are kept in [NOTICE](./NOTICE).
 
 ## Contents
 
+- [Attribution](#attribution)
 - [Features](#features)
 - [Install](#install)
-- [First-run Setup](#first-run-setup)
-- [Usage](#usage)
-- [Privacy And Security](#privacy-and-security)
+- [Requirements](#requirements)
 - [Build From Source](#build-from-source)
 - [Project Structure](#project-structure)
-- [Verification](#verification)
+- [Privacy](#privacy)
 - [Contributing](#contributing)
-- [Release Process](#release-process)
-- [Roadmap](#roadmap)
 - [License](#license)
 
 ## Features
 
-- **On-device transcription** with `whisper.cpp` through `whisper-rs`.
-- **Local rewrite modes** through Ollama and Gemma 3: Off, Developer, Chat, and Pro.
-- **Clipboard-first workflow**: record, process, copy, and optionally auto-paste on macOS with native key events.
-- **Hotkey recording**: Right Option on macOS; Ctrl+Shift+Space on Windows/Linux.
-- **Voice activity detection** to auto-stop after silence.
-- **Custom vocabulary** for names, project terms, acronyms, and identifiers.
-- **Private by default history**: history starts off and can be enabled explicitly.
-- **First-run setup UI** for Whisper, Ollama, and the local model.
-- **Cross-platform bundles** for macOS, Windows, and Linux through Tauri 2.
+- **Fast dictation workflow** for recording, transcribing, and inserting text.
+- **Native macOS app** built in Swift and SwiftUI.
+- **Global shortcuts** and push-to-talk style recording.
+- **Auto-stop and auto-paste** so a dictation can finish and insert text with minimal friction.
+- **Power Mode** to adapt prompts based on the active app, website, or workflow.
+- **AI enhancement prompts** for cleanup, rewriting, assistant-style responses, and custom modes.
+- **Local model support** through Whisper and FluidAudio-backed transcription paths.
+- **Cloud transcription providers** for users who explicitly configure external services.
+- **Personal dictionary** with vocabulary and word replacement support.
+- **History and audio-file transcription** for reviewing or processing previous recordings.
+- **macOS permissions flow** for microphone, Accessibility, screen context, and automation-related capabilities.
 
 ## Install
 
-Download the latest build from the
+Download the latest macOS build from the
 [Releases](https://github.com/arcusis/Zerm/releases) page or the
 [project website](https://arcusis.github.io/Zerm/).
 
-| Platform | Package | Current hotkey |
-| --- | --- | --- |
-| macOS Apple Silicon | `.dmg` | Right Option |
-| macOS Intel | `.dmg` | Right Option |
-| Windows | `.msi` or `.exe` | Ctrl+Shift+Space |
-| Linux | `.deb` or `.AppImage` | Ctrl+Shift+Space |
+Zerm is currently focused on macOS.
 
-macOS releases, including prereleases, are Developer ID signed and notarized so
-macOS Accessibility and Automation grants stay attached across updates. Windows
-installers are Authenticode signed. Linux release artifacts are published with
-SHA-256 checksums instead of platform signing.
+## Requirements
 
-## First-run Setup
-
-The dashboard walks through setup when something is missing:
-
-1. **Whisper model**: downloads the multilingual `ggml-small.bin` model into
-   the app data directory.
-2. **Ollama**: installs the official local app when needed, or lets users keep
-   an existing Homebrew/custom Ollama service with one clear confirmation.
-   Linux treats existing local Ollama services as unverified unless the user
-   explicitly opts in.
-3. **Gemma 3 4B**: pulls the default local rewrite model through Ollama.
-
-macOS also requires Accessibility permission for global modifier-key recording
-and auto-paste. Auto-paste is currently macOS-only and sends a native `Cmd+V`
-keyboard sequence to the app that was focused when recording started. Windows
-and Linux paste synthesis is not implemented yet. Microphone permission is
-requested by the operating system on first use.
-
-## Usage
-
-1. Launch Zerm.
-2. Press the hotkey to start recording.
-3. Speak naturally.
-4. Press the hotkey again or stop talking and let silence detection finish.
-5. Paste the copied result wherever you were working.
-
-Prompt modes:
-
-| Mode | Output |
-| --- | --- |
-| Off | Raw transcript with conservative cleanup |
-| Developer | A clear instruction for a coding agent |
-| Chat | Short casual message |
-| Pro | Polished long-form prose |
-
-## Privacy And Security
-
-Zerm is designed around local processing.
-
-- No accounts.
-- No telemetry.
-- No hosted transcription service.
-- No cloud LLM calls from Zerm.
-- Dictation history is off by default.
-- Clearing or disabling history also erases the backup state file.
-- Local Ollama access is checked before transcripts are sent to
-  `127.0.0.1:11434`. macOS and Windows verify the official app/publisher where
-  supported; Linux treats an existing local listener as unverified unless the
-  user explicitly opts in. When a local service exists but cannot be fully
-  verified, Zerm offers a simple choice: install the official app or keep using
-  the existing local Ollama.
-
-First-run setup does make network requests to download required model and
-installer assets:
-
-| Destination | Purpose |
-| --- | --- |
-| `huggingface.co` | Whisper model download |
-| `api.github.com` / `github.com` | Ollama release metadata and installer assets |
-| Ollama model registry | Gemma model pull through the local Ollama service |
-
-Downloaded setup assets are bounded and hash/signature checked where the app can
-verify them. Release builds are also checked by CI before publishing.
+- macOS 14.4 or later
+- Microphone permission
+- Accessibility permission for auto-paste and global insertion workflows
+- Screen Recording permission only when screen/context-aware features are enabled
 
 ## Build From Source
 
+The actively developed native app lives in [native-macos/](./native-macos).
+
 Prerequisites:
 
-- Node.js 22 or newer
-- pnpm 10.33.0 through Corepack
-- Rust stable
-- Tauri system dependencies for your platform
-- CMake
-- Ollama, if you want local rewrite modes during development
+- Xcode 16 or newer
+- macOS 14.4 or newer
+- Swift Package Manager dependencies resolved by Xcode
 
-macOS:
+Build from the command line:
 
 ```sh
-brew install cmake ollama
-corepack enable
-corepack prepare pnpm@10.33.0 --activate
-pnpm install
-pnpm tauri dev
+xcodebuild \
+  -project native-macos/Zerm.xcodeproj \
+  -scheme Zerm \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 ```
 
-Ubuntu 22.04+:
-
-```sh
-sudo apt-get update
-sudo apt-get install -y \
-  libwebkit2gtk-4.1-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev \
-  libgtk-3-dev \
-  libsoup-3.0-dev \
-  libjavascriptcoregtk-4.1-dev \
-  libasound2-dev \
-  libxdo-dev \
-  cmake \
-  build-essential
-
-corepack enable
-corepack prepare pnpm@10.33.0 --activate
-pnpm install
-pnpm tauri dev
-```
-
-Build a bundle:
-
-```sh
-pnpm tauri build
-```
+For detailed local build notes, see
+[native-macos/BUILDING.md](./native-macos/BUILDING.md).
 
 ## Project Structure
 
 | Path | Purpose |
 | --- | --- |
-| `src-tauri/src/lib.rs` | Tauri commands, app lifecycle, setup, recording pipeline |
-| `src-tauri/src/audio.rs` | Microphone capture and audio utilities |
-| `src-tauri/src/whisper.rs` | Whisper model loading and transcription |
-| `src-tauri/src/ollama.rs` | Local Ollama identity checks and rewrite requests |
-| `src-tauri/src/state.rs` | Settings, history, stats, persistence |
-| `dashboard.html` | Main dashboard markup |
-| `src/dashboard.ts` | Dashboard behavior and setup flows |
-| `src/styles.css` | App UI styling |
-| `docs/` | GitHub Pages landing page |
-| `assets/` | Repository-facing logo assets |
+| `native-macos/Zerm/` | Native Swift/SwiftUI macOS app |
+| `native-macos/Zerm/Transcription/` | Transcription engines, providers, and processing pipeline |
+| `native-macos/Zerm/PowerMode/` | App, URL, and context-aware prompt selection |
+| `native-macos/Zerm/Views/` | SwiftUI application interface |
+| `native-macos/Zerm/Services/` | App services, settings, dictionaries, model management, and integrations |
+| `docs/` | GitHub Pages website |
+| `NOTICE` | Upstream attribution and derivative-work notes |
+| `LICENSE` | GPLv3 license text |
 
-## Verification
+The older Tauri files remain in the repository for historical continuity while
+the current product direction is the native macOS app.
 
-Run the same checks used by CI:
+## Privacy
 
-```sh
-pnpm typecheck
-pnpm build
-pnpm audit --prod
-cargo fmt --manifest-path src-tauri/Cargo.toml --check
-cargo check --manifest-path src-tauri/Cargo.toml --all-targets
-cargo test --manifest-path src-tauri/Cargo.toml --lib
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-cargo audit --file src-tauri/Cargo.lock --deny warnings \
-  --ignore RUSTSEC-2024-0370 \
-  --ignore RUSTSEC-2024-0411 \
-  --ignore RUSTSEC-2024-0412 \
-  --ignore RUSTSEC-2024-0413 \
-  --ignore RUSTSEC-2024-0414 \
-  --ignore RUSTSEC-2024-0415 \
-  --ignore RUSTSEC-2024-0416 \
-  --ignore RUSTSEC-2024-0417 \
-  --ignore RUSTSEC-2024-0418 \
-  --ignore RUSTSEC-2024-0419 \
-  --ignore RUSTSEC-2024-0420 \
-  --ignore RUSTSEC-2024-0429 \
-  --ignore RUSTSEC-2025-0057 \
-  --ignore RUSTSEC-2025-0075 \
-  --ignore RUSTSEC-2025-0080 \
-  --ignore RUSTSEC-2025-0081 \
-  --ignore RUSTSEC-2025-0098 \
-  --ignore RUSTSEC-2025-0100 \
-  --ignore RUSTSEC-2026-0097
-```
+Zerm is designed to make privacy boundaries explicit.
 
-`cargo fmt`, `cargo clippy`, and `cargo audit` require `rustfmt`,
-`clippy`, and `cargo-audit` to be installed for your Rust toolchain.
+- Local transcription paths keep audio on the device.
+- Cloud transcription and AI providers require user configuration before use.
+- History and stored request payloads should be treated carefully because they may contain dictated text.
+- Power Mode and screen-context features may require macOS permissions so Zerm can understand where the text is being inserted.
 
-```sh
-rustup component add rustfmt clippy
-cargo install cargo-audit --locked
-```
-
-The RustSec audit line matches the release workflow's current ignore list for
-known advisories.
-
-Native writing-layer checks for Accessibility, app signing, auto-paste, the
-full-screen pill, and platform paste support live in
-[docs/native-writing-layer-verification.md](./docs/native-writing-layer-verification.md).
-The helper script is read-only by default:
-
-```sh
-scripts/verify-native-writing-layer.sh
-```
-
-Use strict mode for release artifacts:
-
-```sh
-scripts/verify-native-writing-layer.sh --app /Applications/Zerm.app --strict-release
-```
+See [Notebook/Zerm Runtime Privacy Model.md](./Notebook/Zerm%20Runtime%20Privacy%20Model.md)
+for project notes on runtime privacy behavior.
 
 ## Contributing
 
-Issues and pull requests are welcome.
+Issues and pull requests are welcome when they are aligned with the macOS app.
 
 Before opening a PR:
 
-1. Keep changes focused and explain the user-facing behavior.
-2. Add or update tests for persistence, privacy, setup, or platform behavior.
-3. Run the verification commands above.
+1. Keep changes focused and describe the user-facing behavior.
+2. Preserve GPLv3 attribution for VoiceInk-derived code.
+3. Add or update tests for high-risk behavior.
 4. Include screenshots or short recordings for UI changes.
-5. Note any platform you could not test.
-
-Good first areas:
-
-- Platform-specific hotkey improvements.
-- Linux and Windows setup recovery.
-- Accessibility and keyboard navigation.
-- Additional local prompt modes.
-- Documentation for distro-specific Linux dependencies.
-
-## Release Process
-
-Releases are driven by tags.
-
-```sh
-git tag v0.1.0-alpha.16
-git push origin v0.1.0-alpha.16
-```
-
-The release workflow runs preflight checks, creates a draft GitHub Release,
-builds platform artifacts, uploads them, and publishes only after every matrix
-job succeeds.
-
-Release tags, including prerelease tags such as `v0.1.0-alpha.16`, require
-Apple and Windows signing secrets in the GitHub repository. Linux release
-artifacts are published with SHA-256 checksums rather than platform signing.
-
-The website deploys separately from `docs/` on pushes to the `Production`
-branch or through manual workflow dispatch.
-
-## Roadmap
-
-- Push-to-talk style modifier hooks for Windows and Linux.
-- Faster streaming transcription and rewrite feedback.
-- Optional encrypted history storage.
-- User-defined prompt mode templates.
-- Richer release provenance and public checksums.
+5. Note any macOS permissions or signing behavior that could affect testing.
 
 ## License
 
-Zerm is released under the [MIT License](./LICENSE).
+Zerm is licensed under the
+[GNU General Public License v3.0](./LICENSE).
 
-Built by [Arcusis](https://arcusis.com).
+Because Zerm is derived from [VoiceInk](https://github.com/Beingpax/VoiceInk),
+the GPLv3 license and upstream attribution are part of the public project
+identity. See [NOTICE](./NOTICE) for source attribution and modification notes.
+
+Built by [Arcusis](https://arcusis.com), based on VoiceInk by Beingpax.

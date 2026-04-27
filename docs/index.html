@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Zerm - local voice to clipboard</title>
+    <title>Zerm - macOS voice dictation</title>
     <meta
       name="description"
-      content="Zerm is an open-source desktop app for local voice-to-clipboard dictation with Whisper, Ollama, and no telemetry."
+      content="Zerm is a GPLv3 macOS voice dictation app based on VoiceInk, with native transcription workflows, Power Mode, and auto-paste."
     />
-    <meta property="og:title" content="Zerm - local voice to clipboard" />
+    <meta property="og:title" content="Zerm - macOS voice dictation" />
     <meta
       property="og:description"
-      content="Tap a key, speak, paste. Whisper transcription, optional local LLM polish, and a privacy-first desktop workflow."
+      content="Tap a key, speak, and paste. Zerm is a GPLv3 macOS app based on VoiceInk by Beingpax."
     />
     <meta property="og:image" content="./icon.png" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -28,6 +28,7 @@
       <nav class="topbar-nav" aria-label="Primary navigation">
         <a href="#download">Download</a>
         <a href="#native">Native layer</a>
+        <a href="#origin">Origin</a>
         <a href="#privacy">Privacy</a>
         <a href="https://github.com/arcusis/Zerm" rel="noreferrer">GitHub</a>
       </nav>
@@ -37,12 +38,12 @@
       <section class="hero">
         <div class="hero-copy">
           <img src="./icon.png" alt="Zerm app logo" class="hero-logo" />
-          <p class="kicker">Open-source desktop dictation</p>
-          <h1>Zerm turns speech into clean clipboard text.</h1>
+          <p class="kicker">GPLv3 macOS dictation</p>
+          <h1>Zerm turns speech into clean text on macOS.</h1>
           <p class="hero-lede">
-            Tap a hotkey, speak, and paste. Whisper transcribes locally,
-            Ollama can polish locally, Zerm can set it up for you, and the
-            workflow stays private by default.
+            Tap a hotkey, speak, and paste. Zerm is a native macOS dictation
+            app based on VoiceInk by Beingpax, adapted for Arcusis branding,
+            product direction, and ongoing GPLv3 development.
           </p>
           <div class="hero-actions">
             <a id="primary-download" class="button primary" href="https://github.com/arcusis/Zerm/releases">
@@ -50,11 +51,12 @@
               <span class="btn-sub" id="primary-download-sub">GitHub Releases</span>
             </a>
             <a class="button secondary" href="https://github.com/arcusis/Zerm">View source</a>
+            <a class="button secondary" href="https://github.com/Beingpax/VoiceInk">VoiceInk upstream</a>
           </div>
           <div class="release-line" aria-live="polite">
             <span id="release-tag">latest release</span>
-            <span>MIT licensed</span>
-            <span>No accounts or telemetry</span>
+            <span>GPLv3 licensed</span>
+            <span>VoiceInk credited</span>
           </div>
         </div>
 
@@ -72,12 +74,12 @@
             <div>
               <span>01</span>
               <strong>Record</strong>
-              <p>Right Option on macOS, Ctrl+Shift+Space on Windows and Linux.</p>
+              <p>Use a global macOS shortcut or push-to-talk style recording.</p>
             </div>
             <div>
               <span>02</span>
               <strong>Transcribe</strong>
-              <p>Whisper runs locally with a bundled model.</p>
+              <p>Use local and explicitly configured transcription engines.</p>
             </div>
             <div>
               <span>03</span>
@@ -91,15 +93,15 @@
       <section class="strip" aria-label="Highlights">
         <div>
           <strong>Local first</strong>
-          <span>Audio and transcripts stay on the machine, with guided local setup.</span>
+          <span>Local transcription paths keep audio on the machine.</span>
         </div>
         <div>
-          <strong>Developer ready</strong>
-          <span>Agent, chat, pro, and raw transcript modes.</span>
+          <strong>VoiceInk lineage</strong>
+          <span>Built from the GPLv3 VoiceInk foundation with public credit.</span>
         </div>
         <div>
           <strong>Auditable</strong>
-          <span>Tauri 2, Rust, TypeScript, diagnostics, and MIT license.</span>
+          <span>Swift, SwiftUI, transparent source, and GPLv3 license terms.</span>
         </div>
       </section>
 
@@ -108,10 +110,9 @@
           <p class="kicker">Native writing layer</p>
           <h2>Built around the OS behaviors that make dictation reliable.</h2>
           <p>
-            Zerm is moving beyond transcription plus clipboard copy. The app now
-            tracks setup diagnostics, insertion state, Accessibility trust, app
-            signing, and the floating recorder HUD as first-class product
-            surfaces.
+            Zerm focuses on the macOS behaviors that matter for fast dictation:
+            permissions, active app context, insertion state, model selection,
+            recording feedback, and reliable paste behavior.
           </p>
         </div>
 
@@ -119,17 +120,17 @@
           <div>
             <span>01</span>
             <strong>macOS auto-paste</strong>
-            <p>Uses Accessibility insertion with keyboard-event fallback, visible permission diagnostics, and signed prerelease checks for stable trust.</p>
+            <p>Uses native macOS permissions and insertion paths to paste the transcript at your cursor.</p>
           </div>
           <div>
             <span>02</span>
-            <strong>Full-screen recorder pill</strong>
-            <p>The recorder overlay is hardened for full-screen Spaces, display changes, and explicit copied, pasted, permission, and failure states.</p>
+            <strong>Power Mode context</strong>
+            <p>Detects active apps and browser URLs so prompts can adapt to the place you are writing.</p>
           </div>
           <div>
             <span>03</span>
-            <strong>Cross-platform plan</strong>
-            <p>Windows, Linux X11, and Linux Wayland have explicit strategy boundaries so unsupported paste paths are not presented as working.</p>
+            <strong>Visible permissions</strong>
+            <p>Surfaces microphone, Accessibility, and screen-context requirements instead of hiding setup failures.</p>
           </div>
         </div>
 
@@ -139,7 +140,7 @@
       <section id="download" class="section">
         <div class="section-head">
           <p class="kicker">Downloads</p>
-          <h2>Install a build or compile from source.</h2>
+          <h2>Install the macOS app or compile from source.</h2>
           <p>
             The cards update from GitHub Releases when a release is available.
             Current detected release: <span id="release-tag-2">checking...</span>.
@@ -147,7 +148,7 @@
         </div>
 
         <div class="download-grid">
-          <a class="download-card" data-platform="mac-arm" href="https://github.com/arcusis/Zerm/releases">
+          <a class="download-card featured" data-platform="mac-arm" href="https://github.com/arcusis/Zerm/releases">
             <span>macOS Apple Silicon</span>
             <strong>.dmg</strong>
             <small>M1 and newer</small>
@@ -157,25 +158,40 @@
             <strong>.dmg</strong>
             <small>x86_64</small>
           </a>
-          <a class="download-card" data-platform="win" href="https://github.com/arcusis/Zerm/releases">
-            <span>Windows</span>
-            <strong>.msi / .exe</strong>
-            <small>Windows 10 and 11</small>
-          </a>
-          <a class="download-card" data-platform="linux-appimage" href="https://github.com/arcusis/Zerm/releases">
-            <span>Linux</span>
-            <strong>.AppImage</strong>
-            <small>Portable package</small>
-          </a>
-          <a class="download-card" data-platform="linux-deb" href="https://github.com/arcusis/Zerm/releases">
-            <span>Debian / Ubuntu</span>
-            <strong>.deb</strong>
-            <small>Install with <code>sudo apt install ./Zerm.deb</code></small>
-          </a>
           <a class="download-card source-card" href="https://github.com/arcusis/Zerm#build-from-source">
             <span>Source</span>
-            <strong>pnpm tauri dev</strong>
-            <small>Build locally</small>
+            <strong>xcodebuild</strong>
+            <small>Build the Swift macOS app locally</small>
+          </a>
+        </div>
+      </section>
+
+      <section id="origin" class="section attribution">
+        <div class="section-head">
+          <p class="kicker">Origin and license</p>
+          <h2>Based on VoiceInk, credited in public, and licensed under GPLv3.</h2>
+          <p>
+            Zerm is a modified derivative of VoiceInk by Beingpax. VoiceInk
+            provided the foundation for the native macOS dictation workflow,
+            transcription pipeline, Power Mode, model handling, and supporting
+            services. Zerm keeps the GPLv3 license and links back to upstream.
+          </p>
+        </div>
+        <div class="attribution-grid">
+          <a href="https://github.com/Beingpax/VoiceInk">
+            <span>Upstream project</span>
+            <strong>Beingpax/VoiceInk</strong>
+            <small>Original GPLv3 foundation</small>
+          </a>
+          <a href="https://github.com/arcusis/Zerm/blob/Production/NOTICE">
+            <span>Attribution notice</span>
+            <strong>NOTICE</strong>
+            <small>Migration and modification notes</small>
+          </a>
+          <a href="https://github.com/arcusis/Zerm/blob/Production/LICENSE">
+            <span>License</span>
+            <strong>GNU GPLv3</strong>
+            <small>Source license for Zerm</small>
           </a>
         </div>
       </section>
@@ -183,24 +199,21 @@
       <section id="privacy" class="section split">
         <div class="section-head left">
           <p class="kicker">Privacy model</p>
-          <h2>No hosted transcription. No analytics. History off by default.</h2>
+          <h2>Clear boundaries for local and configured services.</h2>
         </div>
         <div class="privacy-list">
           <p>
-            Zerm records through the local microphone API, transcribes with a
-            local Whisper model, and only sends text to your local Ollama
-            service when a rewrite mode needs it. Zerm installs the official
-            Ollama app when needed, while still letting developers explicitly
-            opt in to an existing Homebrew or custom Ollama service.
+            Zerm records through macOS microphone APIs, supports local
+            transcription paths, and only uses cloud or AI providers that the
+            user configures. Context-aware features may require additional
+            macOS permissions so the app can understand where text is going.
           </p>
           <ul>
-            <li>Dictation history is opt-in.</li>
-            <li>Clearing history removes the backup state file too.</li>
-            <li>Setup downloads are bounded and verified where possible.</li>
-            <li>Existing Linux Ollama listeners are treated as unverified unless explicitly allowed.</li>
-            <li>macOS auto-paste uses Accessibility insertion with native key-event fallback.</li>
-            <li>Stable macOS and Windows releases require signing secrets before publishing; Linux artifacts ship with SHA-256 checksums instead of signing.</li>
-            <li>Prerelease macOS alpha builds are signed and notarized when release secrets are available.</li>
+            <li>Local transcription paths keep audio on the device.</li>
+            <li>Cloud transcription providers require explicit setup.</li>
+            <li>AI request payload storage is controlled separately from runtime requests.</li>
+            <li>Power Mode uses active app and browser context only for configured workflows.</li>
+            <li>macOS auto-paste requires Accessibility permission.</li>
           </ul>
         </div>
       </section>
@@ -210,8 +223,8 @@
           <p class="kicker">Open source</p>
           <h2>Read the code, file issues, send patches.</h2>
           <p>
-            The README includes architecture notes, platform setup, release
-            process, and verification commands for local contributors.
+            The README includes VoiceInk attribution, GPLv3 licensing,
+            architecture notes, build instructions, and contributor guidance.
           </p>
         </div>
         <a class="button primary" href="https://github.com/arcusis/Zerm">Open repository</a>
@@ -219,9 +232,10 @@
     </main>
 
     <footer class="site-foot">
-      <span>© <span id="year"></span> Arcusis. MIT License.</span>
+      <span>© <span id="year"></span> Arcusis. GPLv3. Based on VoiceInk by Beingpax.</span>
       <span class="foot-links">
         <a href="https://github.com/arcusis/Zerm">Repository</a>
+        <a href="https://github.com/Beingpax/VoiceInk">VoiceInk</a>
         <a href="https://github.com/arcusis/Zerm/releases">Releases</a>
         <a href="https://github.com/arcusis/Zerm/issues">Issues</a>
       </span>

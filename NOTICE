@@ -1,11 +1,18 @@
-Zerm includes GPLv3-licensed code imported from VoiceInk.
+Zerm is a modified GPLv3 derivative based on VoiceInk.
 
-Upstream project:
+Original upstream project:
 https://github.com/Beingpax/VoiceInk
 
-Imported upstream commit:
+Original author / upstream maintainer:
+Beingpax / Pax
+
+Imported upstream commit recorded during migration:
 620a8439319fd849f0905b901ad3567382a0c5ab
 
-Zerm-specific changes include application branding, bundle identifiers,
-local build output names, and project paths. The imported application code
-remains licensed under GPLv3 or later as described in LICENSE.
+Zerm-specific changes include application branding, bundle identifiers, local
+build output names, project paths, product copy, permission wording, release
+metadata, and ongoing feature and reliability work.
+
+The VoiceInk-derived application code remains licensed under the GNU General
+Public License v3.0 as described in LICENSE. Zerm keeps this license and keeps
+public attribution to the upstream project.

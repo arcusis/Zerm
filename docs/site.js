@@ -8,18 +8,6 @@
     if (platform === "mac-x86") {
       return assets.find((asset) => /(?:x64|x86_64).*\.dmg$/i.test(asset.name));
     }
-    if (platform === "win") {
-      return (
-        assets.find((asset) => /setup.*\.exe$/i.test(asset.name)) ||
-        assets.find((asset) => /\.msi$/i.test(asset.name))
-      );
-    }
-    if (platform === "linux-appimage") {
-      return assets.find((asset) => /\.AppImage$/i.test(asset.name));
-    }
-    if (platform === "linux-deb") {
-      return assets.find((asset) => /\.deb$/i.test(asset.name));
-    }
     return null;
   }
 
@@ -27,8 +15,6 @@
     const ua = navigator.userAgent || "";
     const platform = navigator.platform || "";
     if (/Mac/i.test(platform) || /Mac/i.test(ua)) return "mac";
-    if (/Win/i.test(platform) || /Windows/i.test(ua)) return "win";
-    if (/Linux|X11/i.test(platform) || /Linux/i.test(ua)) return "linux-appimage";
     return "unknown";
   }
 
@@ -36,10 +22,7 @@
     mac: "Choose macOS build",
     "mac-arm": "Download for macOS",
     "mac-x86": "Download for macOS Intel",
-    win: "Download for Windows",
-    "linux-appimage": "Download for Linux",
-    "linux-deb": "Download .deb",
-    unknown: "Choose a download",
+    unknown: "Download for macOS",
   };
 
   function formatSize(bytes) {

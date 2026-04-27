@@ -1,107 +1,80 @@
 <div align="center">
-  <img src="Zerm/Assets.xcassets/AppIcon.appiconset/256-mac.png" width="180" height="180" />
-  <h1>Zerm</h1>
-  <p>Voice to text app for macOS to transcribe what you say to text almost instantly</p>
+  <img src="Zerm/Assets.xcassets/AppIcon.appiconset/256-mac.png" width="180" height="180" alt="Zerm app icon" />
+  <h1>Zerm for macOS</h1>
+  <p>Native macOS voice dictation, transcription, context-aware prompting, and auto-paste.</p>
 
-  [![License](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-  ![Platform](https://img.shields.io/badge/platform-macOS%2014.0%2B-brightgreen)
-  [![GitHub release (latest by date)](https://img.shields.io/github/v/release/Arcusis/Zerm)](https://github.com/Arcusis/Zerm/releases)
-  ![GitHub all releases](https://img.shields.io/github/downloads/Arcusis/Zerm/total)
-  ![GitHub stars](https://img.shields.io/github/stars/Arcusis/Zerm?style=social)
-  <p>
-    <a href="https://tryzerm.com">Website</a> •
-    <a href="https://www.youtube.com/@tryzerm">YouTube</a>
-  </p>
-
-  <a href="https://tryzerm.com">
-    <img src="https://img.shields.io/badge/Download%20Now-Latest%20Version-blue?style=for-the-badge&logo=apple" alt="Download Zerm" width="250"/>
-  </a>
+  [![License](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](../LICENSE)
+  ![Platform](https://img.shields.io/badge/platform-macOS%2014.4%2B-brightgreen)
+  [![GitHub release](https://img.shields.io/github/v/release/arcusis/Zerm)](https://github.com/arcusis/Zerm/releases)
 </div>
 
 ---
 
-Zerm is a native macOS application that transcribes what you say to text almost instantly. You can find all the information and download the app from [here](https://tryzerm.com). 
+Zerm is the native macOS application in this repository. It records your voice,
+transcribes it, optionally enhances the result, and can paste the final text
+directly into the focused app.
 
-![Zerm Mac App](https://github.com/user-attachments/assets/12367379-83e7-48a6-b52c-4488a6a04bba)
+## Upstream Attribution
 
-After dedicating the past 5 months to developing this app, I've decided to open source it for the greater good. 
+Zerm is based on [VoiceInk](https://github.com/Beingpax/VoiceInk) by
+[Beingpax](https://github.com/Beingpax). VoiceInk provided the original
+foundation for the macOS dictation experience, transcription pipeline, Power
+Mode concept, model handling, and related app services.
 
-My goal is to make it **the most efficient and privacy-focused voice-to-text solution for macOS** that is a joy to use. While the source code is now open for experienced developers to build and contribute, purchasing a license helps support continued development and gives you access to automatic updates, priority support, and upcoming features.
+Zerm is a modified GPLv3 derivative. This directory keeps the GPLv3 license,
+preserves attribution to VoiceInk, and documents the project relationship in
+[../NOTICE](../NOTICE).
 
 ## Features
 
-- 🎙️ **Accurate Transcription**: Local AI models that transcribe your voice to text with 99% accuracy, almost instantly
-- 🔒 **Privacy First**: 100% offline processing ensures your data never leaves your device
-- ⚡ **Power Mode**: Intelligent app detection automatically applies your perfect pre-configured settings based on the app/ URL you're on
-- 🧠 **Context Aware**: Smart AI that understands your screen content and adapts to the context
-- 🎯 **Global Shortcuts**: Configurable keyboard shortcuts for quick recording and push-to-talk functionality
-- 📝 **Personal Dictionary**: Train the AI to understand your unique terminology with custom words, industry terms, and smart text replacements
-- 🔄 **Smart Modes**: Instantly switch between AI-powered modes optimized for different writing styles and contexts
-- 🤖 **AI Assistant**: Built-in voice assistant mode for a quick chatGPT like conversational assistant
-
-## Get Started
-
-### Download
-Get the latest version with a free trial from [tryzerm.com](https://tryzerm.com). Your purchase helps me work on Zerm full-time and continuously improve it with new features and updates.
-
-#### Homebrew
-Alternatively, you can install Zerm via `brew`:
-
-```shell
-brew install --cask zerm
-```
-
-### Build from Source
-As an open-source project, you can build Zerm yourself by following the instructions in [BUILDING.md](BUILDING.md). However, the compiled version includes additional benefits like automatic updates, priority support via Discord and email, and helps fund ongoing development.
+- Fast global dictation workflow for macOS.
+- Configurable shortcuts and push-to-talk behavior.
+- Auto-stop and auto-paste support.
+- Power Mode for app, website, and workflow-specific prompts.
+- Local transcription paths using Whisper and FluidAudio-backed models.
+- Optional cloud transcription providers when configured by the user.
+- AI enhancement prompts for cleanup, rewriting, assistant use, and custom modes.
+- Personal dictionary, vocabulary, and word replacements.
+- Audio-file transcription and transcript history.
+- macOS permission onboarding for microphone, Accessibility, and context features.
 
 ## Requirements
 
 - macOS 14.4 or later
+- Xcode 16 or later for development
+- Microphone permission for recording
+- Accessibility permission for auto-paste and global insertion
+- Screen Recording permission when context-aware screen features are used
 
-## Documentation
+## Build From Source
 
-- [Building from Source](BUILDING.md) - Detailed instructions for building the project
-- [Contributing Guidelines](CONTRIBUTING.md) - How to contribute to Zerm
-- [Code of Conduct](CODE_OF_CONDUCT.md) - Our community standards
+```sh
+xcodebuild \
+  -project Zerm.xcodeproj \
+  -scheme Zerm \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+For detailed build and signing notes, see [BUILDING.md](BUILDING.md).
 
 ## Contributing
 
-This project is **not accepting pull requests** at this time. You're welcome to fork and modify Zerm for your own use.
+Issues and pull requests are welcome when they are aligned with the macOS app.
 
-You can still contribute by:
-- Reporting bugs via [issues](https://github.com/Arcusis/Zerm/issues)
-- Suggesting features or enhancements
-- Improving documentation via issues
+Before opening a PR:
 
-For more details, see our [Contributing Guidelines](CONTRIBUTING.md). For build instructions, see our [Building Guide](BUILDING.md).
+1. Keep changes focused.
+2. Preserve GPLv3 attribution for VoiceInk-derived code.
+3. Include screenshots or recordings for UI changes.
+4. Note permission, signing, or notarization behavior that affects testing.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more detail.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+Zerm is licensed under the [GNU General Public License v3.0](../LICENSE).
 
-## Support
-
-If you encounter any issues or have questions, please:
-1. Check the existing issues in the GitHub repository
-2. Create a new issue if your problem isn't already reported
-3. Provide as much detail as possible about your environment and the problem
-
-## Acknowledgments
-
-### Core Technology
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) - High-performance inference of OpenAI's Whisper model
-- [FluidAudio](https://github.com/FluidInference/FluidAudio) - Used for Parakeet model implementation
-
-### Essential Dependencies
-- [Sparkle](https://github.com/sparkle-project/Sparkle) - Keeping Zerm up to date
-- [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) - User-customizable keyboard shortcuts
-- [LaunchAtLogin](https://github.com/sindresorhus/LaunchAtLogin) - Launch at login functionality
-- [MediaRemoteAdapter](https://github.com/ejbills/mediaremote-adapter) - Media playback control during recording
-- [Zip](https://github.com/marmelroy/Zip) - File compression and decompression utilities
-- [SelectedTextKit](https://github.com/tisfeng/SelectedTextKit) - A modern macOS library for getting selected text
-- [Swift Atomics](https://github.com/apple/swift-atomics) - Low-level atomic operations for thread-safe concurrent programming
-
-
----
-
-Made with ❤️ by Pax
+Original VoiceInk work is credited to Beingpax / Pax. Zerm-specific
+modifications are maintained by Arcusis.
