@@ -1,0 +1,25 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Zerm</title>
+        <item>
+            <title>1.74</title>
+            <description><![CDATA[
+                <h3>What's New in v1.74</h3>
+                <ul>
+                    <li>🤖 xAI Grok speech-to-text support</li>
+                    <li>⚡ Per-model streaming toggle</li>
+                    <li>👁️ Hide live text display for real-time models</li>
+                    <li>⌨️ Customizable enhancement shortcut</li>
+                    <li>🔧 Fixed CPU spike issue</li>
+                    <li>🐛 Bug fixes and improvements</li>
+                </ul>
+            ]]></description>
+            <pubDate>Wed, 22 Apr 2026 10:38:42 +0545</pubDate>
+            <sparkle:version>174</sparkle:version>
+            <sparkle:shortVersionString>1.74</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Arcusis/Zerm/releases/download/v1.74/Zerm.dmg" length="13012106" type="application/octet-stream" sparkle:edSignature="f2LHvL1u0f3eJfDuomjabaTQVTaL1Mn02sMmyY5XRfVNj7h0nqVIS4C/dfukcljmKNyK8a81z5h/xanURJIjDQ=="/>
+        </item>
+    </channel>
+</rss>

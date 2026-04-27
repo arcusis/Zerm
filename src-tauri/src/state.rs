@@ -125,6 +125,22 @@ pub struct ProfileTrigger {
     pub match_mode: ProfileMatchMode,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProfileContext {
+    pub bundle_id: Option<String>,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub browser_url_or_domain: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProfileResolution {
+    pub profile_id: Option<String>,
+    pub profile_name: Option<String>,
+    pub prompt_mode: PromptMode,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProfilePrivacyOverrides {
     #[serde(default)]
@@ -508,6 +524,86 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    pub fn resolve_prompt_mode(&self, context: Option<&ProfileContext>) -> ProfileResolution {
+        let fallback = ProfileResolution {
+            profile_id: None,
+            profile_name: None,
+            prompt_mode: self.prompt_mode,
+        };
+
+        if !self.privacy.allow_auto_profile_matching || !self.privacy.capture_app_context {
+            return fallback;
+        }
+
+        let Some(context) = context else {
+            return fallback;
+        };
+
+        let mut selected: Option<&PowerModeProfile> = None;
+        for profile in &self.profiles {
+            if !profile.enabled || profile.triggers.is_empty() || profile.prompt_mode.is_none() {
+                continue;
+            }
+            if profile
+                .triggers
+                .iter()
+                .any(|trigger| trigger.matches(context))
+            {
+                if selected.is_none_or(|current| profile.priority > current.priority) {
+                    selected = Some(profile);
+                }
+            }
+        }
+
+        if let Some(profile) = selected {
+            return ProfileResolution {
+                profile_id: Some(profile.id.clone()),
+                profile_name: Some(profile.name.clone()),
+                prompt_mode: profile.prompt_mode.unwrap_or(self.prompt_mode),
+            };
+        }
+
+        fallback
+    }
+}
+
+impl ProfileTrigger {
+    fn matches(&self, context: &ProfileContext) -> bool {
+        let pattern = self.pattern.trim();
+        if pattern.is_empty() {
+            return false;
+        }
+        let candidate = match self.kind {
+            ProfileTriggerKind::BundleId => context.bundle_id.as_deref(),
+            ProfileTriggerKind::AppName => context.app_name.as_deref(),
+            ProfileTriggerKind::WindowTitle => context.window_title.as_deref(),
+            ProfileTriggerKind::BrowserDomain | ProfileTriggerKind::UrlPrefix => {
+                context.browser_url_or_domain.as_deref()
+            }
+            ProfileTriggerKind::Language => context.language.as_deref(),
+        };
+        let Some(candidate) = candidate else {
+            return false;
+        };
+        matches_pattern(candidate, pattern, self.match_mode)
+    }
+}
+
+fn matches_pattern(candidate: &str, pattern: &str, mode: ProfileMatchMode) -> bool {
+    let candidate = candidate.trim().to_ascii_lowercase();
+    let pattern = pattern.trim().to_ascii_lowercase();
+    if candidate.is_empty() || pattern.is_empty() {
+        return false;
+    }
+    match mode {
+        ProfileMatchMode::Exact => candidate == pattern,
+        ProfileMatchMode::Contains => candidate.contains(&pattern),
+        ProfileMatchMode::Prefix => candidate.starts_with(&pattern),
+        ProfileMatchMode::Suffix => candidate.ends_with(&pattern),
+    }
+}
+
 fn default_power_profiles() -> Vec<PowerModeProfile> {
     vec![PowerModeProfile::default()]
 }
@@ -877,6 +973,74 @@ mod tests {
             round_tripped.settings.vocabulary_replacements[0].replace,
             "Zerm"
         );
+    }
+
+    #[test]
+    fn profile_resolution_uses_highest_priority_matching_prompt_mode() {
+        let mut settings = Settings::default();
+        settings.prompt_mode = PromptMode::Developer;
+        settings.profiles = vec![
+            PowerModeProfile {
+                id: "chat-apps".to_string(),
+                name: "Chat apps".to_string(),
+                priority: 10,
+                triggers: vec![ProfileTrigger {
+                    kind: ProfileTriggerKind::AppName,
+                    pattern: "slack".to_string(),
+                    match_mode: ProfileMatchMode::Contains,
+                }],
+                prompt_mode: Some(PromptMode::Conversational),
+                ..PowerModeProfile::default()
+            },
+            PowerModeProfile {
+                id: "slack-exact".to_string(),
+                name: "Slack exact".to_string(),
+                priority: 20,
+                triggers: vec![ProfileTrigger {
+                    kind: ProfileTriggerKind::BundleId,
+                    pattern: "com.tinyspeck.slackmacgap".to_string(),
+                    match_mode: ProfileMatchMode::Exact,
+                }],
+                prompt_mode: Some(PromptMode::Professional),
+                ..PowerModeProfile::default()
+            },
+        ];
+
+        let resolution = settings.resolve_prompt_mode(Some(&ProfileContext {
+            bundle_id: Some("com.tinyspeck.slackmacgap".to_string()),
+            app_name: Some("Slack".to_string()),
+            ..ProfileContext::default()
+        }));
+
+        assert_eq!(resolution.profile_id.as_deref(), Some("slack-exact"));
+        assert_eq!(resolution.prompt_mode, PromptMode::Professional);
+    }
+
+    #[test]
+    fn profile_resolution_falls_back_when_privacy_disables_context() {
+        let mut settings = Settings::default();
+        settings.prompt_mode = PromptMode::Developer;
+        settings.privacy.capture_app_context = false;
+        settings.profiles = vec![PowerModeProfile {
+            id: "slack".to_string(),
+            name: "Slack".to_string(),
+            priority: 20,
+            triggers: vec![ProfileTrigger {
+                kind: ProfileTriggerKind::AppName,
+                pattern: "slack".to_string(),
+                match_mode: ProfileMatchMode::Contains,
+            }],
+            prompt_mode: Some(PromptMode::Conversational),
+            ..PowerModeProfile::default()
+        }];
+
+        let resolution = settings.resolve_prompt_mode(Some(&ProfileContext {
+            app_name: Some("Slack".to_string()),
+            ..ProfileContext::default()
+        }));
+
+        assert_eq!(resolution.profile_id, None);
+        assert_eq!(resolution.prompt_mode, PromptMode::Developer);
     }
 
     #[test]

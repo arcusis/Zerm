@@ -26,7 +26,10 @@ use insertion::{
     AppContext as InsertionAppContext, InsertionPlan, InsertionRequest, InsertionStrategy,
     Platform as InsertionPlatform, StrategySelector,
 };
-use state::{DashboardData, HotkeyChoice, PersistentState, PillPosition, PromptMode};
+use state::{
+    DashboardData, HotkeyChoice, PersistentState, PillPosition, PowerModeProfile, ProfileContext,
+    PromptMode,
+};
 
 const READY_EVENT: &str = "zerm://ready";
 const ERROR_EVENT: &str = "zerm://error";
@@ -262,6 +265,25 @@ fn format_focus_identity(identity: Option<&FocusIdentity>) -> String {
             identity.app_name.as_deref().unwrap_or("<unknown>")
         ),
         None => "<none>".to_string(),
+    }
+}
+
+fn context_from_paste_target(target: &CapturedPasteTarget) -> ProfileContext {
+    ProfileContext {
+        bundle_id: non_empty_string(target.identity.bundle_id.clone()),
+        app_name: target.identity.app_name.clone().and_then(non_empty_string),
+        window_title: None,
+        browser_url_or_domain: None,
+        language: None,
+    }
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -3051,14 +3073,27 @@ fn handle_release(app: &AppHandle, pipeline: &Pipeline) {
         // so the caller side gives us an Arc to re-clone.
         &app.state::<Arc<Pipeline>>().inner().clone(),
     );
-    let (prompt_mode, vocabulary, allow_unverified_ollama) = {
+    let profile_context = pipeline
+        .paste_target
+        .lock()
+        .as_ref()
+        .map(context_from_paste_target);
+    let (prompt_mode, vocabulary, allow_unverified_ollama, matched_profile_name) = {
         let p = pipeline.persistent.lock();
+        let resolution = p.settings.resolve_prompt_mode(profile_context.as_ref());
         (
-            p.settings.prompt_mode,
+            resolution.prompt_mode,
             p.settings.vocabulary.join(", "),
             p.settings.allow_unverified_ollama,
+            resolution.profile_name,
         )
     };
+    if let Some(profile_name) = matched_profile_name {
+        native_debug_log(format!(
+            "context profile matched name=\"{}\" prompt_mode={:?}",
+            profile_name, prompt_mode
+        ));
+    }
 
     let job = ProcessJob {
         raw,
@@ -3642,6 +3677,154 @@ fn set_prompt_mode(
         other => return Err(format!("unknown prompt mode: {other}")),
     };
     state.persistent.lock().settings.prompt_mode = parsed;
+    state.save_persistent();
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+fn validate_context_profile(mut profile: PowerModeProfile) -> Result<PowerModeProfile, String> {
+    profile.id = profile.id.trim().to_string();
+    profile.name = profile.name.trim().to_string();
+
+    if profile.id.is_empty() {
+        return Err("profile id cannot be empty".to_string());
+    }
+    if profile.id == "default" {
+        return Err("the default profile cannot be replaced".to_string());
+    }
+    if !profile
+        .id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("profile id may only contain letters, numbers, dashes, and underscores".into());
+    }
+    if profile.name.is_empty() {
+        return Err("profile name cannot be empty".to_string());
+    }
+    if profile.name.len() > 80 {
+        return Err("profile name is too long".to_string());
+    }
+
+    profile.triggers = profile
+        .triggers
+        .into_iter()
+        .map(|mut trigger| {
+            trigger.pattern = trigger.pattern.trim().to_string();
+            trigger
+        })
+        .filter(|trigger| !trigger.pattern.is_empty())
+        .collect();
+    if profile.triggers.is_empty() {
+        return Err("add at least one app trigger".to_string());
+    }
+    if profile.triggers.len() > 5 {
+        return Err("profiles can have at most 5 triggers".to_string());
+    }
+    if profile
+        .triggers
+        .iter()
+        .any(|trigger| trigger.pattern.len() > 160)
+    {
+        return Err("trigger pattern is too long".to_string());
+    }
+    if profile.prompt_mode.is_none() {
+        return Err("choose a prompt mode for this profile".to_string());
+    }
+
+    profile.auto_paste = None;
+    profile.auto_send = false;
+    profile.transcription_model_id = None;
+    profile.rewrite_model_id = None;
+    profile.language_hint = None;
+    profile.vocabulary_replacement_ids.clear();
+    profile.privacy = Default::default();
+
+    Ok(profile)
+}
+
+#[tauri::command]
+fn upsert_context_profile(
+    window: tauri::WebviewWindow,
+    profile: PowerModeProfile,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    let profile = validate_context_profile(profile)?;
+    let mut persistent = state.persistent.lock();
+    let existing_custom_profiles = persistent
+        .settings
+        .profiles
+        .iter()
+        .filter(|existing| existing.id != "default" && existing.id != profile.id)
+        .count();
+    if existing_custom_profiles >= 20 {
+        return Err("context profiles are limited to 20".to_string());
+    }
+    persistent
+        .settings
+        .profiles
+        .retain(|existing| existing.id != profile.id);
+    persistent.settings.profiles.push(profile);
+    drop(persistent);
+    state.save_persistent();
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_context_profile_enabled(
+    window: tauri::WebviewWindow,
+    profile_id: String,
+    enabled: bool,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    if profile_id == "default" {
+        return Err("the default profile cannot be toggled".to_string());
+    }
+    let mut persistent = state.persistent.lock();
+    let Some(profile) = persistent
+        .settings
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.id == profile_id)
+    else {
+        return Err("profile not found".to_string());
+    };
+    profile.enabled = enabled;
+    drop(persistent);
+    state.save_persistent();
+    emit_dashboard_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_context_profile(
+    window: tauri::WebviewWindow,
+    profile_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    require_dashboard(&window)?;
+    if profile_id == "default" {
+        return Err("the default profile cannot be deleted".to_string());
+    }
+    let mut persistent = state.persistent.lock();
+    let before = persistent.settings.profiles.len();
+    persistent
+        .settings
+        .profiles
+        .retain(|profile| profile.id != profile_id);
+    if persistent.settings.profiles.len() == before {
+        return Err("profile not found".to_string());
+    }
+    if persistent.settings.active_profile_id.as_deref() == Some(profile_id.as_str()) {
+        persistent.settings.active_profile_id = None;
+    }
+    drop(persistent);
     state.save_persistent();
     emit_dashboard_update(&app);
     Ok(())
@@ -4689,6 +4872,9 @@ pub fn run() {
             set_allow_unverified_ollama,
             set_save_history,
             set_prompt_mode,
+            upsert_context_profile,
+            set_context_profile_enabled,
+            delete_context_profile,
             set_hotkey,
             list_audio_input_devices,
             set_input_device,

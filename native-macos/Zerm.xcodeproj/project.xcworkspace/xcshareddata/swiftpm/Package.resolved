@@ -1,0 +1,105 @@
+{
+  "originHash" : "c2e2df8a2e09b563e3062683ce11c69b2712372c34c99d2bc78f0b526c730c55",
+  "pins" : [
+    {
+      "identity" : "axswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tisfeng/AXSwift.git",
+      "state" : {
+        "revision" : "2efa201fa18184de98674165592fd1ecb0c00a6d",
+        "version" : "0.3.6"
+      }
+    },
+    {
+      "identity" : "fluidaudio",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FluidInference/FluidAudio",
+      "state" : {
+        "branch" : "main",
+        "revision" : "04747b3e77c824917c2b422a7210ab9de9d3b029"
+      }
+    },
+    {
+      "identity" : "keyboardshortcuts",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sindresorhus/KeyboardShortcuts",
+      "state" : {
+        "revision" : "1aef85578fdd4f9eaeeb8d53b7b4fc31bf08fe27",
+        "version" : "2.4.0"
+      }
+    },
+    {
+      "identity" : "keysender",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jordanbaird/KeySender",
+      "state" : {
+        "revision" : "99584bf1a03ab600cc44be89a2dcd98b2dbeb9de",
+        "version" : "0.0.5"
+      }
+    },
+    {
+      "identity" : "launchatlogin-modern",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sindresorhus/LaunchAtLogin-Modern",
+      "state" : {
+        "branch" : "main",
+        "revision" : "a04ec1c363be3627734f6dad757d82f5d4fa8fcc"
+      }
+    },
+    {
+      "identity" : "llmkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Beingpax/LLMkit.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "91b228d3ff13febc6b61a58e5f3aa27e734d1c01"
+      }
+    },
+    {
+      "identity" : "mediaremote-adapter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Beingpax/mediaremote-adapter",
+      "state" : {
+        "branch" : "master",
+        "revision" : "b97fa53f0654c8e33519e8a601b0bead3abd310a"
+      }
+    },
+    {
+      "identity" : "selectedtextkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tisfeng/SelectedTextKit",
+      "state" : {
+        "revision" : "ecbf46d8be541b54296a0836b7ae2f60c0416b72",
+        "version" : "2.6.2"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "9a1d2a19d3595fcf8d9c447173f9a1687b3dcadb",
+        "version" : "2.8.0"
+      }
+    },
+    {
+      "identity" : "swift-atomics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-atomics.git",
+      "state" : {
+        "revision" : "b601256eab081c0f92f059e12818ac1d4f178ff7",
+        "version" : "1.3.0"
+      }
+    },
+    {
+      "identity" : "zip",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/marmelroy/Zip",
+      "state" : {
+        "revision" : "67fa55813b9e7b3b9acee9c0ae501def28746d76",
+        "version" : "2.1.2"
+      }
+    }
+  ],
+  "version" : 3
+}

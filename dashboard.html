@@ -56,14 +56,20 @@
               </button>
             </li>
             <li>
-              <button class="nav-item" data-tab="settings">
+              <button class="nav-item" data-tab="context">
                 <span class="nav-num">03</span>
+                <span class="nav-label">Context</span>
+              </button>
+            </li>
+            <li>
+              <button class="nav-item" data-tab="settings">
+                <span class="nav-num">04</span>
                 <span class="nav-label">Settings</span>
               </button>
             </li>
             <li>
               <button class="nav-item" data-tab="about">
-                <span class="nav-num">04</span>
+                <span class="nav-num">05</span>
                 <span class="nav-label">About</span>
               </button>
             </li>
@@ -118,7 +124,7 @@
         <section class="tab-panel" data-tab="settings">
           <header class="panel-header">
             <div>
-              <span class="eyebrow">Section 03</span>
+              <span class="eyebrow">Section 04</span>
               <h2 class="panel-title">Settings</h2>
             </div>
           </header>
@@ -249,11 +255,84 @@
           </ul>
         </section>
 
+        <!-- CONTEXT -->
+        <section class="tab-panel" data-tab="context">
+          <header class="panel-header">
+            <div>
+              <span class="eyebrow">Section 03</span>
+              <h2 class="panel-title">Context-aware formatting</h2>
+            </div>
+          </header>
+
+          <p class="context-lede">
+            Create app rules that switch Zerm’s prompt mode automatically.
+            If no rule matches, Zerm keeps using the global mode from Settings.
+          </p>
+
+          <form id="context-profile-form" class="context-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label" for="context-profile-name">Profile name</label>
+              <input
+                id="context-profile-name"
+                class="vocab-input"
+                type="text"
+                placeholder="Slack, Cursor, Mail…"
+                maxlength="80"
+              />
+            </div>
+            <div class="context-grid">
+              <div class="field">
+                <label class="field-label" for="context-trigger-kind">Match by</label>
+                <select id="context-trigger-kind" class="select">
+                  <option value="bundle_id">Bundle ID</option>
+                  <option value="app_name">App name</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="context-trigger-pattern">App pattern</label>
+                <input
+                  id="context-trigger-pattern"
+                  class="vocab-input"
+                  type="text"
+                  placeholder="com.tinyspeck.slackmacgap or Slack"
+                  spellcheck="false"
+                />
+              </div>
+              <div class="field">
+                <label class="field-label" for="context-prompt-mode">Use mode</label>
+                <select id="context-prompt-mode" class="select">
+                  <option value="conversational">Chat</option>
+                  <option value="developer">Developer</option>
+                  <option value="professional">Pro</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
+            </div>
+            <p class="field-hint">
+              Tip: Bundle ID is the most reliable match. App name is easier and
+              works well for apps like Slack, Cursor, Mail, and Discord.
+            </p>
+            <button type="submit" class="solid-btn">Add context profile</button>
+          </form>
+
+          <div class="context-meta">
+            <span class="eyebrow">Rules</span>
+            <span id="context-profile-count" class="vocab-count">0 profiles</span>
+          </div>
+
+          <ul id="context-profile-list" class="context-profile-list">
+            <li class="empty-state">
+              <span class="empty-mark">∅</span>
+              <span>No context profiles yet. Add one above to start.</span>
+            </li>
+          </ul>
+        </section>
+
         <!-- ABOUT -->
         <section class="tab-panel" data-tab="about">
           <header class="panel-header">
             <div>
-              <span class="eyebrow">Section 04</span>
+              <span class="eyebrow">Section 05</span>
               <h2 class="panel-title">About</h2>
             </div>
           </header>

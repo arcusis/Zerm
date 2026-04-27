@@ -1,0 +1,203 @@
+import SwiftUI
+import SwiftData
+import KeyboardShortcuts
+import OSLog
+
+// ViewType enum with all cases
+enum ViewType: String, CaseIterable, Identifiable {
+    case metrics = "Dashboard"
+    case transcribeAudio = "Transcribe Audio"
+    case history = "History"
+    case models = "AI Models"
+    case enhancement = "Enhancement"
+    case powerMode = "Power Mode"
+    case permissions = "Permissions"
+    case audioInput = "Audio Input"
+    case dictionary = "Dictionary"
+    case settings = "Settings"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .metrics: return "gauge.medium"
+        case .transcribeAudio: return "waveform.circle.fill"
+        case .history: return "doc.text.fill"
+        case .models: return "brain.head.profile"
+        case .enhancement: return "wand.and.stars"
+        case .powerMode: return "sparkles.square.fill.on.square"
+        case .permissions: return "shield.fill"
+        case .audioInput: return "mic.fill"
+        case .dictionary: return "character.book.closed.fill"
+        case .settings: return "gearshape.fill"
+        }
+    }
+}
+
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let visualEffectView = NSVisualEffectView()
+        visualEffectView.material = material
+        visualEffectView.blendingMode = blendingMode
+        visualEffectView.state = .active
+        return visualEffectView
+    }
+
+    func updateNSView(_ visualEffectView: NSVisualEffectView, context: Context) {
+        visualEffectView.material = material
+        visualEffectView.blendingMode = blendingMode
+    }
+}
+
+struct ContentView: View {
+    private let logger = Logger(subsystem: "com.arcusis.zerm", category: "ContentView")
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var engine: ZermEngine
+    @EnvironmentObject private var whisperModelManager: WhisperModelManager
+    @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
+    @EnvironmentObject private var hotkeyManager: HotkeyManager
+    @AppStorage("powerModeUIFlag") private var powerModeUIFlag = false
+    @State private var selectedView: ViewType? = .metrics
+    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+
+    private var visibleViewTypes: [ViewType] {
+        ViewType.allCases.filter { viewType in
+            if viewType == .powerMode {
+                return powerModeUIFlag
+            }
+            return true
+        }
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selectedView) {
+                Section {
+                    // App Header
+                    HStack(spacing: 6) {
+                        if let appIcon = NSImage(named: "AppIcon") {
+                            Image(nsImage: appIcon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 28, height: 28)
+                                .cornerRadius(8)
+                        }
+
+                        Text("Zerm")
+                            .font(.system(size: 14, weight: .semibold))
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                ForEach(visibleViewTypes) { viewType in
+                    Section {
+                        NavigationLink(value: viewType) {
+                            SidebarItemView(viewType: viewType)
+                        }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowSeparator(.hidden)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Zerm")
+            .navigationSplitViewColumnWidth(210)
+        } detail: {
+            if let selectedView = selectedView {
+                detailView(for: selectedView)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .navigationTitle(selectedView.rawValue)
+            } else {
+                Text("Select a view")
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(width: 950)
+        .frame(minHeight: 730)
+        .onAppear {
+            logger.notice("ContentView appeared")
+        }
+        .onDisappear {
+            logger.notice("ContentView disappeared")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination)) { notification in
+            if let destination = notification.userInfo?["destination"] as? String {
+                logger.notice("navigateToDestination received: \(destination, privacy: .public)")
+                switch destination {
+                case "Settings":
+                    selectedView = .settings
+                case "AI Models":
+                    selectedView = .models
+                case "Zerm Pro":
+                    selectedView = .settings
+                case "History":
+                    selectedView = .history
+                case "Permissions":
+                    selectedView = .permissions
+                case "Enhancement":
+                    selectedView = .enhancement
+                case "Transcribe Audio":
+                    selectedView = .transcribeAudio
+                case "Power Mode":
+                    selectedView = .powerMode
+                default:
+                    break
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func detailView(for viewType: ViewType) -> some View {
+        switch viewType {
+        case .metrics:
+            MetricsView()
+        case .models:
+            ModelManagementView()
+        case .enhancement:
+            EnhancementSettingsView()
+        case .transcribeAudio:
+            AudioTranscribeView()
+        case .history:
+            InlineHistoryView()
+        case .audioInput:
+            AudioInputSettingsView()
+        case .dictionary:
+            DictionarySettingsView(whisperPrompt: whisperModelManager.whisperPrompt)
+        case .powerMode:
+            PowerModeView()
+        case .settings:
+            SettingsView()
+        case .permissions:
+            PermissionsView()
+        }
+    }
+}
+
+private struct SidebarItemView: View {
+    let viewType: ViewType
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: viewType.icon)
+                .font(.system(size: 18, weight: .medium))
+                .frame(width: 24, height: 24)
+
+            Text(viewType.rawValue)
+                .font(.system(size: 14, weight: .medium))
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .padding(.vertical, 8)
+        .padding(.horizontal, 2)
+    }
+}

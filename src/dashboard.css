@@ -1014,6 +1014,130 @@ input[type="checkbox"]:checked::after {
   color: white;
 }
 
+/* ────────────────────── Context profiles ────────────────────── */
+
+.context-lede {
+  font-size: 13px;
+  color: var(--paper-dim);
+  line-height: 1.5;
+  margin-bottom: 18px;
+  max-width: 680px;
+}
+
+.context-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 760px;
+  padding: 14px;
+  margin-bottom: 22px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: 150px 1fr 150px;
+  gap: 10px;
+}
+
+.context-form .solid-btn {
+  align-self: flex-start;
+}
+
+.context-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  max-width: 760px;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.context-meta .eyebrow { padding: 0; }
+
+.context-profile-list {
+  max-width: 760px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.context-profile-list .empty-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  color: var(--paper-quiet);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.context-profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+
+.context-profile-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.context-profile-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-profile-title strong {
+  font-size: 14px;
+  color: var(--paper);
+  letter-spacing: -0.08px;
+}
+
+.context-profile-title span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-faint);
+  border: 1px solid var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.context-profile-triggers {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--paper-quiet);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.checkbox-row.compact {
+  gap: 6px;
+  font-size: 12px;
+  color: var(--paper-dim);
+}
+
 /* ────────────────────── About ────────────────────── */
 
 .about {
@@ -1166,5 +1290,19 @@ input[type="checkbox"]:checked::after {
 @media (max-width: 860px) {
   .diagnostics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .context-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .context-profile {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .context-profile-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }

@@ -22,6 +22,36 @@ type HotkeyChoice =
   | "right_control"
   | "caps_lock"
   | "fn";
+type ProfileTriggerKind =
+  | "bundle_id"
+  | "app_name"
+  | "window_title"
+  | "browser_domain"
+  | "url_prefix"
+  | "language";
+type ProfileMatchMode = "exact" | "contains" | "prefix" | "suffix";
+
+interface ProfileTrigger {
+  kind: ProfileTriggerKind;
+  pattern: string;
+  match_mode: ProfileMatchMode;
+}
+
+interface PowerModeProfile {
+  id: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  triggers: ProfileTrigger[];
+  prompt_mode: PromptMode | null;
+  transcription_model_id?: string | null;
+  rewrite_model_id?: string | null;
+  language_hint?: string | null;
+  auto_paste?: boolean | null;
+  auto_send?: boolean;
+  vocabulary_replacement_ids?: string[];
+  privacy?: Record<string, unknown>;
+}
 
 interface Settings {
   llm_model: string;
@@ -33,6 +63,8 @@ interface Settings {
   allow_unverified_ollama: boolean;
   save_history: boolean;
   input_device_name: string | null;
+  profiles: PowerModeProfile[];
+  active_profile_id: string | null;
 }
 
 interface DashboardData {
@@ -169,6 +201,7 @@ function renderSettings(settings: Settings) {
   });
 
   renderVocabulary(settings.vocabulary);
+  renderContextProfiles(settings.profiles ?? [], settings.prompt_mode);
   renderSetupDiagnostics(lastSetupStatus);
 }
 
@@ -252,6 +285,129 @@ function renderVocabulary(terms: string[]) {
     li.append(termSpan, removeBtn);
     list.appendChild(li);
   }
+}
+
+const PROMPT_MODE_LABELS: Record<PromptMode, string> = {
+  off: "Off",
+  developer: "Developer",
+  conversational: "Chat",
+  professional: "Pro",
+};
+
+const TRIGGER_KIND_LABELS: Record<ProfileTriggerKind, string> = {
+  bundle_id: "Bundle ID",
+  app_name: "App name",
+  window_title: "Window title",
+  browser_domain: "Browser domain",
+  url_prefix: "URL prefix",
+  language: "Language",
+};
+
+function contextProfiles(profiles: PowerModeProfile[]): PowerModeProfile[] {
+  return profiles
+    .filter((profile) => profile.id !== "default")
+    .sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name));
+}
+
+function describeTrigger(trigger: ProfileTrigger): string {
+  const kind = TRIGGER_KIND_LABELS[trigger.kind] ?? trigger.kind;
+  const mode = trigger.match_mode === "exact" ? "is" : trigger.match_mode;
+  return `${kind} ${mode} ${trigger.pattern}`;
+}
+
+function renderContextProfiles(profiles: PowerModeProfile[], fallbackMode: PromptMode) {
+  const list = $("context-profile-list")!;
+  const count = $("context-profile-count")!;
+  const customProfiles = contextProfiles(profiles);
+  count.textContent = `${customProfiles.length} profile${customProfiles.length === 1 ? "" : "s"}`;
+  list.innerHTML = "";
+
+  if (customProfiles.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty-state";
+    li.innerHTML = `<span class="empty-mark">∅</span><span>No context profiles yet. Add one above to start.</span>`;
+    list.appendChild(li);
+    return;
+  }
+
+  for (const profile of customProfiles) {
+    const li = document.createElement("li");
+    li.className = "context-profile";
+
+    const main = document.createElement("div");
+    main.className = "context-profile-main";
+
+    const title = document.createElement("div");
+    title.className = "context-profile-title";
+    const name = document.createElement("strong");
+    name.textContent = profile.name || "Untitled profile";
+    const mode = document.createElement("span");
+    const promptMode = profile.prompt_mode ?? fallbackMode;
+    mode.textContent = PROMPT_MODE_LABELS[promptMode] ?? promptMode;
+    title.append(name, mode);
+
+    const triggers = document.createElement("div");
+    triggers.className = "context-profile-triggers";
+    triggers.textContent = profile.triggers?.length
+      ? profile.triggers.map(describeTrigger).join(" · ")
+      : "No triggers";
+
+    main.append(title, triggers);
+
+    const actions = document.createElement("div");
+    actions.className = "context-profile-actions";
+
+    const enabledLabel = document.createElement("label");
+    enabledLabel.className = "checkbox-row compact";
+    const enabledToggle = document.createElement("input");
+    enabledToggle.type = "checkbox";
+    enabledToggle.checked = profile.enabled;
+    const enabledText = document.createElement("span");
+    enabledText.textContent = profile.enabled ? "On" : "Off";
+    enabledToggle.addEventListener("change", async () => {
+      enabledToggle.disabled = true;
+      try {
+        await requiredInvoke("set_context_profile_enabled", {
+          profileId: profile.id,
+          enabled: enabledToggle.checked,
+        });
+      } catch (err) {
+        window.alert(`Could not update context profile:\n${String(err)}`);
+      } finally {
+        await refresh();
+      }
+    });
+    enabledLabel.append(enabledToggle, enabledText);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "ghost-btn";
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", async () => {
+      deleteBtn.disabled = true;
+      try {
+        await requiredInvoke("delete_context_profile", { profileId: profile.id });
+      } catch (err) {
+        window.alert(`Could not delete context profile:\n${String(err)}`);
+      } finally {
+        await refresh();
+      }
+    });
+
+    actions.append(enabledLabel, deleteBtn);
+    li.append(main, actions);
+    list.appendChild(li);
+  }
+}
+
+function slugId(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return `${slug || "profile"}-${Date.now().toString(36)}`;
 }
 
 function flashButton(btn: HTMLElement, text: string, ok = true) {
@@ -476,6 +632,59 @@ function attachListeners() {
   $("vocab-clear")?.addEventListener("click", async () => {
     await safeInvoke("clear_vocabulary");
     await refresh();
+  });
+
+  const contextForm = document.getElementById("context-profile-form") as HTMLFormElement | null;
+  contextForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const nameInput = $("context-profile-name") as HTMLInputElement | null;
+    const kindSelect = $("context-trigger-kind") as HTMLSelectElement | null;
+    const patternInput = $("context-trigger-pattern") as HTMLInputElement | null;
+    const modeSelect = $("context-prompt-mode") as HTMLSelectElement | null;
+    const name = nameInput?.value.trim() ?? "";
+    const pattern = patternInput?.value.trim() ?? "";
+    const kind = (kindSelect?.value ?? "bundle_id") as ProfileTriggerKind;
+    const mode = (modeSelect?.value ?? "conversational") as PromptMode;
+    if (!name || !pattern) {
+      window.alert("Add a profile name and app pattern first.");
+      return;
+    }
+
+    const submit = contextForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    const profile: PowerModeProfile = {
+      id: slugId(name),
+      name,
+      enabled: true,
+      priority: 10,
+      triggers: [
+        {
+          kind,
+          pattern,
+          match_mode: kind === "bundle_id" ? "exact" : "contains",
+        },
+      ],
+      prompt_mode: mode,
+      transcription_model_id: null,
+      rewrite_model_id: null,
+      language_hint: null,
+      auto_paste: null,
+      auto_send: false,
+      vocabulary_replacement_ids: [],
+      privacy: {},
+    };
+
+    try {
+      await requiredInvoke("upsert_context_profile", { profile });
+      contextForm.reset();
+      if (modeSelect) modeSelect.value = "conversational";
+      await refresh();
+    } catch (err) {
+      window.alert(`Could not add context profile:\n${String(err)}`);
+      await refresh();
+    } finally {
+      if (submit) submit.disabled = false;
+    }
   });
 
   // Clear history (no confirm dialog — Tauri WebView doesn't always honor it)
