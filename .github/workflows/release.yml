@@ -1,494 +1,60 @@
 name: Release
 
-# Multi-stage release pipeline. Runs on tag push (or manual dispatch):
+# Native macOS release workflow.
 #
-#   preflight → create-release → build (matrix) → publish
+# Current status: MANUAL
+#   DMG artifacts are built locally on a signed Apple Silicon Mac and uploaded
+#   to GitHub Releases with `gh release upload`. This is the documented process
+#   in native-macos/BUILDING.md.
 #
-# preflight runs typecheck + cargo check + cargo test + pnpm audit +
-# rustsec audit on one fast runner. If any of those fail, no matrix
-# builds are attempted and nothing is published.
+# Future: automate with a self-hosted macOS runner or GitHub's macos-latest
+#   once a Developer ID certificate is available for hardened-runtime signing.
 #
-# build fans out to 4 OS-arch combinations and uploads installers as
-# a draft GitHub Release (one per matrix leg, atomically attached).
-#
-# publish un-drafts the release once every matrix leg succeeded. If
-# any upstream job fails we leave the release as a draft so we can
-# inspect it before publishing manually.
+# Windows / Linux: Zerm is a native macOS Swift app (AppKit + SwiftUI).
+#   There is no Windows or Linux build. The archived Tauri prototype that
+#   previously built cross-platform installers is no longer maintained.
 
 on:
-  # Disabled: the Tauri-based release pipeline is superseded by the native
-  # macOS Swift app. DMGs are now built locally and uploaded manually.
-  # Re-enable or replace with a native build workflow when CI is ready.
+  # Manual trigger only — for running any future automated steps
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.4)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
-concurrency:
-  group: "release-${{ github.ref }}"
-  cancel-in-progress: false
-
 jobs:
-  preflight:
-    name: Preflight (typecheck · cargo test · audit)
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Enable pnpm via Corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.33.0 --activate
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libasound2-dev \
-            libxdo-dev \
-            cmake \
-            build-essential
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Frontend typecheck
-        run: pnpm typecheck
-
-      - name: npm dependency audit
-        run: pnpm audit --prod --audit-level high
-
-      - name: Cargo check
-        working-directory: src-tauri
-        run: cargo check --all-targets
-
-      - name: Cargo tests
-        working-directory: src-tauri
-        run: cargo test --lib
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Rust dependency audit
-        run: |
-          cargo audit \
-            --file src-tauri/Cargo.lock \
-            --deny warnings \
-            --ignore RUSTSEC-2024-0370 \
-            --ignore RUSTSEC-2024-0411 \
-            --ignore RUSTSEC-2024-0412 \
-            --ignore RUSTSEC-2024-0413 \
-            --ignore RUSTSEC-2024-0414 \
-            --ignore RUSTSEC-2024-0415 \
-            --ignore RUSTSEC-2024-0416 \
-            --ignore RUSTSEC-2024-0417 \
-            --ignore RUSTSEC-2024-0418 \
-            --ignore RUSTSEC-2024-0419 \
-            --ignore RUSTSEC-2024-0420 \
-            --ignore RUSTSEC-2024-0429 \
-            --ignore RUSTSEC-2025-0057 \
-            --ignore RUSTSEC-2025-0075 \
-            --ignore RUSTSEC-2025-0080 \
-            --ignore RUSTSEC-2025-0081 \
-            --ignore RUSTSEC-2025-0098 \
-            --ignore RUSTSEC-2025-0100 \
-            --ignore RUSTSEC-2026-0097
-
-  build:
-    name: Build (${{ matrix.label }})
-    needs: create-release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: macOS (Apple Silicon)
-            os: macos-latest
-            target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin --bundles app,dmg"
-          - label: macOS (Intel)
-            os: macos-latest
-            target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin --bundles app,dmg"
-          - label: Windows
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            args: "--bundles msi,nsis"
-          - label: Linux
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            args: "--bundles deb,appimage"
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Enable git long paths (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: git config --system core.longpaths true
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Enable pnpm via Corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.33.0 --activate
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: ${{ matrix.target }}
-
-      - name: Install Linux build dependencies
-        if: matrix.os == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libasound2-dev \
-            libxdo-dev \
-            cmake \
-            build-essential
-
-      - name: Install macOS build dependencies
-        if: runner.os == 'macOS'
-        run: brew install cmake
-
-      - name: Install Windows build dependencies
-        if: runner.os == 'Windows'
-        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-
-      - name: Set CMake generator (Windows only)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: echo "CMAKE_GENERATOR=Visual Studio 17 2022" >> $GITHUB_ENV
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Require signing secrets for release artifacts
-        if: ${{ runner.os == 'macOS' || runner.os == 'Windows' }}
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          is_prerelease=false
-          if [[ "${{ github.ref_name }}" == *"-alpha"* || "${{ github.ref_name }}" == *"-beta"* || "${{ github.ref_name }}" == *"-rc"* ]]; then
-            is_prerelease=true
-          fi
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            test -n "$APPLE_CERTIFICATE" || { echo "::error::APPLE_CERTIFICATE is required for macOS releases"; exit 1; }
-            test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::APPLE_CERTIFICATE_PASSWORD is required for macOS releases"; exit 1; }
-            test -n "$APPLE_ID" || { echo "::error::APPLE_ID is required for macOS notarization"; exit 1; }
-            test -n "$APPLE_PASSWORD" || { echo "::error::APPLE_PASSWORD is required for macOS notarization"; exit 1; }
-            test -n "$APPLE_TEAM_ID" || { echo "::error::APPLE_TEAM_ID is required for macOS notarization"; exit 1; }
-          fi
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            if [[ "$is_prerelease" == "true" && ( -z "$WINDOWS_CERTIFICATE" || -z "$WINDOWS_CERTIFICATE_PASSWORD" ) ]]; then
-              echo "::warning::Windows signing secrets are missing; continuing with unsigned prerelease artifacts."
-              exit 0
-            fi
-            test -n "$WINDOWS_CERTIFICATE" || { echo "::error::WINDOWS_CERTIFICATE is required for Windows releases"; exit 1; }
-            test -n "$WINDOWS_CERTIFICATE_PASSWORD" || { echo "::error::WINDOWS_CERTIFICATE_PASSWORD is required for Windows releases"; exit 1; }
-          fi
-
-      - name: Import Windows signing certificate
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          if (-not $env:WINDOWS_CERTIFICATE) {
-            Write-Host "::warning::WINDOWS_CERTIFICATE is not set; prerelease artifacts may be unsigned."
-            exit 0
-          }
-          New-Item -ItemType Directory -Force -Path certificate | Out-Null
-          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
-          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
-          Remove-Item certificate/tempCert.txt
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-          Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-
-      - name: Touch models directory
-        shell: bash
-        run: |
-          mkdir -p models
-          touch models/.gitkeep
-
-      - name: Build Tauri app
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          args="${{ matrix.args }}"
-          if [[ "${{ runner.os }}" == "macOS" ]] && [[ "${{ github.ref_name }}" == *"-alpha"* || "${{ github.ref_name }}" == *"-beta"* || "${{ github.ref_name }}" == *"-rc"* ]]; then
-            args="$args --skip-stapling"
-            echo "::notice::Using --skip-stapling for macOS prerelease builds to avoid long notarization polling failures."
-          fi
-          pnpm tauri build $args
-
-      - name: Archive macOS dSYM
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          mkdir -p src-tauri/target/release-symbols
-          dsyms=()
-          while IFS= read -r -d '' dsym; do
-            dsyms+=("$dsym")
-          done < <(find src-tauri/target -type d -name '*.dSYM' -print0)
-          if [[ ${#dsyms[@]} -eq 0 ]]; then
-            echo "::error::No macOS dSYM bundle found"
-            exit 1
-          fi
-          staging="src-tauri/target/release-symbols/zerm-${{ matrix.target }}-dSYMs"
-          rm -rf "$staging"
-          mkdir -p "$staging"
-          for dsym in "${dsyms[@]}"; do
-            ditto "$dsym" "$staging/$(basename "$dsym")"
-          done
-          ditto -c -k "$staging" "src-tauri/target/release-symbols/zerm-${{ matrix.target }}.dSYM.zip"
-
-      - name: Upload release artifacts
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          retry() {
-            local attempts="$1"
-            shift
-            local n=1
-            while true; do
-              if "$@"; then
-                return 0
-              fi
-              if [[ "$n" -ge "$attempts" ]]; then
-                return 1
-              fi
-              sleep $((n * 5))
-              n=$((n + 1))
-            done
-          }
-          artifacts=()
-          while IFS= read -r -d '' artifact; do
-            artifacts+=("$artifact")
-          done < <(find src-tauri/target -type f \( \
-            -name '*.AppImage' -o \
-            -name '*.deb' -o \
-            -name '*.dmg' -o \
-            -name '*.dSYM.zip' -o \
-            -name '*.msi' -o \
-            -name '*.exe' \
-          \) -print0)
-          if [[ ${#artifacts[@]} -eq 0 ]]; then
-            echo "::error::No release artifacts found"
-            exit 1
-          fi
-          existing_assets="$(gh release view "${{ github.ref_name }}" --repo ${{ github.repository }} --json assets --jq '.assets[].name' || true)"
-          for artifact in "${artifacts[@]}"; do
-            asset_name="$(basename "$artifact")"
-            if grep -Fxq "$asset_name" <<<"$existing_assets"; then
-              retry 3 gh release delete-asset "${{ github.ref_name }}" "$asset_name" \
-                --repo ${{ github.repository }} \
-                --yes
-            fi
-            retry 3 gh release upload "${{ github.ref_name }}" "$artifact" \
-              --repo ${{ github.repository }}
-          done
-
-      - name: Verify macOS signing
-        if: ${{ runner.os == 'macOS' }}
-        shell: bash
-        run: |
-          apps=()
-          while IFS= read -r -d '' app; do
-            apps+=("$app")
-          done < <(find src-tauri/target -maxdepth 8 -path '*/release/bundle/macos/*.app' -print0)
-          if [[ ${#apps[@]} -eq 0 ]]; then
-            echo "::error::No macOS .app bundle found for signing verification"
-            exit 1
-          fi
-          for app in "${apps[@]}"; do
-            codesign --verify --deep --strict --verbose=4 "$app"
-            codesign -dv --verbose=4 "$app" 2>&1 | tee /tmp/zerm-codesign.txt
-            grep -q 'Authority=Developer ID Application' /tmp/zerm-codesign.txt
-            grep -q 'TeamIdentifier=' /tmp/zerm-codesign.txt
-            if [[ "${{ github.ref_name }}" != *"-alpha"* && "${{ github.ref_name }}" != *"-beta"* && "${{ github.ref_name }}" != *"-rc"* ]]; then
-              spctl -a -vv -t exec "$app"
-            fi
-          done
-
-      - name: Verify Windows Authenticode signatures
-        if: ${{ runner.os == 'Windows' }}
-        shell: pwsh
-        run: |
-          $isPrerelease = "${{ github.ref_name }}" -match "-alpha|-beta|-rc"
-          $hasWindowsCert = -not [string]::IsNullOrWhiteSpace("${{ secrets.WINDOWS_CERTIFICATE }}") -and -not [string]::IsNullOrWhiteSpace("${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}")
-          if (-not $hasWindowsCert -and $isPrerelease) {
-            Write-Host "::warning::Skipping Authenticode verification for unsigned prerelease artifacts."
-            exit 0
-          }
-          $artifacts = Get-ChildItem -Path src-tauri\target -Recurse -Include *.exe,*.msi
-          if (-not $artifacts) {
-            Write-Error "No Windows installers found for signature verification"
-            exit 1
-          }
-          foreach ($artifact in $artifacts) {
-            $sig = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
-            if ($sig.Status -ne "Valid") {
-              Write-Error "$($artifact.FullName) is not Authenticode signed: $($sig.Status)"
-              exit 1
-            }
-            Write-Host "Verified $($artifact.Name): $($sig.SignerCertificate.Subject)"
-          }
-
-  create-release:
-    name: Create draft release
-    needs: preflight
+  release-notes:
+    name: Validate release tag
     runs-on: ubuntu-latest
     steps:
-      - name: Create draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
+      - uses: actions/checkout@v5
+
+      - name: Verify tag exists
         run: |
-          prerelease=()
-          if [[ "${{ github.ref_name }}" == *"-alpha"* || "${{ github.ref_name }}" == *"-beta"* || "${{ github.ref_name }}" == *"-rc"* ]]; then
-            prerelease=(--prerelease)
-          fi
-
-          cat > release-notes.md <<'EOF'
-          ## First launch
-          1. Open Zerm. The dashboard shows a setup banner.
-          2. Zerm streams the hash-pinned Whisper model (~466 MB)
-             into your app-data dir automatically.
-          3. Click **Install Ollama**. Zerm downloads the signed
-             installer from github.com/ollama/ollama/releases and
-             hands it to your OS's own signature check before it
-             runs.
-          4. Gemma 3 4B is then pulled through your local Ollama.
-          5. macOS: grant Accessibility and Microphone permission when prompted.
-
-          ## Use it
-          Tap **Right Option** (macOS) / **Ctrl+Shift+Space** (Windows
-          + Linux), speak, stop talking. Text lands in your clipboard.
-
-          ## Notes
-          - macOS builds are signed with Developer ID. Stable releases wait for notarization + stapling; prereleases submit for notarization with `--skip-stapling` so Apple polling outages do not fail the release.
-          - macOS builds include the audio-input entitlement required for microphone capture.
-          - Windows installers are Authenticode signed when `WINDOWS_CERTIFICATE` is configured. Prereleases continue unsigned if that certificate is absent.
-          - Stable release jobs fail if required signing credentials are not configured.
-          - Linux .AppImage built on Ubuntu 22.04.
-          - SHA-256 checksums are attached as `SHA256SUMS.txt`.
-
-          ## Changes
-          <https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}>
-          EOF
-
-          if gh release view "${{ github.ref_name }}" --repo ${{ github.repository }} >/dev/null 2>&1; then
-            gh release edit "${{ github.ref_name }}" \
-              --repo ${{ github.repository }} \
-              --title "Zerm ${{ github.ref_name }}" \
-              --notes-file release-notes.md \
-              "${prerelease[@]}"
+          TAG="${{ inputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG exists — release is valid"
           else
-            gh release create "${{ github.ref_name }}" \
-              --repo ${{ github.repository }} \
-              --title "Zerm ${{ github.ref_name }}" \
-              --notes-file release-notes.md \
-              --draft \
-              "${prerelease[@]}"
+            echo "Tag $TAG not found. Create the tag first:"
+            echo "  git tag $TAG && git push origin $TAG"
+            exit 1
           fi
 
-  publish:
-    name: Publish release
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Generate and upload release checksums
+      - name: Check release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          retry() {
-            local attempts="$1"
-            shift
-            local n=1
-            while true; do
-              if "$@"; then
-                return 0
-              fi
-              if [[ "$n" -ge "$attempts" ]]; then
-                return 1
-              fi
-              sleep $((n * 5))
-              n=$((n + 1))
-            done
-          }
-          mkdir -p release-assets
-          retry 3 gh release download "${{ github.ref_name }}" \
-            --repo ${{ github.repository }} \
-            --dir release-assets \
-            --clobber
-          cd release-assets
-          rm -f SHA256SUMS.txt
-          find . -maxdepth 1 -type f -print0 \
-            | sort -z \
-            | xargs -0 sha256sum > SHA256SUMS.txt
-          if gh release view "${{ github.ref_name }}" --repo ${{ github.repository }} --json assets --jq '.assets[].name' | grep -Fxq 'SHA256SUMS.txt'; then
-            retry 3 gh release delete-asset "${{ github.ref_name }}" SHA256SUMS.txt \
-              --repo ${{ github.repository }} \
-              --yes
+          TAG="${{ inputs.tag }}"
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
+          if echo "$ASSETS" | grep -qi "\.dmg"; then
+            echo "Release $TAG has DMG assets:"
+            echo "$ASSETS"
+          else
+            echo "WARNING: Release $TAG has no .dmg assets yet."
+            echo "Upload a DMG with:"
+            echo "  gh release upload $TAG path/to/Zerm_VERSION_aarch64.dmg"
           fi
-          retry 3 gh release upload "${{ github.ref_name }}" SHA256SUMS.txt \
-            --repo ${{ github.repository }}
-
-      - name: Promote draft to published
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release edit "${{ github.ref_name }}" \
-            --draft=false \
-            --repo ${{ github.repository }}
-      - name: Summary
-        run: |
-          echo "::notice title=Release published::Zerm ${{ github.ref_name }} is live."

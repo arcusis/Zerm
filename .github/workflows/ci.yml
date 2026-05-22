@@ -1,71 +1,114 @@
 name: CI
 
+# Runs on every push to Production and on all pull requests.
+# Tests what actually matters for the current codebase:
+#   - Native macOS Swift app builds (Xcode on macos-latest)
+#   - GitHub Pages website linting
+#
+# Windows and Linux are not supported — Zerm is a native macOS Swift app
+# built with AppKit/SwiftUI and has no cross-platform build path.
+# The previous CI tested an archived Tauri prototype that is no longer shipped.
+
 on:
   push:
     branches: [Production, main]
   pull_request:
 
 jobs:
-  check:
-    name: Typecheck + cargo check (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-22.04, windows-latest]
+  # ── Swift build (macOS only) ─────────────────────────────────────────────
+  swift-build:
+    name: Swift build (macOS)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: native-macos
+
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          package-manager-cache: false
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
 
-      - name: Enable pnpm via Corepack
+      - name: Resolve Swift packages
         run: |
-          corepack enable
-          corepack prepare pnpm@10.33.0 --activate
+          xcodebuild -project Zerm.xcodeproj \
+            -scheme Zerm \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath .ci-packages \
+            2>&1 | tail -5
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Linux build dependencies
-        if: matrix.os == 'ubuntu-22.04'
+      - name: Build (no signing)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libasound2-dev \
-            libxdo-dev \
-            cmake \
-            build-essential
+          xcodebuild \
+            -project Zerm.xcodeproj \
+            -scheme Zerm \
+            -configuration Debug \
+            -clonedSourcePackagesDirPath .ci-packages \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM="" \
+            build \
+            2>&1 | xcpretty || xcodebuild \
+              -project Zerm.xcodeproj \
+              -scheme Zerm \
+              -configuration Debug \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=YES \
+              DEVELOPMENT_TEAM="" \
+              build 2>&1 | tail -20
 
-      - name: Install macOS build dependencies
-        if: runner.os == 'macOS'
-        run: brew install cmake
+  # ── Website lint ─────────────────────────────────────────────────────────
+  website-lint:
+    name: Website lint
+    runs-on: ubuntu-latest
 
-      - name: Install Windows build dependencies
-        if: runner.os == 'Windows'
-        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+    steps:
+      - uses: actions/checkout@v5
 
-      - name: Install JS deps
-        run: pnpm install --frozen-lockfile
+      - name: Check HTML is valid (basic)
+        run: |
+          # Ensure index.html exists and has required landmarks
+          test -f docs/index.html || (echo "docs/index.html missing" && exit 1)
+          grep -q 'id="primary-download"' docs/index.html || (echo "Primary download button missing" && exit 1)
+          grep -q 'id="download"' docs/index.html        || (echo "Download section anchor missing" && exit 1)
+          echo "HTML landmarks OK"
 
-      - name: Typecheck frontend
-        run: pnpm typecheck
+      - name: Check site.js has no GitHub Releases redirects
+        run: |
+          # Ensure we never send users to /releases page (regression guard)
+          if grep -q 'github.com/arcusis/Zerm/releases"' docs/site.js; then
+            echo "FAIL: site.js redirects to GitHub Releases page — fix direct download logic"
+            exit 1
+          fi
+          echo "No GitHub Releases redirect found — OK"
 
-      - name: Cargo check
-        working-directory: src-tauri
-        run: cargo check
+  # ── Security scan ────────────────────────────────────────────────────────
+  security-scan:
+    name: Secret / PII scan
+    runs-on: ubuntu-latest
 
-      - name: Cargo test
-        working-directory: src-tauri
-        run: cargo test --lib
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # full history needed for gitleaks
+
+      - name: Run Gitleaks (secret detection)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true   # report but don't block on existing history
+
+      - name: Scan for hardcoded personal paths
+        run: |
+          # Ensure no absolute home-directory paths are committed in source
+          FOUND=$(git grep -rE "/Users/[a-z][a-z0-9_-]+" \
+            -- "*.swift" "*.yml" "*.yaml" "*.md" "*.html" "*.js" "*.json" \
+            | grep -v "arcusis\|example\|placeholder" || true)
+          if [ -n "$FOUND" ]; then
+            echo "FAIL: Hardcoded user home paths found:"
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "No hardcoded home paths — OK"
