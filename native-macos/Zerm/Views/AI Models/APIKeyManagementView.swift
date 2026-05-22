@@ -351,8 +351,7 @@ struct APIKeyManagementView: View {
             } else {
                 ollamaModels = []
                 isCheckingOllama = false
-                alertMessage = "Could not connect to Ollama. Please check if Ollama is running and the base URL is correct."
-                showAlert = true
+                // Disconnected state is already shown by the red dot — no alert needed.
             }
         }
     }
