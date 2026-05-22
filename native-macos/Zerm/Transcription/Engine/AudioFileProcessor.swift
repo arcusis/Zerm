@@ -95,7 +95,7 @@ class AudioProcessor {
                     }
                 )
                 
-                if let error = error {
+                if error != nil {
                     throw AudioProcessingError.conversionFailed
                 }
                 
@@ -120,15 +120,21 @@ class AudioProcessor {
         
         let channelCount = Int(buffer.format.channelCount)
         let frameLength = Int(buffer.frameLength)
+        guard channelCount > 0, frameLength > 0 else {
+            return []
+        }
+
         var samples = Array(repeating: Float(0), count: frameLength)
         
         if channelCount == 1 {
-            samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
+            let monoChannel = channelData[0]
+            samples = Array(UnsafeBufferPointer(start: monoChannel, count: frameLength))
         } else {
             for frame in 0..<frameLength {
                 var sum: Float = 0
                 for channel in 0..<channelCount {
-                    sum += channelData[channel][frame]
+                    let channelSamples = channelData[channel]
+                    sum += channelSamples[frame]
                 }
                 samples[frame] = sum / Float(channelCount)
             }
@@ -142,6 +148,10 @@ class AudioProcessor {
         return samples
     }
     func saveSamplesAsWav(samples: [Float], to url: URL) throws {
+        guard !samples.isEmpty else {
+            throw AudioProcessingError.sampleExtractionFailed
+        }
+
         let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: AudioFormat.targetSampleRate,
@@ -166,9 +176,14 @@ class AudioProcessor {
         let int16Samples = samples.map { max(-1.0, min(1.0, $0)) * Float(Int16.max) }.map { Int16($0) }
 
         // Copy samples to buffer
+        guard let channelData = buffer.int16ChannelData else {
+            throw AudioProcessingError.conversionFailed
+        }
+        let firstChannel = channelData[0]
+
         int16Samples.withUnsafeBufferPointer { int16Buffer in
-            let int16Pointer = int16Buffer.baseAddress!
-            buffer.int16ChannelData![0].update(from: int16Pointer, count: int16Samples.count)
+            guard let int16Pointer = int16Buffer.baseAddress else { return }
+            firstChannel.update(from: int16Pointer, count: int16Samples.count)
         }
         buffer.frameLength = AVAudioFrameCount(samples.count)
 
@@ -183,4 +198,3 @@ class AudioProcessor {
         try audioFile.write(from: buffer)
     }
 } 
-

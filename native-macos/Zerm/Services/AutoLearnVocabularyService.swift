@@ -30,6 +30,7 @@ final class AutoLearnVocabularyService {
         let systemWide = AXUIElementCreateSystemWide()
         var focusedElement: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedElement) == .success else { return nil }
+        guard let focusedElement, CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else { return nil }
         return (focusedElement as! AXUIElement)
     }
 
@@ -191,7 +192,7 @@ final class AutoLearnVocabularyService {
             }
         }
 
-        let uniqueWordsToAdd = Array(NSOrderedSet(array: wordsToAdd)) as! [String]
+        let uniqueWordsToAdd = NSOrderedSet(array: wordsToAdd).compactMap { $0 as? String }
         guard !uniqueWordsToAdd.isEmpty else { return }
 
         let descriptor = FetchDescriptor<VocabularyWord>()

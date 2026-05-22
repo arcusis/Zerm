@@ -14,6 +14,7 @@ struct ApplicationState: Codable {
 struct PowerModeSession: Codable {
     let id: UUID
     let startTime: Date
+    var activeConfigId: UUID?
     var originalState: ApplicationState
 }
 
@@ -22,6 +23,7 @@ class PowerModeSessionManager {
     static let shared = PowerModeSessionManager()
     private let sessionKey = "powerModeActiveSession.v1"
     private var isApplyingPowerModeConfig = false
+    private var isTransitioningSession = false
 
     private weak var stateProvider: (any PowerModeStateProvider)?
     private var enhancementService: AIEnhancementService?
@@ -37,13 +39,20 @@ class PowerModeSessionManager {
     }
 
     func beginSession(with config: PowerModeConfig) async {
+        guard !isTransitioningSession else { return }
+        isTransitioningSession = true
+        defer { isTransitioningSession = false }
+
         guard let stateProvider = stateProvider, let enhancementService = enhancementService else {
             print("SessionManager not configured.")
             return
         }
 
-        // Only capture baseline if NO session exists
-        if loadSession() == nil {
+        if var existingSession = loadSession() {
+            guard existingSession.activeConfigId != config.id else { return }
+            existingSession.activeConfigId = config.id
+            saveSession(existingSession)
+        } else {
             let originalState = ApplicationState(
                 isEnhancementEnabled: enhancementService.isEnhancementEnabled,
                 useScreenCaptureContext: enhancementService.useScreenCaptureContext,
@@ -57,6 +66,7 @@ class PowerModeSessionManager {
             let newSession = PowerModeSession(
                 id: UUID(),
                 startTime: Date(),
+                activeConfigId: config.id,
                 originalState: originalState
             )
             saveSession(newSession)
@@ -75,6 +85,10 @@ class PowerModeSessionManager {
     }
 
     func endSession() async {
+        guard !isTransitioningSession else { return }
+        isTransitioningSession = true
+        defer { isTransitioningSession = false }
+
         guard let session = loadSession() else { return }
 
         isApplyingPowerModeConfig = true

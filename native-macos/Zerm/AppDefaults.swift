@@ -10,7 +10,7 @@ enum AppDefaults {
             "autoUpdateCheck": true,
 
             // Clipboard
-            "restoreClipboardAfterPaste": true,
+            "restoreClipboardAfterPaste": false,
             "clipboardRestoreDelay": 2.0,
             "useAppleScriptPaste": false,
 
@@ -74,6 +74,11 @@ enum AppDefaults {
             defaults.set(true, forKey: "powerModeUIFlag")
             defaults.set(true, forKey: "AutoStopAfterSilence")
             defaults.set(1, forKey: "ZermFastDefaultsVersion")
+        }
+
+        if defaults.integer(forKey: "ZermFastDefaultsVersion") < 2 {
+            defaults.set(false, forKey: "restoreClipboardAfterPaste")
+            defaults.set(2, forKey: "ZermFastDefaultsVersion")
         }
     }
 }

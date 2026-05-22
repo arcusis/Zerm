@@ -77,7 +77,7 @@ class StreamingTranscriptionService {
         state = .connecting
         committedSegments = []
 
-        let provider = createProvider(for: model)
+        let provider = try createProvider(for: model)
         self.provider = provider
 
         let selectedLanguage = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
@@ -166,16 +166,16 @@ class StreamingTranscriptionService {
 
     // MARK: - Private
 
-    private func createProvider(for model: any TranscriptionModel) -> StreamingTranscriptionProvider {
+    private func createProvider(for model: any TranscriptionModel) throws -> StreamingTranscriptionProvider {
         if model.provider == .fluidAudio {
             guard let fluidAudioService else {
-                fatalError("FluidAudioTranscriptionService required for FluidAudio streaming. Ensure it is passed to StreamingTranscriptionService.")
+                throw StreamingTranscriptionError.unsupportedProvider(model.provider.rawValue)
             }
             return FluidAudioStreamingProvider(fluidAudioService: fluidAudioService)
         }
         guard let cloudProvider = CloudProviderRegistry.provider(for: model.provider),
               let streamingProvider = cloudProvider.makeStreamingProvider(modelContext: modelContext) else {
-            fatalError("Unsupported streaming provider: \(model.provider). Check supportsStreaming() before calling startStreaming().")
+            throw StreamingTranscriptionError.unsupportedProvider(model.provider.rawValue)
         }
         return streamingProvider
     }

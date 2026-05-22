@@ -115,7 +115,7 @@ class ZermEngine: NSObject, ObservableObject {
                 recordingState = .idle
                 await cleanupResources()
             }
-        } else {
+        } else if recordingState == .idle {
             logger.notice("toggleRecord: entering start-recording branch")
             guard transcriptionModelManager.currentTranscriptionModel != nil else {
                 NotificationManager.shared.showNotification(title: "No AI Model Selected", type: .error)
@@ -123,6 +123,7 @@ class ZermEngine: NSObject, ObservableObject {
             }
             shouldCancelRecording = false
             partialTranscript = ""
+            recordingState = .starting
 
             requestRecordPermission { [self] granted in
                 if granted {
@@ -239,8 +240,11 @@ class ZermEngine: NSObject, ObservableObject {
                     }
                 } else {
                     logger.error("❌ Recording permission denied.")
+                    recordingState = .idle
                 }
             }
+        } else {
+            logger.notice("toggleRecord ignored while lifecycle is busy")
         }
     }
 
