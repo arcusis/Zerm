@@ -67,7 +67,11 @@ class MenuBarManager: ObservableObject {
     }
     
     private func updateAppActivationPolicy() {
-        let applyPolicy = { [weak self] in
+        // Always defer to the next run loop pass — even when already on the main thread.
+        // Calling setActivationPolicy or hideMainWindow synchronously while SwiftUI is still
+        // processing a Toggle interaction tears down the window under the live responder chain,
+        // which crashes the app.
+        DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let application = NSApplication.shared
             if self.isMenuBarOnly {
@@ -79,12 +83,6 @@ class MenuBarManager: ObservableObject {
                 application.setActivationPolicy(.regular)
                 WindowManager.shared.showMainWindow()
             }
-        }
-
-        if Thread.isMainThread {
-            applyPolicy()
-        } else {
-            DispatchQueue.main.async(execute: applyPolicy)
         }
     }
     
