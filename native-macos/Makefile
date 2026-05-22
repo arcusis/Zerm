@@ -4,7 +4,7 @@ WHISPER_CPP_DIR := $(DEPS_DIR)/whisper.cpp
 FRAMEWORK_PATH := $(WHISPER_CPP_DIR)/build-apple/whisper.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 
-.PHONY: all clean whisper setup build local check healthcheck help dev run
+.PHONY: all clean whisper setup build local check healthcheck help dev run install reset-permissions
 
 # Default target
 all: check build
@@ -76,6 +76,32 @@ local: check setup
 		exit 1; \
 	fi
 
+# Install built app to /Applications and reset TCC permissions
+# Run this after every 'make local' to avoid stale permission grants from old builds
+install: local
+	@echo "Installing Zerm.app to /Applications..."
+	@pkill -x Zerm 2>/dev/null || true
+	@sleep 0.5
+	@ditto "$$HOME/Downloads/Zerm.app" /Applications/Zerm.app
+	@rm -rf "$$HOME/Downloads/Zerm.app"
+	@rm -rf "$(LOCAL_DERIVED_DATA)"
+	@/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister \
+		-f /Applications/Zerm.app
+	@defaults write com.apple.dock ResetLaunchPad -bool true && killall Dock
+	@echo ""
+	@echo "Zerm.app installed. Opening..."
+	@open /Applications/Zerm.app
+	@echo ""
+	@echo "If Accessibility or Screen Recording still shows as denied, run: make reset-permissions"
+
+# Reset TCC permissions for Zerm (run after rebuilding with a new ad-hoc signature)
+reset-permissions:
+	@echo "Resetting Zerm TCC permissions..."
+	@tccutil reset Accessibility com.arcusis.zerm && echo "  Accessibility reset" || echo "  Accessibility: nothing to reset"
+	@tccutil reset ScreenCapture com.arcusis.zerm && echo "  ScreenCapture reset" || echo "  ScreenCapture: nothing to reset"
+	@echo ""
+	@echo "Done. Open Zerm → Permissions and re-grant Accessibility and Screen Recording."
+
 # Run application
 run:
 	@if [ -d "$$HOME/Downloads/Zerm.app" ]; then \
@@ -107,6 +133,8 @@ help:
 	@echo "  setup              Copy whisper XCFramework to Zerm project"
 	@echo "  build              Build the Zerm Xcode project"
 	@echo "  local              Build for local use (no Apple Developer certificate needed)"
+	@echo "  install            Build, install to /Applications, and reset Launchpad"
+	@echo "  reset-permissions  Reset Accessibility + Screen Recording TCC grants (run after rebuild)"
 	@echo "  run                Launch the built Zerm app"
 	@echo "  dev                Build and run the app (for development)"
 	@echo "  all                Run full build process (default)"
