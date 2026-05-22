@@ -88,7 +88,7 @@ class CursorPaster {
 
     private static func postPasteCommand() async -> PasteResult {
         if UserDefaults.standard.bool(forKey: "useAppleScriptPaste") {
-            return pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
+            return await pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
         } else {
             return await pasteFromClipboard()
         }
@@ -156,17 +156,27 @@ class CursorPaster {
         return (Unmanaged<CFString>.fromOpaque(nameRef).takeUnretainedValue() as String).hasSuffix("⌘")
     }
 
-    private static func pasteUsingAppleScript() -> Bool {
-        guard let script = layoutSwitchesToQWERTYOnCommand ? pasteScriptKeyCode : pasteScriptKeystroke else {
-            logger.error("AppleScript paste script is unavailable")
-            return false
+    // Dispatches AppleScript execution to a background thread.
+    // NSAppleScript.executeAndReturnError is a blocking call; on macOS 26 it has an
+    // internal queue assertion that fires if called from the main queue (EXC_BREAKPOINT /
+    // dispatch_assert_queue_fail). Running it off-main satisfies the assertion and
+    // prevents the hard crash reported in VoiceInk issue #737.
+    private static func pasteUsingAppleScript() async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let script = layoutSwitchesToQWERTYOnCommand ? pasteScriptKeyCode : pasteScriptKeystroke else {
+                    logger.error("AppleScript paste script is unavailable")
+                    continuation.resume(returning: false)
+                    return
+                }
+                var error: NSDictionary?
+                script.executeAndReturnError(&error)
+                if let error {
+                    logger.error("AppleScript paste failed: \(String(describing: error), privacy: .public)")
+                }
+                continuation.resume(returning: error == nil)
+            }
         }
-        var error: NSDictionary?
-        script.executeAndReturnError(&error)
-        if let error {
-            logger.error("AppleScript paste failed: \(String(describing: error), privacy: .public)")
-        }
-        return error == nil
     }
 
     // MARK: - CGEvent paste

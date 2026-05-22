@@ -59,10 +59,15 @@ class TranscriptionPipeline {
         do {
             let transcriptionStart = Date()
             var text: String
-            if let session {
-                text = try await session.transcribe(audioURL: audioURL)
-            } else {
-                text = try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
+            // Hard timeout: if transcription hasn't returned within 120 seconds the
+            // model/provider is hung.  Cancel it so the app returns to .idle rather than
+            // staying stuck in the "Transcribing…" state indefinitely. (VoiceInk #338)
+            text = try await withTranscriptionTimeout(seconds: 120) { [serviceRegistry = self.serviceRegistry] in
+                if let session {
+                    return try await session.transcribe(audioURL: audioURL)
+                } else {
+                    return try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
+                }
             }
             logger.notice("📝 Transcript: \(text, privacy: .public)")
             text = TranscriptionOutputFilter.filter(text)
@@ -88,6 +93,21 @@ class TranscriptionPipeline {
 
             let cleanedText = TranscriptionOutputFilter.applyUserCleanupPreferences(text)
             logger.notice("📝 Cleanup preferences result: \(cleanedText, privacy: .public)")
+
+            // Notify the user when the transcription returns nothing — typically a very
+            // short phrase released before the model captures enough audio, or a fully
+            // silent recording. Without feedback the user sees no paste and no error,
+            // which is confusing. (VoiceInk #686)
+            if cleanedText.isEmpty {
+                logger.notice("⚠️ Transcription returned empty result")
+                await MainActor.run {
+                    NotificationManager.shared.showNotification(
+                        title: "Nothing transcribed — audio too short or silent",
+                        type: .warning,
+                        duration: 3.0
+                    )
+                }
+            }
 
             let audioAsset = AVURLAsset(url: audioURL)
             let actualDuration = (try? CMTimeGetSeconds(await audioAsset.load(.duration))) ?? 0.0
@@ -189,5 +209,31 @@ class TranscriptionPipeline {
         }
 
         await onDismiss()
+    }
+}
+
+// MARK: - Transcription timeout helper
+
+private struct TranscriptionTimeoutError: LocalizedError {
+    var errorDescription: String? { "Transcription timed out. The model may be unresponsive — please try again." }
+    var recoverySuggestion: String? { "If this keeps happening, try reloading the model in Settings." }
+}
+
+/// Runs `operation` and throws `TranscriptionTimeoutError` if it has not returned
+/// within `seconds`.  The operation task is cancelled on timeout.
+private func withTranscriptionTimeout<T: Sendable>(
+    seconds: TimeInterval,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw TranscriptionTimeoutError()
+        }
+        // First to finish wins; the other is cancelled immediately.
+        let result = try await group.next()!
+        group.cancelAll()
+        return result
     }
 }

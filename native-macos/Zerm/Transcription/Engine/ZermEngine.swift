@@ -318,6 +318,23 @@ class ZermEngine: NSObject, ObservableObject {
             return
         }
 
+        // The model reload (started in toggleRecord's Task.detached) runs concurrently
+        // with recording.  If the recording was short the load may still be in progress
+        // when we reach this point.  Wait for it before running the pipeline so that
+        // the first transcription after idle doesn't fail with a nil context.
+        // (VoiceInk #614 / Zerm #15)
+        if whisperModelManager.isModelLoading {
+            logger.notice("runPipeline: model is loading, waiting…")
+            var waited = 0
+            while whisperModelManager.isModelLoading && waited < 60 {
+                try? await Task.sleep(nanoseconds: 200_000_000) // 200 ms
+                waited += 1
+            }
+            if whisperModelManager.isModelLoading {
+                logger.error("runPipeline: timed out waiting for model to load")
+            }
+        }
+
         let session = currentSession
         currentSession = nil
 

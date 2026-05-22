@@ -230,7 +230,22 @@ class HotkeyManager: ObservableObject {
                 await self.handleModifierKeyEvent(event)
             }
         }
-        
+
+        // On macOS 26 and newer, Input Monitoring permission is required for global
+        // keyboard event monitoring.  addGlobalMonitorForEvents returns nil when the
+        // permission is missing — surfacing a notification gives the user actionable
+        // guidance rather than a silently broken hotkey. (VoiceInk #735)
+        if globalEventMonitor == nil {
+            logger.warning("Global event monitor is nil — Accessibility / Input Monitoring permission may be missing")
+            Task { @MainActor in
+                NotificationManager.shared.showNotification(
+                    title: "Hotkey not working — enable Accessibility in System Settings",
+                    type: .warning,
+                    duration: 6.0
+                )
+            }
+        }
+
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self = self else { return event }
             Task { @MainActor in

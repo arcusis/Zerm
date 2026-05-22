@@ -92,21 +92,26 @@ class MenuBarManager: ObservableObject {
         NSApplication.shared.setActivationPolicy(.regular)
         logger.notice("openMainWindowAndNavigate: activation policy set to .regular")
 
-        guard WindowManager.shared.showMainWindow() != nil else {
-            logger.error("openMainWindowAndNavigate: showMainWindow returned nil — cannot navigate to \(destination, privacy: .public)")
-            return
-        }
+        // Defer the show to the next run loop so the activation policy change takes
+        // effect before we attempt to order the window front.  Without the async, the
+        // window may silently fail to appear on macOS when coming from .accessory mode.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard WindowManager.shared.showMainWindow() != nil else {
+                self.logger.error("openMainWindowAndNavigate: showMainWindow returned nil — cannot navigate to \(destination, privacy: .public)")
+                return
+            }
 
-        logger.notice("openMainWindowAndNavigate: window shown, posting navigation notification for \(destination, privacy: .public)")
+            self.logger.notice("openMainWindowAndNavigate: window shown, posting navigation notification for \(destination, privacy: .public)")
 
-        // Post a notification to navigate to the desired destination
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            NotificationCenter.default.post(
-                name: .navigateToDestination,
-                object: nil,
-                userInfo: ["destination": destination]
-            )
-            self?.logger.notice("openMainWindowAndNavigate: navigation notification posted for \(destination, privacy: .public)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                NotificationCenter.default.post(
+                    name: .navigateToDestination,
+                    object: nil,
+                    userInfo: ["destination": destination]
+                )
+                self?.logger.notice("openMainWindowAndNavigate: navigation notification posted for \(destination, privacy: .public)")
+            }
         }
     }
 

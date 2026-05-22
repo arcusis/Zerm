@@ -82,6 +82,11 @@ class WindowManager: NSObject {
 
     func showMainWindow() -> NSWindow? {
         guard let window = resolveMainWindow() else { return nil }
+        // When the app was running as .accessory (dock-icon hidden), its windows are
+        // hidden at the OS level. unhide(nil) re-shows them before we order-front,
+        // which fixes the "Settings window doesn't appear in menu-bar-only mode" bug
+        // (VoiceInk #576 / Zerm #26).
+        NSApplication.shared.unhide(nil)
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
         return window

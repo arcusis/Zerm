@@ -96,49 +96,66 @@ final class MediaController: ObservableObject {
         return status == noErr ? deviceID : nil
     }
 
+    // Returns the mute elements that are currently readable on the given device
+    // (element 0 = master, 1/2 = per-channel for stereo devices).
+    // Some USB DACs (Topping, SMSL, etc.) only expose per-channel mute properties,
+    // which is why the previous master-only check silently failed on those devices
+    // while leaving audio stuck in muted state (VoiceInk #640).
+    private func muteableElements(for deviceID: AudioDeviceID) -> [UInt32] {
+        // Probe elements: master (0) + first 8 channels
+        let candidates: [UInt32] = (0...8).map { UInt32($0) }
+        return candidates.filter { element in
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyMute,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: element
+            )
+            guard AudioObjectHasProperty(deviceID, &address) else { return false }
+            var isSettable: DarwinBoolean = false
+            return AudioObjectIsPropertySettable(deviceID, &address, &isSettable) == noErr && isSettable.boolValue
+        }
+    }
+
     private func isSystemAudioMuted() -> Bool {
         guard let deviceID = getDefaultOutputDevice() else { return false }
 
-        var muted: UInt32 = 0
-        var propertySize = UInt32(MemoryLayout<UInt32>.size)
-
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        if !AudioObjectHasProperty(deviceID, &address) {
-            address.mElement = 0
-            if !AudioObjectHasProperty(deviceID, &address) { return false }
+        // Check any mutable element — if the master element is muted, or every
+        // channel is muted, consider the device muted.
+        for element in muteableElements(for: deviceID) {
+            var muted: UInt32 = 0
+            var propertySize = UInt32(MemoryLayout<UInt32>.size)
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyMute,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: element
+            )
+            if AudioObjectGetPropertyData(deviceID, &address, 0, nil, &propertySize, &muted) == noErr && muted != 0 {
+                return true
+            }
         }
-
-        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &propertySize, &muted)
-        return status == noErr && muted != 0
+        return false
     }
 
     private func setSystemMuted(_ muted: Bool) -> Bool {
         guard let deviceID = getDefaultOutputDevice() else { return false }
 
+        let elements = muteableElements(for: deviceID)
+        guard !elements.isEmpty else { return false }
+
         var muteValue: UInt32 = muted ? 1 : 0
         let propertySize = UInt32(MemoryLayout<UInt32>.size)
+        var anySuccess = false
 
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        if !AudioObjectHasProperty(deviceID, &address) {
-            address.mElement = 0
-            if !AudioObjectHasProperty(deviceID, &address) { return false }
+        for element in elements {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyMute,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: element
+            )
+            if AudioObjectSetPropertyData(deviceID, &address, 0, nil, propertySize, &muteValue) == noErr {
+                anySuccess = true
+            }
         }
-
-        var isSettable: DarwinBoolean = false
-        var status = AudioObjectIsPropertySettable(deviceID, &address, &isSettable)
-        if status != noErr || !isSettable.boolValue { return false }
-
-        status = AudioObjectSetPropertyData(deviceID, &address, 0, nil, propertySize, &muteValue)
-        return status == noErr
+        return anySuccess
     }
 }
