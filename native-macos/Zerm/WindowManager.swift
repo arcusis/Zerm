@@ -16,9 +16,11 @@ class WindowManager: NSObject {
     private override init() {
         super.init()
     }
-    
+
     func configureWindow(_ window: NSWindow) {
-        if let existingWindow = NSApplication.shared.windows.first(where: { $0.identifier == Self.mainWindowIdentifier && $0 != window }) {
+        if let existingWindow = NSApplication.shared.windows.first(where: {
+            $0.identifier == Self.mainWindowIdentifier && $0 != window
+        }) {
             logger.notice("configureWindow: duplicate detected, reusing existing window")
             window.close()
             existingWindow.makeKeyAndOrderFront(nil)
@@ -36,26 +38,27 @@ class WindowManager: NSObject {
         window.collectionBehavior = [.fullScreenPrimary]
         window.level = .normal
         window.isOpaque = true
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 0, height: 0)
         window.setFrameAutosaveName(Self.mainWindowAutosaveName)
         applyInitialPlacementIfNeeded(to: window)
         registerMainWindowIfNeeded(window)
         window.orderFrontRegardless()
 
-        // SwiftUI may restore its own autosave frame AFTER this method returns,
-        // overriding our placement. Defer a correction pass to catch that case.
+        // SwiftUI restores ITS OWN autosave frame (keyed by the full view-hierarchy
+        // type string) AFTER this method returns, potentially overriding our placement.
+        // Defer a correction that fires once SwiftUI has finished its own restoration.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak window, weak self] in
             guard let window, let self else { return }
-            self.constrainToVisibleScreenIfNeeded(window)
+            self.ensureWindowIsOnMainScreen(window)
         }
     }
-    
+
     func configureOnboardingPanel(_ window: NSWindow) {
         if window.identifier == nil || window.identifier != Self.onboardingWindowIdentifier {
             window.identifier = Self.onboardingWindowIdentifier
         }
-        
+
         let requiredStyleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView, .resizable]
         window.styleMask.formUnion(requiredStyleMask)
         window.titlebarAppearsTransparent = true
@@ -76,89 +79,123 @@ class WindowManager: NSObject {
         window.identifier = Self.mainWindowIdentifier
         window.delegate = self
     }
-    
+
     func showMainWindow() -> NSWindow? {
-        guard let window = resolveMainWindow() else {
-            return nil
-        }
-        
+        guard let window = resolveMainWindow() else { return nil }
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
         return window
     }
-    
+
     func hideMainWindow() {
-        guard let window = resolveMainWindow() else {
-            return
-        }
-        window.orderOut(nil)
+        resolveMainWindow()?.orderOut(nil)
     }
-    
+
     func currentMainWindow() -> NSWindow? {
         resolveMainWindow()
     }
-    
+
+    // MARK: - Private
+
     private func registerMainWindowIfNeeded(_ window: NSWindow) {
-        // Only register the primary content window, identified by the hidden title bar style
         if window.identifier == nil || window.identifier != Self.mainWindowIdentifier {
             registerMainWindow(window)
         }
     }
-    
+
     private func applyInitialPlacementIfNeeded(to window: NSWindow) {
         guard !didApplyInitialPlacement else { return }
-        if !window.setFrameUsingName(Self.mainWindowAutosaveName) {
-            window.center()
+
+        if window.setFrameUsingName(Self.mainWindowAutosaveName) {
+            // We have a previously saved frame — verify it's on a visible screen.
+            // NOTE: window.center() centers on whatever screen the window is currently on,
+            // NOT necessarily the main screen. Always use centerOnMainScreen() so stale
+            // external-monitor coordinates don't put the window somewhere inaccessible.
+            let frame = window.frame
+            let onAnyScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+            if !onAnyScreen {
+                logger.notice("applyInitialPlacement: saved frame \(NSStringFromRect(frame)) is off all screens — centering on main")
+                centerOnMainScreen(window)
+                window.saveFrame(usingName: Self.mainWindowAutosaveName)
+            }
+        } else {
+            // No saved frame — center on the main (built-in) screen.
+            centerOnMainScreen(window)
+            window.saveFrame(usingName: Self.mainWindowAutosaveName)
         }
+
         didApplyInitialPlacement = true
     }
 
-    /// Move the window to the main screen if its current frame is not visible
-    /// on any connected display. Called deferred so SwiftUI frame restoration
-    /// (which fires after configureWindow returns) is already applied.
-    private func constrainToVisibleScreenIfNeeded(_ window: NSWindow) {
+    /// Deferred correction: if SwiftUI overwrote our placement with stale external-monitor
+    /// coordinates, move the window back to the main screen and persist the corrected frame.
+    private func ensureWindowIsOnMainScreen(_ window: NSWindow) {
         let frame = window.frame
-        let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
-        guard !onScreen else { return }
-        logger.notice("constrainToVisibleScreenIfNeeded: frame \(NSStringFromRect(frame)) is off all screens — centering on main")
-        window.center()
-        window.saveFrame(usingName: Self.mainWindowAutosaveName)
-    }
-    
-    private func resolveMainWindow() -> NSWindow? {
-        if let window = mainWindow {
-            return window
+        let mainScreen = NSScreen.main
+
+        // Check if the window's frame is substantially on the main screen.
+        // If not — it ended up on an external monitor due to SwiftUI frame restoration —
+        // bring it to the main screen. The user can always move it back to any monitor.
+        guard let main = mainScreen else { return }
+        let intersection = frame.intersection(main.visibleFrame)
+        let windowArea = frame.width * frame.height
+        let intersectionArea = intersection.width * intersection.height
+
+        // If less than 50% of the window is on the main screen, snap to main.
+        if intersectionArea < windowArea * 0.5 {
+            logger.notice("ensureWindowIsOnMainScreen: window mostly off main screen — snapping to main display")
+            centerOnMainScreen(window)
+            window.saveFrame(usingName: Self.mainWindowAutosaveName)
         }
+    }
 
-        logger.notice("resolveMainWindow: weak ref is nil, searching \(NSApplication.shared.windows.count, privacy: .public) windows by identifier")
+    /// Center the window on NSScreen.main explicitly. Unlike window.center() which centers
+    /// on the window's CURRENT screen, this always targets the built-in/primary display.
+    private func centerOnMainScreen(_ window: NSWindow) {
+        guard let screen = NSScreen.main else {
+            window.center()
+            return
+        }
+        let screenFrame = screen.visibleFrame
+        let windowSize = window.frame.size
+        let x = screenFrame.origin.x + (screenFrame.width - windowSize.width) / 2
+        let y = screenFrame.origin.y + (screenFrame.height - windowSize.height) / 2
+        window.setFrameOrigin(NSPoint(x: x, y: y))
+        logger.notice("centerOnMainScreen: positioned at (\(x, privacy: .public), \(y, privacy: .public)) on \(screen.localizedName, privacy: .public)")
+    }
 
-        if let window = NSApplication.shared.windows.first(where: { $0.identifier == Self.mainWindowIdentifier }) {
-            logger.notice("resolveMainWindow: recovered window via identifier fallback")
+    private func resolveMainWindow() -> NSWindow? {
+        if let window = mainWindow { return window }
+
+        logger.notice("resolveMainWindow: weak ref is nil, searching \(NSApplication.shared.windows.count, privacy: .public) windows")
+
+        if let window = NSApplication.shared.windows.first(where: {
+            $0.identifier == Self.mainWindowIdentifier
+        }) {
+            logger.notice("resolveMainWindow: recovered via identifier fallback")
             mainWindow = window
             window.delegate = self
             return window
         }
 
-        let windowIDs = NSApplication.shared.windows.map { $0.identifier?.rawValue ?? "nil" }.joined(separator: ", ")
-        logger.error("resolveMainWindow: FAILED — no window found with main identifier. Total windows: \(NSApplication.shared.windows.count, privacy: .public), identifiers: \(windowIDs, privacy: .public)")
+        logger.error("resolveMainWindow: FAILED — no window with main identifier found")
         return nil
     }
 }
 
 extension WindowManager: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        if window.identifier == Self.mainWindowIdentifier {
-            logger.notice("windowWillClose: main window closing, clearing weak reference")
-            window.orderOut(nil)
-            mainWindow = nil
-            didApplyInitialPlacement = false
-        }
+        guard let window = notification.object as? NSWindow,
+              window.identifier == Self.mainWindowIdentifier else { return }
+        logger.notice("windowWillClose: clearing main window reference")
+        window.orderOut(nil)
+        mainWindow = nil
+        didApplyInitialPlacement = false
     }
-    
+
     func windowDidBecomeKey(_ notification: Notification) {
         guard let window = notification.object as? NSWindow,
               window.identifier == Self.mainWindowIdentifier else { return }
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
-} 
+}
