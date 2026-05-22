@@ -3,50 +3,136 @@ import AppKit
 import Carbon
 import os
 
-private let logger = Logger(subsystem: "com.Zerm", category: "CursorPaster")
+private let logger = Logger(subsystem: "com.arcusis.zerm", category: "CursorPaster")
 
 class CursorPaster {
+    private typealias ClipboardItemSnapshot = [(NSPasteboard.PasteboardType, Data)]
+    private typealias ClipboardSnapshot = [ClipboardItemSnapshot]
+
+    enum PasteResult: Equatable {
+        case commandPosted
+        case commandNotPosted
+
+        var didPostPasteCommand: Bool {
+            self == .commandPosted
+        }
+    }
+
+    private static let prePasteDelay: TimeInterval = 0.10
+    private static let pasteShortcutEventDelay: TimeInterval = 0.01
+    private static let minimumClipboardRestoreDelay: TimeInterval = 0.25
 
     static func pasteAtCursor(_ text: String) {
+        Task {
+            let pasteTask = await MainActor.run {
+                startPasteAtCursor(text)
+            }
+            _ = await pasteTask.value
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    static func startPasteAtCursor(_ text: String) -> Task<PasteResult, Never> {
+        Task { @MainActor in
+            await performPasteSession(text)
+        }
+    }
+
+    @MainActor
+    static func pasteAtCursorAndWaitUntilPosted(_ text: String) async -> PasteResult {
+        await startPasteAtCursor(text).value
+    }
+
+    @MainActor
+    private static func performPasteSession(_ text: String) async -> PasteResult {
         let pasteboard = NSPasteboard.general
         let shouldRestoreClipboard = UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste")
+        let savedContents = shouldRestoreClipboard ? snapshotClipboard(from: pasteboard) : []
+        let sessionID = UUID().uuidString
 
-        var savedContents: [(NSPasteboard.PasteboardType, Data)] = []
-
-        if shouldRestoreClipboard {
-            let currentItems = pasteboard.pasteboardItems ?? []
-
-            for item in currentItems {
-                for type in item.types {
-                    if let data = item.data(forType: type) {
-                        savedContents.append((type, data))
-                    }
-                }
-            }
+        guard ClipboardManager.setClipboard(
+            text,
+            transient: shouldRestoreClipboard,
+            sessionID: shouldRestoreClipboard ? sessionID : nil
+        ) else {
+            logger.error("Failed to prepare clipboard for paste")
+            return .commandNotPosted
         }
 
-        ClipboardManager.setClipboard(text, transient: shouldRestoreClipboard)
+        await wait(prePasteDelay)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            if UserDefaults.standard.bool(forKey: "useAppleScriptPaste") {
-                pasteUsingAppleScript()
-            } else {
-                pasteFromClipboard()
-            }
+        let pasteResult = await postPasteCommand()
+        if shouldRestoreClipboard {
+            scheduleClipboardRestore(
+                savedContents,
+                expectedText: text,
+                sessionID: sessionID,
+                on: pasteboard
+            )
         }
 
-        if shouldRestoreClipboard {
-            let restoreDelay = UserDefaults.standard.double(forKey: "clipboardRestoreDelay")
-            let delay = max(restoreDelay, 0.25)
+        return pasteResult
+    }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                if !savedContents.isEmpty {
-                    pasteboard.clearContents()
-                    for (type, data) in savedContents {
-                        pasteboard.setData(data, forType: type)
-                    }
+    private static func snapshotClipboard(from pasteboard: NSPasteboard) -> ClipboardSnapshot {
+        (pasteboard.pasteboardItems ?? []).map { item in
+            item.types.compactMap { type in
+                if let data = item.data(forType: type) {
+                    return (type, data)
                 }
+                return nil
             }
+        }
+    }
+
+    private static func postPasteCommand() async -> PasteResult {
+        if UserDefaults.standard.bool(forKey: "useAppleScriptPaste") {
+            return pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
+        } else {
+            return await pasteFromClipboard()
+        }
+    }
+
+    private static func scheduleClipboardRestore(
+        _ savedContents: ClipboardSnapshot,
+        expectedText: String,
+        sessionID: String,
+        on pasteboard: NSPasteboard
+    ) {
+        let delay = max(
+            UserDefaults.standard.double(forKey: "clipboardRestoreDelay"),
+            minimumClipboardRestoreDelay
+        )
+
+        Task { @MainActor in
+            await wait(delay)
+            guard pasteboardStillOwnedByPasteSession(pasteboard, expectedText: expectedText, sessionID: sessionID) else {
+                return
+            }
+            pasteboard.clearContents()
+            if !savedContents.isEmpty {
+                pasteboard.writeObjects(pasteboardItems(from: savedContents))
+            }
+        }
+    }
+
+    private static func pasteboardStillOwnedByPasteSession(
+        _ pasteboard: NSPasteboard,
+        expectedText: String,
+        sessionID: String
+    ) -> Bool {
+        pasteboard.string(forType: .string) == expectedText &&
+            pasteboard.string(forType: ClipboardManager.pasteSessionType) == sessionID
+    }
+
+    private static func pasteboardItems(from snapshot: ClipboardSnapshot) -> [NSPasteboardItem] {
+        snapshot.map { itemSnapshot in
+            let item = NSPasteboardItem()
+            for (type, data) in itemSnapshot {
+                item.setData(data, forType: type)
+            }
+            return item
         }
     }
 
@@ -70,48 +156,64 @@ class CursorPaster {
         return (Unmanaged<CFString>.fromOpaque(nameRef).takeUnretainedValue() as String).hasSuffix("⌘")
     }
 
-    private static func pasteUsingAppleScript() {
-        let script = layoutSwitchesToQWERTYOnCommand ? pasteScriptKeyCode : pasteScriptKeystroke
-        var error: NSDictionary?
-        script?.executeAndReturnError(&error)
-        if let error = error {
-            logger.error("AppleScript paste failed: \(error, privacy: .public)")
+    private static func pasteUsingAppleScript() -> Bool {
+        guard let script = layoutSwitchesToQWERTYOnCommand ? pasteScriptKeyCode : pasteScriptKeystroke else {
+            logger.error("AppleScript paste script is unavailable")
+            return false
         }
+        var error: NSDictionary?
+        script.executeAndReturnError(&error)
+        if let error {
+            logger.error("AppleScript paste failed: \(String(describing: error), privacy: .public)")
+        }
+        return error == nil
     }
 
     // MARK: - CGEvent paste
 
     // Posts Cmd+V via CGEvent without modifying the active input source.
-    private static func pasteFromClipboard() {
+    private static func pasteFromClipboard() async -> PasteResult {
         guard AXIsProcessTrusted() else {
-            logger.error("Accessibility not trusted — falling back to AppleScript paste")
-            pasteUsingAppleScript()
+            logger.error("Accessibility permission is required to paste with simulated key events")
             Task { @MainActor in
                 NotificationManager.shared.showNotification(
                     title: "Enable Accessibility for reliable auto-paste",
                     type: .warning
                 )
             }
-            return
+            return .commandNotPosted
         }
 
         let source = CGEventSource(stateID: .privateState)
 
-        let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true)
-        let vDown   = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
-        let vUp     = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-        let cmdUp   = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
+        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true),
+              let vDown   = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let vUp     = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false),
+              let cmdUp   = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false) else {
+            logger.error("Failed to create Cmd+V keyboard events")
+            return .commandNotPosted
+        }
 
-        cmdDown?.flags = .maskCommand
-        vDown?.flags   = .maskCommand
-        vUp?.flags     = .maskCommand
+        cmdDown.flags = .maskCommand
+        vDown.flags   = .maskCommand
+        vUp.flags     = .maskCommand
 
-        cmdDown?.post(tap: .cghidEventTap)
-        vDown?.post(tap: .cghidEventTap)
-        vUp?.post(tap: .cghidEventTap)
-        cmdUp?.post(tap: .cghidEventTap)
+        cmdDown.post(tap: .cghidEventTap)
+        await wait(pasteShortcutEventDelay)
+        vDown.post(tap: .cghidEventTap)
+        await wait(pasteShortcutEventDelay)
+        vUp.post(tap: .cghidEventTap)
+        await wait(pasteShortcutEventDelay)
+        cmdUp.post(tap: .cghidEventTap)
 
         logger.notice("CGEvents posted for Cmd+V")
+        return .commandPosted
+    }
+
+    private static func wait(_ seconds: TimeInterval) async {
+        guard seconds > 0 else { return }
+        let nanoseconds = UInt64(seconds * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: nanoseconds)
     }
 
     // MARK: - Auto Send Keys

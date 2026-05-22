@@ -86,16 +86,19 @@ class TranscriptionPipeline {
             text = WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
             logger.notice("📝 WordReplacement: \(text, privacy: .public)")
 
+            let cleanedText = TranscriptionOutputFilter.applyUserCleanupPreferences(text)
+            logger.notice("📝 Cleanup preferences result: \(cleanedText, privacy: .public)")
+
             let audioAsset = AVURLAsset(url: audioURL)
             let actualDuration = (try? CMTimeGetSeconds(await audioAsset.load(.duration))) ?? 0.0
 
-            transcription.text = text
+            transcription.text = cleanedText
             transcription.duration = actualDuration
             transcription.transcriptionModelName = model.displayName
             transcription.transcriptionDuration = transcriptionDuration
             transcription.powerModeName = powerModeName
             transcription.powerModeEmoji = powerModeEmoji
-            finalPastedText = text
+            finalPastedText = cleanedText
 
             let instantTranscriptionMode = UserDefaults.standard.bool(forKey: "InstantTranscriptionMode")
             let allowPromptTriggeredEnhancement = UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement")
@@ -164,18 +167,17 @@ class TranscriptionPipeline {
 
         if shouldCancel() { await onCleanup(); return }
 
-        if var textToPaste = finalPastedText,
+        if let textToPaste = finalPastedText,
            transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
-                SoundManager.shared.playStopSound()
-                let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
-                CursorPaster.pasteAtCursor(textToPaste + (appendSpace ? " " : ""))
-
-                let powerMode = PowerModeManager.shared
-                if let activeConfig = powerMode.currentActiveConfiguration, activeConfig.autoSendKey.isEnabled {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        CursorPaster.performAutoSend(activeConfig.autoSendKey)
-                    }
+            let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
+            let pastedText = textToPaste + (appendSpace ? " " : "")
+            _ = await CursorPaster.startPasteAtCursor(pastedText).value
+            let autoSendKey = PowerModeManager.shared.currentActiveConfiguration?.autoSendKey
+            SoundManager.shared.playStopSound()
+            if let autoSendKey, autoSendKey.isEnabled {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    CursorPaster.performAutoSend(autoSendKey)
                 }
             }
         }

@@ -80,5 +80,7 @@ enum AppDefaults {
             defaults.set(false, forKey: "restoreClipboardAfterPaste")
             defaults.set(2, forKey: "ZermFastDefaultsVersion")
         }
+
+        PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()
     }
 }
