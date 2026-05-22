@@ -111,44 +111,54 @@ actor WhisperContext {
     }
 
     static func createContext(path: String) async throws -> WhisperContext {
-        let whisperContext = WhisperContext()
-        try await whisperContext.initializeModel(path: path)
-        
-        // Load VAD model from bundle resources
+        // whisper_init_from_file_with_params is a heavy C call (can take 5–30s for large
+        // models). Running it on the main actor freezes the entire UI. Load the raw C
+        // context on a background thread, then hand it back to the actor.
+        let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperContext")
+
+        let cContext: OpaquePointer = try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var params = whisper_context_default_params()
+
+                #if targetEnvironment(simulator)
+                params.use_gpu = false
+                if let ctx = whisper_init_from_file_with_params(path, params) {
+                    continuation.resume(returning: ctx)
+                    return
+                }
+                #else
+                // Try with flash attention first (better Metal throughput for fp16/fp32).
+                // Falls back without it for quantized models (q5_0, q8_0) which are
+                // incompatible with the flash attention Metal kernels.
+                params.flash_attn = true
+                logger.info("Loading model with flash attention: \(path, privacy: .public)")
+                if let ctx = whisper_init_from_file_with_params(path, params) {
+                    logger.info("Model loaded with flash attention")
+                    continuation.resume(returning: ctx)
+                    return
+                }
+
+                logger.warning("Flash attention failed — retrying without flash attention")
+                params.flash_attn = false
+                if let ctx = whisper_init_from_file_with_params(path, params) {
+                    logger.info("Model loaded without flash attention (quantized path)")
+                    continuation.resume(returning: ctx)
+                    return
+                }
+                #endif
+
+                logger.error("❌ whisper_init_from_file_with_params returned nil for: \(path, privacy: .public)")
+                continuation.resume(throwing: ZermEngineError.modelLoadFailed)
+            }
+        }
+
+        let whisperContext = WhisperContext(context: cContext)
+
+        // VAD model path lookup can happen on the actor
         let vadModelPath = await VADModelManager.shared.getModelPath()
         await whisperContext.setVADModelPath(vadModelPath)
-        
+
         return whisperContext
-    }
-    
-    private func initializeModel(path: String) throws {
-        var params = whisper_context_default_params()
-        #if targetEnvironment(simulator)
-        params.use_gpu = false
-        logger.info("Running on the simulator, using CPU")
-        #else
-        // Flash attention improves Metal throughput for fp16/fp32 models but
-        // is incompatible with some quantized formats (q5_0, q8_0). Try with
-        // flash attention first; fall back to plain Metal on failure.
-        params.flash_attn = true
-        logger.info("Attempting model load with flash attention enabled")
-        if let ctx = whisper_init_from_file_with_params(path, params) {
-            self.context = ctx
-            logger.info("Model loaded with flash attention")
-            return
-        }
-
-        logger.warning("Flash attention load failed — retrying without flash attention")
-        params.flash_attn = false
-        if let ctx = whisper_init_from_file_with_params(path, params) {
-            self.context = ctx
-            logger.info("Model loaded without flash attention (quantized model path)")
-            return
-        }
-        #endif
-
-        logger.error("❌ Couldn't load model at \(path, privacy: .public)")
-        throw ZermEngineError.modelLoadFailed
     }
     
     private func setVADModelPath(_ path: String?) {
