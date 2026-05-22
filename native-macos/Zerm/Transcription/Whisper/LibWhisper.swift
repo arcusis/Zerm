@@ -127,17 +127,28 @@ actor WhisperContext {
         params.use_gpu = false
         logger.info("Running on the simulator, using CPU")
         #else
-        params.flash_attn = true // Enable flash attention for Metal
-        logger.info("Flash attention enabled for Metal")
-        #endif
-        
-        let context = whisper_init_from_file_with_params(path, params)
-        if let context {
-            self.context = context
-        } else {
-            logger.error("❌ Couldn't load model at \(path, privacy: .public)")
-            throw ZermEngineError.modelLoadFailed
+        // Flash attention improves Metal throughput for fp16/fp32 models but
+        // is incompatible with some quantized formats (q5_0, q8_0). Try with
+        // flash attention first; fall back to plain Metal on failure.
+        params.flash_attn = true
+        logger.info("Attempting model load with flash attention enabled")
+        if let ctx = whisper_init_from_file_with_params(path, params) {
+            self.context = ctx
+            logger.info("Model loaded with flash attention")
+            return
         }
+
+        logger.warning("Flash attention load failed — retrying without flash attention")
+        params.flash_attn = false
+        if let ctx = whisper_init_from_file_with_params(path, params) {
+            self.context = ctx
+            logger.info("Model loaded without flash attention (quantized model path)")
+            return
+        }
+        #endif
+
+        logger.error("❌ Couldn't load model at \(path, privacy: .public)")
+        throw ZermEngineError.modelLoadFailed
     }
     
     private func setVADModelPath(_ path: String?) {

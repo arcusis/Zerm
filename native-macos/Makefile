@@ -88,11 +88,14 @@ install: local
 	@/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister \
 		-f /Applications/Zerm.app
 	@defaults write com.apple.dock ResetLaunchPad -bool true && killall Dock
+	@echo "Resetting TCC permissions (ad-hoc signature changed)..."
+	@tccutil reset Accessibility com.arcusis.zerm 2>/dev/null || true
+	@tccutil reset ScreenCapture com.arcusis.zerm 2>/dev/null || true
 	@echo ""
 	@echo "Zerm.app installed. Opening..."
 	@open /Applications/Zerm.app
 	@echo ""
-	@echo "If Accessibility or Screen Recording still shows as denied, run: make reset-permissions"
+	@echo "Re-grant Accessibility and Screen Recording in Zerm → Permissions."
 
 # Reset TCC permissions for Zerm (run after rebuilding with a new ad-hoc signature)
 reset-permissions:
