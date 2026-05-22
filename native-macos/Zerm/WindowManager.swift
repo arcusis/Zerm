@@ -36,7 +36,7 @@ class WindowManager: NSObject {
         window.collectionBehavior = [.fullScreenPrimary]
         window.level = .normal
         window.isOpaque = true
-        window.isMovableByWindowBackground = false
+        window.isMovableByWindowBackground = true
         window.minSize = NSSize(width: 0, height: 0)
         window.setFrameAutosaveName(Self.mainWindowAutosaveName)
         applyInitialPlacementIfNeeded(to: window)
@@ -100,8 +100,19 @@ class WindowManager: NSObject {
     
     private func applyInitialPlacementIfNeeded(to window: NSWindow) {
         guard !didApplyInitialPlacement else { return }
-        // Attempt to restore previous frame if one exists; otherwise fall back to a centered placement
-        if !window.setFrameUsingName(Self.mainWindowAutosaveName) {
+        // Restore previous frame if one was saved, then verify it's on a connected screen.
+        // Stale frames from disconnected monitors (negative or large x/y coordinates) get
+        // silently re-centred on the main screen instead of opening off-screen.
+        if window.setFrameUsingName(Self.mainWindowAutosaveName) {
+            let frame = window.frame
+            let visibleOnScreen = NSScreen.screens.contains {
+                $0.visibleFrame.intersects(frame)
+            }
+            if !visibleOnScreen {
+                logger.notice("Saved frame \(NSStringFromRect(frame)) is off-screen — centering on main display")
+                window.center()
+            }
+        } else {
             window.center()
         }
         didApplyInitialPlacement = true
