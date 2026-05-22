@@ -244,18 +244,32 @@ struct APIKeyManagementView: View {
                         SecureField("API Key", text: $apiKey)
                             .textFieldStyle(.roundedBorder)
 
-                        Button("Verify and Save") {
-                            isVerifying = true
-                            aiService.saveAPIKey(apiKey) { success, errorMessage in
-                                isVerifying = false
-                                if !success {
-                                    alertMessage = errorMessage ?? "Verification failed"
-                                    showAlert = true
+                        HStack {
+                            Button("Verify and Save") {
+                                isVerifying = true
+                                aiService.saveAPIKey(apiKey) { success, errorMessage in
+                                    isVerifying = false
+                                    if !success {
+                                        alertMessage = errorMessage ?? "Verification failed"
+                                        showAlert = true
+                                    }
+                                    apiKey = ""
                                 }
+                            }
+                            .disabled(aiService.customBaseURL.isEmpty || aiService.customModel.isEmpty || apiKey.isEmpty)
+
+                            // "Save without verifying" bypass for corporate/self-hosted
+                            // gateways that return 404/401 on the verification probe even
+                            // when the key is correct (non-standard auth, path routing, etc.).
+                            // (VoiceInk #716)
+                            Button("Save (skip verification)") {
+                                aiService.saveCustomAPIKeyWithoutVerification(apiKey)
                                 apiKey = ""
                             }
+                            .disabled(aiService.customBaseURL.isEmpty || aiService.customModel.isEmpty || apiKey.isEmpty)
+                            .foregroundColor(.secondary)
+                            .help("Skip the test request and save directly. Use when your gateway rejects the verification probe.")
                         }
-                        .disabled(aiService.customBaseURL.isEmpty || aiService.customModel.isEmpty || apiKey.isEmpty)
                     }
                     
                 } else {

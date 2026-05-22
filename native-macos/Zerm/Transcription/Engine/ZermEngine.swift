@@ -145,6 +145,14 @@ class ZermEngine: NSObject, ObservableObject {
                                 try result.get()
                                 self.logger.notice("toggleRecord: audio hardware started successfully")
 
+                                // Play start sound NOW — CoreAudio is running, so this is
+                                // the true "go" cue for the user.  Previously the sound
+                                // played ~1 s before hardware init, losing the first words
+                                // spoken on the cue. (VoiceInk #572)
+                                SoundManager.shared.playStartSound {
+                                    Task { await MediaController.shared.muteSystemAudio() }
+                                }
+
                                 guard self.recorderUIManager?.isMiniRecorderVisible ?? false, !self.shouldCancelRecording else {
                                     self.cancelAutoStopMonitor()
                                     self.recorder.stopRecording()

@@ -336,6 +336,19 @@ class AIService: ObservableObject {
             }
         }
     }
+
+    /// Save the API key for the Custom provider WITHOUT running the test request.
+    /// Corporate/self-hosted gateways often reject the OpenAI-compatible verification
+    /// probe with 404/401 even when the key is correct (non-standard auth schemes,
+    /// path routing, etc.).  This bypass lets advanced users skip the check and trust
+    /// their own configuration. (VoiceInk #716)
+    func saveCustomAPIKeyWithoutVerification(_ key: String) {
+        guard selectedProvider == .custom else { return }
+        apiKey = key
+        isAPIKeyValid = true
+        APIKeyManager.shared.saveAPIKey(key, forProvider: selectedProvider.rawValue)
+        NotificationCenter.default.post(name: .aiProviderKeyChanged, object: nil)
+    }
     
     func verifyAPIKey(_ key: String, completion: @escaping (Bool, String?) -> Void) {
         guard selectedProvider.requiresAPIKey else {

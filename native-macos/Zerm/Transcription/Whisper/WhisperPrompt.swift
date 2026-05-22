@@ -12,8 +12,11 @@ class WhisperPrompt: ObservableObject {
     
     // Language-specific base prompts
     private let languagePrompts: [String: String] = [
-        // English
-        "en": "Hello, how are you doing? Nice to meet you.",
+        // English — number words included to reduce Whisper's tendency to transcribe
+        // spoken numbers as digits (e.g. "one way" → "1 way").  The initial prompt is
+        // a style/vocabulary guide; examples with written-out numbers shift probability
+        // towards word form. (VoiceInk #702)
+        "en": "Hello, how are you doing? Nice to meet you. One, two, three — let me know.",
         
         // Asian Languages
         "hi": "नमस्ते, कैसे हैं आप? आपसे मिलकर अच्छा लगा।",

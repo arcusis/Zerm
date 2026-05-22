@@ -81,6 +81,12 @@ class HotkeyManager: ObservableObject {
     private var fnDebounceTask: Task<Void, Never>?
     private var pendingFnKeyState: Bool? = nil
     private var pendingFnEventTime: TimeInterval? = nil
+    // Monitor that tracks whether another key was pressed while Fn is held.
+    // When a key-down fires during Fn hold, we cancel the recording trigger so that
+    // Fn+F1 / Fn+F11 / etc. work normally without accidentally starting a recording.
+    // (VoiceInk #720)
+    private var fnKeyDownMonitor: Any?
+    private var fnCompanionKeyPressed = false
 
     // Keyboard shortcut state tracking
     private var shortcutKeyPressEventTime: TimeInterval?
@@ -330,7 +336,13 @@ class HotkeyManager: ObservableObject {
         }
         middleClickMonitors = []
         middleClickTask?.cancel()
-        
+
+        if let monitor = fnKeyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            fnKeyDownMonitor = nil
+        }
+        fnCompanionKeyPressed = false
+
         resetKeyStates()
     }
     
@@ -375,9 +387,29 @@ class HotkeyManager: ObservableObject {
             pendingFnKeyState = isKeyPressed
             pendingFnEventTime = eventTime
             fnDebounceTask?.cancel()
+
+            if isKeyPressed {
+                // Fn just went DOWN — install a companion-key monitor.
+                // If the user presses any other key while Fn is held (e.g. Fn+F1),
+                // we record the companion press and cancel the recording trigger so
+                // function-key combos work normally. (VoiceInk #720)
+                fnCompanionKeyPressed = false
+                fnKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+                    self?.fnCompanionKeyPressed = true
+                }
+            } else {
+                // Fn just went UP — tear down the companion-key monitor.
+                if let monitor = fnKeyDownMonitor {
+                    NSEvent.removeMonitor(monitor)
+                    fnKeyDownMonitor = nil
+                }
+            }
+
             fnDebounceTask = Task { [pendingState = isKeyPressed, pendingTime = eventTime] in
                 try? await Task.sleep(nanoseconds: 75_000_000) // 75ms
-                guard !Task.isCancelled, pendingFnKeyState == pendingState else { return }
+                guard !Task.isCancelled, self.pendingFnKeyState == pendingState else { return }
+                // Skip the trigger if a companion key was pressed — this was a Fn+Fkey combo.
+                if pendingState && self.fnCompanionKeyPressed { return }
                 Task { @MainActor in
                     await self.processKeyPress(isKeyPressed: pendingState, eventTime: pendingTime, mode: activeMode)
                 }

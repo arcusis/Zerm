@@ -257,7 +257,10 @@ class StreamingTranscriptionService {
         }
     }
 
-    /// Waits for the server to acknowledge our explicit commit, with a 10-second timeout.
+    /// Waits for the server to acknowledge our explicit commit.
+    /// Timeout is 30 s — long enough for recordings of several minutes to be fully
+    /// assembled server-side before the acknowledgment fires. The previous 10 s limit
+    /// caused truncated transcripts for ~1 min+ Parakeet v2 recordings. (VoiceInk #727)
     private func waitForFinalCommit(signalStream: AsyncStream<Void>) async -> String {
         // Race: wait for commit acknowledgment vs timeout
         let receivedInTime = await withTaskGroup(of: Bool.self) { group in
@@ -269,7 +272,7 @@ class StreamingTranscriptionService {
             }
 
             group.addTask {
-                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
                 return false
             }
 

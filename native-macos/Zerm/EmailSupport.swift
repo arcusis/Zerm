@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 
 struct EmailSupport {
+    @MainActor
     static func generateSupportEmailURL() -> URL? {
         let subject = "Zerm Support Request"
         let systemInfo = SystemInfoService.shared.getSystemInfoString()
@@ -36,6 +37,7 @@ struct EmailSupport {
         return URL(string: "mailto:prakashjoshipax@gmail.com?subject=\(encodedSubject)&body=\(encodedBody)")
     }
     
+    @MainActor
     static func openSupportEmail() {
         if let emailURL = generateSupportEmailURL() {
             NSWorkspace.shared.open(emailURL)

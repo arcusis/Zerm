@@ -51,8 +51,10 @@ class WhisperTranscriptionService: TranscriptionService {
             throw ZermEngineError.modelLoadFailed
         }
 
-        // Read audio data
-        let data = try readAudioSamples(audioURL)
+        // Read audio data — use AVAudioFile-based resampler so variable-length WAV
+        // headers (non-standard RIFF chunks, LIST/INFO blocks, etc.) are handled
+        // correctly rather than always skipping 44 bytes (VoiceInk #393).
+        let data = try await AudioProcessor().processAudioToSamples(audioURL)
 
         // Set prompt
         let currentPrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
@@ -79,14 +81,4 @@ class WhisperTranscriptionService: TranscriptionService {
         return text
     }
 
-    private func readAudioSamples(_ url: URL) throws -> [Float] {
-        let data = try Data(contentsOf: url)
-        let floats = stride(from: 44, to: data.count, by: 2).map {
-            return data[$0..<$0 + 2].withUnsafeBytes {
-                let short = Int16(littleEndian: $0.load(as: Int16.self))
-                return max(-1.0, min(Float(short) / 32767.0, 1.0))
-            }
-        }
-        return floats
-    }
 }

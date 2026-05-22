@@ -179,6 +179,11 @@ class AudioProcessor {
         guard let channelData = buffer.int16ChannelData else {
             throw AudioProcessingError.conversionFailed
         }
+        // Guard the channel-count before subscript access — a zero-channel buffer
+        // would crash here. (VoiceInk #394)
+        guard buffer.format.channelCount > 0 else {
+            throw AudioProcessingError.conversionFailed
+        }
         let firstChannel = channelData[0]
 
         int16Samples.withUnsafeBufferPointer { int16Buffer in

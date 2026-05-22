@@ -15,6 +15,9 @@ enum AudioInputMode: String, CaseIterable {
     case prioritized = "Prioritized"
 }
 
+// All @Published mutations are main-actor-isolated to prevent random crashes when
+// CoreAudio device-change callbacks interact with SwiftUI observation. (VoiceInk #390)
+@MainActor
 class AudioDeviceManager: ObservableObject {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "AudioDeviceManager")
     @Published var availableDevices: [(id: AudioDeviceID, uid: String, name: String)] = []

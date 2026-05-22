@@ -94,9 +94,10 @@ class RecorderUIManager: ObservableObject {
                 await cancelRecording()
             }
         } else {
-            SoundManager.shared.playStartSound {
-                Task { await MediaController.shared.muteSystemAudio() }
-            }
+            // Show the recorder panel immediately (visual feedback) but delay the
+            // start sound until CoreAudio confirms it is running — see ZermEngine.toggleRecord.
+            // Playing the sound before CoreAudio is ready caused a ~1 s gap where speech
+            // was lost because users started speaking on the sound cue. (VoiceInk #572)
             await MainActor.run { isMiniRecorderVisible = true }
             await engine.toggleRecord(powerModeId: powerModeId)
         }
