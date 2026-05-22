@@ -16,10 +16,9 @@ name: Release
 # inspect it before publishing manually.
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "v*.*.*-*"
+  # Disabled: the Tauri-based release pipeline is superseded by the native
+  # macOS Swift app. DMGs are now built locally and uploaded manually.
+  # Re-enable or replace with a native build workflow when CI is ready.
   workflow_dispatch:
 
 permissions:
