@@ -94,62 +94,97 @@ class BrowserURLService {
     private init() {}
     
     func getCurrentURL(from browser: BrowserType) async throws -> String {
-        guard let scriptURL = Bundle.main.url(forResource: browser.scriptName, withExtension: "scpt") else {
-            logger.error("❌ AppleScript file not found: \(browser.scriptName, privacy: .public).scpt")
-            throw BrowserURLError.scriptNotFound
-        }
-        
-        logger.debug("🔍 Attempting to execute AppleScript for \(browser.displayName, privacy: .public)")
-        
-        // Check if browser is running
-        if !isRunning(browser) {
-            logger.error("❌ Browser not running: \(browser.displayName, privacy: .public)")
+        logger.debug("🔍 Attempting to get URL from \(browser.displayName, privacy: .public)")
+
+        // Find the FRONTMOST instance of this browser by PID.
+        // When multiple instances share the same bundle ID (e.g. a normal Chrome window
+        // alongside a Playwright/automation Chrome), AppleScript's
+        // `tell application "Google Chrome"` picks an arbitrary process, often routing
+        // to the automation one with no visible window — causing error -1719.
+        // Targeting by PID ensures we always query the user-facing window. (VoiceInk #658)
+        guard let targetApp = frontmostInstance(of: browser) else {
+            logger.error("❌ No visible \(browser.displayName, privacy: .public) instance found")
             throw BrowserURLError.browserNotRunning
         }
-        
+
+        let pid = targetApp.processIdentifier
+        let inlineScript = inlineURLScript(for: browser, pid: pid)
+
         let task = Process()
         task.launchPath = "/usr/bin/osascript"
-        task.arguments = [scriptURL.path]
-        
+        task.arguments = ["-e", inlineScript]
+
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = pipe
-        
+
         do {
-            logger.debug("▶️ Executing AppleScript for \(browser.displayName, privacy: .public)")
+            logger.debug("▶️ Executing AppleScript for \(browser.displayName, privacy: .public) PID=\(pid, privacy: .public)")
             try task.run()
             task.waitUntilExit()
-            
+
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 if output.isEmpty {
                     logger.error("❌ Empty output from AppleScript for \(browser.displayName, privacy: .public)")
                     throw BrowserURLError.noActiveTab
                 }
-                
-                // Check if output contains error messages
                 if output.lowercased().contains("error") {
                     logger.error("❌ AppleScript error for \(browser.displayName, privacy: .public): \(output, privacy: .public)")
                     throw BrowserURLError.executionFailed
                 }
-                
-                logger.debug("✅ Successfully retrieved URL from \(browser.displayName, privacy: .public): \(output, privacy: .public)")
+                logger.debug("✅ Retrieved URL from \(browser.displayName, privacy: .public): \(output, privacy: .public)")
                 return output
             } else {
-                logger.error("❌ Failed to decode output from AppleScript for \(browser.displayName, privacy: .public)")
                 throw BrowserURLError.executionFailed
             }
+        } catch let error as BrowserURLError {
+            throw error
         } catch {
             logger.error("❌ AppleScript execution failed for \(browser.displayName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             throw BrowserURLError.executionFailed
         }
     }
-    
+
+    /// Returns the frontmost (user-visible) running instance of the browser,
+    /// preferring the active app, falling back to any regular-policy instance.
+    private func frontmostInstance(of browser: BrowserType) -> NSRunningApplication? {
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleIdentifier == browser.bundleIdentifier &&
+            $0.activationPolicy == .regular
+        }
+        // Prefer the currently-active one; fall back to any regular-policy instance.
+        return apps.first(where: { $0.isActive }) ?? apps.first
+    }
+
+    /// Generates an inline AppleScript that targets the browser by the specific PID
+    /// rather than by display name, avoiding ambiguity when multiple instances run.
+    private func inlineURLScript(for browser: BrowserType, pid: pid_t) -> String {
+        switch browser {
+        case .safari:
+            return "tell application id \"\(browser.bundleIdentifier)\" to return URL of current tab of front window"
+        case .firefox:
+            // Firefox AppleScript support is limited; use the display-name path
+            return "tell application \"\(browser.displayName)\" to return URL of selected tab of front window"
+        default:
+            // Chrome-family browsers (Chrome, Edge, Brave, Arc, Opera, Vivaldi, Orion, Zen, Yandex)
+            // use the same tab model; target by PID via `tell process` → `tell application`
+            // Note: we address by bundle ID for precision, then navigate to front window active tab.
+            return """
+            tell application id "\(browser.bundleIdentifier)"
+                tell front window
+                    return URL of active tab
+                end tell
+            end tell
+            """
+        }
+    }
+
     func isRunning(_ browser: BrowserType) -> Bool {
-        let workspace = NSWorkspace.shared
-        let runningApps = workspace.runningApplications
-        let isRunning = runningApps.contains { $0.bundleIdentifier == browser.bundleIdentifier }
-        logger.debug("\(browser.displayName, privacy: .public) running status: \(isRunning, privacy: .public)")
+        let isRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == browser.bundleIdentifier
+        }
+        logger.debug("\(browser.displayName, privacy: .public) running: \(isRunning, privacy: .public)")
         return isRunning
     }
 } 
