@@ -1,68 +1,51 @@
 # Zerm Setup And Permissions
 
-Zerm setup covers model availability, local Ollama availability/trust, and platform input permissions.
+## Required macOS Permissions
 
-## Setup Sequence
+| Permission | What needs it | How to grant |
+|------------|--------------|--------------|
+| Microphone | `CoreAudioRecorder` — audio capture | System Settings → Privacy → Microphone → Zerm |
+| Accessibility | `CursorPaster` — CGEvent Cmd+V injection | System Settings → Privacy → Accessibility → Zerm |
+| Screen Recording | `ScreenCaptureService` — Power Mode context capture | System Settings → Privacy → Screen Recording → Zerm |
 
-1. Whisper model: download `ggml-small.bin` into app data and load it.
-2. macOS Accessibility permission: required for modifier-key recording and auto-paste.
-3. macOS Microphone permission and entitlement: required before CPAL capture can produce usable samples.
-4. Ollama: install official local app when missing, or allow user opt-in to an existing local service.
-5. Gemma model: pull the configured local model through Ollama.
+## TCC Behaviour After Rebuild
 
-## macOS Accessibility
+macOS TCC (Transparency, Consent, Control) tracks apps by **bundle ID + code signature hash**.  
+Ad-hoc signing changes the hash on every build, orphaning TCC grants.
 
-macOS can show an existing `/Applications/Zerm.app` entry in Accessibility while a rebuilt local bundle still does not have effective trust. The app should:
-
-- check Accessibility whenever enabling auto-paste,
-- use `AXIsProcessTrusted()` as the authoritative runtime check for the current process,
-- open System Settings to Privacy and Security -> Accessibility when blocked,
-- reset stale local TCC entries for ad-hoc/rebuilt development bundles when appropriate,
-- make failures visible in the dashboard/pill rather than silently copying only.
-
-Public alpha/production builds should be Developer ID signed and notarized. Local ad-hoc builds are useful for development, but they are not stable TCC identities and should not be used to judge production Accessibility behavior.
-
-Manual recovery when trust is stale:
-
-1. Quit Zerm.
-2. Open System Settings -> Privacy and Security -> Accessibility.
-3. Remove `/Applications/Zerm.app`.
-4. Re-add `/Applications/Zerm.app`.
-5. Reopen Zerm.
-
-The dashboard setup diagnostics should report app signing, stable TCC identity, Accessibility trust, auto-paste readiness, and last insertion status separately.
-
-## macOS Microphone
-
-Microphone trust has two independent requirements:
-
-- User approval in System Settings -> Privacy and Security -> Microphone for `/Applications/Zerm.app`.
-- The signed app must carry the hardened-runtime entitlement `com.apple.security.device.audio-input`.
-
-Do not assume the System Settings toggle proves capture will work. A Developer ID signed app without the audio-input entitlement can show as enabled in Microphone settings while AVFoundation reports denied or CPAL opens a stream that only yields silence.
-
-Production and local signed installs must include `src-tauri/Entitlements.plist` when signing:
-
-```sh
-codesign --force --deep --options runtime \
-  --entitlements src-tauri/Entitlements.plist \
-  --sign 'Developer ID Application: Arcusis LTD (F9Z784RA6D)' \
-  /Applications/Zerm.app
+**Fix:**
+```bash
+cd native-macos
+make reset-permissions   # tccutil reset Accessibility + ScreenCapture for com.arcusis.zerm
 ```
 
-If macOS has cached a stale Microphone decision for an older unentitled build, reset it after installing the entitled build:
-
-```sh
-tccutil reset Microphone com.arcusis.zerm
+Or manually:
+```bash
+tccutil reset Accessibility com.arcusis.zerm
+tccutil reset ScreenCapture com.arcusis.zerm
 ```
 
-The recorder diagnostics should log `device`, `sample_format`, raw sample count, duration, and `peak_rms`. A healthy spoken capture should have nonzero `peak_rms`; values near `0.0000` indicate permission, device, mute, or input-level issues before STT.
+## Launchpad Duplicate Icons
 
-## Ollama Trust
+If multiple Zerm.app entries appear in Launchpad after rebuilds:
+```bash
+cd native-macos && make install
+# make install already does: lsregister + Launchpad reset + tccutil reset
+```
 
-- macOS: verify official app signature/team where possible.
-- Windows: verify Authenticode signer where possible.
-- Linux: existing local Ollama listeners are treated as unverified unless explicitly allowed by the user.
-- Installer downloads are bounded and hash/signature checked where supported.
+## Local Model Storage
 
-Related: [[Zerm Runtime Privacy Model]], [[Zerm Auto Paste]], [[Zerm Verification Workflow]]
+Whisper models: `~/Library/Application Support/com.arcusis.zerm/WhisperModels/`  
+FluidAudio (Parakeet) models: managed by `FluidAudioModelManager` (path handled by FluidAudio framework)  
+whisper.cpp XCFramework: `$(HOME)/Zerm-Dependencies/whisper.cpp/build-apple/whisper.xcframework`
+
+## First-Run Checklist
+
+1. Open app → complete onboarding
+2. Go to Settings → AI Models → download a local model (or configure cloud provider)
+3. Grant Microphone when prompted
+4. Grant Accessibility (for auto-paste)
+5. Optionally grant Screen Recording (for Power Mode context)
+6. Press the configured hotkey (default: Right Command) to test
+
+Related: [[Zerm Auto Paste]], [[Zerm Runtime Privacy Model]]

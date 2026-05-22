@@ -1,23 +1,67 @@
 # Zerm Overview
 
-Zerm is a native Tauri 2 desktop app for local voice-to-clipboard dictation. It records microphone audio, transcribes locally with Whisper through `whisper-rs`, optionally reformats through a local Ollama model, copies the result to the clipboard, and can auto-paste on macOS.
+Zerm is a **native macOS Swift/SwiftUI dictation app** based on VoiceInk (GPLv3) by Beingpax. It records microphone audio, transcribes locally or via cloud providers, optionally enhances the text with AI, and pastes the result at the cursor.
 
-Primary audience: developers and heavy text-entry users who dictate into coding agents, chat, email, notes, PR reviews, and long-form writing.
+Primary audience: developers and heavy text-entry users who dictate into coding agents, chat, email, notes, and long-form writing.
 
-## Main Components
+## What Zerm Is Not
 
-- `src-tauri/src/lib.rs`: app lifecycle, Tauri commands, setup flow, recording pipeline, clipboard, auto-paste, installer helpers.
-- `src-tauri/src/audio.rs`: microphone capture, silence detection, VAD, hard recording caps, audio conversion.
-- `src-tauri/src/whisper.rs`: Whisper model loading and transcription.
-- `src-tauri/src/ollama.rs`: local Ollama identity checks and rewrite requests.
-- `src-tauri/src/state.rs`: settings, history, stats, persistence.
-- `dashboard.html` and `src/dashboard.ts`: dashboard UI, settings, setup banners, history, vocabulary.
-- `docs/`: GitHub Pages website.
+- **Not Tauri.** The Tauri/Rust/Vite prototype was fully removed in commit `16d619f`. Nothing from `src-tauri/` exists anymore.
+- **Not cross-platform.** macOS only. No Windows or Linux build path.
+- **Not a paid app.** GPLv3 open source. The `LicenseManager`/`PolarService` code is a VoiceInk remnant that is still present but hardcoded to `.licensed` — it is dead weight to remove in a future cleanup pass.
 
-## Platform Model
+## Repository Layout
 
-- macOS hotkey: modifier-only Right Option by default.
-- Windows/Linux hotkey: `Ctrl+Shift+Space`.
-- Auto-paste is currently macOS-focused. Windows and Linux paste synthesis remains a roadmap item unless implemented later.
+```
+native-macos/          ← Xcode project (the actual app)
+  Zerm.xcodeproj
+  Zerm/                ← Swift source
+    Zerm.swift         ← @main App entry, dependency wiring
+    ZermEngine.swift   ← recording/transcription orchestrator
+    HotkeyManager.swift
+    CursorPaster.swift
+    CoreAudioRecorder.swift
+    Recorder.swift
+    ...
+  ZermTests/
+  ZermUITests/
 
-Related: [[Zerm Auto Paste]], [[Zerm Setup And Permissions]], [[Zerm Runtime Privacy Model]]
+docs/                  ← GitHub Pages website (docs/index.html)
+Notebook/              ← this Zettelkasten
+.github/workflows/     ← ci.yml, release.yml
+```
+
+## Main Data Flow
+
+```
+Hotkey pressed
+  → RecorderUIManager.toggleMiniRecorder()
+    → SoundManager.playStartSound()   ← fires AFTER CoreAudio confirms ready
+    → ZermEngine.toggleRecord()
+      → Recorder.startRecording()     ← CoreAudio AUHAL, background queue
+      → WhisperModelManager.loadModel() ← concurrent Task.detached
+    → [user speaks]
+  → Hotkey released (or auto-stop silence)
+    → ZermEngine.toggleRecord() stops recording
+    → ZermEngine.runPipeline()
+      → waits for isModelLoading == false
+      → TranscriptionPipeline.run()
+        → session.transcribe() or serviceRegistry.transcribe()
+        → TranscriptionOutputFilter
+        → WordReplacementService
+        → AIEnhancementService.enhance()  ← optional
+        → CursorPaster.startPasteAtCursor()
+        → onDismiss()
+```
+
+## Transcription Providers
+
+| Provider | Type | Key file |
+|----------|------|----------|
+| Whisper (local) | Local ggml | `WhisperTranscriptionService.swift` |
+| Parakeet/FluidAudio | Local ANE | `FluidAudioTranscriptionService.swift` |
+| Apple Speech | Local | `NativeAppleTranscriptionService.swift` |
+| OpenAI, Gemini, Deepgram, etc. | Cloud | `CloudTranscriptionService.swift` |
+| Streaming (Deepgram, ElevenLabs, etc.) | Cloud streaming | `StreamingTranscriptionService.swift` |
+
+Related: [[Zerm Architecture]], [[Zerm Auto Paste]], [[Zerm Runtime Privacy Model]]

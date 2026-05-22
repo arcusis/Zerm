@@ -1,31 +1,32 @@
 # Zerm Runtime Privacy Model
 
-Zerm is designed around local processing and minimal durable state.
+## What Data Leaves the Device
 
-## Runtime Data Flow
+Zerm only sends data externally when the user has explicitly configured an external provider.
 
-1. Microphone audio is captured locally.
-2. Whisper transcribes locally from the model stored in app data.
-3. Optional rewrite modes send text to the local Ollama service at `127.0.0.1:11434`.
-4. The final output is written to the system clipboard.
-5. Auto-paste may insert the output into the target app on macOS if enabled and permitted.
+| Data | Sent where | Condition |
+|------|-----------|-----------|
+| Audio / transcribed text | Cloud transcription provider (OpenAI, Deepgram, etc.) | Only if cloud provider is selected |
+| Enhancement prompt + transcribed text | AI enhancement provider (OpenAI, Gemini, Anthropic, etc.) | Only if enhancement is enabled + provider configured |
+| Screen content | Enhancement provider | Only if "Context Awareness" is enabled in Power Mode |
+| Clipboard text | Enhancement provider | Only if "Clipboard Context" is enabled |
+| Selected text | Enhancement provider | Only if selected text capture is triggered |
+| No analytics, no telemetry | — | No background data collection |
 
-## Privacy Defaults
+## What Stays Local
 
-- No accounts.
-- No telemetry.
-- No hosted transcription service.
-- No cloud LLM calls from Zerm itself.
-- Dictation history is opt-in.
-- Clearing/disabling history also clears the backup state file.
+- Audio files: `~/Library/Application Support/com.arcusis.zerm/Recordings/` (auto-cleaned by `AudioCleanupManager`)
+- Transcription history: SwiftData store at `~/Library/Application Support/com.arcusis.zerm/default.store`
+- Dictionary / word replacements: SwiftData store at `~/Library/Application Support/com.arcusis.zerm/dictionary.store` (optionally synced via iCloud CloudKit)
+- API keys: `APIKeyManager` stores in the system Keychain (not UserDefaults)
+- Custom provider URL + model: UserDefaults (not sensitive)
 
-## Hardening Already Landed
+## HTTP Cache Disabled
 
-- Custom Tauri commands are dashboard-gated where needed.
-- History and auto-paste are opt-in.
-- Whisper downloads are hash-pinned and bounded.
-- Clipboard failure is treated as a job failure for paste/history/done purposes, preventing stale clipboard auto-paste.
-- Ollama calls are gated by local identity checks and user opt-in for unverified local service cases.
-- Linux Ollama listener identity is treated as unverified unless the user explicitly opts in.
+`URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)` in `Zerm.swift` init — API responses are never stored in `Cache.db`.
 
-Related: [[Zerm Auto Paste]], [[Zerm Setup And Permissions]]
+## Known Privacy Gap (Z#177)
+
+The in-app and website privacy section does not fully disclose that screen content and clipboard text may be sent to the AI provider when those features are enabled. Needs a documentation update.
+
+Related: [[Zerm Setup And Permissions]], [[Zerm Overview]]

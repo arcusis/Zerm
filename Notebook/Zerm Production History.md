@@ -1,45 +1,55 @@
 # Zerm Production History
 
-Recent production work centered on privacy hardening, setup UX, local app rebuilds, and auto-paste reliability.
+## Current Branch
 
-## Recent Commits
+`Production` — main and only production branch. All releases tagged here.
 
-- `ebcbbc8 Add verified macOS auto-paste insertion path`
-- `b8ef4c0 Fix macOS auto-paste execution`
-- `10afb52 Keep auto-paste gated on Accessibility trust`
-- `1429e59 Request Accessibility before enabling auto-paste`
-- `ce0d3d6 Make auto-paste permission failures visible`
-- `f200f51 Address privacy and reliability review findings`
-- `ab3839b Harden auto-paste and improve about page`
-- `b33643e Fix macOS auto-paste focus restore`
+## Recent Commits (newest first, 2026-05-22)
 
-## Notable Shipped Changes
+| Hash | Summary |
+|------|---------|
+| `16d619f` | Remove Tauri prototype, Vite frontend, stale .scpt files, dead code (106 files, ~19 GB freed) |
+| `0483bce` | Fix P2: browser multi-instance URL detection (Power Mode); paste fallback confirmed fixed |
+| `2e56c35` | Fix P1/P2: WAV header, AudioDeviceManager threading, Fn+F-key, streaming timeout, audio delay, numeric prompt, buffer guard, custom LLM skip-verify |
+| `a41ed10` | Fix P0/P1: macOS 26 CursorPaster crash, Settings window menu-bar-only, transcription idle failure, 120s hang timeout, empty transcription notification, DAC mute, hotkey nil-check |
+| `7f38b23` | Clarify GPLv3 license and VoiceInk attribution |
+| `1894ad6` | Release v1.0.0 |
+| `224a3f6` | Add native macOS Zerm app (initial native Swift port) |
 
-- Release pipeline now treats prerelease CI differently from stable releases: macOS prereleases use Tauri `--skip-stapling` after signing so Apple notarization polling outages do not fail the build, Windows prereleases can publish unsigned installers when signing secrets are absent, and GitHub release asset uploads use explicit delete-plus-retry instead of a single `gh release upload --clobber`.
-- macOS signed builds now carry the audio-input entitlement required for microphone capture under hardened runtime.
-- The app now separates Accessibility permission, Microphone permission, selected input device, capture level, STT, and insertion diagnostics.
-- Right Option capture has a CoreGraphics event-tap fallback for side-specific modifier keys.
-- The pill is forced onto the primary monitor and configured as a high-level visible overlay to avoid off-screen/stale monitor placement.
-- Recording uses tap-to-toggle semantics: tap Right Option to start, tap again to stop; quick release no longer immediately stops capture.
-- Dashboard has a Start/Stop fallback and microphone picker.
-- Auto-paste failures are no longer silent.
-- Auto-paste enabling requests/checks Accessibility permission.
-- Auto-paste and hotkey readiness are separate concepts.
-- Clipboard failure skips auto-paste, history save, dashboard done state, and normal done event.
-- Linux Ollama trust wording and behavior were downgraded to explicit unverified opt-in.
-- Recording memory cap was lowered to reduce peak memory risk.
-- macOS Ollama install now backs up and rolls back instead of removing the old app before replacement is verified.
-- README, website, and About page were updated with repository links, privacy model, release links, and platform caveats.
+## v1.0.x Fixes Summary
 
-## Local Install Notes
+### Commit `a41ed10` — P0/P1 fixes
+- **macOS 26 crash** — `CursorPaster.pasteUsingAppleScript` now runs on background thread
+- **Settings window in menu-bar-only mode** — `NSApp.unhide(nil)` + deferred `setActivationPolicy`
+- **First transcription fails after idle** — `runPipeline` waits for model load
+- **Transcription hang** — 120 s `withTranscriptionTimeout` in `TranscriptionPipeline`
+- **Short phrase no output** — empty transcription shows user notification
+- **External DAC stays muted** — `MediaController` sweeps elements 0–8
+- **Hotkey silent nil** — `addGlobalMonitorForEvents` nil-check shows permission alert
+- **Clipboard regression (VI#722)** — session-ID tracking in `CursorPaster`
+- **Gemini model upgrade** — `gemini-3.5-flash` GA
 
-Local macOS builds have been installed by:
+### Commit `2e56c35` — P1/P2 fixes
+- **WAV 44-byte hardcoded** — `WhisperTranscriptionService` uses `AudioProcessor.processAudioToSamples` 
+- **AudioDeviceManager thread safety** — `@MainActor` added
+- **Fn+F-key triggers recording** — companion keyDown monitor during Fn hold
+- **Long Parakeet transcripts cut off** — streaming commit timeout 10 s → 30 s
+- **First words lost after trigger sound** — `playStartSound` moved post-CoreAudio-ready
+- **Numeric word → digit** — English Whisper prompt updated with "One, two, three"
+- **Buffer pointer crash** — `channelCount > 0` guard in `AudioFileProcessor`
+- **Custom LLM "Not Found"** — `saveCustomAPIKeyWithoutVerification` bypass added
 
-- building with `pnpm tauri build --bundles app`,
-- Developer ID signing with `src-tauri/Entitlements.plist`,
-- replacing `/Applications/Zerm.app`,
-- launching `/Applications/Zerm.app`.
+### Commit `0483bce` — P2 fixes
+- **Power Mode URL detection with multiple browsers** — `BrowserURLService` targets frontmost regular-policy process, inline script via bundle ID
 
-Because these are rebuilt local app bundles, macOS may require Accessibility or Microphone permission to be reset and re-granted after entitlement/signing changes.
+## Release Process
 
-Related: [[Zerm Verification Workflow]], [[Zerm Auto Paste]]
+1. Build locally: `cd native-macos && xcodebuild -scheme Zerm ...` 
+2. Sign: Developer ID (or ad-hoc for internal builds)
+3. Create DMG, tag git: `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. Upload to GitHub Releases: `gh release create vX.Y.Z Zerm_X.Y.Z_aarch64.dmg`
+5. CI `release.yml` validates the tag and checks for DMG asset
+
+Full process: `native-macos/BUILDING.md`
+
+Related: [[Zerm Overview]], [[Zerm Known Follow Ups]]

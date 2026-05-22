@@ -1,23 +1,32 @@
 # Zerm Notebook
 
-Last updated: 2026-04-23
+Last updated: 2026-05-22
 
 This notebook captures durable project context for Zerm. Start here, then follow the linked notes relevant to the task.
 
 ## Core Notes
 
 - [[Zerm Overview]]
+- [[Zerm Architecture]]
 - [[Zerm Runtime Privacy Model]]
 - [[Zerm Auto Paste]]
 - [[Zerm Setup And Permissions]]
 - [[Zerm Production History]]
-- [[Zerm Verification Workflow]]
 - [[Zerm Known Follow Ups]]
 
-## Current Local State
+## Current State (2026-05-22)
 
-- Branch: `Production`
-- Tracking: `origin/Production`
-- Latest production recovery fixed macOS Right Option capture, pill visibility, microphone capture, and Notes insertion.
-- Developer ID signed macOS builds must include `com.apple.security.device.audio-input`; without it, System Settings can show Microphone enabled while AVFoundation/CPAL still produce denied or silent capture.
-- The current app records microphone device name, sample format, raw sample count, and peak RMS so silent input, wrong device selection, and STT failures can be separated.
+- Branch: `Production`  
+- Latest release: `v1.0.0` (Apple Silicon DMG only — Intel build not yet available)
+- **The Tauri prototype has been fully removed.** Zerm is now a pure native macOS Swift/SwiftUI app.
+- All upstream VoiceInk issues tracked in `arcusis/Zerm` GitHub Issues (~168 open).
+
+## Quick Build Reference
+
+```bash
+cd native-macos
+make local         # build + install to ~/Applications (unsigned, local dev)
+make reset-permissions  # tccutil reset Accessibility + ScreenCapture
+```
+
+Full build guide: `native-macos/BUILDING.md`
