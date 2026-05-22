@@ -25,7 +25,7 @@ class WindowManager: NSObject {
             return
         }
         logger.notice("configureWindow: registering main window")
-        
+
         let requiredStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.styleMask.formUnion(requiredStyleMask)
         window.titlebarAppearsTransparent = true
@@ -42,6 +42,13 @@ class WindowManager: NSObject {
         applyInitialPlacementIfNeeded(to: window)
         registerMainWindowIfNeeded(window)
         window.orderFrontRegardless()
+
+        // SwiftUI may restore its own autosave frame AFTER this method returns,
+        // overriding our placement. Defer a correction pass to catch that case.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak window, weak self] in
+            guard let window, let self else { return }
+            self.constrainToVisibleScreenIfNeeded(window)
+        }
     }
     
     func configureOnboardingPanel(_ window: NSWindow) {
@@ -100,22 +107,22 @@ class WindowManager: NSObject {
     
     private func applyInitialPlacementIfNeeded(to window: NSWindow) {
         guard !didApplyInitialPlacement else { return }
-        // Restore previous frame if one was saved, then verify it's on a connected screen.
-        // Stale frames from disconnected monitors (negative or large x/y coordinates) get
-        // silently re-centred on the main screen instead of opening off-screen.
-        if window.setFrameUsingName(Self.mainWindowAutosaveName) {
-            let frame = window.frame
-            let visibleOnScreen = NSScreen.screens.contains {
-                $0.visibleFrame.intersects(frame)
-            }
-            if !visibleOnScreen {
-                logger.notice("Saved frame \(NSStringFromRect(frame)) is off-screen — centering on main display")
-                window.center()
-            }
-        } else {
+        if !window.setFrameUsingName(Self.mainWindowAutosaveName) {
             window.center()
         }
         didApplyInitialPlacement = true
+    }
+
+    /// Move the window to the main screen if its current frame is not visible
+    /// on any connected display. Called deferred so SwiftUI frame restoration
+    /// (which fires after configureWindow returns) is already applied.
+    private func constrainToVisibleScreenIfNeeded(_ window: NSWindow) {
+        let frame = window.frame
+        let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+        guard !onScreen else { return }
+        logger.notice("constrainToVisibleScreenIfNeeded: frame \(NSStringFromRect(frame)) is off all screens — centering on main")
+        window.center()
+        window.saveFrame(usingName: Self.mainWindowAutosaveName)
     }
     
     private func resolveMainWindow() -> NSWindow? {
