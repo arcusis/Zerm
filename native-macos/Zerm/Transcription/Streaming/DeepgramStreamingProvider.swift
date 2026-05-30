@@ -36,7 +36,10 @@ final class DeepgramStreamingProvider: StreamingTranscriptionProvider {
         startEventForwarding()
 
         do {
-            try await client.connect(apiKey: apiKey, model: model.name, language: language, customVocabulary: vocabulary)
+            // Map "Auto detect" to Deepgram's multilingual "multi" for Nova-3; otherwise
+            // an omitted language silently defaults to English. (VoiceInk #742)
+            let resolvedLanguage = DeepgramProvider.resolvedLanguage(language, model: model.name)
+            try await client.connect(apiKey: apiKey, model: model.name, language: resolvedLanguage, customVocabulary: vocabulary)
         } catch {
             // Clean up forwarding task on connection failure
             forwardingTask?.cancel()
