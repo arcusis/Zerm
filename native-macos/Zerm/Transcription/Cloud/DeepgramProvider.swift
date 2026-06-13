@@ -44,8 +44,16 @@ struct DeepgramProvider: CloudProvider {
             audioData: audioData,
             apiKey: apiKey,
             model: model,
-            language: language
+            language: Self.resolvedLanguage(language, model: model)
         )
+    }
+
+    /// Deepgram performs no language auto-detection when the `language` param is omitted — it
+    /// silently transcribes as English. For the multilingual Nova-3 model, "multi" enables
+    /// Deepgram's built-in multilingual code-switching, so "Auto detect" actually works. (VoiceInk #742)
+    static func resolvedLanguage(_ language: String?, model: String) -> String? {
+        if let language, !language.isEmpty { return language }
+        return model == "nova-3" ? "multi" : language
     }
 
     func makeStreamingProvider(modelContext: ModelContext) -> (any StreamingTranscriptionProvider)? {

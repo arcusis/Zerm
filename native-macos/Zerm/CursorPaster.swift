@@ -86,9 +86,10 @@ class CursorPaster {
         }
     }
 
+    @MainActor
     private static func postPasteCommand() async -> PasteResult {
         if UserDefaults.standard.bool(forKey: "useAppleScriptPaste") {
-            return await pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
+            return pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
         } else {
             return await pasteFromClipboard()
         }
@@ -150,38 +151,38 @@ class CursorPaster {
     private static let pasteScriptKeystroke = makeScript("tell application \"System Events\" to keystroke \"v\" using command down")
     private static let pasteScriptKeyCode   = makeScript("tell application \"System Events\" to key code 9 using command down")
 
+    @MainActor
     private static var layoutSwitchesToQWERTYOnCommand: Bool {
         let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
         guard let nameRef = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else { return false }
         return (Unmanaged<CFString>.fromOpaque(nameRef).takeUnretainedValue() as String).hasSuffix("⌘")
     }
 
-    // Dispatches AppleScript execution to a background thread.
-    // NSAppleScript.executeAndReturnError is a blocking call; on macOS 26 it has an
-    // internal queue assertion that fires if called from the main queue (EXC_BREAKPOINT /
-    // dispatch_assert_queue_fail). Running it off-main satisfies the assertion and
-    // prevents the hard crash reported in VoiceInk issue #737.
-    private static func pasteUsingAppleScript() async -> Bool {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                guard let script = layoutSwitchesToQWERTYOnCommand ? pasteScriptKeyCode : pasteScriptKeystroke else {
-                    logger.error("AppleScript paste script is unavailable")
-                    continuation.resume(returning: false)
-                    return
-                }
-                var error: NSDictionary?
-                script.executeAndReturnError(&error)
-                if let error {
-                    logger.error("AppleScript paste failed: \(String(describing: error), privacy: .public)")
-                }
-                continuation.resume(returning: error == nil)
-            }
+    // Must run on the main thread. On macOS 26 both the Text Input Source APIs
+    // (TISCopyCurrentKeyboardInputSource / TISGetInputSourceProperty, via
+    // layoutSwitchesToQWERTYOnCommand) and NSAppleScript execution assert they are
+    // called from the main queue — calling them off-main triggers
+    // dispatch_assert_queue_fail (EXC_BREAKPOINT / SIGTRAP). This matches the fix in
+    // VoiceInk v1.79 for issue #737, and fixes the regression crash reported in
+    // Zerm #204 (an earlier off-main dispatch crashed inside the TIS layout read).
+    @MainActor
+    private static func pasteUsingAppleScript() -> Bool {
+        guard let script = layoutSwitchesToQWERTYOnCommand ? pasteScriptKeyCode : pasteScriptKeystroke else {
+            logger.error("AppleScript paste script is unavailable")
+            return false
         }
+        var error: NSDictionary?
+        script.executeAndReturnError(&error)
+        if let error {
+            logger.error("AppleScript paste failed: \(String(describing: error), privacy: .public)")
+        }
+        return error == nil
     }
 
     // MARK: - CGEvent paste
 
     // Posts Cmd+V via CGEvent without modifying the active input source.
+    @MainActor
     private static func pasteFromClipboard() async -> PasteResult {
         guard AXIsProcessTrusted() else {
             logger.error("Accessibility permission is required to paste with simulated key events")

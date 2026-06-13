@@ -118,10 +118,33 @@ class FluidAudioTranscriptionService: TranscriptionService {
             speechAudio += [Float](repeating: 0, count: trailingSilenceSamples)
         }
 
-        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
-        let result = try await asrManager.transcribe(speechAudio, decoderState: &decoderState)
+        do {
+            var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+            let result = try await asrManager.transcribe(speechAudio, decoderState: &decoderState)
+            return TextNormalizer.shared.normalizeSentence(result.text)
+        } catch {
+            // CoreML model handles can go stale after the app sits idle and memory is paged
+            // out, surfacing as "Unable to compute asynchronous prediction using ML Program".
+            // The manager still reports as loaded, so a plain retry reuses the broken handles —
+            // reload the models from disk and re-create the manager once, then retry. (VoiceInk #614)
+            logger.notice("ASR prediction failed; reloading models and retrying once: \(error.localizedDescription, privacy: .public)")
+            await reloadModels(for: targetVersion)
+            guard let reloadedManager = self.asrManager else { throw error }
+            var retryDecoderState = TdtDecoderState.make(decoderLayers: await reloadedManager.decoderLayerCount)
+            let result = try await reloadedManager.transcribe(speechAudio, decoderState: &retryDecoderState)
+            return TextNormalizer.shared.normalizeSentence(result.text)
+        }
+    }
 
-        return TextNormalizer.shared.normalizeSentence(result.text)
+    /// Forces a fresh model reload from disk, discarding cached (possibly stale) CoreML handles. (VoiceInk #614)
+    private func reloadModels(for version: AsrModelVersion) async {
+        await asrManager?.cleanup()
+        asrManager = nil
+        vadManager = nil
+        activeVersion = nil
+        cachedModels = nil
+        loadingTask = nil
+        try? await ensureModelsLoaded(for: version)
     }
 
     private func readAudioSamples(from url: URL) throws -> [Float] {
