@@ -65,7 +65,10 @@ actor WhisperContext {
         params.offset_ms = 0
         params.no_context = true
         params.single_segment = false
-        params.temperature = 0.2
+        // Greedy/deterministic first pass to reduce hallucinated repetition/gibberish (#150).
+        // whisper.cpp still falls back to higher temperatures (default temperature_inc) when the
+        // entropy/logprob thresholds are exceeded, so quality on hard audio is preserved.
+        params.temperature = 0.0
 
         whisper_reset_timings(context)
         

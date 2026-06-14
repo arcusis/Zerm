@@ -17,7 +17,9 @@ struct MistralProvider: CloudProvider {
             speed: 0.99,
             accuracy: 0.98,
             isMultilingual: true,
-            supportsStreaming: true,
+            // Streaming disabled: the realtime model id (voxtral-mini-transcribe-realtime-2602)
+            // was retired by Mistral and now 400s on every connect (#36). Use batch transcription.
+            supportsStreaming: false,
             supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .mistral)
         )
     ]}
