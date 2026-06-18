@@ -24,6 +24,14 @@ final class TTSController: ObservableObject {
     init(engine: ZermEngine? = nil, recorderUIManager: RecorderUIManager? = nil) {
         self.engine = engine
         self.recorderUIManager = recorderUIManager
+
+        // Feed the TTS output level into the recorder's meter so the widget shows live
+        // audio bars while speaking — the same visualizer dictation uses. Capture the
+        // recorder directly (a plain class) to avoid main-actor isolation in the tap.
+        let recorderRef = engine?.recorder
+        player.onLevel = { level in
+            recorderRef?.audioMeter = AudioMeter(averagePower: level, peakPower: level)
+        }
     }
 
     /// Hotkey action: start reading the selection, or stop if already speaking.

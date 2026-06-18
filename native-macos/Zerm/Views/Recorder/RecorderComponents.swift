@@ -315,7 +315,11 @@ struct RecorderStatusDisplay: View {
     var body: some View {
         Group {
             if currentState == .speaking {
-                ProcessingStatusDisplay(mode: .speaking, color: .white).transition(.opacity)
+                // Read Aloud shows the same animated bars as recording, driven by the TTS
+                // output level (see TTSPlayer metering tap → recorder.audioMeter).
+                AudioVisualizer(audioMeter: audioMeter, color: .white, isActive: true)
+                    .scaleEffect(y: menuBarHeight != nil ? min(1.0, (menuBarHeight! - 8) / 25) : 1.0, anchor: .center)
+                    .transition(.opacity)
             } else if currentState == .enhancing {
                 ProcessingStatusDisplay(mode: .enhancing, color: .white).transition(.opacity)
             } else if currentState == .transcribing {
