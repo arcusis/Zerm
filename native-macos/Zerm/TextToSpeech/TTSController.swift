@@ -18,7 +18,13 @@ final class TTSController: ObservableObject {
     private var task: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TTSController")
 
-    init() {}
+    weak var engine: ZermEngine?
+    weak var recorderUIManager: RecorderUIManager?
+
+    init(engine: ZermEngine? = nil, recorderUIManager: RecorderUIManager? = nil) {
+        self.engine = engine
+        self.recorderUIManager = recorderUIManager
+    }
 
     /// Hotkey action: start reading the selection, or stop if already speaking.
     func toggle() {
@@ -35,6 +41,7 @@ final class TTSController: ObservableObject {
         task = nil
         player.stop()
         isSpeaking = false
+        recorderUIManager?.endSpeaking()
     }
 
     /// Reads whatever text is currently selected system-wide.
@@ -50,6 +57,13 @@ final class TTSController: ObservableObject {
 
     /// Synthesizes and plays arbitrary text using the configured provider/voice.
     func speak(_ text: String) async {
+        // Mutual exclusion: never run Read Aloud while dictation owns the recorder widget.
+        if let rm = recorderUIManager, !rm.canStartSpeaking {
+            notify("Finish or cancel dictation before using Read Aloud")
+            SoundManager.shared.playEscSound()
+            return
+        }
+
         guard let provider = TTSProviderRegistry.provider(for: TTSSettings.providerKind) else {
             notify("No speech provider selected")
             return
@@ -70,17 +84,21 @@ final class TTSController: ObservableObject {
         }
 
         isSpeaking = true
+        recorderUIManager?.beginSpeaking()
         do {
             let audio = try await provider.synthesize(text: text, voice: voice, speed: TTSSettings.speed, apiKey: apiKey)
-            if Task.isCancelled { isSpeaking = false; return }
+            if Task.isCancelled { isSpeaking = false; recorderUIManager?.endSpeaking(); return }
             try player.play(audio) { [weak self] in
                 self?.isSpeaking = false
+                self?.recorderUIManager?.endSpeaking()
             }
             TTSSettings.recordReadAloud(of: text)
         } catch is CancellationError {
             isSpeaking = false
+            recorderUIManager?.endSpeaking()
         } catch {
             isSpeaking = false
+            recorderUIManager?.endSpeaking()
             logger.error("Read Aloud failed: \(error.localizedDescription, privacy: .public)")
             notify("Read Aloud failed: \(error.localizedDescription)")
         }

@@ -6,5 +6,6 @@ enum RecordingState: Equatable {
     case recording
     case transcribing
     case enhancing
+    case speaking   // Read Aloud (TTS) is playing — reuses the recorder widget
     case busy
 }
