@@ -2,9 +2,13 @@
 DEPS_DIR := $(HOME)/Zerm-Dependencies
 WHISPER_CPP_DIR := $(DEPS_DIR)/whisper.cpp
 FRAMEWORK_PATH := $(WHISPER_CPP_DIR)/build-apple/whisper.xcframework
+SHERPA_DIR := $(DEPS_DIR)/sherpa-onnx
+SHERPA_BUILD := $(SHERPA_DIR)/build-swift-macos
+SHERPA_XCFRAMEWORK := $(SHERPA_BUILD)/sherpa-onnx.xcframework
+ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 
-.PHONY: all clean whisper setup build local check healthcheck help dev run install reset-permissions
+.PHONY: all clean whisper sherpa setup build local check healthcheck help dev run install reset-permissions
 
 # Default target
 all: check build
@@ -37,9 +41,29 @@ whisper:
 		echo "whisper.xcframework already built in $(DEPS_DIR), skipping build"; \
 	fi
 
-setup: whisper
+# Build sherpa-onnx + onnxruntime xcframeworks for on-device Kokoro TTS (Read Aloud feature)
+sherpa:
+	@mkdir -p $(DEPS_DIR)
+	@if [ ! -d "$(SHERPA_XCFRAMEWORK)" ]; then \
+		echo "Building sherpa-onnx.xcframework in $(DEPS_DIR)..."; \
+		if [ ! -d "$(SHERPA_DIR)" ]; then \
+			git clone --depth 1 https://github.com/k2-fsa/sherpa-onnx.git $(SHERPA_DIR); \
+		fi; \
+		cd $(SHERPA_DIR) && ./build-swift-macos.sh; \
+	else \
+		echo "sherpa-onnx.xcframework already built, skipping"; \
+	fi
+	@if [ ! -d "$(ONNX_XCFRAMEWORK)" ]; then \
+		echo "Packaging onnxruntime.xcframework..."; \
+		cd $(SHERPA_BUILD) && xcodebuild -create-xcframework -library install/lib/libonnxruntime.a -output onnxruntime.xcframework; \
+	else \
+		echo "onnxruntime.xcframework already built, skipping"; \
+	fi
+
+setup: whisper sherpa
 	@echo "Whisper framework is ready at $(FRAMEWORK_PATH)"
-	@echo "Please ensure your Xcode project references the framework from this new location."
+	@echo "sherpa-onnx framework is ready at $(SHERPA_XCFRAMEWORK)"
+	@echo "Please ensure your Xcode project references the frameworks from these locations."
 
 build: setup
 	xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug CODE_SIGN_IDENTITY="" build

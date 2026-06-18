@@ -16,6 +16,8 @@ struct TextToSpeechSettingsView: View {
     /// Does not call `registerHotkey()`, so it never double-binds the global shortcut.
     @StateObject private var previewController = TTSController()
 
+    @ObservedObject private var kokoro = KokoroModelManager.shared
+
     private enum VerifyState: Equatable {
         case idle, verifying, valid, invalid(String)
     }
@@ -53,6 +55,10 @@ struct TextToSpeechSettingsView: View {
 
                 if provider.requiresAPIKey {
                     apiKeySection
+                }
+
+                if providerKind.isLocal {
+                    kokoroDownloadCard
                 }
 
                 previewSection
@@ -165,14 +171,61 @@ struct TextToSpeechSettingsView: View {
             } label: {
                 Label(isPreviewing ? "Speaking…" : "Preview voice", systemImage: "play.circle.fill")
             }
-            .disabled(isPreviewing)
-
-            if providerKind.isLocal {
-                Text("On-device Kokoro voices arrive in a later update (#210).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            .disabled(isPreviewing || (providerKind.isLocal && !kokoro.isInstalled))
             Spacer()
+        }
+    }
+
+    /// On-device model download card — the TTS mirror of the Whisper model card.
+    @ViewBuilder
+    private var kokoroDownloadCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "cpu")
+                    Text(KokoroModelManager.package.displayName).font(.headline)
+                    Spacer()
+                    Text(KokoroModelManager.package.approxSize)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                if kokoro.isInstalled {
+                    HStack {
+                        Label("Downloaded — runs fully offline", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Spacer()
+                        Button(role: .destructive) { kokoro.delete() } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                } else if kokoro.isDownloading {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: kokoro.downloadProgress ?? 0)
+                        HStack {
+                            Text(kokoro.statusText ?? "Downloading…")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if let p = kokoro.downloadProgress {
+                                Text("\(Int(p * 100))%").font(.caption.monospacedDigit())
+                            }
+                            Button("Cancel") { kokoro.cancelDownload() }
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("Download once to use Kokoro offline. No API key needed.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { Task { await kokoro.download() } } label: {
+                            Label("Download model", systemImage: "arrow.down.circle")
+                        }
+                    }
+                    if let status = kokoro.statusText {
+                        Text(status).font(.caption).foregroundStyle(.red)
+                    }
+                }
+            }
+            .padding(8)
         }
     }
 
