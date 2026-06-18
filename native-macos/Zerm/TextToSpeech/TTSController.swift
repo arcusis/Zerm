@@ -91,26 +91,59 @@ final class TTSController: ObservableObject {
             return
         }
 
+        let speed = TTSSettings.speed
+        let chunks = Self.splitIntoChunks(text)
+
         isSpeaking = true
         recorderUIManager?.beginSpeaking()
+        player.startStreaming { [weak self] in
+            self?.isSpeaking = false
+            self?.recorderUIManager?.endSpeaking()
+        }
+
+        var startedPlaying = false
         do {
-            let audio = try await provider.synthesize(text: text, voice: voice, speed: TTSSettings.speed, apiKey: apiKey)
-            if Task.isCancelled { isSpeaking = false; recorderUIManager?.endSpeaking(); return }
-            recorderUIManager?.markSpeechPlaying()   // "Preparing…" → live audio bars
-            try player.play(audio) { [weak self] in
-                self?.isSpeaking = false
-                self?.recorderUIManager?.endSpeaking()
+            for chunk in chunks {
+                try Task.checkCancellation()
+                let audio = try await provider.synthesize(text: chunk, voice: voice, speed: speed, apiKey: apiKey)
+                try Task.checkCancellation()
+                try player.enqueue(audio)
+                if !startedPlaying {
+                    startedPlaying = true
+                    recorderUIManager?.markSpeechPlaying()   // first chunk → live audio bars
+                }
             }
+            player.finishEnqueueing()
             TTSSettings.recordReadAloud(of: text)
         } catch is CancellationError {
-            isSpeaking = false
-            recorderUIManager?.endSpeaking()
+            // stop() already cleaned up the widget + player.
         } catch {
+            player.stop()
             isSpeaking = false
             recorderUIManager?.endSpeaking()
             logger.error("Read Aloud failed: \(error.localizedDescription, privacy: .public)")
             notify("Read Aloud failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Splits text into sentence-based chunks. The first chunk is a single sentence (so audio
+    /// starts fast); later chunks accumulate to ~220 chars to limit per-chunk overhead.
+    private static func splitIntoChunks(_ text: String) -> [String] {
+        var chunks: [String] = []
+        var current = ""
+        text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { sub, _, _, _ in
+            guard let sub, !sub.isEmpty else { return }
+            current += sub
+            let threshold = chunks.isEmpty ? 1 : 220
+            if current.count >= threshold {
+                chunks.append(current)
+                current = ""
+            }
+        }
+        if !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            chunks.append(current)
+        }
+        return chunks.isEmpty ? [text] : chunks
     }
 
     private func notify(_ message: String) {
