@@ -20,6 +20,7 @@ struct ZermApp: App {
     @StateObject private var hotkeyManager: HotkeyManager
     @StateObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var menuBarManager: MenuBarManager
+    @StateObject private var ttsController: TTSController
     @StateObject private var aiService = AIService()
     @StateObject private var enhancementService: AIEnhancementService
     @StateObject private var activeWindowService = ActiveWindowService.shared
@@ -149,6 +150,11 @@ struct ZermApp: App {
         _menuBarManager = StateObject(wrappedValue: menuBarManager)
         menuBarManager.configure(modelContainer: container, engine: engine)
 
+        // Read Aloud (text-to-speech) — mirror of the dictation flow.
+        let ttsController = TTSController()
+        ttsController.registerHotkey()
+        _ttsController = StateObject(wrappedValue: ttsController)
+
         let activeWindowService = ActiveWindowService.shared
         activeWindowService.configure(with: enhancementService)
         _activeWindowService = StateObject(wrappedValue: activeWindowService)
@@ -259,6 +265,7 @@ struct ZermApp: App {
                     .environmentObject(hotkeyManager)
                     .environmentObject(updaterViewModel)
                     .environmentObject(menuBarManager)
+                    .environmentObject(ttsController)
                     .environmentObject(aiService)
                     .environmentObject(enhancementService)
                     .modelContainer(container)

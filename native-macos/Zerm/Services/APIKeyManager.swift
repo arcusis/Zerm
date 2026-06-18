@@ -20,6 +20,8 @@ final class APIKeyManager {
         "speechmatics": "speechmaticsAPIKey",
         "xai": "xaiAPIKey",
         "openai": "openAIAPIKey",
+        "inworld": "inworldAPIKey",
+        "cartesia": "cartesiaAPIKey",
         "anthropic": "anthropicAPIKey",
         "openrouter": "openRouterAPIKey"
     ]
