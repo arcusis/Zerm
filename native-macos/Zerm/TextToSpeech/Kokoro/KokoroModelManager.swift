@@ -172,6 +172,14 @@ final class KokoroModelManager: ObservableObject {
         return TTSAudio(pcm: Self.floatToInt16PCM(samples), sampleRate: Double(sampleRate), channels: 1)
     }
 
+    /// Pre-loads the model in the background when Kokoro is the selected provider, so the
+    /// first read-aloud is instant instead of a cold ~330 MB load.
+    func prewarmIfNeeded() async {
+        guard isInstalled, TTSSettings.providerKind == .kokoro else { return }
+        let engine = ensureEngine()
+        try? await engine.warmUp()
+    }
+
     private func ensureEngine() -> KokoroEngine {
         if let engine { return engine }
         let cfg = modelConfig

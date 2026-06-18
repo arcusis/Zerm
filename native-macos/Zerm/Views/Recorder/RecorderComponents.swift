@@ -314,7 +314,10 @@ struct RecorderStatusDisplay: View {
 
     var body: some View {
         Group {
-            if currentState == .speaking {
+            if currentState == .preparingSpeech {
+                // Read Aloud is synthesizing — show a loading indicator until audio starts.
+                ProcessingStatusDisplay(mode: .preparing, color: .white).transition(.opacity)
+            } else if currentState == .speaking {
                 // Read Aloud shows the same animated bars as recording, driven by the TTS
                 // output level (see TTSPlayer metering tap → recorder.audioMeter).
                 AudioVisualizer(audioMeter: audioMeter, color: .white, isActive: true)

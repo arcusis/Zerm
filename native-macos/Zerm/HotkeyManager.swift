@@ -71,7 +71,7 @@ class HotkeyManager: ObservableObject {
 
     // MARK: - Helper Properties
     private var canProcessHotkeyAction: Bool {
-        engine.recordingState != .transcribing && engine.recordingState != .enhancing && engine.recordingState != .busy && engine.recordingState != .speaking
+        engine.recordingState != .transcribing && engine.recordingState != .enhancing && engine.recordingState != .busy && engine.recordingState != .speaking && engine.recordingState != .preparingSpeech
     }
     
     // NSEvent monitoring for modifier keys
