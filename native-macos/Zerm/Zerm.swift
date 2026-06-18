@@ -176,6 +176,9 @@ struct ZermApp: App {
             await recorderUIManager.resetOnLaunch()
         }
 
+        // Pre-warm the on-device Read Aloud model so the first read is instant.
+        Task { await KokoroModelManager.shared.prewarmIfNeeded() }
+
         AppShortcuts.updateAppShortcutParameters()
 
         // Start cleanup service for the app's lifetime, not tied to window lifecycle

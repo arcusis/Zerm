@@ -273,6 +273,8 @@ struct TextToSpeechSettingsView: View {
             apiKey = ""
         }
         verifyState = .idle
+        // Warm up the on-device model when Kokoro is selected so the first read is instant.
+        Task { await kokoro.prewarmIfNeeded() }
     }
 
     private func saveAndVerify() async {

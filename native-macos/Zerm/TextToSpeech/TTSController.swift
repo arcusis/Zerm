@@ -96,6 +96,7 @@ final class TTSController: ObservableObject {
         do {
             let audio = try await provider.synthesize(text: text, voice: voice, speed: TTSSettings.speed, apiKey: apiKey)
             if Task.isCancelled { isSpeaking = false; recorderUIManager?.endSpeaking(); return }
+            recorderUIManager?.markSpeechPlaying()   // "Preparing…" → live audio bars
             try player.play(audio) { [weak self] in
                 self?.isSpeaking = false
                 self?.recorderUIManager?.endSpeaking()

@@ -57,23 +57,36 @@ class RecorderUIManager: ObservableObject {
     /// Stops Read Aloud playback. Set by the app to TTSController.stop().
     var onCancelSpeaking: (() -> Void)?
 
+    /// True while Read Aloud owns the widget (synthesizing or playing).
+    var isReadAloudActive: Bool {
+        engine?.recordingState == .speaking || engine?.recordingState == .preparingSpeech
+    }
+
     /// Whether Read Aloud may start — only when nothing else is using the recorder.
     var canStartSpeaking: Bool {
         guard let engine = engine else { return true }
         return engine.recordingState == .idle && !isMiniRecorderVisible
     }
 
-    /// Shows the recorder widget in "Speaking" mode (no microphone/recording).
+    /// Shows the recorder widget in the "Preparing…" loading state (no microphone/recording).
     func beginSpeaking() {
         guard let engine = engine else { return }
-        engine.recordingState = .speaking
+        engine.recordingState = .preparingSpeech
         isMiniRecorderVisible = true
+    }
+
+    /// Switches the widget from "Preparing…" to the live audio bars once playback starts.
+    func markSpeechPlaying() {
+        guard let engine = engine else { return }
+        if engine.recordingState == .preparingSpeech {
+            engine.recordingState = .speaking
+        }
     }
 
     /// Hides the widget after Read Aloud finishes or is cancelled.
     func endSpeaking() {
         guard let engine = engine else { return }
-        if engine.recordingState == .speaking {
+        if isReadAloudActive {
             engine.recordingState = .idle
         }
         isMiniRecorderVisible = false
@@ -81,7 +94,7 @@ class RecorderUIManager: ObservableObject {
 
     /// Cancels whatever the recorder is currently doing — Read Aloud or a recording.
     func cancelActiveOperation() async {
-        if engine?.recordingState == .speaking {
+        if isReadAloudActive {
             onCancelSpeaking?()
         } else {
             await cancelRecording()
@@ -122,7 +135,7 @@ class RecorderUIManager: ObservableObject {
         logger.notice("toggleMiniRecorder called – visible=\(self.isMiniRecorderVisible, privacy: .public), state=\(String(describing: engine.recordingState), privacy: .public)")
 
         // If Read Aloud is using the widget, this gesture stops it (don't start a recording).
-        if engine.recordingState == .speaking {
+        if isReadAloudActive {
             onCancelSpeaking?()
             return
         }
@@ -149,7 +162,7 @@ class RecorderUIManager: ObservableObject {
         guard let engine = engine, let recorder = recorder else { return }
         logger.notice("dismissMiniRecorder called – state=\(String(describing: engine.recordingState), privacy: .public)")
 
-        if engine.recordingState == .speaking {
+        if isReadAloudActive {
             onCancelSpeaking?()
             return
         }

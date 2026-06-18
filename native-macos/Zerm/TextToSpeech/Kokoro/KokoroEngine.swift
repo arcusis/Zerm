@@ -33,6 +33,11 @@ actor KokoroEngine {
         tts = wrapper
     }
 
+    /// Loads the model ahead of time so the first `generate` is instant.
+    func warmUp() throws {
+        try ensureLoaded()
+    }
+
     func generate(text: String, sid: Int, speed: Float) throws -> (samples: [Float], sampleRate: Int) {
         try ensureLoaded()
         guard let tts else { throw TTSError.notAvailable("Kokoro engine unavailable.") }
