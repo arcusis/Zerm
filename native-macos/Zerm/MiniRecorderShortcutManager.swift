@@ -90,7 +90,7 @@ class MiniRecorderShortcutManager: ObservableObject {
                 if let firstTime = self.escFirstPressTime,
                    now.timeIntervalSince(firstTime) <= self.escSecondPressThreshold {
                     self.escFirstPressTime = nil
-                    await self.recorderUIManager.cancelRecording()
+                    await self.recorderUIManager.cancelActiveOperation()
                 } else {
                     self.escFirstPressTime = now
                     SoundManager.shared.playEscSound()
@@ -127,7 +127,7 @@ class MiniRecorderShortcutManager: ObservableObject {
                       await self.recorderUIManager.isMiniRecorderVisible,
                       KeyboardShortcuts.getShortcut(for: .cancelRecorder) != nil else { return }
 
-                await self.recorderUIManager.cancelRecording()
+                await self.recorderUIManager.cancelActiveOperation()
             }
         }
     }

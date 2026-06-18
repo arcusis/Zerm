@@ -153,8 +153,9 @@ struct ZermApp: App {
         // Read Aloud (text-to-speech) — mirror of the dictation flow.
         // HotkeyManager owns the trigger (modifier-key dropdown or custom shortcut),
         // consistent with dictation; it calls back into the controller.
-        let ttsController = TTSController()
+        let ttsController = TTSController(engine: engine, recorderUIManager: recorderUIManager)
         hotkeyManager.onReadAloudTriggered = { [weak ttsController] in ttsController?.toggle() }
+        recorderUIManager.onCancelSpeaking = { [weak ttsController] in ttsController?.stop() }
         _ttsController = StateObject(wrappedValue: ttsController)
 
         let activeWindowService = ActiveWindowService.shared
