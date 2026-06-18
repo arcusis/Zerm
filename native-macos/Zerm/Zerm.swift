@@ -151,8 +151,10 @@ struct ZermApp: App {
         menuBarManager.configure(modelContainer: container, engine: engine)
 
         // Read Aloud (text-to-speech) — mirror of the dictation flow.
+        // HotkeyManager owns the trigger (modifier-key dropdown or custom shortcut),
+        // consistent with dictation; it calls back into the controller.
         let ttsController = TTSController()
-        ttsController.registerHotkey()
+        hotkeyManager.onReadAloudTriggered = { [weak ttsController] in ttsController?.toggle() }
         _ttsController = StateObject(wrappedValue: ttsController)
 
         let activeWindowService = ActiveWindowService.shared
