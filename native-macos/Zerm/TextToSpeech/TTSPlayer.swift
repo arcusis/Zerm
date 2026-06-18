@@ -11,6 +11,10 @@ final class TTSPlayer {
     private var attached = false
     private var currentSampleRate: Double = 0
     private var currentChannels: AVAudioChannelCount = 0
+    private var tapInstalled = false
+
+    /// Output level (0...1) during playback, so the recorder widget can show live bars.
+    var onLevel: ((Double) -> Void)?
 
     init() {
         engine.attach(playerNode)
@@ -61,7 +65,10 @@ final class TTSPlayer {
             try engine.start()
         }
 
-        playerNode.scheduleBuffer(buffer, at: nil, options: []) {
+        installMeteringTap()
+
+        playerNode.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            self?.teardownMeteringTap()
             DispatchQueue.main.async { onFinished() }
         }
         playerNode.play()
@@ -71,7 +78,40 @@ final class TTSPlayer {
         if playerNode.isPlaying {
             playerNode.stop()
         }
+        teardownMeteringTap()
     }
 
     var isPlaying: Bool { playerNode.isPlaying }
+
+    // MARK: - Output level metering (drives the widget's audio bars)
+
+    private func installMeteringTap() {
+        guard !tapInstalled else { return }
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            let level = TTSPlayer.rms(buffer)
+            DispatchQueue.main.async { self?.onLevel?(level) }
+        }
+        tapInstalled = true
+    }
+
+    private func teardownMeteringTap() {
+        guard tapInstalled else { return }
+        engine.mainMixerNode.removeTap(onBus: 0)
+        tapInstalled = false
+        DispatchQueue.main.async { [weak self] in self?.onLevel?(0) }
+    }
+
+    private static func rms(_ buffer: AVAudioPCMBuffer) -> Double {
+        guard let data = buffer.floatChannelData else { return 0 }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return 0 }
+        let ch0 = data[0]
+        var sum: Float = 0
+        for i in 0..<frames {
+            let s = ch0[i]
+            sum += s * s
+        }
+        let rms = (sum / Float(frames)).squareRoot()
+        return Double(min(1.0, rms * 3.5)) // gain for visual punch
+    }
 }
