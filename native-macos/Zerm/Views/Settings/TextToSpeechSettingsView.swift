@@ -17,6 +17,7 @@ struct TextToSpeechSettingsView: View {
     @StateObject private var previewController = TTSController()
 
     @ObservedObject private var kokoro = KokoroModelManager.shared
+    @EnvironmentObject private var hotkeyManager: HotkeyManager
 
     private enum VerifyState: Equatable {
         case idle, verifying, valid, invalid(String)
@@ -82,11 +83,40 @@ struct TextToSpeechSettingsView: View {
     }
 
     private var shortcutRow: some View {
-        HStack {
-            Label("Shortcut", systemImage: "command")
-            Spacer()
-            KeyboardShortcuts.Recorder(for: .readSelectedTextAloud)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Trigger key", systemImage: "command")
+                Spacer()
+                Picker("", selection: $hotkeyManager.readAloudHotkey) {
+                    ForEach(HotkeyManager.HotkeyOption.allCases, id: \.self) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 240)
+            }
+
+            if hotkeyManager.readAloudHotkey == .custom {
+                HStack {
+                    Text("Custom shortcut").foregroundStyle(.secondary)
+                    Spacer()
+                    KeyboardShortcuts.Recorder(for: .readSelectedTextAloud)
+                }
+            }
+
+            if readAloudHotkeyConflictsWithDictation {
+                Label("This key is also your dictation hotkey — pick a different one to avoid both firing.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
+    }
+
+    private var readAloudHotkeyConflictsWithDictation: Bool {
+        let key = hotkeyManager.readAloudHotkey
+        guard key != .none, key != .custom else { return false }
+        return key == hotkeyManager.selectedHotkey1 || key == hotkeyManager.selectedHotkey2
     }
 
     private var providerRow: some View {

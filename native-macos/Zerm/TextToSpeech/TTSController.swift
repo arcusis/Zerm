@@ -20,13 +20,6 @@ final class TTSController: ObservableObject {
 
     init() {}
 
-    /// Registers the global Read Aloud shortcut. Call exactly once, from app startup.
-    func registerHotkey() {
-        KeyboardShortcuts.onKeyDown(for: .readSelectedTextAloud) { [weak self] in
-            self?.toggle()
-        }
-    }
-
     /// Hotkey action: start reading the selection, or stop if already speaking.
     func toggle() {
         guard TTSSettings.isEnabled else { return }

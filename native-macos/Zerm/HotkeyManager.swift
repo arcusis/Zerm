@@ -52,7 +52,17 @@ class HotkeyManager: ObservableObject {
             UserDefaults.standard.set(middleClickActivationDelay, forKey: "middleClickActivationDelay")
         }
     }
-    
+    /// Modifier key (or Custom) that triggers Read Aloud, mirroring the dictation hotkey dropdown.
+    @Published var readAloudHotkey: HotkeyOption {
+        didSet {
+            UserDefaults.standard.set(readAloudHotkey.rawValue, forKey: "readAloudHotkey")
+            setupHotkeyMonitoring()
+        }
+    }
+    /// Invoked when the Read Aloud trigger fires (wired to TTSController.toggle()).
+    var onReadAloudTriggered: (() -> Void)?
+    private var readAloudKeyState = false
+
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "HotkeyManager")
     private var engine: ZermEngine
     private var recorderUIManager: RecorderUIManager
@@ -163,6 +173,7 @@ class HotkeyManager: ObservableObject {
 
         self.isMiddleClickToggleEnabled = UserDefaults.standard.bool(forKey: "isMiddleClickToggleEnabled")
         self.middleClickActivationDelay = UserDefaults.standard.integer(forKey: "middleClickActivationDelay")
+        self.readAloudHotkey = HotkeyOption(rawValue: UserDefaults.standard.string(forKey: "readAloudHotkey") ?? "") ?? .none
 
         self.engine = engine
         self.recorderUIManager = recorderUIManager
@@ -228,7 +239,7 @@ class HotkeyManager: ObservableObject {
     
     private func setupModifierKeyMonitoring() {
         // Only set up if at least one hotkey is a modifier key
-        guard (selectedHotkey1.isModifierKey && selectedHotkey1 != .none) || (selectedHotkey2.isModifierKey && selectedHotkey2 != .none) else { return }
+        guard (selectedHotkey1.isModifierKey && selectedHotkey1 != .none) || (selectedHotkey2.isModifierKey && selectedHotkey2 != .none) || (readAloudHotkey.isModifierKey && readAloudHotkey != .none) else { return }
 
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self = self else { return }
@@ -316,6 +327,11 @@ class HotkeyManager: ObservableObject {
                 Task { @MainActor in await self?.handleCustomShortcutKeyUp(eventTime: eventTime, mode: self?.hotkeyMode2 ?? .toggle) }
             }
         }
+        if readAloudHotkey == .custom {
+            KeyboardShortcuts.onKeyDown(for: .readSelectedTextAloud) { [weak self] in
+                Task { @MainActor in self?.onReadAloudTriggered?() }
+            }
+        }
     }
     
     private func removeAllMonitoring() {
@@ -353,12 +369,34 @@ class HotkeyManager: ObservableObject {
         shortcutCurrentKeyState = false
         shortcutKeyPressEventTime = nil
         isShortcutHandsFreeMode = false
+        readAloudKeyState = false
     }
     
+    static func isModifierPressed(_ option: HotkeyOption, flags: NSEvent.ModifierFlags) -> Bool {
+        switch option {
+        case .rightOption, .leftOption: return flags.contains(.option)
+        case .leftControl, .rightControl: return flags.contains(.control)
+        case .fn: return flags.contains(.function)
+        case .rightCommand: return flags.contains(.command)
+        case .rightShift: return flags.contains(.shift)
+        case .custom, .none: return false
+        }
+    }
+
     private func handleModifierKeyEvent(_ event: NSEvent) async {
         let keycode = event.keyCode
         let flags = event.modifierFlags
         let eventTime = event.timestamp
+
+        // Read Aloud trigger — independent of dictation. Simple tap-to-toggle on key down.
+        if readAloudHotkey.isModifierKey, readAloudHotkey != .none, readAloudHotkey.keyCode == keycode {
+            let pressed = Self.isModifierPressed(readAloudHotkey, flags: flags)
+            if pressed != readAloudKeyState {
+                readAloudKeyState = pressed
+                if pressed { onReadAloudTriggered?() }
+            }
+            return
+        }
 
         let activeMode: HotkeyMode
         let activeHotkey: HotkeyOption?
