@@ -41,7 +41,10 @@ final class TTSController: ObservableObject {
             stop()
             return
         }
-        task = Task { await self.speakSelection() }
+        // Show the widget INSTANTLY (before fetching text / synthesizing) so Read Aloud feels
+        // as immediate as dictation; the fetch + synthesis happen asynchronously after.
+        guard startSession() else { return }
+        task = Task { await self.fetchAndSpeak() }
     }
 
     func stop() {
@@ -52,50 +55,63 @@ final class TTSController: ObservableObject {
         recorderUIManager?.endSpeaking()
     }
 
-    /// Reads whatever text is currently selected system-wide.
-    func speakSelection() async {
-        guard let raw = await SelectedTextService.fetchSelectedText(),
-              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            notify("No text selected")
-            SoundManager.shared.playEscSound()
-            return
-        }
-        await speak(raw)
+    /// Synthesizes and plays arbitrary text (e.g. the settings Preview button).
+    func speak(_ text: String) async {
+        guard startSession() else { return }
+        await synthesizeAndPlay(text)
     }
 
-    /// Synthesizes and plays arbitrary text using the configured provider/voice.
-    func speak(_ text: String) async {
-        // Mutual exclusion: never run Read Aloud while dictation owns the recorder widget.
+    /// Reserves the recorder widget and shows the "Preparing…" state immediately.
+    private func startSession() -> Bool {
         if let rm = recorderUIManager, !rm.canStartSpeaking {
             notify("Finish or cancel dictation before using Read Aloud")
             SoundManager.shared.playEscSound()
+            return false
+        }
+        isSpeaking = true
+        recorderUIManager?.beginSpeaking()
+        return true
+    }
+
+    private func endSession(_ message: String? = nil, beep: Bool = false) {
+        if let message { notify(message) }
+        if beep { SoundManager.shared.playEscSound() }
+        isSpeaking = false
+        recorderUIManager?.endSpeaking()
+    }
+
+    /// Reads whatever text is currently selected system-wide.
+    private func fetchAndSpeak() async {
+        guard let raw = await SelectedTextService.fetchSelectedText(),
+              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            endSession("No text selected", beep: true)
             return
         }
+        await synthesizeAndPlay(raw)
+    }
 
+    /// Chunked, streaming synthesis + playback. Assumes a session is already started.
+    private func synthesizeAndPlay(_ text: String) async {
         guard let provider = TTSProviderRegistry.provider(for: TTSSettings.providerKind) else {
-            notify("No speech provider selected")
-            return
+            endSession("No speech provider selected", beep: true); return
         }
 
         var apiKey = ""
         if let providerID = provider.apiKeyProviderID {
             apiKey = APIKeyManager.shared.getAPIKey(forProvider: providerID) ?? ""
             if provider.requiresAPIKey && apiKey.isEmpty {
-                notify("Add an API key for \(provider.displayName) in Read Aloud settings")
+                endSession("Add an API key for \(provider.displayName) in Read Aloud settings", beep: true)
                 return
             }
         }
 
         guard let voice = TTSSettings.resolvedVoice(for: provider) else {
-            notify("No voice available for \(provider.displayName)")
-            return
+            endSession("No voice available for \(provider.displayName)", beep: true); return
         }
 
         let speed = TTSSettings.speed
         let chunks = Self.splitIntoChunks(text)
 
-        isSpeaking = true
-        recorderUIManager?.beginSpeaking()
         player.startStreaming { [weak self] in
             self?.isSpeaking = false
             self?.recorderUIManager?.endSpeaking()
@@ -119,10 +135,8 @@ final class TTSController: ObservableObject {
             // stop() already cleaned up the widget + player.
         } catch {
             player.stop()
-            isSpeaking = false
-            recorderUIManager?.endSpeaking()
             logger.error("Read Aloud failed: \(error.localizedDescription, privacy: .public)")
-            notify("Read Aloud failed: \(error.localizedDescription)")
+            endSession("Read Aloud failed: \(error.localizedDescription)")
         }
     }
 
