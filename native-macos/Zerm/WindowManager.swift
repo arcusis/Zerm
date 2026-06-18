@@ -43,7 +43,19 @@ class WindowManager: NSObject {
         window.setFrameAutosaveName(Self.mainWindowAutosaveName)
         applyInitialPlacementIfNeeded(to: window)
         registerMainWindowIfNeeded(window)
-        window.orderFrontRegardless()
+
+        // Guard the recurring "stuck window" bug. In menu-bar-only mode the app runs as
+        // .accessory, where a visible main window cannot become key/active — it shows but
+        // can't take focus, so the whole UI looks frozen (can't navigate or change settings).
+        // SwiftUI's WindowGroup still instantiates the window at launch, and forcing it front
+        // here races MenuBarManager's hideMainWindow(). If we're .accessory, keep the window
+        // hidden; it is shown with .regular policy when opened from the menu bar.
+        if NSApplication.shared.activationPolicy() == .accessory {
+            logger.notice("configureWindow: app is .accessory (menu-bar-only) — keeping main window hidden to avoid an unfocusable window")
+            window.orderOut(nil)
+        } else {
+            window.orderFrontRegardless()
+        }
 
         // SwiftUI restores ITS OWN autosave frame (keyed by the full view-hierarchy
         // type string) AFTER this method returns, potentially overriding our placement.
