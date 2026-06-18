@@ -3,7 +3,8 @@ import KeyboardShortcuts
 import os
 
 extension KeyboardShortcuts.Name {
-    static let readSelectedTextAloud = Self("readSelectedTextAloud")
+    // Ships with a sensible default (⌃⌥R) so Read Aloud works out of the box; the user can rebind it.
+    static let readSelectedTextAloud = Self("readSelectedTextAloud", default: .init(.r, modifiers: [.control, .option]))
 }
 
 /// Orchestrates the Read Aloud feature: hotkey → fetch selected text → synthesize → play.
@@ -82,6 +83,7 @@ final class TTSController: ObservableObject {
             try player.play(audio) { [weak self] in
                 self?.isSpeaking = false
             }
+            TTSSettings.recordReadAloud(of: text)
         } catch is CancellationError {
             isSpeaking = false
         } catch {

@@ -75,6 +75,8 @@ enum TTSSettings {
         static let provider = "ttsProviderKind"
         static let speed = "ttsSpeed"
         static let restoreClipboard = "ttsRestoreClipboard"
+        static let wordsReadAloud = "ttsWordsReadAloud"
+        static let sessionsReadAloud = "ttsSessionsReadAloud"
         static func voice(for kind: TTSProviderKind) -> String { "ttsVoice_\(kind.rawValue)" }
     }
 
@@ -100,6 +102,18 @@ enum TTSSettings {
 
     static func setVoiceID(_ id: String, for kind: TTSProviderKind) {
         defaults.set(id, forKey: Keys.voice(for: kind))
+    }
+
+    // MARK: - Usage stats (shown on the Dashboard)
+
+    static var wordsReadAloud: Int { defaults.integer(forKey: Keys.wordsReadAloud) }
+    static var sessionsReadAloud: Int { defaults.integer(forKey: Keys.sessionsReadAloud) }
+
+    /// Records one successful Read Aloud of `text`.
+    static func recordReadAloud(of text: String) {
+        let words = text.split(whereSeparator: \.isWhitespace).count
+        defaults.set(wordsReadAloud + words, forKey: Keys.wordsReadAloud)
+        defaults.set(sessionsReadAloud + 1, forKey: Keys.sessionsReadAloud)
     }
 
     /// Resolves the selected voice for a provider, falling back to its first voice.

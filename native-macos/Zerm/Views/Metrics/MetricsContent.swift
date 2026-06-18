@@ -12,6 +12,7 @@ struct MetricsContent: View {
     @State private var totalDuration: TimeInterval = 0
     @State private var isLoadingMetrics: Bool = true
     @State private var metricsTask: Task<Void, Never>?
+    @AppStorage(TTSSettings.Keys.wordsReadAloud) private var wordsReadAloud: Int = 0
 
     var body: some View {
         Group {
@@ -224,6 +225,14 @@ struct MetricsContent: View {
                 value: Formatters.formattedNumber(totalKeystrokesSaved),
                 detail: "fewer keystrokes",
                 color: .orange
+            )
+
+            MetricCard(
+                icon: "speaker.wave.2.fill",
+                title: "Words Read Aloud",
+                value: Formatters.formattedNumber(wordsReadAloud),
+                detail: "spoken by Read Aloud",
+                color: .blue
             )
         }
     }
