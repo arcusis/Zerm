@@ -12,9 +12,9 @@ struct TextToSpeechSettingsView: View {
     @State private var verifyState: VerifyState = .idle
     @State private var isPreviewing = false
 
-    /// Retained so preview playback isn't cut off when the action returns.
-    /// Does not call `registerHotkey()`, so it never double-binds the global shortcut.
-    @StateObject private var previewController = TTSController()
+    /// The app-level controller (wired to the recorder widget), so Preview shows the same
+    /// "Speaking" widget a real trigger does — a reliable way to see Read Aloud working.
+    @EnvironmentObject private var ttsController: TTSController
 
     @ObservedObject private var kokoro = KokoroModelManager.shared
     @EnvironmentObject private var hotkeyManager: HotkeyManager
@@ -286,7 +286,7 @@ struct TextToSpeechSettingsView: View {
     private func preview() async {
         isPreviewing = true
         defer { isPreviewing = false }
-        await previewController.speak("This is how the selected voice sounds in Zerm.")
+        await ttsController.speak("This is how the selected voice sounds in Zerm.")
         // brief settle so synthesis can start before the button re-enables
         try? await Task.sleep(nanoseconds: 1_200_000_000)
     }

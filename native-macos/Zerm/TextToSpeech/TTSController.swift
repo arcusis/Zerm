@@ -107,5 +107,6 @@ final class TTSController: ObservableObject {
     private func notify(_ message: String) {
         statusMessage = message
         logger.notice("\(message, privacy: .public)")
+        NotificationManager.shared.showNotification(title: message, type: .info, duration: 3.0)
     }
 }
