@@ -53,7 +53,8 @@ final class TTSNaturalizer {
     ones pronounced as words (NASA, JSON).
     - Convert code, file paths, URLs, symbols, and log/error lines into plain spoken language \
     (e.g. "Error: ENOENT" → "there was a file-not-found error").
-    - Remove markup, formatting characters, and anything that shouldn't be spoken.
+    - Remove markup, emoji, and table/box-drawing characters, and anything that shouldn't be \
+    spoken — never read an emoji or symbol by its name (never say "white heavy check mark").
     - Expand abbreviations and read numbers, units, and currency naturally.
     - Output ONLY the text to be spoken. No preamble, no quotes, no explanations, no markdown.
     """

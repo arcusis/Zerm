@@ -50,6 +50,12 @@ enum TTSTextNormalizer {
         text = regexReplace(#"(?m)^\s*>\s?"#, in: text, with: "")
         text = regexReplace(#"(?m)^\s*\d+[.)]\s+"#, in: text, with: "")
 
+        // 1b. Emoji + symbol glyphs that TTS would otherwise read by their Unicode name
+        // ("✅" → "white heavy check mark"). Map the few that carry meaning, strip the rest
+        // along with box-drawing / table characters.
+        text = mapMeaningfulSymbols(text)
+        text = stripUnreadableScalars(text)
+
         // 2. Fenced code blocks: drop the fences, keep the contents.
         text = regexReplace(#"```[A-Za-z0-9_+-]*\n?"#, in: text, with: " ")
 
@@ -103,6 +109,49 @@ enum TTSTextNormalizer {
         text = regexReplace("([.])\\1{1,}", in: text, with: ".")
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Symbols & emoji
+
+    /// Status-bearing symbols a person would actually voice, mapped to short words.
+    private static let symbolWords: [(String, String)] = [
+        ("✅", " check "), ("✔️", " check "), ("✔", " check "), ("☑️", " check "), ("☑", " check "),
+        ("❌", " no "), ("✖️", " no "), ("✖", " no "), ("✗", " no "), ("✘", " no "),
+        ("⚠️", " warning "), ("⚠", " warning "), ("⛔", " stop "), ("🚫", " no "),
+        ("⭐", " star "), ("🌟", " star "), ("🔴", " red "), ("🟢", " green "), ("🟡", " yellow "),
+        ("❗", "! "), ("‼️", "! "), ("❓", "? "), ("➡️", " to "), ("→", " to ")
+    ]
+
+    private static func mapMeaningfulSymbols(_ text: String) -> String {
+        var t = text
+        for (symbol, word) in symbolWords {
+            t = t.replacingOccurrences(of: symbol, with: word)
+        }
+        return t
+    }
+
+    /// Replaces emoji, pictographs, and box-drawing/table glyphs with spaces so the synthesizer
+    /// never reads their Unicode names. Plain punctuation (dashes, quotes, ellipsis) is kept.
+    private static func stripUnreadableScalars(_ text: String) -> String {
+        let space = Unicode.Scalar(32)!
+        var view = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            view.append(shouldStrip(scalar) ? space : scalar)
+        }
+        return String(view)
+    }
+
+    private static func shouldStrip(_ s: Unicode.Scalar) -> Bool {
+        let v = s.value
+        // Variation selectors, zero-width joiner, skin-tone modifiers, regional indicators.
+        if (0xFE00...0xFE0F).contains(v) || v == 0x200D
+            || (0x1F3FB...0x1F3FF).contains(v) || (0x1F1E6...0x1F1FF).contains(v) { return true }
+        // Box drawing, block elements, geometric shapes (tables/diagrams).
+        if (0x2500...0x25FF).contains(v) { return true }
+        // Misc symbols, dingbats, arrows-as-symbols, supplemental pictographs.
+        if (0x2600...0x27BF).contains(v) || (0x2B00...0x2BFF).contains(v)
+            || (0x1F000...0x1FAFF).contains(v) { return true }
+        return s.properties.isEmojiPresentation
     }
 
     // MARK: - Spoken-form transforms
