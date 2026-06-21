@@ -15,7 +15,6 @@ Ad-hoc signing changes the hash on every build, orphaning TCC grants.
 
 **Fix:**
 ```bash
-cd native-macos
 make reset-permissions   # tccutil reset Accessibility + ScreenCapture for com.arcusis.zerm
 ```
 
@@ -29,7 +28,7 @@ tccutil reset ScreenCapture com.arcusis.zerm
 
 If multiple Zerm.app entries appear in Launchpad after rebuilds:
 ```bash
-cd native-macos && make install
+make install
 # make install already does: lsregister + Launchpad reset + tccutil reset
 ```
 

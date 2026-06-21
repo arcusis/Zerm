@@ -19,9 +19,6 @@ jobs:
   swift-build:
     name: Swift build (macOS)
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: native-macos
 
     steps:
       - uses: actions/checkout@v5
