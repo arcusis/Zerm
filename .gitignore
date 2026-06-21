@@ -53,3 +53,7 @@ models/*
 logs
 *.log
 output/
+
+# Release build artifacts
+.release-build/
+*.dmg
