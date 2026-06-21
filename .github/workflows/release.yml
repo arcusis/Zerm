@@ -5,7 +5,7 @@ name: Release
 # Current status: MANUAL
 #   DMG artifacts are built locally on a signed Apple Silicon Mac and uploaded
 #   to GitHub Releases with `gh release upload`. This is the documented process
-#   in native-macos/BUILDING.md.
+#   in BUILDING.md.
 #
 # Future: automate with a self-hosted macOS runner or GitHub's macos-latest
 #   once a Developer ID certificate is available for hardened-runtime signing.

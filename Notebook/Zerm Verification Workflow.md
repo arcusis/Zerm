@@ -5,7 +5,6 @@ Steps to verify a change before pushing.
 ## Build
 
 ```bash
-cd native-macos
 xcodebuild \
   -project Zerm.xcodeproj \
   -scheme Zerm \

@@ -78,7 +78,7 @@ Zerm is currently focused on macOS.
 
 ## Build From Source
 
-The actively developed native app lives in [native-macos/](./native-macos).
+The Xcode project lives at the repository root (`Zerm.xcodeproj`).
 
 Prerequisites:
 
@@ -90,31 +90,37 @@ Build from the command line:
 
 ```sh
 xcodebuild \
-  -project native-macos/Zerm.xcodeproj \
+  -project Zerm.xcodeproj \
   -scheme Zerm \
   -configuration Debug \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
-For detailed local build notes, see
-[native-macos/BUILDING.md](./native-macos/BUILDING.md).
+Or use the Makefile to build, sign ad-hoc, and install to `/Applications`:
+
+```sh
+make install
+```
+
+For detailed local build notes, see [BUILDING.md](./BUILDING.md).
 
 ## Project Structure
 
 | Path | Purpose |
 | --- | --- |
-| `native-macos/Zerm/` | Native Swift/SwiftUI macOS app |
-| `native-macos/Zerm/Transcription/` | Transcription engines, providers, and processing pipeline |
-| `native-macos/Zerm/PowerMode/` | App, URL, and context-aware prompt selection |
-| `native-macos/Zerm/Views/` | SwiftUI application interface |
-| `native-macos/Zerm/Services/` | App services, settings, dictionaries, model management, and integrations |
+| `Zerm.xcodeproj` | Xcode project (app target, tests) |
+| `Zerm/` | Native Swift/SwiftUI macOS app source |
+| `Zerm/Transcription/` | Speech-to-text engines, providers, and processing pipeline |
+| `Zerm/TextToSpeech/` | Read Aloud (text-to-speech) — providers, player, Kokoro |
+| `Zerm/LocalLLM/` | On-device LLM (llama.cpp / Gemma) for smart reading & enhancement |
+| `Zerm/PowerMode/` | App, URL, and context-aware prompt selection |
+| `Zerm/Views/` | SwiftUI application interface |
+| `Zerm/Services/` | App services, settings, dictionaries, model management, and integrations |
+| `Makefile` | Local build + ad-hoc install helpers |
 | `docs/` | GitHub Pages website |
 | `NOTICE` | Upstream attribution and derivative-work notes |
 | `LICENSE` | GPLv3 license text |
-
-The older Tauri files remain in the repository for historical continuity while
-the current product direction is the native macOS app.
 
 ## Privacy
 

@@ -24,9 +24,8 @@ This notebook captures durable project context for Zerm. Start here, then follow
 ## Quick Build Reference
 
 ```bash
-cd native-macos
 make local         # build + install to ~/Applications (unsigned, local dev)
 make reset-permissions  # tccutil reset Accessibility + ScreenCapture
 ```
 
-Full build guide: `native-macos/BUILDING.md`
+Full build guide: `BUILDING.md`

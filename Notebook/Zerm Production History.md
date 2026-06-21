@@ -44,12 +44,12 @@
 
 ## Release Process
 
-1. Build locally: `cd native-macos && xcodebuild -scheme Zerm ...` 
+1. Build locally: `xcodebuild -scheme Zerm ...` 
 2. Sign: Developer ID (or ad-hoc for internal builds)
 3. Create DMG, tag git: `git tag vX.Y.Z && git push origin vX.Y.Z`
 4. Upload to GitHub Releases: `gh release create vX.Y.Z Zerm_X.Y.Z_aarch64.dmg`
 5. CI `release.yml` validates the tag and checks for DMG asset
 
-Full process: `native-macos/BUILDING.md`
+Full process: `BUILDING.md`
 
 Related: [[Zerm Overview]], [[Zerm Known Follow Ups]]

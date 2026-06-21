@@ -13,23 +13,27 @@ Primary audience: developers and heavy text-entry users who dictate into coding 
 ## Repository Layout
 
 ```
-native-macos/          ← Xcode project (the actual app)
-  Zerm.xcodeproj
-  Zerm/                ← Swift source
-    Zerm.swift         ← @main App entry, dependency wiring
-    ZermEngine.swift   ← recording/transcription orchestrator
-    HotkeyManager.swift
-    CursorPaster.swift
-    CoreAudioRecorder.swift
-    Recorder.swift
-    ...
-  ZermTests/
-  ZermUITests/
-
+Zerm.xcodeproj         ← Xcode project (app target + tests), at the repo ROOT
+Zerm/                  ← Swift source
+  Zerm.swift           ← @main App entry, dependency wiring
+  ZermEngine.swift     ← recording/transcription orchestrator
+  HotkeyManager.swift
+  CursorPaster.swift
+  CoreAudioRecorder.swift
+  TextToSpeech/        ← Read Aloud (TTS): providers, player, Kokoro
+  LocalLLM/            ← on-device LLM (llama.cpp / Gemma)
+  ...
+ZermTests/
+ZermUITests/
+Makefile               ← local build + ad-hoc install
 docs/                  ← GitHub Pages website (docs/index.html)
 Notebook/              ← this Zettelkasten
-.github/workflows/     ← ci.yml, release.yml
+.github/workflows/     ← ci.yml, release.yml, pages.yml
 ```
+
+> The app used to live under `native-macos/` to sit alongside a since-removed
+> Tauri prototype. That prototype is gone, so the Xcode project now lives at the
+> repository root (matching VoiceInk's layout).
 
 ## Main Data Flow
 
