@@ -26,11 +26,18 @@ final class TTSNaturalizer {
         guard !trimmed.isEmpty else { return nil }
 
         do {
-            let result = try await llm.generate(system: Self.systemPrompt, user: trimmed,
+            // Completion-style framing: the text to transform is delimited and the turn ends on
+            // "REWRITTEN:" so the model continues with the rewrite instead of chatting back.
+            let userTurn = "TEXT:\n\(trimmed)\n\nREWRITTEN:"
+            let result = try await llm.generate(system: Self.instruction, user: userTurn,
                                                 maxNewTokens: maxTokens(for: trimmed),
                                                 isCancelled: isCancelled)
             let cleaned = Self.cleanup(result)
-            return cleaned.isEmpty ? nil : cleaned
+            guard Self.isUsableRewrite(cleaned, source: trimmed) else {
+                logger.notice("Naturalize produced a non-rewrite; falling back to cleaned text")
+                return nil
+            }
+            return cleaned
         } catch {
             logger.error("Naturalize failed: \(error.localizedDescription, privacy: .public)")
             return nil
@@ -43,27 +50,49 @@ final class TTSNaturalizer {
         return min(700, max(96, approx))
     }
 
-    private static let systemPrompt = """
-    You prepare written text to be read aloud by a text-to-speech voice. Rewrite the user's text \
-    so it sounds natural and clear when spoken by a person — not robotic.
+    /// Imperative, no second-person identity ("You are…" makes small models introduce themselves).
+    private static let instruction = """
+    Rewrite the text that appears after "TEXT:" so a text-to-speech voice can read it aloud \
+    naturally, the way a person would actually say it. This is a rewriting task only — do NOT \
+    answer the text, describe yourself, explain, or summarize.
 
     Rules:
-    - Keep the original meaning and all important information. Do not summarize or add new facts.
-    - Say acronyms the way a human would: spell out letter-acronyms (API → "A P I"), but keep \
-    ones pronounced as words (NASA, JSON).
-    - Convert code, file paths, URLs, symbols, and log/error lines into plain spoken language \
-    (e.g. "Error: ENOENT" → "there was a file-not-found error").
-    - Remove markup, emoji, and table/box-drawing characters, and anything that shouldn't be \
-    spoken — never read an emoji or symbol by its name (never say "white heavy check mark").
-    - Expand abbreviations and read numbers, units, and currency naturally.
-    - Output ONLY the text to be spoken. No preamble, no quotes, no explanations, no markdown.
+    - Keep all the meaning and information. Do not add new facts.
+    - Spell out letter-acronyms (API → "A P I") but keep word-acronyms (NASA, JSON).
+    - Turn code, file paths, URLs, symbols, emoji, and error/log lines into plain spoken words \
+    (e.g. "Error: ENOENT" → "there was a file-not-found error"). Never read an emoji or symbol by \
+    its name — never say things like "white heavy check mark" or "heavy right arrow".
+    - Remove markup and formatting. Expand abbreviations; read numbers and currency naturally.
+    - Reply with ONLY the spoken text, nothing else.
     """
+
+    /// Rejects degenerate model output (self-introductions, refusals, or wildly off-length),
+    /// so Read Aloud falls back to the deterministically-cleaned text instead of speaking junk.
+    private static func isUsableRewrite(_ out: String, source: String) -> Bool {
+        guard !out.isEmpty else { return false }
+        let lower = out.lowercased()
+        let badMarkers = [
+            "i am gemma", "i'm gemma", "i am a gemma", "an ai model", "i am an ai", "as an ai",
+            "language model", "from deepmind", "i cannot", "i can't", "i don't have",
+            "how can i help", "i'm here to help", "i am here to help", "as a large language"
+        ]
+        if badMarkers.contains(where: { lower.contains($0) }) { return false }
+
+        // A rewrite should be roughly comparable in length to the source.
+        let srcWords = source.split(whereSeparator: \.isWhitespace).count
+        let outWords = out.split(whereSeparator: \.isWhitespace).count
+        if srcWords >= 4 {
+            if outWords < max(2, srcWords / 3) { return false }
+            if outWords > srcWords * 3 + 25 { return false }
+        }
+        return true
+    }
 
     /// Strips any stray quoting/preamble the model might add despite instructions.
     private static func cleanup(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Drop a leading "Sure, here is..." style preamble line if present.
-        if let range = text.range(of: #"^(here('s| is)|sure|okay)[^\n:]*:\s*"#,
+        // Drop an echoed label or a "Sure, here is..." style preamble if present.
+        if let range = text.range(of: #"^(rewritten|text|here('s| is)|sure|okay)[^\n:]*:\s*"#,
                                   options: [.regularExpression, .caseInsensitive]) {
             text.removeSubrange(range)
         }
