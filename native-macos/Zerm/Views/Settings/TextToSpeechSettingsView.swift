@@ -6,6 +6,8 @@ struct TextToSpeechSettingsView: View {
     @AppStorage(TTSSettings.Keys.enabled) private var enabled = true
     @AppStorage(TTSSettings.Keys.provider) private var providerRaw = TTSProviderKind.deepgram.rawValue
     @AppStorage(TTSSettings.Keys.speed) private var speed = 1.0
+    @AppStorage(TTSSettings.Keys.smartCleanup) private var smartCleanup = true
+    @AppStorage(TTSSettings.Keys.naturalReadingAI) private var naturalReadingAI = false
 
     @State private var voiceID: String = ""
     @State private var apiKey: String = ""
@@ -17,6 +19,7 @@ struct TextToSpeechSettingsView: View {
     @EnvironmentObject private var ttsController: TTSController
 
     @ObservedObject private var kokoro = KokoroModelManager.shared
+    @ObservedObject private var localLLM = LocalLLMModelManager.shared
     @EnvironmentObject private var hotkeyManager: HotkeyManager
 
     private enum VerifyState: Equatable {
@@ -53,6 +56,8 @@ struct TextToSpeechSettingsView: View {
                     }
                     .padding(8)
                 }
+
+                smartReadingSection
 
                 if provider.requiresAPIKey {
                     apiKeySection
@@ -160,6 +165,37 @@ struct TextToSpeechSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: $speed, in: 0.5...2.0, step: 0.05)
+        }
+    }
+
+    /// Smart reading: instant rules (always available) + the on-device LLM rewrite.
+    private var smartReadingSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Smart reading")
+                    .font(.headline)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Smart text cleanup", isOn: $smartCleanup)
+                    Text("Instantly reads acronyms, URLs, file paths, code, and symbols the way a person would — offline, no delay.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Natural reading (AI)", isOn: $naturalReadingAI)
+                        .disabled(!localLLM.isInstalled)
+                    Text("Rewrites text into natural spoken language using Zerm's on-device model before reading. Fully offline; adds a moment before the first word.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                LocalLLMModelCardView()
+            }
+            .padding(8)
+        }
+        .onChange(of: naturalReadingAI) { _, on in
+            if on { Task { await localLLM.prewarmIfNeeded() } }
         }
     }
 

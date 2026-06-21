@@ -77,6 +77,8 @@ enum TTSSettings {
         static let restoreClipboard = "ttsRestoreClipboard"
         static let wordsReadAloud = "ttsWordsReadAloud"
         static let sessionsReadAloud = "ttsSessionsReadAloud"
+        static let smartCleanup = "ttsSmartCleanup"
+        static let naturalReadingAI = "ttsNaturalReadingAI"
         static func voice(for kind: TTSProviderKind) -> String { "ttsVoice_\(kind.rawValue)" }
     }
 
@@ -94,6 +96,18 @@ enum TTSSettings {
     static var speed: Double {
         get { defaults.object(forKey: Keys.speed) as? Double ?? 1.0 }
         set { defaults.set(newValue, forKey: Keys.speed) }
+    }
+
+    /// Instant, offline text cleanup (acronyms, URLs, code, symbols). On by default.
+    static var smartCleanup: Bool {
+        get { defaults.object(forKey: Keys.smartCleanup) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.smartCleanup) }
+    }
+
+    /// On-device LLM rewrite into natural spoken language. Off by default (needs the model).
+    static var naturalReadingAI: Bool {
+        get { defaults.object(forKey: Keys.naturalReadingAI) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Keys.naturalReadingAI) }
     }
 
     static func voiceID(for kind: TTSProviderKind) -> String? {
