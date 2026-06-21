@@ -143,21 +143,20 @@ final class TTSController: ObservableObject {
         }
     }
 
-    /// Makes the selection sound human before synthesis. The on-device LLM rewrite (when enabled
-    /// and downloaded) takes precedence; otherwise the instant offline normalizer cleans it up.
-    /// Either way we fall back to the original text so Read Aloud never fails on preprocessing.
+    /// Makes the selection sound human before synthesis. The instant offline normalizer ALWAYS
+    /// runs first (so emoji/symbols/markup are stripped no matter what); the on-device LLM then
+    /// refines that clean text into natural prose. If the model misbehaves (e.g. answers instead
+    /// of rewriting) the naturalizer returns nil and we speak the cleaned text — never junk.
     private func prepareSpokenText(from raw: String) async -> String {
+        let base = TTSSettings.smartCleanup ? TTSTextNormalizer.normalize(raw) : raw
+        let cleaned = base.isEmpty ? raw : base
+
         if TTSSettings.naturalReadingAI, naturalizer.isModelInstalled {
-            if let rewritten = await naturalizer.naturalize(raw, isCancelled: { Task.isCancelled }),
-               !rewritten.isEmpty {
+            if let rewritten = await naturalizer.naturalize(cleaned, isCancelled: { Task.isCancelled }) {
                 return rewritten
             }
         }
-        if TTSSettings.smartCleanup {
-            let normalized = TTSTextNormalizer.normalize(raw)
-            if !normalized.isEmpty { return normalized }
-        }
-        return raw
+        return cleaned
     }
 
     /// Splits text into sentence-based chunks. The first chunk is a single sentence (so audio
