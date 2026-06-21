@@ -51,10 +51,11 @@ final class TTSNaturalizer {
     }
 
     /// Imperative, no second-person identity ("You are…" makes small models introduce themselves).
+    /// A one-shot example anchors the format for the small model and prevents chatty replies.
     private static let instruction = """
     Rewrite the text that appears after "TEXT:" so a text-to-speech voice can read it aloud \
-    naturally, the way a person would actually say it. This is a rewriting task only — do NOT \
-    answer the text, describe yourself, explain, or summarize.
+    naturally — clear, warm, and conversational, the way a person would actually say it out loud. \
+    This is a rewriting task only — do NOT answer the text, describe yourself, explain, or summarize.
 
     Rules:
     - Keep all the meaning and information. Do not add new facts.
@@ -63,7 +64,14 @@ final class TTSNaturalizer {
     (e.g. "Error: ENOENT" → "there was a file-not-found error"). Never read an emoji or symbol by \
     its name — never say things like "white heavy check mark" or "heavy right arrow".
     - Remove markup and formatting. Expand abbreviations; read numbers and currency naturally.
-    - Reply with ONLY the spoken text, nothing else.
+    - Keep it about the same length as the original. Reply with ONLY the spoken text, nothing else.
+
+    Example —
+    TEXT:
+    PR #877 merged: fixed the 42P10 dedupe index bug. Cost capture now works.
+    REWRITTEN:
+    Pull request 877 was merged. It fixed the four-two-P-ten dedupe index bug, so cost capture \
+    now works.
     """
 
     /// Rejects degenerate model output (self-introductions, refusals, or wildly off-length),
@@ -91,6 +99,10 @@ final class TTSNaturalizer {
     /// Strips any stray quoting/preamble the model might add despite instructions.
     private static func cleanup(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip chat-control tokens a small model may emit as literal text.
+        text = text.replacingOccurrences(of: #"<\/?[A-Za-z0-9_]+>"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\b(end|start)_of_turn\b"#, with: "",
+                                         options: [.regularExpression, .caseInsensitive])
         // Drop an echoed label or a "Sure, here is..." style preamble if present.
         if let range = text.range(of: #"^(rewritten|text|here('s| is)|sure|okay)[^\n:]*:\s*"#,
                                   options: [.regularExpression, .caseInsensitive]) {
