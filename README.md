@@ -49,17 +49,24 @@ Additional attribution details are kept in [NOTICE](./NOTICE).
 
 ## Features
 
-- **Fast dictation workflow** for recording, transcribing, and inserting text.
-- **Native macOS app** built in Swift and SwiftUI.
-- **Global shortcuts** and push-to-talk style recording.
-- **Auto-stop and auto-paste** so a dictation can finish and insert text with minimal friction.
-- **Power Mode** to adapt prompts based on the active app, website, or workflow.
-- **AI enhancement prompts** for cleanup, rewriting, assistant-style responses, and custom modes.
-- **Local model support** through Whisper and FluidAudio-backed transcription paths.
-- **Cloud transcription providers** for users who explicitly configure external services.
-- **Personal dictionary** with vocabulary and word replacement support.
-- **History and audio-file transcription** for reviewing or processing previous recordings.
-- **macOS permissions flow** for microphone, Accessibility, screen context, and automation-related capabilities.
+Zerm is built around **three on-device AI models** the app downloads and manages for you — speech-to-text, text-to-speech, and a small agentic LLM — so the core experience is fast, private, and works offline. Cloud providers remain available for every task as an option.
+
+| Model | Job | Engine |
+| --- | --- | --- |
+| 🎙️ Whisper | Speech-to-Text (dictation) | `whisper.cpp` |
+| 🔊 Kokoro | Text-to-Speech (Read Aloud) | `sherpa-onnx` |
+| 🧠 Gemma | Agentic layer (smart reading + enhancement) | `llama.cpp` |
+
+- **Fast dictation workflow** — global shortcut, push-to-talk recording, auto-stop, and auto-paste at the cursor.
+- **Read Aloud** — select text anywhere, press a shortcut, and Zerm reads it in a natural voice (local Kokoro or cloud).
+- **Smart Reading** — text is cleaned (acronyms, URLs, code, emoji, tables) and optionally rewritten by the on-device LLM so it sounds human, not robotic.
+- **On-device AI enhancement** — clean up and reformat dictated text with the local Gemma model (no API key) or a cloud provider.
+- **Power Mode** — adapt prompts based on the active app, website, or workflow.
+- **Local + cloud everywhere** — Whisper/FluidAudio/Apple for STT; Kokoro for TTS; Gemma/Ollama for the LLM — plus cloud providers you explicitly configure.
+- **Personal dictionary**, **history**, and **audio-file transcription**.
+- **Explicit macOS permissions flow** for microphone, Accessibility, and screen context.
+
+See the [project wiki](https://github.com/arcusis/Zerm/wiki) for architecture and subsystem docs.
 
 ## Install
 
