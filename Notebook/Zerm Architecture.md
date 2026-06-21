@@ -1,12 +1,35 @@
 # Zerm Architecture
 
+## System Overview
+
+Two flows share one engine, one state machine, and one recorder widget — and are mutually exclusive.
+
+```mermaid
+flowchart TB
+    HK[HotkeyManager] --> ENG[ZermEngine<br/>RecordingState]
+    MIC[CoreAudioRecorder] --> ENG
+    ENG --> STT[Whisper STT] --> ENH[AIEnhancementService] --> PASTE[CursorPaster]
+    HK --> TC[TTSController]
+    SEL[SelectedTextService] --> TC
+    TC --> SR{Smart Reading}
+    SR -->|always| NORM[TTSTextNormalizer]
+    SR -->|optional| LLM[Gemma llama.cpp]
+    NORM --> TTS[Kokoro TTS] --> PLAY[TTSPlayer]
+    LLM --> TTS
+    ENH -.optional.-> LLM
+    ENG --> UI[RecorderUIManager widget]
+    TC --> UI
+```
+
+See [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]].
+
 ## Tech Stack
 
 - **Language:** Swift 5.10+
 - **UI:** SwiftUI + AppKit (NSPanel for recording overlays)
 - **Data:** SwiftData (transcription history, vocabulary, word replacements)
-- **Audio:** CoreAudio AUHAL (`CoreAudioRecorder.swift`), AVFoundation for file processing
-- **Local AI:** whisper.cpp XCFramework (at `$(HOME)/Zerm-Dependencies/whisper.cpp/build-apple/whisper.xcframework`)
+- **Audio:** CoreAudio AUHAL (`CoreAudioRecorder.swift`) for capture, AVFoundation/AVAudioEngine for playback
+- **On-device AI (three models):** `whisper.cpp` (STT), `sherpa-onnx` + Kokoro (TTS), `llama.cpp` + Gemma (LLM) — all prebuilt XCFrameworks under `$(HOME)/Zerm-Dependencies/`
 - **Packaging:** Xcode + xcodebuild, ad-hoc signed for local dev
 - **Updates:** Sparkle 2.x (`UpdaterViewModel`)
 - **Dependencies (Swift packages):** KeyboardShortcuts 2.4.x, LaunchAtLogin-Modern, Sparkle, FluidAudio, LLMkit, swift-atomics, Zip, AXSwift, SelectedTextKit, KeySender, MediaRemoteAdapter
@@ -30,13 +53,27 @@
 
 ## Recording State Machine
 
-```
-.idle → .starting → .recording → .transcribing → .enhancing → .idle
-                                                             ↑ (via cancelRecording)
-                                               .busy (transient during dismiss)
+`RecordingState` (on `ZermEngine`) is the single source of truth; the hotkey is ignored unless the state allows it (`canProcessHotkeyAction`). Dictation and Read Aloud both start only from `.idle`, so they are mutually exclusive.
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> starting: dictation hotkey
+    starting --> recording
+    recording --> transcribing: stop
+    transcribing --> enhancing: AI on
+    enhancing --> idle
+    transcribing --> idle
+
+    idle --> preparingSpeech: Read Aloud hotkey
+    preparingSpeech --> generatingSpeech: AI rewrite on
+    generatingSpeech --> preparingSpeech: rewrite done
+    preparingSpeech --> speaking: first audio chunk
+    speaking --> idle
+    generatingSpeech --> idle: cancelled
 ```
 
-`ZermEngine.toggleRecord()` only starts from `.idle` and only stops from `.recording`. All other states block the hotkey via `canProcessHotkeyAction`.
+The widget label is driven directly by the state: **Transcribing / Enhancing** (dictation), **Thinking… / Preparing… / live bars** (Read Aloud).
 
 ## Whisper Model Loading
 
