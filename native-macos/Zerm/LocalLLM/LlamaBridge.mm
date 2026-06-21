@@ -35,7 +35,13 @@
 
     // llama.cpp's global backend must be initialized exactly once per process.
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ llama_backend_init(); });
+    dispatch_once(&once, ^{
+        // Disable Metal residency sets: their collection is freed by a C++ static destructor at
+        // process exit, which races with its own background init and aborts (ggml_metal_rsets_free).
+        // GPU acceleration is unaffected — this only turns off a memory-residency optimization.
+        setenv("GGML_METAL_NO_RESIDENCY", "1", 1);
+        llama_backend_init();
+    });
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = 999;   // offload everything to Metal; falls back gracefully
@@ -63,7 +69,7 @@
     _sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(_sampler, llama_sampler_init_top_k(40));
     llama_sampler_chain_add(_sampler, llama_sampler_init_top_p(0.95f, 1));
-    llama_sampler_chain_add(_sampler, llama_sampler_init_temp(0.4f));
+    llama_sampler_chain_add(_sampler, llama_sampler_init_temp(0.3f));
     llama_sampler_chain_add(_sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     return YES;
 }
@@ -103,6 +109,16 @@
         if (llama_vocab_is_eog(_vocab, id)) break;
 
         out += [self pieceFor:id];
+
+        // Some small/quantized models emit the turn delimiter as literal text instead of the
+        // special token — stop there so "<end_of_turn>" is never spoken.
+        bool hitStop = false;
+        for (const char *stop : {"<end_of_turn>", "<start_of_turn>", "<eos>"}) {
+            size_t pos = out.find(stop);
+            if (pos != std::string::npos) { out.erase(pos); hitStop = true; break; }
+        }
+        if (hitStop) break;
+
         generated++;
         current.assign(1, id);
     }
