@@ -152,9 +152,10 @@ final class TTSController: ObservableObject {
         let cleaned = base.isEmpty ? raw : base
 
         if TTSSettings.naturalReadingAI, naturalizer.isModelInstalled {
-            if let rewritten = await naturalizer.naturalize(cleaned, isCancelled: { Task.isCancelled }) {
-                return rewritten
-            }
+            recorderUIManager?.beginGenerating()          // widget shows "Thinking…"
+            let rewritten = await naturalizer.naturalize(cleaned, isCancelled: { Task.isCancelled })
+            recorderUIManager?.endGenerating()            // back to "Preparing…" for synthesis
+            if let rewritten { return rewritten }
         }
         return cleaned
     }

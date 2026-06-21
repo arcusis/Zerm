@@ -57,9 +57,10 @@ class RecorderUIManager: ObservableObject {
     /// Stops Read Aloud playback. Set by the app to TTSController.stop().
     var onCancelSpeaking: (() -> Void)?
 
-    /// True while Read Aloud owns the widget (synthesizing or playing).
+    /// True while Read Aloud owns the widget (thinking, synthesizing, or playing).
     var isReadAloudActive: Bool {
-        engine?.recordingState == .speaking || engine?.recordingState == .preparingSpeech
+        let s = engine?.recordingState
+        return s == .speaking || s == .preparingSpeech || s == .generatingSpeech
     }
 
     /// Whether Read Aloud may start — only when nothing else is using the recorder.
@@ -75,10 +76,26 @@ class RecorderUIManager: ObservableObject {
         isMiniRecorderVisible = true
     }
 
-    /// Switches the widget from "Preparing…" to the live audio bars once playback starts.
-    func markSpeechPlaying() {
+    /// Shows the "Thinking…" state while the on-device AI rewrites the text.
+    func beginGenerating() {
         guard let engine = engine else { return }
         if engine.recordingState == .preparingSpeech {
+            engine.recordingState = .generatingSpeech
+        }
+    }
+
+    /// Returns to "Preparing…" once the AI rewrite finishes and synthesis begins.
+    func endGenerating() {
+        guard let engine = engine else { return }
+        if engine.recordingState == .generatingSpeech {
+            engine.recordingState = .preparingSpeech
+        }
+    }
+
+    /// Switches the widget from the loading states to the live audio bars once playback starts.
+    func markSpeechPlaying() {
+        guard let engine = engine else { return }
+        if engine.recordingState == .preparingSpeech || engine.recordingState == .generatingSpeech {
             engine.recordingState = .speaking
         }
     }

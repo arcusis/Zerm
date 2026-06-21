@@ -64,6 +64,8 @@ final class TTSNaturalizer {
     (e.g. "Error: ENOENT" → "there was a file-not-found error"). Never read an emoji or symbol by \
     its name — never say things like "white heavy check mark" or "heavy right arrow".
     - Remove markup and formatting. Expand abbreviations; read numbers and currency naturally.
+    - If the text is a table or list, read it as natural sentences (row by row, mentioning the \
+    column meaning where helpful). Never read separators or column borders.
     - Keep it about the same length as the original. Reply with ONLY the spoken text, nothing else.
 
     Example —

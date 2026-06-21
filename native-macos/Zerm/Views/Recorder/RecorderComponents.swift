@@ -314,7 +314,10 @@ struct RecorderStatusDisplay: View {
 
     var body: some View {
         Group {
-            if currentState == .preparingSpeech {
+            if currentState == .generatingSpeech {
+                // Read Aloud is running the on-device AI rewrite — show "Thinking…".
+                ProcessingStatusDisplay(mode: .generating, color: .white).transition(.opacity)
+            } else if currentState == .preparingSpeech {
                 // Read Aloud is synthesizing — show a loading indicator until audio starts.
                 ProcessingStatusDisplay(mode: .preparing, color: .white).transition(.opacity)
             } else if currentState == .speaking {

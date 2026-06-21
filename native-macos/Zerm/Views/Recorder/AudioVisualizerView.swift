@@ -71,6 +71,7 @@ struct ProcessingStatusDisplay: View {
         case transcribing
         case enhancing
         case preparing
+        case generating
     }
 
     let mode: Mode
@@ -81,6 +82,7 @@ struct ProcessingStatusDisplay: View {
         case .transcribing: return "Transcribing"
         case .enhancing:    return "Enhancing"
         case .preparing:    return "Preparing…"
+        case .generating:   return "Thinking…"
         }
     }
 
@@ -89,6 +91,7 @@ struct ProcessingStatusDisplay: View {
         case .transcribing: return 0.18
         case .enhancing:    return 0.22
         case .preparing:    return 0.14
+        case .generating:   return 0.16
         }
     }
 
