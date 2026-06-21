@@ -15,9 +15,10 @@ enum AIProvider: String, CaseIterable {
     case speechmatics = "Speechmatics"
     case ollama = "Ollama"
     case localCLI = "Local CLI"
+    case localLLM = "On-Device"
     case custom = "Custom"
-    
-    
+
+
     var baseURL: String {
         switch self {
         case .cerebras:
@@ -45,6 +46,8 @@ enum AIProvider: String, CaseIterable {
         case .ollama:
             return UserDefaults.standard.string(forKey: "ollamaBaseURL") ?? "http://localhost:11434"
         case .localCLI:
+            return ""
+        case .localLLM:
             return ""
         case .custom:
             return UserDefaults.standard.string(forKey: "customProviderBaseURL") ?? ""
@@ -77,6 +80,8 @@ enum AIProvider: String, CaseIterable {
             return UserDefaults.standard.string(forKey: "ollamaSelectedModel") ?? "mistral"
         case .localCLI:
             return "local-cli"
+        case .localLLM:
+            return LocalLLMModelManager.package.displayName
         case .custom:
             return UserDefaults.standard.string(forKey: "customProviderModel") ?? ""
         case .openRouter:
@@ -147,16 +152,18 @@ enum AIProvider: String, CaseIterable {
             return []
         case .localCLI:
             return []
+        case .localLLM:
+            return [LocalLLMModelManager.package.displayName]
         case .custom:
             return []
         case .openRouter:
             return []
         }
     }
-    
+
     var requiresAPIKey: Bool {
         switch self {
-        case .ollama, .localCLI:
+        case .ollama, .localCLI, .localLLM:
             return false
         default:
             return true
@@ -215,6 +222,8 @@ class AIService: ObservableObject {
                 return ollamaService.isConnected
             } else if provider == .localCLI {
                 return localCLIService.isConfigured
+            } else if provider == .localLLM {
+                return LocalLLMModelManager.isModelDownloaded
             } else if provider.requiresAPIKey {
                 return APIKeyManager.shared.hasAPIKey(forProvider: provider.rawValue)
             }
@@ -265,7 +274,8 @@ class AIService: ObservableObject {
            let provider = AIProvider(rawValue: savedProvider) {
             self.selectedProvider = provider
         } else {
-            self.selectedProvider = .gemini
+            // Recommend the on-device model by default — no key, fully private.
+            self.selectedProvider = .localLLM
         }
 
         if selectedProvider.requiresAPIKey {

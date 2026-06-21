@@ -22,6 +22,8 @@
 		E1F350122F1D10D600790A2C /* whisper.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E1A0BD052EB1E7B800266859 /* whisper.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D7A1C0DE0000000000000001 /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000002 /* sherpa-onnx.xcframework */; };
 		D7A1C0DE0000000000000003 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000004 /* onnxruntime.xcframework */; };
+		D7A1C0DE0000000000000005 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000007 /* llama.xcframework */; };
+		D7A1C0DE0000000000000006 /* llama.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000007 /* llama.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +51,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				E1F350122F1D10D600790A2C /* whisper.xcframework in Embed Frameworks */,
+				D7A1C0DE0000000000000006 /* llama.xcframework in Embed Frameworks */,
 				E1D7EF9A2E35E19B00640029 /* MediaRemoteAdapter in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
@@ -64,6 +67,7 @@
 		E1A0BD052EB1E7B800266859 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "$(HOME)/Zerm-Dependencies/whisper.cpp/build-apple/whisper.xcframework"; sourceTree = "<group>"; };
 		D7A1C0DE0000000000000002 /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "$(HOME)/Zerm-Dependencies/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"; sourceTree = "<group>"; };
 		D7A1C0DE0000000000000004 /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "onnxruntime.xcframework"; path = "$(HOME)/Zerm-Dependencies/sherpa-onnx/build-swift-macos/onnxruntime.xcframework"; sourceTree = "<group>"; };
+		D7A1C0DE0000000000000007 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = "$(HOME)/Zerm-Dependencies/llama/build-apple/llama.xcframework"; sourceTree = "<group>"; };
 		E1B2DCAA2E3DE70A008DFD68 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "../whisper.cpp/build-apple/whisper.xcframework"; sourceTree = "<group>"; };
 		E1CE28772E4336150082B758 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "../build-apple/whisper.xcframework"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -95,6 +99,7 @@
 				E1F350112F1D10D600790A2C /* whisper.xcframework in Frameworks */,
 				D7A1C0DE0000000000000001 /* sherpa-onnx.xcframework in Frameworks */,
 				D7A1C0DE0000000000000003 /* onnxruntime.xcframework in Frameworks */,
+				D7A1C0DE0000000000000005 /* llama.xcframework in Frameworks */,
 				E1ECEC162E44591300DFFBA8 /* Zip in Frameworks */,
 				E1ADD45A2CC5352A00303ECB /* LaunchAtLogin in Frameworks */,
 				E11BBA4E2E5DC555000AB839 /* FluidAudio in Frameworks */,
@@ -152,6 +157,7 @@
 				E1A0BD052EB1E7B800266859 /* whisper.xcframework */,
 				E1CE28772E4336150082B758 /* whisper.xcframework */,
 				E1B2DCAA2E3DE70A008DFD68 /* whisper.xcframework */,
+				D7A1C0DE0000000000000007 /* llama.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -490,7 +496,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 201;
+				CURRENT_PROJECT_VERSION = 210;
 				DEVELOPMENT_ASSET_PATHS = "\"Zerm/Preview Content\"";
 				DEVELOPMENT_TEAM = V6J6A3VWY2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -505,7 +511,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.4;
-				MARKETING_VERSION = 2.0.1;
+				MARKETING_VERSION = 2.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.arcusis.zerm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ENABLE_NATIVE_SPEECH_ANALYZER $(inherited)";
@@ -531,7 +537,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 201;
+				CURRENT_PROJECT_VERSION = 210;
 				DEVELOPMENT_ASSET_PATHS = "\"Zerm/Preview Content\"";
 				DEVELOPMENT_TEAM = V6J6A3VWY2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -546,7 +552,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.4;
-				MARKETING_VERSION = 2.0.1;
+				MARKETING_VERSION = 2.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.arcusis.zerm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "ENABLE_NATIVE_SPEECH_ANALYZER $(inherited)";

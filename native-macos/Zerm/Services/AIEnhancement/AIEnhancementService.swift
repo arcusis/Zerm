@@ -250,6 +250,16 @@ class AIEnhancementService: ObservableObject {
             }
         }
 
+        if aiService.selectedProvider == .localLLM {
+            do {
+                let result = try await LocalLLMModelManager.shared.generate(
+                    system: systemMessage, user: formattedText, maxNewTokens: 512)
+                return AIEnhancementOutputFilter.filter(result)
+            } catch {
+                throw EnhancementError.customError(error.localizedDescription)
+            }
+        }
+
         try await waitForRateLimit()
 
         do {

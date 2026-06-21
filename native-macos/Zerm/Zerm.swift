@@ -176,8 +176,9 @@ struct ZermApp: App {
             await recorderUIManager.resetOnLaunch()
         }
 
-        // Pre-warm the on-device Read Aloud model so the first read is instant.
+        // Pre-warm the on-device Read Aloud models so the first read is instant.
         Task { await KokoroModelManager.shared.prewarmIfNeeded() }
+        Task { await LocalLLMModelManager.shared.prewarmIfNeeded() }
 
         AppShortcuts.updateAppShortcutParameters()
 

@@ -27,7 +27,15 @@ struct APIKeyManagementView: View {
                 .pickerStyle(.automatic)
                 .tint(.blue)
                 
-                if aiService.isAPIKeyValid && aiService.selectedProvider != .ollama {
+                if aiService.selectedProvider == .localLLM {
+                    Spacer()
+                    Circle()
+                        .fill(LocalLLMModelManager.isModelDownloaded ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text(LocalLLMModelManager.isModelDownloaded ? "Ready" : "Not downloaded")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else if aiService.isAPIKeyValid && aiService.selectedProvider != .ollama {
                     Spacer()
                     Circle()
                         .fill(Color.green)
@@ -271,7 +279,13 @@ struct APIKeyManagementView: View {
                             .help("Skip the test request and save directly. Use when your gateway rejects the verification probe.")
                         }
                     }
-                    
+
+                } else if aiService.selectedProvider == .localLLM {
+                    Text("Runs entirely on your Mac — no API key, nothing leaves the device. Used to clean up dictation and to make Read Aloud sound natural.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LocalLLMModelCardView()
+
                 } else {
                     if aiService.isAPIKeyValid {
                         HStack {

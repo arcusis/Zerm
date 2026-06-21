@@ -15,6 +15,7 @@ final class TTSController: ObservableObject {
     @Published var statusMessage: String?
 
     private let player = TTSPlayer()
+    private let naturalizer = TTSNaturalizer()
     private var task: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TTSController")
 
@@ -110,7 +111,9 @@ final class TTSController: ObservableObject {
         }
 
         let speed = TTSSettings.speed
-        let chunks = Self.splitIntoChunks(text)
+        let spoken = await prepareSpokenText(from: text)
+        guard !Task.isCancelled else { return }
+        let chunks = Self.splitIntoChunks(spoken)
 
         player.startStreaming { [weak self] in
             self?.isSpeaking = false
@@ -138,6 +141,23 @@ final class TTSController: ObservableObject {
             logger.error("Read Aloud failed: \(error.localizedDescription, privacy: .public)")
             endSession("Read Aloud failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Makes the selection sound human before synthesis. The on-device LLM rewrite (when enabled
+    /// and downloaded) takes precedence; otherwise the instant offline normalizer cleans it up.
+    /// Either way we fall back to the original text so Read Aloud never fails on preprocessing.
+    private func prepareSpokenText(from raw: String) async -> String {
+        if TTSSettings.naturalReadingAI, naturalizer.isModelInstalled {
+            if let rewritten = await naturalizer.naturalize(raw, isCancelled: { Task.isCancelled }),
+               !rewritten.isEmpty {
+                return rewritten
+            }
+        }
+        if TTSSettings.smartCleanup {
+            let normalized = TTSTextNormalizer.normalize(raw)
+            if !normalized.isEmpty { return normalized }
+        }
+        return raw
     }
 
     /// Splits text into sentence-based chunks. The first chunk is a single sentence (so audio

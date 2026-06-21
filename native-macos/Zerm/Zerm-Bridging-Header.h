@@ -5,5 +5,6 @@
 #define SWIFT_API_EXAMPLES_SHERPAONNX_BRIDGING_HEADER_H_
 
 #import "sherpa-onnx/c-api/c-api.h"
+#import "LocalLLM/LlamaBridge.h"
 
 #endif  // SWIFT_API_EXAMPLES_SHERPAONNX_BRIDGING_HEADER_H_
