@@ -44,6 +44,10 @@ enum TTSTextNormalizer {
     static func normalize(_ raw: String) -> String {
         var text = raw
 
+        // 0. Tables: turn each row ("│ a │ b │" or "| a | b |") into "a, b." so cells read with
+        // pauses and rows are separate sentences, instead of a stripped-glyph run-on.
+        text = flattenTables(text)
+
         // 1. Markdown line markers (headings, bullets, quotes, ordered lists).
         text = regexReplace(#"(?m)^\s*#{1,6}\s+"#, in: text, with: "")
         text = regexReplace(#"(?m)^\s*[-*+]\s+"#, in: text, with: "")
@@ -78,6 +82,7 @@ enum TTSTextNormalizer {
 
         // 7. snake_case / kebab-ish underscores and camelCase → spaced words.
         text = regexReplace("([A-Za-z0-9])_([A-Za-z0-9])", in: text, with: "$1 $2")
+        text = regexReplace("_+", in: text, with: " ")   // strip any leftover underscores
         text = regexReplace("([a-z0-9])([A-Z])", in: text, with: "$1 $2")
 
         // 8. Emphasis markers and stray symbols that shouldn't be spoken.
@@ -109,6 +114,28 @@ enum TTSTextNormalizer {
         text = regexReplace("([.])\\1{1,}", in: text, with: ".")
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Tables
+
+    /// Converts table rows (Unicode box `│` or markdown `|`) into spoken "cell, cell." sentences.
+    /// Border/separator rows (only box-drawing or dashes) collapse to nothing.
+    private static func flattenTables(_ text: String) -> String {
+        guard text.contains("│") || text.contains("|") else { return text }
+        let lines = text.components(separatedBy: "\n")
+        let converted = lines.map { line -> String in
+            guard line.contains("│") || line.contains("|") else { return line }
+            let cells = line
+                .split(whereSeparator: { $0 == "│" || $0 == "|" })
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { cell in
+                    guard !cell.isEmpty else { return false }
+                    // Drop markdown separator cells like "---" or ":---:".
+                    return !cell.allSatisfy { "-:= ".contains($0) }
+                }
+            return cells.isEmpty ? "" : cells.joined(separator: ", ") + "."
+        }
+        return converted.joined(separator: "\n")
     }
 
     // MARK: - Symbols & emoji
