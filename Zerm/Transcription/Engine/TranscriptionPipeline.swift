@@ -158,6 +158,9 @@ class TranscriptionPipeline {
                     transcription.aiRequestUserMessage = enhancementService.lastUserMessageSent
                     finalPastedText = enhancedText
                 } catch {
+                    // A cancelled enhancement is not a failure — let it propagate to
+                    // the outer cancellation handler instead of relabelling it.
+                    if error is CancellationError { throw error }
                     let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                     transcription.enhancedText = "Enhancement failed: \(errorDescription)"
                     let shortReason = String(errorDescription.prefix(80))
@@ -173,7 +176,28 @@ class TranscriptionPipeline {
 
             transcription.transcriptionStatus = TranscriptionStatus.completed.rawValue
 
+        } catch is CancellationError {
+            // The pipeline task was cancelled — e.g. a new recording started, the
+            // engine was torn down, or the user toggled again mid-transcription.
+            // This is normal control flow, NOT a failure: a raw CancellationError
+            // surfaces as the confusing "The operation couldn't be completed.
+            // (Swift.CancellationError error 1.)".  Discard the empty pending record
+            // and bail out quietly instead of writing a "Transcription Failed" entry.
+            logger.notice("⏹️ Transcription cancelled — discarding pending record")
+            modelContext.delete(transcription)
+            try? modelContext.save()
+            await onCleanup()
+            return
         } catch {
+            // A late/transitive cancellation can arrive wrapped or after the task is
+            // already cancelled; treat that as a cancel too rather than a hard failure.
+            if Task.isCancelled {
+                logger.notice("⏹️ Transcription cancelled (task) — discarding pending record")
+                modelContext.delete(transcription)
+                try? modelContext.save()
+                await onCleanup()
+                return
+            }
             let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             let recoverySuggestion = (error as? LocalizedError)?.recoverySuggestion ?? ""
             let fullErrorText = recoverySuggestion.isEmpty ? errorDescription : "\(errorDescription) \(recoverySuggestion)"
