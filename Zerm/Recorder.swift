@@ -31,6 +31,14 @@ class Recorder: NSObject, ObservableObject {
     enum RecorderError: Error {
         case couldNotStartRecording
     }
+
+    /// True while the underlying audio unit is live. Goes false once the hardware
+    /// recorder is stopped/disposed.
+    var isHardwareRecording: Bool { recorder?.isCurrentlyRecording ?? false }
+
+    /// Seconds since the last audio input callback, or `nil` if not recording or
+    /// none received yet. Used to detect a silently-dropped capture.
+    var secondsSinceLastAudioInput: Double? { recorder?.secondsSinceLastInput }
     
     override init() {
         super.init()

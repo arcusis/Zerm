@@ -259,13 +259,20 @@ class ZermEngine: NSObject, ObservableObject {
     private func startAutoStopMonitor() {
         cancelAutoStopMonitor()
 
-        guard UserDefaults.standard.bool(forKey: "AutoStopAfterSilence") else { return }
-
         let defaults = UserDefaults.standard
+        // The silence auto-stop is opt-out, but the loop always runs so the
+        // dropped-capture watchdog below works regardless of that setting.
+        let autoStopEnabled = defaults.bool(forKey: "AutoStopAfterSilence")
         let silenceSeconds = max(defaults.double(forKey: "AutoStopSilenceSeconds"), 0.6)
         let minimumRecordingSeconds = max(defaults.double(forKey: "AutoStopMinimumRecordingSeconds"), 0.3)
         let initialSilenceSeconds = max(defaults.double(forKey: "AutoStopInitialSilenceSeconds"), 2.0)
         let levelThreshold = max(defaults.double(forKey: "AutoStopLevelThreshold"), 0.02)
+        // If the audio unit dies mid-recording (device unplugged, render error)
+        // the input callback stops firing while the engine still believes it is
+        // recording — the capture is silently lost and the UI gets stuck. If no
+        // audio has arrived for this long after the unit was delivering, treat the
+        // recording as dropped and recover.
+        let captureStallSeconds = 3.0
         let startedAt = Date()
 
         autoStopTask = Task { @MainActor [weak self] in
@@ -281,6 +288,24 @@ class ZermEngine: NSObject, ObservableObject {
 
                 let now = Date()
                 let elapsed = now.timeIntervalSince(startedAt)
+
+                // Dropped-capture watchdog. `secondsSinceLastAudioInput` is non-nil
+                // only once the callback has fired at least once, so this never
+                // false-fires during the brief hardware start-up window.
+                if let sinceInput = self.recorder.secondsSinceLastAudioInput,
+                   sinceInput >= captureStallSeconds {
+                    self.logger.error("Recording dropped: no audio input for \(sinceInput, privacy: .public)s — recovering")
+                    await NotificationManager.shared.showNotification(
+                        title: "Recording stopped — microphone dropped",
+                        type: .warning,
+                        duration: 3.0
+                    )
+                    // Stop and transcribe whatever was captured before the drop,
+                    // then return cleanly to idle so the next press starts fresh.
+                    await self.toggleRecord()
+                    return
+                }
+
                 let level = max(self.recorder.audioMeter.averagePower, self.recorder.audioMeter.peakPower * 0.65)
 
                 if level >= levelThreshold {
@@ -288,6 +313,8 @@ class ZermEngine: NSObject, ObservableObject {
                     lastSpeechAt = now
                     continue
                 }
+
+                guard autoStopEnabled else { continue }
 
                 if heardSpeech,
                    elapsed >= minimumRecordingSeconds,
