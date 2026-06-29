@@ -31,6 +31,10 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private let meterLock = NSLock()
     private var _averagePower: Float = -160.0
     private var _peakPower: Float = -160.0
+    /// Monotonic timestamp of the last successful input callback. Lets the engine
+    /// detect a silently-dropped capture: if the audio unit dies (device removed,
+    /// render error) the callback stops firing while `isRecording` stays true.
+    private var _lastInputUptimeNanos: UInt64 = 0
 
     var averagePower: Float {
         meterLock.lock()
@@ -42,6 +46,18 @@ final class CoreAudioRecorder: @unchecked Sendable {
         meterLock.lock()
         defer { meterLock.unlock() }
         return _peakPower
+    }
+
+    /// Seconds since the last input callback fired, or `nil` if none has yet.
+    /// A value that keeps climbing while recording means the capture has stalled.
+    var secondsSinceLastInput: Double? {
+        meterLock.lock()
+        let last = _lastInputUptimeNanos
+        meterLock.unlock()
+        guard last != 0 else { return nil }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now > last else { return 0 }
+        return Double(now - last) / 1_000_000_000.0
     }
 
     // Pre-allocated render buffer (to avoid malloc in real-time callback)
@@ -147,6 +163,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         meterLock.lock()
         _averagePower = -160.0
         _peakPower = -160.0
+        _lastInputUptimeNanos = 0
         meterLock.unlock()
     }
 
@@ -625,6 +642,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         meterLock.lock()
         _averagePower = avgDb
         _peakPower = peakDb
+        _lastInputUptimeNanos = DispatchTime.now().uptimeNanoseconds
         meterLock.unlock()
     }
 

@@ -24,7 +24,10 @@ enum AppDefaults {
             "IsTextFormattingEnabled": true,
             "IsVADEnabled": true,
             "AutoStopAfterSilence": true,
-            "AutoStopSilenceSeconds": 1.1,
+            // 1.1s was short enough that a normal thinking pause in long-form
+            // dictation tripped auto-stop and cut the recording off. 2.5s tolerates
+            // natural pauses while still stopping promptly when the user is done.
+            "AutoStopSilenceSeconds": 2.5,
             "AutoStopMinimumRecordingSeconds": 0.8,
             "AutoStopInitialSilenceSeconds": 6.0,
             "AutoStopLevelThreshold": 0.12,
