@@ -302,7 +302,7 @@ class ZermEngine: NSObject, ObservableObject {
                     )
                     // Stop and transcribe whatever was captured before the drop,
                     // then return cleanly to idle so the next press starts fresh.
-                    await self.toggleRecord()
+                    self.stopFromMonitor()
                     return
                 }
 
@@ -320,16 +320,30 @@ class ZermEngine: NSObject, ObservableObject {
                    elapsed >= minimumRecordingSeconds,
                    now.timeIntervalSince(lastSpeechAt) >= silenceSeconds {
                     self.logger.notice("Auto-stop: silence threshold reached")
-                    await self.toggleRecord()
+                    self.stopFromMonitor()
                     return
                 }
 
                 if !heardSpeech, elapsed >= initialSilenceSeconds {
                     self.logger.notice("Auto-stop: initial silence timeout reached")
-                    await self.toggleRecord()
+                    self.stopFromMonitor()
                     return
                 }
             }
+        }
+    }
+
+    /// Stops the recording on behalf of the auto-stop monitor.
+    ///
+    /// Must run as a NEW unstructured task, never `await self.toggleRecord()`
+    /// from inside `autoStopTask`: toggleRecord's first step cancels that very
+    /// task, so the whole stop → transcribe → paste pipeline would then run in
+    /// an already-cancelled task. `Task.sleep` inside the transcription timeout
+    /// throws CancellationError immediately, and the pipeline discards the
+    /// capture as if the user had cancelled — the recording is silently lost.
+    private func stopFromMonitor() {
+        Task { @MainActor in
+            await self.toggleRecord()
         }
     }
 

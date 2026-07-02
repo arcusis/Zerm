@@ -24,6 +24,10 @@ final class TTSNaturalizer {
         guard llm.isInstalled else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // Symbol-only input (e.g. stripped TUI borders / box-drawing from a terminal
+        // selection) gives the model nothing to rewrite, and small models respond to
+        // that with a self-introduction instead. Don't invoke the LLM at all.
+        guard trimmed.filter(\.isLetter).count >= 2 else { return nil }
 
         do {
             // Completion-style framing: the text to transform is delimited and the turn ends on
@@ -84,9 +88,19 @@ final class TTSNaturalizer {
         let badMarkers = [
             "i am gemma", "i'm gemma", "i am a gemma", "an ai model", "i am an ai", "as an ai",
             "language model", "from deepmind", "i cannot", "i can't", "i don't have",
-            "how can i help", "i'm here to help", "i am here to help", "as a large language"
+            "how can i help", "i'm here to help", "i am here to help", "as a large language",
+            "advanced model", "open model", "ai assistant", "how can i assist", "happy to help"
         ]
         if badMarkers.contains(where: { lower.contains($0) }) { return false }
+
+        // Identity leakage the static markers can't enumerate ("a very advanced Gemma
+        // model by Google", "built by Google DeepMind", …): the rewrite may mention
+        // these words only if the source text itself does.
+        let srcLower = source.lowercased()
+        let identityWords = ["gemma", "google", "deepmind"]
+        if identityWords.contains(where: { lower.contains($0) && !srcLower.contains($0) }) {
+            return false
+        }
 
         // A rewrite should be roughly comparable in length to the source.
         let srcWords = source.split(whereSeparator: \.isWhitespace).count
@@ -94,6 +108,10 @@ final class TTSNaturalizer {
         if srcWords >= 4 {
             if outWords < max(2, srcWords / 3) { return false }
             if outWords > srcWords * 3 + 25 { return false }
+        } else if outWords > srcWords * 5 + 10 {
+            // Tiny sources previously skipped the length check entirely, letting a
+            // multi-sentence self-introduction pass as a "rewrite" of two words.
+            return false
         }
         return true
     }
