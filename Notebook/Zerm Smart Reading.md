@@ -28,7 +28,8 @@ Always on (`TTSSettings.smartCleanup`). Mechanical pass:
 Off by default (`TTSSettings.naturalReadingAI`); needs the [[Zerm On-Device LLM]]. Rewrites cleaned text into natural prose. Small-model scaffolding:
 - **Imperative completion prompt** (`TEXT:`…`REWRITTEN:`), not "You are…" (which makes small models self-introduce).
 - One-shot example anchors format.
-- `isUsableRewrite` validation rejects self-intros/refusals/off-length → fall back to cleaned text.
+- `isUsableRewrite` validation rejects self-intros/refusals/off-length → fall back to cleaned text. Hardened 2026-07-02 after "a very advanced Gemma model by Google" leaked past the static markers: output may mention gemma/google/deepmind only if the source does; short sources (<4 words) now get a length cap too (previously exempt).
+- Symbol-only input (stripped TUI borders from terminal selections) is never sent to the LLM — that's what provoked the self-intros. Requires ≥2 letters.
 - Temp 0.3.
 
 ## Settings

@@ -14,6 +14,7 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Smart Reading]] — human-sounding read-aloud
 - [[Zerm Runtime Privacy Model]]
 - [[Zerm Auto Paste]]
+- [[Zerm Auto Stop Dictation]] — hands-free auto-stop + the self-cancellation gotcha
 - [[Zerm Setup And Permissions]]
 - [[Zerm Production History]]
 - [[Zerm Known Follow Ups]]
