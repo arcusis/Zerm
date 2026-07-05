@@ -35,6 +35,7 @@ make dev
 - `make setup` - Prepare the whisper framework for linking
 - `make build` - Build the Zerm Xcode project
 - `make local` - Build for local use (no Apple Developer certificate needed)
+- `make release` - Build the Developer ID signed + notarized release DMG (maintainers only)
 - `make run` - Launch the built Zerm app
 - `make dev` - Build and run (ideal for development workflow)
 - `make all` - Complete build process (default)
@@ -75,6 +76,42 @@ The `make local` command uses:
 - `LOCAL_BUILD` Swift compilation flag for conditional code paths
 
 Your normal `make all` / `make build` commands are completely unaffected.
+
+---
+
+## Building a Release (Maintainers)
+
+Public DMGs must be Developer ID signed **and notarized**, otherwise Gatekeeper
+rejects the app on other Macs ("Zerm is damaged and can't be opened" /
+"Apple could not verify Zerm is free of malware").
+
+Requirements on the release machine:
+
+- The `Developer ID Application: Arcusis LTD (F9Z784RA6D)` certificate in the login keychain
+- One-time notarization credential setup:
+
+```bash
+xcrun notarytool store-credentials zerm-notary \
+  --key ~/.appstoreconnect/private_keys/AuthKey_32D372QBLD.p8 \
+  --key-id 32D372QBLD \
+  --issuer <ISSUER-UUID>
+```
+
+The issuer UUID is shown in App Store Connect under
+**Users and Access → Integrations → App Store Connect API**.
+
+Then build the release:
+
+```bash
+make release            # or: scripts/release.sh
+```
+
+This builds the Release configuration, signs the app with Developer ID and the
+hardened runtime, notarizes app and DMG with Apple, staples the tickets, and
+verifies the result with `spctl`. The DMG lands in the repo root as
+`Zerm_X.Y.Z_aarch64.dmg`, ready for `gh release upload`.
+
+`SKIP_NOTARIZE=1 scripts/release.sh` does a signing-only dry run.
 
 ---
 
