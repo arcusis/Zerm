@@ -17,6 +17,7 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Auto Stop Dictation]] — hands-free auto-stop + the self-cancellation gotcha
 - [[Zerm Setup And Permissions]]
 - [[Zerm Production History]]
+- [[Zerm Release Signing]] — Developer ID + notarization pipeline (fixes the Gatekeeper "damaged app" reports)
 - [[Zerm Known Follow Ups]]
 
 ## Current State (2026-06-21)

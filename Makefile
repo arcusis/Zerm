@@ -8,7 +8,7 @@ SHERPA_XCFRAMEWORK := $(SHERPA_BUILD)/sherpa-onnx.xcframework
 ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 
-.PHONY: all clean whisper sherpa setup build local check healthcheck help dev run install reset-permissions
+.PHONY: all clean whisper sherpa setup build local check healthcheck help dev run install reset-permissions release
 
 # Default target
 all: check build
@@ -121,6 +121,10 @@ install: local
 	@echo ""
 	@echo "Re-grant Accessibility and Screen Recording in Zerm → Permissions."
 
+# Build the Developer ID signed + notarized release DMG (see scripts/release.sh)
+release: check setup
+	@scripts/release.sh
+
 # Reset TCC permissions for Zerm (run after rebuilding with a new ad-hoc signature)
 reset-permissions:
 	@echo "Resetting Zerm TCC permissions..."
@@ -160,6 +164,7 @@ help:
 	@echo "  setup              Copy whisper XCFramework to Zerm project"
 	@echo "  build              Build the Zerm Xcode project"
 	@echo "  local              Build for local use (no Apple Developer certificate needed)"
+	@echo "  release            Build Developer ID signed + notarized release DMG"
 	@echo "  install            Build, install to /Applications, and reset Launchpad"
 	@echo "  reset-permissions  Reset Accessibility + Screen Recording TCC grants (run after rebuild)"
 	@echo "  run                Launch the built Zerm app"

@@ -25,7 +25,7 @@ Open work tracked in `arcusis/Zerm` GitHub Issues. ~168 open as of 2026-05-22.
 ## Known Constraints
 
 - **Intel (x86_64) DMG** — not yet available. Only Apple Silicon build is published. Would need a CI self-hosted runner or Intel Mac.
-- **Developer ID signing** — Z#1 is open. All current releases are ad-hoc signed and require "allow anyway" in Gatekeeper.
+- **Developer ID signing** — Z#1. Releases through v2.1.3 were ad-hoc signed and rejected by Gatekeeper. Fixed by `make release` (see [[Zerm Release Signing]]); still blocked on the notary issuer UUID for the one-time `notarytool store-credentials` setup.
 - **macOS 26 compatibility** — `KeyboardShortcuts` package (2.4.0) uses Carbon `RegisterEventHotKey` which may have issues on macOS 26 with the "custom" hotkey option. The modifier-key path (NSEvent flagsChanged) is confirmed working.
 - **Ollama persistence** — Ollama must be manually started with `ollama serve` after reboot; not persisted as a login item.
 
