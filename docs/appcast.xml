@@ -3,20 +3,20 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.3.1</title>
+            <title>2.3.2</title>
             <description><![CDATA[
-                <h3>What's New in v2.3.1</h3>
+                <h3>What's New in v2.3.2</h3>
                 <ul>
-                    <li>Working auto-update: Sparkle checks surface in the sidebar with an Install button.</li>
-                    <li>Clearer Settings / menu bar update actions when a release is pending.</li>
-                    <li>Reliable background update checks with gentle-reminder support.</li>
+                    <li>Update banner only appears when a strictly newer build is available, and clears after install/dismiss.</li>
+                    <li>Whisper retries without VAD when the first pass is empty but the mic picked up real audio.</li>
+                    <li>Clearer empty-transcript messaging for short vs failed captures.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 13 Jul 2026 18:16:38 +0000</pubDate>
-            <sparkle:version>231</sparkle:version>
-            <sparkle:shortVersionString>2.3.1</sparkle:shortVersionString>
+            <pubDate>Mon, 13 Jul 2026 18:40:24 +0000</pubDate>
+            <sparkle:version>232</sparkle:version>
+            <sparkle:shortVersionString>2.3.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.1/Zerm-2.3.1-macos.zip" length="23814196" type="application/octet-stream" sparkle:edSignature="/XLBRkcvjVibtkdcREX4RZ+IheHiY2o8uasSZjxOx3lzFcVrSEsuhmidbjC2amrm+g/oC8HPO+GPmX44eXOGDQ=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.2/Zerm-2.3.2-macos.zip" length="23826136" type="application/octet-stream" sparkle:edSignature="/w2cbp0ebgt0MlrKvGLNn5beXIWmdwV3hWp3I1U4UVKunN7OKTf7vytrjOIxABnNxckGCu4rM/uJZodEKKb2Bw=="/>
         </item>
     </channel>
 </rss>
