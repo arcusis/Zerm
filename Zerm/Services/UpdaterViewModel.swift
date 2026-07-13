@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 import Sparkle
 import os
 
@@ -7,6 +8,9 @@ import os
 ///
 /// Background checks use Sparkle gentle-reminder hooks so we can show a persistent
 /// sidebar banner without always forcing a modal alert.
+///
+/// Banner state is always re-validated against the running app's build number so
+/// we never keep advertising an update the user has already installed.
 @MainActor
 final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     private let autoUpdateCheckKey = "autoUpdateCheck"
@@ -51,7 +55,6 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
         let updater = updaterController.updater
         updater.automaticallyChecksForUpdates = autoUpdateCheck
-        // Check daily; also check on launch via `checkInBackground()`.
         updater.updateCheckInterval = 24 * 60 * 60
 
         updater.publisher(for: \.canCheckForUpdates)
@@ -70,11 +73,29 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
                 } else {
                     self.isChecking = false
                     self.lastCheckedAt = Date()
+                    // Session ended (dismissed, installed, aborted, or "already current").
+                    // Drop a stale banner if we're no longer behind the advertised build.
+                    self.clearIfNotActuallyNewer()
                 }
             }
             .store(in: &cancellables)
 
-        logger.notice("Sparkle updater started feed=\(updater.feedURL?.absoluteString ?? "nil", privacy: .public)")
+        NotificationCenter.default.publisher(for: Notification.Name("SUUpdaterWillRestartNotification"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.clearAvailableUpdate(status: nil)
+            }
+            .store(in: &cancellables)
+
+        // Also clear on app activation if we somehow still advertise a non-newer build.
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.clearIfNotActuallyNewer()
+            }
+            .store(in: &cancellables)
+
+        logger.notice("Sparkle updater started feed=\(updater.feedURL?.absoluteString ?? "nil", privacy: .public) running=\(self.currentVersion, privacy: .public)(\(self.currentBuild, privacy: .public))")
     }
 
     func toggleAutoUpdates(_ value: Bool) {
@@ -84,6 +105,8 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     /// User-initiated check — shows Sparkle’s standard progress / result UI.
     func checkForUpdates() {
+        // If banner claims an update that isn't newer than us, drop it first.
+        clearIfNotActuallyNewer()
         guard canCheckForUpdates else {
             logger.warning("checkForUpdates ignored — canCheckForUpdates=false")
             return
@@ -96,8 +119,8 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     /// Silent background check (launch / interval). May only update the sidebar.
     func checkInBackground() {
+        clearIfNotActuallyNewer()
         guard canCheckForUpdates || updaterController.updater.sessionInProgress == false else { return }
-        // If the updater isn't ready yet, retry shortly after launch.
         if !canCheckForUpdates {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -118,18 +141,21 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     /// Opens Sparkle’s install flow for the pending update (sidebar CTA).
     func installPendingUpdate() {
+        clearIfNotActuallyNewer()
         guard updateAvailable else {
+            // Nothing real pending — run a fresh check so the user gets honest feedback.
             checkForUpdates()
             return
         }
+        lastErrorMessage = nil
+        statusText = "Opening installer…"
+        isChecking = true
         // Brings the update alert into focus / continues install.
         updaterController.checkForUpdates(nil)
     }
 
     func dismissUpdateBanner() {
-        // Soft dismiss only — next check can bring it back.
-        updateAvailable = false
-        statusText = nil
+        clearAvailableUpdate(status: nil)
     }
 
     // MARK: - SPUUpdaterDelegate
@@ -137,7 +163,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         Task { @MainActor in
             self.applyFoundUpdate(item)
-            self.logger.notice("Valid update found: \(item.displayVersionString, privacy: .public) (\(item.versionString, privacy: .public))")
+            self.logger.notice("Valid update found: \(item.displayVersionString, privacy: .public) (\(item.versionString, privacy: .public)) current=\(self.currentBuild, privacy: .public)")
         }
     }
 
@@ -145,18 +171,10 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         Task { @MainActor in
             self.isChecking = false
             self.lastCheckedAt = Date()
-            // Keep a soft banner if we previously knew about an update and the
-            // check failed for a transient reason; clear when truly up to date.
+            self.clearAvailableUpdate(status: "You're up to date")
             let ns = error as NSError
             let reason = ns.userInfo[SPUNoUpdateFoundReasonKey] as? Int
-            // SPUNoUpdateFoundReason.onLatestVersion == typically 0/1 depending on version
-            self.updateAvailable = false
-            self.availableVersion = nil
-            self.availableBuild = nil
-            self.statusText = "You're up to date"
-            self.lastErrorMessage = nil
             self.logger.notice("No update found reason=\(reason.map(String.init) ?? "?", privacy: .public) err=\(error.localizedDescription, privacy: .public)")
-            // Clear "up to date" status after a few seconds so the sidebar stays clean.
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 if self.statusText == "You're up to date" {
@@ -171,15 +189,32 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             self.isChecking = false
             self.lastCheckedAt = Date()
             let message = error.localizedDescription
-            self.lastErrorMessage = message
-            self.statusText = nil
-            self.logger.error("Update aborted: \(message, privacy: .public)")
+            // User cancel / abort should not leave a permanent error card for benign cancels.
+            let ns = error as NSError
+            let isCancel = ns.domain == "SUSparkleErrorDomain" && (ns.code == 1001 || ns.code == 4)
+            if isCancel {
+                self.lastErrorMessage = nil
+                self.statusText = nil
+                // Keep banner only if the candidate is still strictly newer.
+                self.clearIfNotActuallyNewer()
+            } else {
+                self.lastErrorMessage = message
+                self.statusText = nil
+                self.clearIfNotActuallyNewer()
+            }
+            self.logger.error("Update aborted: \(message, privacy: .public) code=\(ns.code, privacy: .public)")
         }
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didFinishLoading appcast: SUAppcast) {
         Task { @MainActor in
             self.logger.notice("Appcast loaded items=\(appcast.items.count, privacy: .public)")
+            // If the feed's latest item is not newer than us, force-clear any banner.
+            if let latest = appcast.items.first {
+                if !self.isStrictlyNewer(build: latest.versionString) {
+                    self.clearAvailableUpdate(status: nil)
+                }
+            }
         }
     }
 
@@ -189,8 +224,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         _ update: SUAppcastItem,
         andInImmediateFocus immediateFocus: Bool
     ) -> Bool {
-        // Immediate focus (idle/recent launch): let Sparkle show its alert.
-        // Otherwise we own the presentation via the sidebar banner.
+        // Immediate focus: Sparkle modal. Otherwise sidebar owns presentation.
         immediateFocus
     }
 
@@ -200,6 +234,12 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         state: SPUUserUpdateState
     ) {
         Task { @MainActor in
+            // Ignore callbacks for items that are not actually newer (post-install stale UI).
+            guard self.isStrictlyNewer(build: update.versionString) else {
+                self.clearAvailableUpdate(status: "You're up to date")
+                self.logger.notice("Ignoring non-newer update UI for \(update.versionString, privacy: .public) (running \(self.currentBuild, privacy: .public))")
+                return
+            }
             self.applyFoundUpdate(update)
             if !handleShowingUpdate {
                 self.statusText = "Update available"
@@ -209,19 +249,29 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
     }
 
     nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        // User interacted with Sparkle UI — keep banner until install finishes.
+        // User engaged Sparkle UI — leave banner until session ends / install.
     }
 
     nonisolated func standardUserDriverWillFinishUpdateSession() {
         Task { @MainActor in
             self.isChecking = false
             self.lastCheckedAt = Date()
+            // Critical: after install, dismiss, or "already current", drop stale banners.
+            self.clearIfNotActuallyNewer()
+            if !self.updateAvailable, self.statusText == "Opening installer…" || self.statusText == "Checking for updates…" {
+                self.statusText = nil
+            }
         }
     }
 
     // MARK: - Private
 
     private func applyFoundUpdate(_ item: SUAppcastItem) {
+        guard isStrictlyNewer(build: item.versionString) else {
+            clearAvailableUpdate(status: "You're up to date")
+            logger.notice("Rejected update \(item.versionString, privacy: .public) — not newer than \(self.currentBuild, privacy: .public)")
+            return
+        }
         availableVersion = item.displayVersionString
         availableBuild = item.versionString
         updateAvailable = true
@@ -229,5 +279,29 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         statusText = "Update available"
         isChecking = false
         lastCheckedAt = Date()
+    }
+
+    private func clearAvailableUpdate(status: String?) {
+        updateAvailable = false
+        availableVersion = nil
+        availableBuild = nil
+        statusText = status
+        lastErrorMessage = nil
+    }
+
+    /// Drop the banner if the advertised build is missing or not greater than ours.
+    private func clearIfNotActuallyNewer() {
+        guard updateAvailable else { return }
+        guard let build = availableBuild, isStrictlyNewer(build: build) else {
+            clearAvailableUpdate(status: nil)
+            return
+        }
+    }
+
+    /// Numeric CFBundleVersion comparison (Sparkle uses sparkle:version the same way).
+    private func isStrictlyNewer(build candidate: String) -> Bool {
+        let current = currentBuild
+        guard !candidate.isEmpty, !current.isEmpty else { return false }
+        return candidate.compare(current, options: .numeric) == .orderedDescending
     }
 }
