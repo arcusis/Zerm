@@ -3,22 +3,20 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.3.0</title>
+            <title>2.3.1</title>
             <description><![CDATA[
-                <h3>What's New in v2.3.0</h3>
+                <h3>What's New in v2.3.1</h3>
                 <ul>
-                    <li>Privacy: stop logging full transcripts to the system log; default audio retention on.</li>
-                    <li>Accuracy: dictionary wired into Whisper + Deepgram; language auto-detect by default; safer hallucination filter; continuous resampler; streaming batch fallback.</li>
-                    <li>Stability: stuck-mute race fixed; session tokens prevent stale paste; busy-state watchdog; cancelable local enhancement.</li>
-                    <li>UX: hard failures notify with actions; mic test; history workspace actions; offline dictation commands.</li>
-                    <li>Ops: MetricKit diagnostics; working Sparkle auto-update feed; first unit tests.</li>
+                    <li>Working auto-update: Sparkle checks surface in the sidebar with an Install button.</li>
+                    <li>Clearer Settings / menu bar update actions when a release is pending.</li>
+                    <li>Reliable background update checks with gentle-reminder support.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 13 Jul 2026 09:47:54 +0000</pubDate>
-            <sparkle:version>230</sparkle:version>
-            <sparkle:shortVersionString>2.3.0</sparkle:shortVersionString>
+            <pubDate>Mon, 13 Jul 2026 18:16:38 +0000</pubDate>
+            <sparkle:version>231</sparkle:version>
+            <sparkle:shortVersionString>2.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.0/Zerm-2.3.0-macos.zip" length="23748337" type="application/octet-stream" sparkle:edSignature="mic54QmMftSiVMTm5jVrbkCkHI+V9EblcX6jj+7e7B8zixqrRkdWr6aftzBTmanEYETRxXWWTezozGFlVk7XCw=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.1/Zerm-2.3.1-macos.zip" length="23814196" type="application/octet-stream" sparkle:edSignature="/XLBRkcvjVibtkdcREX4RZ+IheHiY2o8uasSZjxOx3lzFcVrSEsuhmidbjC2amrm+g/oC8HPO+GPmX44eXOGDQ=="/>
         </item>
     </channel>
 </rss>
