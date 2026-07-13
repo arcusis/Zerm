@@ -411,6 +411,8 @@ class AudioDeviceManager: ObservableObject {
         loadAvailableDevices { [weak self] in
             guard let self = self else { return }
 
+            DebugLogger.shared.log("AudioDeviceManager", "device list changed: \(self.availableDevices.count) input device(s), recording=\(self.isRecordingActive)")
+
             if self.inputMode == .systemDefault {
                 self.notifyDeviceChange()
                 return
@@ -421,6 +423,7 @@ class AudioDeviceManager: ObservableObject {
 
                 if !self.isDeviceAvailable(currentID) {
                     self.logger.warning("🎙️ Recording device \(currentID, privacy: .public) no longer available - requesting switch")
+                    DebugLogger.shared.log("AudioDeviceManager", "recording device \(currentID) lost — looking for replacement")
 
                     let newDeviceID: AudioDeviceID?
                     if self.inputMode == .prioritized {
@@ -441,6 +444,7 @@ class AudioDeviceManager: ObservableObject {
 
                     if let deviceID = newDeviceID {
                         self.selectedDeviceID = deviceID
+                        DebugLogger.shared.log("AudioDeviceManager", "requesting switch to replacement device \(deviceID)")
                         NotificationCenter.default.post(
                             name: .audioDeviceSwitchRequired,
                             object: nil,
@@ -448,6 +452,7 @@ class AudioDeviceManager: ObservableObject {
                         )
                     } else {
                         self.logger.error("No audio input devices available!")
+                        DebugLogger.shared.log("AudioDeviceManager", "no input devices available — stopping recording")
                         NotificationCenter.default.post(name: .toggleMiniRecorder, object: nil)
                     }
                 }

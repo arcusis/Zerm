@@ -5,8 +5,8 @@ set -euo pipefail
 #
 # One-time setup — store notarization credentials in the login keychain:
 #   xcrun notarytool store-credentials zerm-notary \
-#     --key ~/.appstoreconnect/private_keys/AuthKey_32D372QBLD.p8 \
-#     --key-id 32D372QBLD \
+#     --key ~/.appstoreconnect/private_keys/AuthKey_<KEY-ID>.p8 \
+#     --key-id <KEY-ID> \
 #     --issuer <ISSUER-UUID>
 #   (Issuer UUID: App Store Connect -> Users and Access -> Integrations -> App Store Connect API)
 #
@@ -56,8 +56,62 @@ xcodebuild -project "$REPO_ROOT/Zerm.xcodeproj" -scheme Zerm -configuration Rele
 
 [ -d "$APP_PATH" ] || { echo "error: $APP_PATH not found after build"; exit 1; }
 
+# Xcode's CodeSignOnCopy re-signs each embedded framework's *main* binary with our
+# Developer ID, but NOT the executables nested inside them. Sparkle in particular
+# ships its XPC services, Autoupdate helper and Updater.app ad-hoc signed via SPM.
+# Notarization rejects any ad-hoc / hardened-runtime-less nested code, and at launch
+# dyld's library validation aborts with "different Team IDs" on a downloaded copy.
+# So re-sign every nested Mach-O bottom-up (deepest first) before sealing the app.
+echo "==> Re-signing nested code inside-out (Developer ID + hardened runtime)"
+# Collect nested bundles plus loose Mach-O helpers (e.g. Sparkle's Autoupdate),
+# then sign deepest paths first so inner bundles are sealed before their parents.
+NESTED_BUNDLES=$(find "$APP_PATH/Contents/Frameworks" \
+    \( -name "*.xpc" -o -name "*.app" -o -name "*.framework" \) -print)
+NESTED_MACHO=$(find "$APP_PATH/Contents/Frameworks" -type f ! -name "*.dylib" \
+    -exec sh -c 'file -b "$1" | grep -q "Mach-O"' _ {} \; -print)
+SIGN_LIST=$(printf '%s\n%s\n' "$NESTED_BUNDLES" "$NESTED_MACHO" \
+    | awk 'NF { print length"\t"$0 }' | sort -rn | cut -f2- | awk '!seen[$0]++')
+while IFS= read -r ITEM; do
+    [ -n "$ITEM" ] || continue
+    # Preserve each helper's own entitlements; only the outer app gets ours.
+    codesign --force --options runtime --timestamp \
+        --preserve-metadata=entitlements --sign "$SIGN_IDENTITY" "$ITEM"
+done <<SIGN_EOF
+$SIGN_LIST
+SIGN_EOF
+
+echo "==> Re-sealing app bundle"
+codesign --force --options runtime --timestamp \
+    --entitlements "$REPO_ROOT/Zerm/Zerm.local.entitlements" \
+    --sign "$SIGN_IDENTITY" "$APP_PATH"
+
 echo "==> Verifying code signature"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+# Guard against the failure that shipped in 2.1.3: an ad-hoc (or wrong-team)
+# signature passes `--deep --strict` because ad-hoc is itself valid, yet dyld's
+# library validation aborts at launch with "different Team IDs", and notarization
+# rejects ad-hoc code. Assert every bundled executable carries our Developer ID team.
+echo "==> Asserting Developer ID Team ID ($TEAM_ID) on all bundled code"
+SIGN_BAD=0
+while IFS= read -r -d '' ITEM; do
+    TEAM=$(codesign -dvv "$ITEM" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+    if [ "$TEAM" != "$TEAM_ID" ]; then
+        echo "  !! ${ITEM#$APP_PATH/}: TeamIdentifier='${TEAM:-not set}' (expected $TEAM_ID)"
+        SIGN_BAD=1
+    fi
+done < <(
+    find "$APP_PATH" \
+        \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.dylib" \) -print0
+    find "$APP_PATH/Contents/Frameworks" -type f ! -name "*.dylib" \
+        -exec sh -c 'file -b "$1" | grep -q "Mach-O"' _ {} \; -print0
+    printf '%s\0' "$APP_PATH/Contents/MacOS/Zerm"
+)
+if [ "$SIGN_BAD" != "0" ]; then
+    echo "error: not all bundled code is signed with team $TEAM_ID."
+    echo "This build would crash on download with a dyld 'different Team IDs' error. Aborting."
+    exit 1
+fi
 
 if [ "${SKIP_NOTARIZE:-0}" != "1" ]; then
     echo "==> Notarizing app"

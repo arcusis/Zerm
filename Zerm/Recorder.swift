@@ -21,6 +21,8 @@ class Recorder: NSObject, ObservableObject {
     private let smoothedValuesLock = NSLock()
     private var smoothedAverage: Float = 0
     private var smoothedPeak: Float = 0
+    // Only touched on audioMeterQueue (serial)
+    private var meterTickCount = 0
 
     /// Audio chunk callback for streaming. Can be updated while recording;
     /// changes are forwarded to the live CoreAudioRecorder.
@@ -97,6 +99,7 @@ class Recorder: NSObject, ObservableObject {
             logger.notice("🎙️ Successfully switched recording to device \(newDeviceID, privacy: .public)")
         } catch {
             logger.error("❌ Failed to switch device: \(error.localizedDescription, privacy: .public)")
+            DebugLogger.shared.log("Recorder", "device switch to \(newDeviceID) FAILED: \(error.localizedDescription)")
 
             // If switch fails, stop recording and notify user
             await handleRecordingError(error)
@@ -115,6 +118,12 @@ class Recorder: NSObject, ObservableObject {
             }
         }
         UserDefaults.standard.set(String(currentDeviceID), forKey: "lastUsedMicrophoneDeviceID")
+
+        let resolvedName = deviceManager.availableDevices.first(where: { $0.id == currentDeviceID })?.name ?? "unknown"
+        DebugLogger.shared.log("Recorder", "start requested: device=\(currentDeviceID) (\(resolvedName)) mode=\(deviceManager.inputMode.rawValue) file=\(url.lastPathComponent)")
+        if currentDeviceID == 0 {
+            DebugLogger.shared.log("Recorder", "no input device resolved (deviceID=0, mode=\(deviceManager.inputMode.rawValue))")
+        }
 
         let deviceID = currentDeviceID
 
@@ -144,6 +153,7 @@ class Recorder: NSObject, ObservableObject {
                 }
             } catch {
                 capturedLogger.error("Failed to start recording: \(error.localizedDescription, privacy: .public)")
+                DebugLogger.shared.log("Recorder", "start FAILED: \(error.localizedDescription)")
                 DispatchQueue.main.async { [weak self] in
                     self?.stopRecording()
                     self?.deviceManager.isRecordingActive = false
@@ -207,6 +217,12 @@ class Recorder: NSObject, ObservableObject {
 
     private func updateAudioMeter() {
         guard let recorder = recorder else { return }
+
+        // ~1 Hz capture-health heartbeat while debug logging is on (17 ms ticks)
+        meterTickCount += 1
+        if meterTickCount % 59 == 0 {
+            DebugLogger.shared.log("Recorder", "heartbeat: \(recorder.debugSessionStats())")
+        }
 
         // Sample audio levels (thread-safe read)
         let averagePower = recorder.averagePower

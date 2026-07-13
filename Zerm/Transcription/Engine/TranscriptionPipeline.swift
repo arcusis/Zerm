@@ -93,6 +93,7 @@ class TranscriptionPipeline {
 
             let cleanedText = TranscriptionOutputFilter.applyUserCleanupPreferences(text)
             logger.notice("📝 Cleanup preferences result: \(cleanedText, privacy: .public)")
+            DebugLogger.shared.log("TranscriptionPipeline", "transcription finished: chars=\(cleanedText.count) empty=\(cleanedText.isEmpty)")
 
             // Notify the user when the transcription returns nothing — typically a very
             // short phrase released before the model captures enough audio, or a fully

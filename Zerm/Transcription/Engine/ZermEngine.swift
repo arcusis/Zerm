@@ -110,6 +110,7 @@ class ZermEngine: NSObject, ObservableObject {
                 }
             } else {
                 logger.error("❌ No recorded file found after stopping recording")
+                DebugLogger.shared.log("ZermEngine", "no recorded file after stopping recording")
                 currentSession?.cancel()
                 currentSession = nil
                 recordingState = .idle
@@ -248,7 +249,13 @@ class ZermEngine: NSObject, ObservableObject {
                     }
                 } else {
                     logger.error("❌ Recording permission denied.")
+                    DebugLogger.shared.log("ZermEngine", "recording blocked: microphone permission denied")
+                    NotificationManager.shared.showNotification(
+                        title: "Microphone access denied — enable Zerm in System Settings → Privacy & Security → Microphone",
+                        type: .error
+                    )
                     recordingState = .idle
+                    Task { await self.recorderUIManager?.dismissMiniRecorder() }
                 }
             }
         } else {
@@ -295,6 +302,7 @@ class ZermEngine: NSObject, ObservableObject {
                 if let sinceInput = self.recorder.secondsSinceLastAudioInput,
                    sinceInput >= captureStallSeconds {
                     self.logger.error("Recording dropped: no audio input for \(sinceInput, privacy: .public)s — recovering")
+                    DebugLogger.shared.log("ZermEngine", "watchdog: no audio input for \(String(format: "%.1f", sinceInput))s — recording dropped")
                     await NotificationManager.shared.showNotification(
                         title: "Recording stopped — microphone dropped",
                         type: .warning,
@@ -320,12 +328,14 @@ class ZermEngine: NSObject, ObservableObject {
                    elapsed >= minimumRecordingSeconds,
                    now.timeIntervalSince(lastSpeechAt) >= silenceSeconds {
                     self.logger.notice("Auto-stop: silence threshold reached")
+                    DebugLogger.shared.log("ZermEngine", "auto-stop: silence threshold reached after \(String(format: "%.1f", elapsed))s")
                     self.stopFromMonitor()
                     return
                 }
 
                 if !heardSpeech, elapsed >= initialSilenceSeconds {
                     self.logger.notice("Auto-stop: initial silence timeout reached")
+                    DebugLogger.shared.log("ZermEngine", "auto-stop: initial silence timeout, no speech detected in \(String(format: "%.1f", elapsed))s")
                     self.stopFromMonitor()
                     return
                 }
@@ -352,8 +362,31 @@ class ZermEngine: NSObject, ObservableObject {
         autoStopTask = nil
     }
 
-    private func requestRecordPermission(response: @escaping (Bool) -> Void) {
-        response(true)
+    private func requestRecordPermission(response: @escaping @MainActor (Bool) -> Void) {
+        Task { @MainActor in
+            let status = AVCaptureDevice.authorizationStatus(for: .audio)
+            DebugLogger.shared.log("ZermEngine", "microphone permission status=\(Self.describe(status))")
+            switch status {
+            case .authorized:
+                response(true)
+            case .notDetermined:
+                let granted = await AVCaptureDevice.requestAccess(for: .audio)
+                DebugLogger.shared.log("ZermEngine", "microphone permission requested, granted=\(granted)")
+                response(granted)
+            default:
+                response(false)
+            }
+        }
+    }
+
+    private static func describe(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown(\(status.rawValue))"
+        }
     }
 
     // MARK: - Pipeline Dispatch
