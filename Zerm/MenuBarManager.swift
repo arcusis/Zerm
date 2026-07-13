@@ -4,6 +4,9 @@ import AppKit
 import OSLog
 
 class MenuBarManager: ObservableObject {
+    /// Set when the app creates its single MenuBarManager instance.
+    static weak var shared: MenuBarManager?
+
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "MenuBarManager")
     @Published var isMenuBarOnly: Bool {
         didSet {
@@ -18,6 +21,7 @@ class MenuBarManager: ObservableObject {
     init() {
         self.isMenuBarOnly = UserDefaults.standard.bool(forKey: "IsMenuBarOnly")
         updateAppActivationPolicy()
+        MenuBarManager.shared = self
 
         NotificationCenter.default.addObserver(
             self,

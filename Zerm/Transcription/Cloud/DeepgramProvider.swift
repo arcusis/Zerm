@@ -44,7 +44,8 @@ struct DeepgramProvider: CloudProvider {
             audioData: audioData,
             apiKey: apiKey,
             model: model,
-            language: Self.resolvedLanguage(language, model: model)
+            language: Self.resolvedLanguage(language, model: model),
+            customVocabulary: customVocabulary
         )
     }
 
@@ -52,8 +53,9 @@ struct DeepgramProvider: CloudProvider {
     /// silently transcribes as English. For the multilingual Nova-3 model, "multi" enables
     /// Deepgram's built-in multilingual code-switching, so "Auto detect" actually works. (VoiceInk #742)
     static func resolvedLanguage(_ language: String?, model: String) -> String? {
-        if let language, !language.isEmpty { return language }
-        return model == "nova-3" ? "multi" : language
+        // Treat "auto" the same as nil so nova-3 becomes "multi".
+        if let language, !language.isEmpty, language != "auto" { return language }
+        return model == "nova-3" ? "multi" : nil
     }
 
     func makeStreamingProvider(modelContext: ModelContext) -> (any StreamingTranscriptionProvider)? {

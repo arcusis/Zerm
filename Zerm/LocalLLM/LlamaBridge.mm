@@ -2,6 +2,7 @@
 #import <llama/llama.h>
 #import <os/log.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,9 @@
     llama_sampler_chain_add(_sampler, llama_sampler_init_top_k(40));
     llama_sampler_chain_add(_sampler, llama_sampler_init_top_p(0.95f, 1));
     llama_sampler_chain_add(_sampler, llama_sampler_init_temp(0.3f));
+    // Penalize loops/stutter so long rewrites don't repeat a phrase forever.
+    llama_sampler_chain_add(_sampler, llama_sampler_init_penalties(
+        /*last_n*/ 64, /*repeat*/ 1.15f, /*freq*/ 0.0f, /*present*/ 0.0f));
     llama_sampler_chain_add(_sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     return YES;
 }
@@ -84,15 +88,32 @@
     llama_memory_clear(llama_get_memory(_ctx), true);
     llama_sampler_reset(_sampler);
 
-    std::string combined = std::string(system.UTF8String) + "\n\n" + std::string(user.UTF8String);
-    std::string prompt = [self buildPrompt:combined];
+    std::string systemStr = system.UTF8String ? system.UTF8String : "";
+    std::string userStr = user.UTF8String ? user.UTF8String : "";
+    std::string prompt = [self buildPromptWithSystem:systemStr user:userStr];
 
     std::vector<llama_token> tokens = [self tokenize:prompt addSpecial:true];
     if (tokens.empty()) return nil;
 
+    // On overflow, keep the system/instructions prefix and drop the oldest
+    // middle of the user transcript — never evict instructions while keeping
+    // only the transcript tail (that makes the model continue the text).
     const int nCtx = (int)llama_n_ctx(_ctx);
-    if ((int)tokens.size() > nCtx - 128) {
-        tokens.erase(tokens.begin(), tokens.end() - (nCtx - 128));   // keep most recent context
+    const int budget = nCtx - 128;
+    if ((int)tokens.size() > budget) {
+        std::vector<llama_token> systemTokens = [self tokenize:systemStr addSpecial:false];
+        int keepPrefix = std::min((int)systemTokens.size() + 32, budget / 3);
+        keepPrefix = std::max(keepPrefix, 64);
+        int keepSuffix = budget - keepPrefix;
+        if (keepSuffix < 64) {
+            keepPrefix = budget / 4;
+            keepSuffix = budget - keepPrefix;
+        }
+        std::vector<llama_token> trimmed;
+        trimmed.reserve(budget);
+        trimmed.insert(trimmed.end(), tokens.begin(), tokens.begin() + keepPrefix);
+        trimmed.insert(trimmed.end(), tokens.end() - keepSuffix, tokens.end());
+        tokens.swap(trimmed);
     }
 
     std::string out;
@@ -129,22 +150,41 @@
 
 // MARK: - Helpers
 
-/// Builds the prompt using the model's own chat template (so any GGUF instruct model works),
-/// folding the instructions into a single user turn. Falls back to the Gemma format.
-- (std::string)buildPrompt:(const std::string &)content {
+/// Builds the prompt with separate system + user roles when the model template supports it.
+- (std::string)buildPromptWithSystem:(const std::string &)system user:(const std::string &)user {
     const char * tmpl = llama_model_chat_template(_model, nullptr);
     if (tmpl != nullptr) {
+        llama_chat_message msgs[2];
+        int msgCount = 0;
+        if (!system.empty()) {
+            msgs[msgCount].role = "system";
+            msgs[msgCount].content = system.c_str();
+            msgCount++;
+        }
+        msgs[msgCount].role = "user";
+        msgs[msgCount].content = user.c_str();
+        msgCount++;
+
+        int32_t needed = llama_chat_apply_template(tmpl, msgs, msgCount, true, nullptr, 0);
+        if (needed > 0) {
+            std::vector<char> buf(needed);
+            int32_t n = llama_chat_apply_template(tmpl, msgs, msgCount, true, buf.data(), (int32_t)buf.size());
+            if (n > 0) return std::string(buf.data(), n);
+        }
+        // Some templates reject "system" — fall back to fused user turn.
+        std::string fused = system.empty() ? user : (system + "\n\n" + user);
         llama_chat_message msg;
         msg.role = "user";
-        msg.content = content.c_str();
-        int32_t needed = llama_chat_apply_template(tmpl, &msg, 1, true, nullptr, 0);
+        msg.content = fused.c_str();
+        needed = llama_chat_apply_template(tmpl, &msg, 1, true, nullptr, 0);
         if (needed > 0) {
             std::vector<char> buf(needed);
             int32_t n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), (int32_t)buf.size());
             if (n > 0) return std::string(buf.data(), n);
         }
     }
-    return "<start_of_turn>user\n" + content + "<end_of_turn>\n<start_of_turn>model\n";
+    std::string fused = system.empty() ? user : (system + "\n\n" + user);
+    return "<start_of_turn>user\n" + fused + "<end_of_turn>\n<start_of_turn>model\n";
 }
 
 - (std::vector<llama_token>)tokenize:(const std::string &)text addSpecial:(bool)addSpecial {

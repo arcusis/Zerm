@@ -28,6 +28,13 @@ class ZermEngine: NSObject, ObservableObject {
 
     let logger = Logger(subsystem: "com.arcusis.zerm", category: "ZermEngine")
     private var autoStopTask: Task<Void, Never>?
+    /// Per-run token: cancel/new recording invalidates prior pipeline so late
+    /// results cannot paste stale text or dismiss a newer session.
+    private(set) var pipelineRunToken = UUID()
+    private var pipelineTask: Task<Void, Never>?
+    private var busyWatchdogTask: Task<Void, Never>?
+    private var whisperIdleUnloadTask: Task<Void, Never>?
+    private let whisperIdleUnloadSeconds: TimeInterval = 120
 
     init(
         modelContext: ModelContext,
@@ -85,7 +92,7 @@ class ZermEngine: NSObject, ObservableObject {
         if recordingState == .recording {
             cancelAutoStopMonitor()
             partialTranscript = ""
-            recordingState = .transcribing
+            setState(.transcribing)
             await recorder.stopRecording()
 
             if let recordedFile {
@@ -102,29 +109,62 @@ class ZermEngine: NSObject, ObservableObject {
 
                     await runPipeline(on: transcription, audioURL: recordedFile)
                 } else {
+                    invalidatePipelineRun()
                     currentSession?.cancel()
                     currentSession = nil
                     try? FileManager.default.removeItem(at: recordedFile)
-                    recordingState = .idle
+                    setState(.idle)
                     await cleanupResources()
                 }
             } else {
                 logger.error("❌ No recorded file found after stopping recording")
                 DebugLogger.shared.log("ZermEngine", "no recorded file after stopping recording")
+                invalidatePipelineRun()
                 currentSession?.cancel()
                 currentSession = nil
-                recordingState = .idle
+                setState(.idle)
                 await cleanupResources()
             }
         } else if recordingState == .idle {
             logger.notice("toggleRecord: entering start-recording branch")
-            guard transcriptionModelManager.currentTranscriptionModel != nil else {
-                NotificationManager.shared.showNotification(title: "No AI Model Selected", type: .error)
+            guard let selectedModel = transcriptionModelManager.currentTranscriptionModel else {
+                NotificationManager.shared.showNotification(
+                    title: "No AI Model Selected",
+                    type: .error,
+                    duration: 5.0,
+                    actionButton: (label: "Open Models", action: {
+                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                    })
+                )
+                return
+            }
+            // Selection alone is not enough — model must be downloaded / API key present.
+            let isUsable = transcriptionModelManager.usableModels.contains { $0.name == selectedModel.name }
+            guard isUsable else {
+                let message: String
+                switch selectedModel.provider {
+                case .whisper, .fluidAudio:
+                    message = "Model not downloaded — download \(selectedModel.displayName) first"
+                case .nativeApple:
+                    message = "Apple Speech is not available on this system"
+                default:
+                    message = "Add an API key for \(selectedModel.displayName) in Settings"
+                }
+                NotificationManager.shared.showNotification(
+                    title: message,
+                    type: .error,
+                    duration: 5.0,
+                    actionButton: (label: "Open Models", action: {
+                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                    })
+                )
                 return
             }
             shouldCancelRecording = false
             partialTranscript = ""
-            recordingState = .starting
+            invalidatePipelineRun()
+            cancelWhisperIdleUnload()
+            setState(.starting)
 
             requestRecordPermission { [self] granted in
                 if granted {
@@ -137,7 +177,7 @@ class ZermEngine: NSObject, ObservableObject {
                         pendingChunks.withLock { $0.append(data) }
                     }
 
-                    self.recordingState = .recording
+                    self.setState(.recording)
                     self.logger.notice("toggleRecord: state=recording, starting audio hardware")
 
                     self.recorder.startRecording(toOutputFile: permanentURL) { result in
@@ -150,15 +190,27 @@ class ZermEngine: NSObject, ObservableObject {
                                 // the true "go" cue for the user.  Previously the sound
                                 // played ~1 s before hardware init, losing the first words
                                 // spoken on the cue. (VoiceInk #572)
+                                // Mute only after the cue finishes, and only if still
+                                // recording — prevents cancel-during-sound from leaving
+                                // output stuck muted (generation + state guard).
                                 SoundManager.shared.playStartSound {
-                                    Task { await MediaController.shared.muteSystemAudio() }
+                                    Task { @MainActor [weak self] in
+                                        guard let self else { return }
+                                        guard self.recordingState == .recording,
+                                              !self.shouldCancelRecording else {
+                                            return
+                                        }
+                                        _ = await MediaController.shared.muteSystemAudio()
+                                    }
                                 }
 
                                 guard self.recorderUIManager?.isMiniRecorderVisible ?? false, !self.shouldCancelRecording else {
                                     self.cancelAutoStopMonitor()
+                                    MediaController.shared.cancelPendingMute()
+                                    await MediaController.shared.unmuteSystemAudio()
                                     self.recorder.stopRecording()
                                     self.recordedFile = nil
-                                    self.recordingState = .idle
+                                    self.setState(.idle)
                                     return
                                 }
 
@@ -239,7 +291,7 @@ class ZermEngine: NSObject, ObservableObject {
                             } catch {
                                 self.cancelAutoStopMonitor()
                                 self.logger.error("❌ Failed to start recording: \(error.localizedDescription, privacy: .public)")
-                                self.recordingState = .idle
+                                self.setState(.idle)
                                 self.recordedFile = nil
                                 await NotificationManager.shared.showNotification(title: "Recording failed to start", type: .error)
                                 self.logger.notice("toggleRecord: calling dismissMiniRecorder from error handler")
@@ -252,14 +304,63 @@ class ZermEngine: NSObject, ObservableObject {
                     DebugLogger.shared.log("ZermEngine", "recording blocked: microphone permission denied")
                     NotificationManager.shared.showNotification(
                         title: "Microphone access denied — enable Zerm in System Settings → Privacy & Security → Microphone",
-                        type: .error
+                        type: .error,
+                        duration: 6.0,
+                        actionButton: (label: "Open Settings", action: {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        })
                     )
-                    recordingState = .idle
+                    setState(.idle)
                     Task { await self.recorderUIManager?.dismissMiniRecorder() }
                 }
             }
         } else {
-            logger.notice("toggleRecord ignored while lifecycle is busy")
+            logger.notice("toggleRecord ignored while lifecycle is busy (state=\(String(describing: self.recordingState), privacy: .public))")
+        }
+    }
+
+    // MARK: - State transitions
+
+    /// Single chokepoint for lifecycle transitions (logged + watchdog for stuck states).
+    func setState(_ newState: RecordingState) {
+        let old = recordingState
+        guard old != newState else { return }
+        logger.notice("state \(String(describing: old), privacy: .public) → \(String(describing: newState), privacy: .public)")
+        recordingState = newState
+        restartBusyWatchdogIfNeeded()
+    }
+
+    private func invalidatePipelineRun() {
+        pipelineRunToken = UUID()
+        pipelineTask?.cancel()
+        pipelineTask = nil
+        busyWatchdogTask?.cancel()
+        busyWatchdogTask = nil
+    }
+
+    private func restartBusyWatchdogIfNeeded() {
+        busyWatchdogTask?.cancel()
+        busyWatchdogTask = nil
+        let stuckStates: Set<RecordingState> = [.transcribing, .enhancing, .busy, .starting]
+        guard stuckStates.contains(recordingState) else { return }
+        let tokenAtStart = pipelineRunToken
+        let stateAtStart = recordingState
+        busyWatchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000_000) // 3 minutes
+            guard let self, !Task.isCancelled else { return }
+            guard self.pipelineRunToken == tokenAtStart, self.recordingState == stateAtStart else { return }
+            self.logger.error("Watchdog: stuck in \(String(describing: stateAtStart), privacy: .public) — recovering to idle")
+            DebugLogger.shared.log("ZermEngine", "watchdog: stuck in \(stateAtStart) — force idle")
+            self.shouldCancelRecording = true
+            self.invalidatePipelineRun()
+            self.setState(.idle)
+            await NotificationManager.shared.showNotification(
+                title: "Zerm recovered from a stuck state — try again",
+                type: .warning,
+                duration: 4.0
+            )
         }
     }
 
@@ -396,7 +497,15 @@ class ZermEngine: NSObject, ObservableObject {
             transcription.text = "Transcription Failed: No model selected"
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
             try? modelContext.save()
-            recordingState = .idle
+            setState(.idle)
+            await NotificationManager.shared.showNotification(
+                title: "Transcription failed: No model selected",
+                type: .error,
+                duration: 5.0,
+                actionButton: (label: "Open Models", action: {
+                    MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                })
+            )
             return
         }
 
@@ -419,32 +528,68 @@ class ZermEngine: NSObject, ObservableObject {
 
         let session = currentSession
         currentSession = nil
+        let runToken = pipelineRunToken
 
         await pipeline.run(
             transcription: transcription,
             audioURL: audioURL,
             model: model,
             session: session,
-            onStateChange: { [weak self] state in self?.recordingState = state },
-            shouldCancel: { [weak self] in self?.shouldCancelRecording ?? false },
+            onStateChange: { [weak self] state in
+                guard let self, self.pipelineRunToken == runToken else { return }
+                self.setState(state)
+            },
+            shouldCancel: { [weak self] in
+                guard let self else { return true }
+                return self.shouldCancelRecording || self.pipelineRunToken != runToken
+            },
+            isRunStillValid: { [weak self] in
+                guard let self else { return false }
+                return self.pipelineRunToken == runToken && !self.shouldCancelRecording
+            },
             onCleanup: { [weak self] in await self?.cleanupResources() },
-            onDismiss: { [weak self] in await self?.recorderUIManager?.dismissMiniRecorder() }
+            onDismiss: { [weak self] in
+                guard let self, self.pipelineRunToken == runToken else { return }
+                await self.recorderUIManager?.dismissMiniRecorder()
+            }
         )
 
         shouldCancelRecording = false
-        if recordingState != .idle {
-            recordingState = .idle
+        if pipelineRunToken == runToken, recordingState != .idle {
+            setState(.idle)
         }
+        scheduleWhisperIdleUnload()
     }
 
     // MARK: - Resource Cleanup
 
     func cleanupResources() async {
         cancelAutoStopMonitor()
-        logger.notice("cleanupResources: releasing model resources")
-        await whisperModelManager.cleanupResources()
+        // Keep Whisper warm across rapid dictations; unload on idle timer instead.
+        // FluidAudio sessions and streaming state still need release.
+        logger.notice("cleanupResources: releasing non-Whisper resources")
         await serviceRegistry.cleanup()
+        scheduleWhisperIdleUnload()
         logger.notice("cleanupResources: completed")
+    }
+
+    private func cancelWhisperIdleUnload() {
+        whisperIdleUnloadTask?.cancel()
+        whisperIdleUnloadTask = nil
+    }
+
+    private func scheduleWhisperIdleUnload() {
+        cancelWhisperIdleUnload()
+        whisperIdleUnloadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(self.whisperIdleUnloadSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            guard self.recordingState == .idle else { return }
+            self.logger.notice("Whisper idle unload after \(self.whisperIdleUnloadSeconds, privacy: .public)s")
+            await self.whisperModelManager.cleanupResources()
+            // Invert Gemma: unload when idle so VRAM isn't pinned forever.
+            LocalLLMModelManager.shared.unloadIfIdle()
+        }
     }
 
     // MARK: - Notification Handling

@@ -1,6 +1,6 @@
 import Foundation
 
-enum RecordingState: Equatable {
+enum RecordingState: Equatable, Hashable {
     case idle
     case starting
     case recording
@@ -8,6 +8,6 @@ enum RecordingState: Equatable {
     case enhancing
     case generatingSpeech  // Read Aloud is running the on-device AI rewrite — widget shows "Thinking…"
     case preparingSpeech   // Read Aloud is synthesizing audio — widget shows "Preparing…"
-    case speaking          // Read Aloud audio is playing — animated bars
+    case speaking          // Read Aloud audio is playing — widget shows animated bars
     case busy
 }

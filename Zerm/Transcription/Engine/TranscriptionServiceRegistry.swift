@@ -12,7 +12,8 @@ class TranscriptionServiceRegistry {
 
     private(set) lazy var localTranscriptionService = WhisperTranscriptionService(
         modelsDirectory: modelsDirectory,
-        modelProvider: modelProvider
+        modelProvider: modelProvider,
+        modelContext: modelContext
     )
     private(set) lazy var cloudTranscriptionService = CloudTranscriptionService(modelContext: modelContext)
     private(set) lazy var nativeAppleTranscriptionService = NativeAppleTranscriptionService()

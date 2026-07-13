@@ -252,9 +252,19 @@ class AIEnhancementService: ObservableObject {
 
         if aiService.selectedProvider == .localLLM {
             do {
+                let cancelHook = cancellationCheck
                 let result = try await LocalLLMModelManager.shared.generate(
-                    system: systemMessage, user: formattedText, maxNewTokens: 512)
+                    system: systemMessage,
+                    user: formattedText,
+                    maxNewTokens: 512,
+                    isCancelled: { Task.isCancelled || cancelHook() }
+                )
+                if Task.isCancelled || cancelHook() {
+                    throw CancellationError()
+                }
                 return AIEnhancementOutputFilter.filter(result)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 throw EnhancementError.customError(error.localizedDescription)
             }
@@ -381,13 +391,24 @@ class AIEnhancementService: ObservableObject {
         throw EnhancementError.enhancementFailed
     }
 
-    func enhance(_ text: String) async throws -> (String, TimeInterval, String?) {
+    /// External cancel hook set for the duration of a single enhance call.
+    private var cancellationCheck: () -> Bool = { false }
+
+    func enhance(
+        _ text: String,
+        isCancelled: @escaping () -> Bool = { false }
+    ) async throws -> (String, TimeInterval, String?) {
         let startTime = Date()
         let enhancementPrompt: EnhancementPrompt = .transcriptionEnhancement
         let promptName = activePrompt?.title
+        cancellationCheck = isCancelled
+        defer { cancellationCheck = { false } }
+
+        if isCancelled() { throw CancellationError() }
 
         do {
             let result = try await makeRequestWithRetry(text: text, mode: enhancementPrompt)
+            if isCancelled() || Task.isCancelled { throw CancellationError() }
             let endTime = Date()
             let duration = endTime.timeIntervalSince(startTime)
             return (result, duration, promptName)

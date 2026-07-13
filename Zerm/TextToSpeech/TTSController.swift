@@ -111,9 +111,12 @@ final class TTSController: ObservableObject {
         }
 
         let speed = TTSSettings.speed
-        let spoken = await prepareSpokenText(from: text)
+        // Instant cleanup first so first audio can start without waiting on the full
+        // on-device naturalize. Remaining chunks may be refined per-sentence.
+        let cleaned = prepareInstantText(from: text)
         guard !Task.isCancelled else { return }
-        let chunks = Self.splitIntoChunks(spoken)
+        let chunks = Self.splitIntoChunks(cleaned)
+        let useAI = TTSSettings.naturalReadingAI && naturalizer.isModelInstalled
 
         player.startStreaming { [weak self] in
             self?.isSpeaking = false
@@ -124,7 +127,14 @@ final class TTSController: ObservableObject {
         do {
             for chunk in chunks {
                 try Task.checkCancellation()
-                let audio = try await provider.synthesize(text: chunk, voice: voice, speed: speed, apiKey: apiKey)
+                let spokenChunk: String
+                if useAI {
+                    spokenChunk = await naturalizer.naturalize(chunk, isCancelled: { Task.isCancelled }) ?? chunk
+                } else {
+                    spokenChunk = chunk
+                }
+                try Task.checkCancellation()
+                let audio = try await provider.synthesize(text: spokenChunk, voice: voice, speed: speed, apiKey: apiKey)
                 try Task.checkCancellation()
                 try player.enqueue(audio)
                 if !startedPlaying {
@@ -143,13 +153,18 @@ final class TTSController: ObservableObject {
         }
     }
 
+    /// Instant offline cleanup only (no LLM) so first audio can start immediately.
+    private func prepareInstantText(from raw: String) -> String {
+        let base = TTSSettings.smartCleanup ? TTSTextNormalizer.normalize(raw) : raw
+        return base.isEmpty ? raw : base
+    }
+
     /// Makes the selection sound human before synthesis. The instant offline normalizer ALWAYS
     /// runs first (so emoji/symbols/markup are stripped no matter what); the on-device LLM then
     /// refines that clean text into natural prose. If the model misbehaves (e.g. answers instead
     /// of rewriting) the naturalizer returns nil and we speak the cleaned text — never junk.
     private func prepareSpokenText(from raw: String) async -> String {
-        let base = TTSSettings.smartCleanup ? TTSTextNormalizer.normalize(raw) : raw
-        let cleaned = base.isEmpty ? raw : base
+        let cleaned = prepareInstantText(from: raw)
 
         if TTSSettings.naturalReadingAI, naturalizer.isModelInstalled {
             recorderUIManager?.beginGenerating()          // widget shows "Thinking…"

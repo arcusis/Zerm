@@ -11,7 +11,7 @@
 	<key>LSUIElement</key>
 	<false/>
 	<key>SUEnableAutomaticChecks</key>
-	<false/>
+	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Zerm needs access to your microphone to record audio for transcription.</string>
 	<key>NSAppleEventsUsageDescription</key>

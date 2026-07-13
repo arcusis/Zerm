@@ -99,6 +99,13 @@ final class LocalLLMModelManager: ObservableObject {
         refreshInstalled()
     }
 
+    /// Release the warm Gemma engine so it doesn't pin ~2–3 GB after idle.
+    func unloadIfIdle() {
+        guard engine != nil else { return }
+        logger.notice("Unloading local LLM engine (idle / memory reclaim)")
+        engine = nil
+    }
+
     /// Downloads to a temp file, reporting fractional progress via KVO (mirrors KokoroModelManager).
     private func downloadFile(from url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in

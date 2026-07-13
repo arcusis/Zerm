@@ -34,6 +34,7 @@ class TranscriptionPipeline {
     ///   - session: An active streaming session if one was prepared, otherwise nil.
     ///   - onStateChange: Called when the pipeline moves to a new recording state (e.g. `.enhancing`).
     ///   - shouldCancel: Returns true if the user requested cancellation.
+    ///   - isRunStillValid: Returns false when a newer pipeline run has superseded this one.
     ///   - onCleanup: Called when cancellation is detected to release model resources.
     ///   - onDismiss: Called at the end to dismiss the recorder panel.
     func run(
@@ -42,11 +43,12 @@ class TranscriptionPipeline {
         model: any TranscriptionModel,
         session: TranscriptionSession?,
         onStateChange: @escaping (RecordingState) -> Void,
-        shouldCancel: () -> Bool,
+        shouldCancel: @escaping () -> Bool,
+        isRunStillValid: @escaping () -> Bool = { true },
         onCleanup: @escaping () async -> Void,
         onDismiss: @escaping () async -> Void
     ) async {
-        if shouldCancel() {
+        if shouldCancel() || !isRunStillValid() {
             await onCleanup()
             return
         }
@@ -69,9 +71,17 @@ class TranscriptionPipeline {
                     return try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
                 }
             }
-            logger.notice("📝 Transcript: \(text, privacy: .public)")
+            // If this run was superseded while awaiting transcription, drop the result.
+            if !isRunStillValid() {
+                logger.notice("⏹️ Transcription superseded by newer run — discarding")
+                modelContext.delete(transcription)
+                try? modelContext.save()
+                await onCleanup()
+                return
+            }
+            logger.notice("📝 Transcript: \(text.count, privacy: .public) characters")
             text = TranscriptionOutputFilter.filter(text)
-            logger.notice("📝 Output filter result: \(text, privacy: .public)")
+            logger.notice("📝 Output filter result: \(text.count, privacy: .public) characters")
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
 
             let powerModeManager = PowerModeManager.shared
@@ -85,14 +95,18 @@ class TranscriptionPipeline {
 
             if UserDefaults.standard.bool(forKey: "IsTextFormattingEnabled") {
                 text = WhisperTextFormatter.format(text)
-                logger.notice("📝 Formatted transcript: \(text, privacy: .public)")
+                logger.notice("📝 Formatted transcript: \(text.count, privacy: .public) characters")
             }
 
             text = WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
-            logger.notice("📝 WordReplacement: \(text, privacy: .public)")
+            logger.notice("📝 WordReplacement: \(text.count, privacy: .public) characters")
+
+            // Offline dictation commands ("new line", "scratch that", spoken punctuation)
+            // run as a deterministic post-processor so they work without the LLM prompt.
+            text = DictationCommandProcessor.process(text)
 
             let cleanedText = TranscriptionOutputFilter.applyUserCleanupPreferences(text)
-            logger.notice("📝 Cleanup preferences result: \(cleanedText, privacy: .public)")
+            logger.notice("📝 Cleanup preferences result: \(cleanedText.count, privacy: .public) characters")
             DebugLogger.shared.log("TranscriptionPipeline", "transcription finished: chars=\(cleanedText.count) empty=\(cleanedText.isEmpty)")
 
             // Notify the user when the transcription returns nothing — typically a very
@@ -149,8 +163,11 @@ class TranscriptionPipeline {
                 let textForAI = promptDetectionResult?.processedText ?? text
 
                 do {
-                    let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(textForAI)
-                    logger.notice("📝 AI enhancement: \(enhancedText, privacy: .public)")
+                    let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(
+                        textForAI,
+                        isCancelled: { shouldCancel() }
+                    )
+                    logger.notice("📝 AI enhancement: \(enhancedText.count, privacy: .public) characters")
                     transcription.enhancedText = enhancedText
                     transcription.aiEnhancementModelName = enhancementService.getAIService()?.currentModel
                     transcription.promptName = promptName
@@ -205,15 +222,28 @@ class TranscriptionPipeline {
 
             transcription.text = "Transcription Failed: \(fullErrorText)"
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
+            finalPastedText = nil
+            let shortReason = String(fullErrorText.prefix(100))
+            await MainActor.run {
+                NotificationManager.shared.showNotification(
+                    title: "Transcription failed: \(shortReason)",
+                    type: .error,
+                    duration: 5.0
+                )
+            }
+            logger.error("❌ Transcription failed: \(fullErrorText, privacy: .public)")
+            DebugLogger.shared.log("TranscriptionPipeline", "transcription failed: \(shortReason)")
         }
 
         try? modelContext.save()
         NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
 
-        if shouldCancel() { await onCleanup(); return }
+        if shouldCancel() || !isRunStillValid() { await onCleanup(); return }
 
+        // Never paste if a newer recording/pipeline already started.
         if let textToPaste = finalPastedText,
-           transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
+           transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue,
+           isRunStillValid() {
             let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
             let pastedText = textToPaste + (appendSpace ? " " : "")
             _ = await CursorPaster.startPasteAtCursor(pastedText).value
@@ -233,7 +263,11 @@ class TranscriptionPipeline {
             await promptDetectionService.restoreOriginalSettings(result, to: enhancementService)
         }
 
-        await onDismiss()
+        if isRunStillValid() {
+            await onDismiss()
+        } else {
+            await onCleanup()
+        }
     }
 }
 

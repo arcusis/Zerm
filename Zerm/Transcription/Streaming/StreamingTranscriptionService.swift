@@ -48,6 +48,7 @@ class StreamingTranscriptionService {
     private let chunkSource = AudioChunkSource()
     private var state: StreamingState = .idle
     private var committedSegments: [String] = []
+    private var sawStreamingError = false
     private let modelContext: ModelContext
     private let fluidAudioService: FluidAudioTranscriptionService?
     private var onPartialTranscript: ((String) -> Void)?
@@ -76,11 +77,13 @@ class StreamingTranscriptionService {
     func startStreaming(model: any TranscriptionModel) async throws {
         state = .connecting
         committedSegments = []
+        sawStreamingError = false
 
         let provider = try createProvider(for: model)
         self.provider = provider
 
-        let selectedLanguage = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
+        // Normalize "auto" → nil so providers don't pass a literal "auto" language hint.
+        let selectedLanguage = LanguagePreference.apiLanguage()
 
         try await provider.connect(model: model, language: selectedLanguage)
 
@@ -131,7 +134,7 @@ class StreamingTranscriptionService {
         }
 
         // Wait for the server to acknowledge our commit (or timeout)
-        let finalText = await waitForFinalCommit(signalStream: signalStream)
+        let finalText = try await waitForFinalCommit(signalStream: signalStream)
 
         state = .done
         await cleanupStreaming()
@@ -250,6 +253,8 @@ class StreamingTranscriptionService {
                     break
                 case .error(let error):
                     await MainActor.run {
+                        self.sawStreamingError = true
+                        self.state = .failed
                         self.logger.error("Streaming event error: \(error.localizedDescription, privacy: .public)")
                     }
                 }
@@ -261,7 +266,10 @@ class StreamingTranscriptionService {
     /// Timeout is 30 s — long enough for recordings of several minutes to be fully
     /// assembled server-side before the acknowledgment fires. The previous 10 s limit
     /// caused truncated transcripts for ~1 min+ Parakeet v2 recordings. (VoiceInk #727)
-    private func waitForFinalCommit(signalStream: AsyncStream<Void>) async -> String {
+    ///
+    /// Throws on timeout-with-partial / stream error so `StreamingTranscriptionSession`
+    /// can re-run the recorded file through batch instead of accepting truncated text.
+    private func waitForFinalCommit(signalStream: AsyncStream<Void>) async throws -> String {
         // Race: wait for commit acknowledgment vs timeout
         let receivedInTime = await withTaskGroup(of: Bool.self) { group in
             group.addTask { @MainActor in
@@ -285,11 +293,22 @@ class StreamingTranscriptionService {
         commitSignal?.finish()
         commitSignal = nil
 
-        if !receivedInTime && committedSegments.isEmpty {
-            logger.warning("No transcript received from streaming")
+        if sawStreamingError {
+            logger.warning("Streaming error observed — forcing batch fallback")
+            throw StreamingTranscriptionError.providerError("Streaming provider reported an error")
         }
 
-        return committedSegments.isEmpty ? "" : committedSegments.joined(separator: " ")
+        if !receivedInTime {
+            logger.warning("Streaming commit timed out (segments=\(self.committedSegments.count, privacy: .public)) — forcing batch fallback")
+            throw StreamingTranscriptionError.timeout
+        }
+
+        if committedSegments.isEmpty {
+            logger.warning("No transcript received from streaming")
+            throw StreamingTranscriptionError.noResult
+        }
+
+        return committedSegments.joined(separator: " ")
     }
 
     private func cleanupStreaming() async {

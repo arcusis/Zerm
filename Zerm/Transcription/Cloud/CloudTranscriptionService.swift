@@ -59,7 +59,7 @@ class CloudTranscriptionService: TranscriptionService {
                 throw CloudTranscriptionError.unsupportedProvider
             }
             let apiKey = try requireAPIKey(forProvider: cloudProvider.providerKey)
-            return try await cloudProvider.transcribe(
+            let text = try await cloudProvider.transcribe(
                 audioData: audioData,
                 fileName: fileName,
                 apiKey: apiKey,
@@ -68,6 +68,12 @@ class CloudTranscriptionService: TranscriptionService {
                 prompt: transcriptionPrompt(),
                 customVocabulary: getCustomDictionaryTerms()
             )
+            // Empty body from cloud STT is a provider failure, not silence —
+            // treating it as success surfaces as "Nothing transcribed".
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw CloudTranscriptionError.noTranscriptionReturned
+            }
+            return text
         } catch let error as CloudTranscriptionError {
             throw error
         } catch let error as LLMKitError {
@@ -94,8 +100,7 @@ class CloudTranscriptionService: TranscriptionService {
     }
 
     private func selectedLanguage() -> String? {
-        let lang = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
-        return (lang == "auto" || lang.isEmpty) ? nil : lang
+        LanguagePreference.apiLanguage()
     }
 
     private func transcriptionPrompt() -> String? {
@@ -104,22 +109,7 @@ class CloudTranscriptionService: TranscriptionService {
     }
 
     private func getCustomDictionaryTerms() -> [String] {
-        let descriptor = FetchDescriptor<VocabularyWord>(sortBy: [SortDescriptor(\.word)])
-        guard let vocabularyWords = try? modelContext.fetch(descriptor) else {
-            return []
-        }
-        var seen = Set<String>()
-        var unique: [String] = []
-        for word in vocabularyWords {
-            let trimmed = word.word.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let key = trimmed.lowercased()
-            if !seen.contains(key) {
-                seen.insert(key)
-                unique.append(trimmed)
-            }
-        }
-        return unique
+        VocabularyTerms.fetch(from: modelContext)
     }
 
     private func mapLLMKitError(_ error: LLMKitError) -> CloudTranscriptionError {
