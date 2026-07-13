@@ -58,6 +58,18 @@ class WhisperTranscriptionService: TranscriptionService {
         // headers (non-standard RIFF chunks, LIST/INFO blocks, etc.) are handled
         // correctly rather than always skipping 44 bytes (VoiceInk #393).
         let data = try await AudioProcessor().processAudioToSamples(audioURL)
+        let durationSeconds = Double(data.count) / 16_000.0
+        let peak = data.map { abs($0) }.max() ?? 0
+        DebugLogger.shared.log(
+            "Whisper",
+            "samples=\(data.count) dur=\(String(format: "%.2f", durationSeconds))s peak=\(String(format: "%.3f", peak)) model=\(model.name)"
+        )
+
+        guard !data.isEmpty else {
+            logger.error("❌ No audio samples extracted from recording")
+            DebugLogger.shared.log("Whisper", "empty sample buffer from audio file")
+            throw ZermEngineError.transcriptionFailed
+        }
 
         // Merge style prompt with custom dictionary so Whisper biases toward user terms.
         let basePrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
@@ -70,17 +82,32 @@ class WhisperTranscriptionService: TranscriptionService {
         let currentPrompt = basePrompt + dictionarySuffix
         await whisperContext.setPrompt(currentPrompt)
 
-        // Transcribe
-        let success = await whisperContext.fullTranscribe(samples: data)
-
+        // Transcribe (with VAD if enabled)
+        var success = await whisperContext.fullTranscribe(samples: data)
         guard success else {
             logger.error("❌ Core transcription engine failed (whisper_full).")
             throw ZermEngineError.whisperCoreFailed
         }
 
-        let text = await whisperContext.getTranscription()
+        var text = await whisperContext.getTranscription()
 
-        logger.notice("Whisper transcription completed successfully.")
+        // VAD often drops short dictations that still have measurable energy — retry once
+        // without VAD when the first pass is empty but the file is long enough to matter.
+        let vadOn = UserDefaults.standard.bool(forKey: "IsVADEnabled")
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           vadOn,
+           durationSeconds >= 0.6,
+           peak > 0.01 {
+            logger.notice("Empty result with VAD — retrying without VAD (dur=\(durationSeconds, privacy: .public)s peak=\(peak, privacy: .public))")
+            DebugLogger.shared.log("Whisper", "empty with VAD — retry without VAD")
+            success = await whisperContext.fullTranscribe(samples: data, forceDisableVAD: true)
+            if success {
+                text = await whisperContext.getTranscription()
+            }
+        }
+
+        logger.notice("Whisper transcription completed: \(text.count, privacy: .public) characters")
+        DebugLogger.shared.log("Whisper", "result chars=\(text.count) empty=\(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
 
         // Only release resources if we created a new context (not using the shared one)
         if await modelProvider?.whisperContext !== whisperContext {

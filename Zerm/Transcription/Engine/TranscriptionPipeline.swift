@@ -107,25 +107,43 @@ class TranscriptionPipeline {
 
             let cleanedText = TranscriptionOutputFilter.applyUserCleanupPreferences(text)
             logger.notice("📝 Cleanup preferences result: \(cleanedText.count, privacy: .public) characters")
-            DebugLogger.shared.log("TranscriptionPipeline", "transcription finished: chars=\(cleanedText.count) empty=\(cleanedText.isEmpty)")
+            let audioAsset = AVURLAsset(url: audioURL)
+            let actualDuration = (try? CMTimeGetSeconds(await audioAsset.load(.duration))) ?? 0.0
+
+            DebugLogger.shared.log(
+                "TranscriptionPipeline",
+                "transcription finished: chars=\(cleanedText.count) empty=\(cleanedText.isEmpty) model=\(model.displayName) provider=\(model.provider.rawValue) dur=\(String(format: "%.2f", actualDuration))s"
+            )
 
             // Notify the user when the transcription returns nothing — typically a very
             // short phrase released before the model captures enough audio, or a fully
             // silent recording. Without feedback the user sees no paste and no error,
             // which is confusing. (VoiceInk #686)
             if cleanedText.isEmpty {
-                logger.notice("⚠️ Transcription returned empty result")
+                logger.notice("⚠️ Transcription returned empty result model=\(model.displayName, privacy: .public) dur=\(actualDuration, privacy: .public)s")
+                let shortClip = actualDuration < 0.8
+                let title = shortClip
+                    ? "Nothing transcribed — hold a bit longer before releasing"
+                    : "Nothing transcribed — try again or switch model in AI Models"
                 await MainActor.run {
-                    NotificationManager.shared.showNotification(
-                        title: "Nothing transcribed — audio too short or silent",
-                        type: .warning,
-                        duration: 3.0
-                    )
+                    if shortClip {
+                        NotificationManager.shared.showNotification(
+                            title: title,
+                            type: .warning,
+                            duration: 4.0
+                        )
+                    } else {
+                        NotificationManager.shared.showNotification(
+                            title: title,
+                            type: .warning,
+                            duration: 4.0,
+                            actionButton: (label: "Open Models", action: {
+                                MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                            })
+                        )
+                    }
                 }
             }
-
-            let audioAsset = AVURLAsset(url: audioURL)
-            let actualDuration = (try? CMTimeGetSeconds(await audioAsset.load(.duration))) ?? 0.0
 
             transcription.text = cleanedText
             transcription.duration = actualDuration

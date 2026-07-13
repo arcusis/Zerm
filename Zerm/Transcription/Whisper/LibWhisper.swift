@@ -28,7 +28,9 @@ actor WhisperContext {
         }
     }
 
-    func fullTranscribe(samples: [Float]) -> Bool {
+    /// - Parameter forceDisableVAD: When true, skip Whisper VAD even if the user setting is on.
+    ///   Used to retry short/empty results that VAD may have discarded as non-speech.
+    func fullTranscribe(samples: [Float], forceDisableVAD: Bool = false) -> Bool {
         guard let context = context else { return false }
         
         let maxThreads = max(1, min(8, cpuCount() - 2))
@@ -73,7 +75,7 @@ actor WhisperContext {
         whisper_reset_timings(context)
         
         // Configure VAD if enabled by user and model is available
-        let isVADEnabled = UserDefaults.standard.bool(forKey: "IsVADEnabled")
+        let isVADEnabled = !forceDisableVAD && UserDefaults.standard.bool(forKey: "IsVADEnabled")
         if isVADEnabled, let vadModelPath = self.vadModelPath {
             params.vad = true
             params.vad_model_path = (vadModelPath as NSString).utf8String
