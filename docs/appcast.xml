@@ -11,14 +11,14 @@
                     <li>Accuracy: dictionary wired into Whisper + Deepgram; language auto-detect by default; safer hallucination filter; continuous resampler; streaming batch fallback.</li>
                     <li>Stability: stuck-mute race fixed; session tokens prevent stale paste; busy-state watchdog; cancelable local enhancement.</li>
                     <li>UX: hard failures notify with actions; mic test; history workspace actions; offline dictation commands.</li>
-                    <li>Ops: MetricKit diagnostics; Sparkle appcast generation in release pipeline; first unit tests.</li>
+                    <li>Ops: MetricKit diagnostics; working Sparkle auto-update feed; first unit tests.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 13 Jul 2026 12:00:00 +0000</pubDate>
+            <pubDate>Mon, 13 Jul 2026 09:47:54 +0000</pubDate>
             <sparkle:version>230</sparkle:version>
             <sparkle:shortVersionString>2.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.0/Zerm-2.3.0-macos.zip" length="0" type="application/octet-stream"/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.0/Zerm-2.3.0-macos.zip" length="23748337" type="application/octet-stream" sparkle:edSignature="mic54QmMftSiVMTm5jVrbkCkHI+V9EblcX6jj+7e7B8zixqrRkdWr6aftzBTmanEYETRxXWWTezozGFlVk7XCw=="/>
         </item>
     </channel>
 </rss>
