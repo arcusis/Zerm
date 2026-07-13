@@ -1,6 +1,6 @@
 # Zerm Notebook
 
-Last updated: 2026-06-21
+Last updated: 2026-07-13
 
 This notebook captures durable project context for Zerm. Start here, then follow the linked notes relevant to the task.
 
@@ -16,13 +16,14 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Auto Paste]]
 - [[Zerm Auto Stop Dictation]] — hands-free auto-stop + the self-cancellation gotcha
 - [[Zerm Setup And Permissions]]
+- [[Zerm Debug Logging]] — user-enabled diagnostic log for field "mic not picked up" reports + real permission check
 - [[Zerm Production History]]
 - [[Zerm Release Signing]] — Developer ID + notarization pipeline (fixes the Gatekeeper "damaged app" reports)
 - [[Zerm Known Follow Ups]]
 
-## Current State (2026-06-21)
+## Current State (2026-07-13)
 
-- Branch: `Production` · Version: `2.1.0` (build 210)
+- Branch: `Production` · Version: `2.2.0` (build 220)
 - **Repo is flat:** the Xcode project lives at the **repository root** (`Zerm.xcodeproj`), matching VoiceInk. The old `native-macos/` nesting (a Tauri-era vestige) is gone.
 - **Three on-device models:** Whisper (STT), Kokoro (TTS), Gemma (agentic LLM) — each auto-downloaded and managed in-app; cloud providers optional per task.
 - **Read Aloud** ships with smart reading (instant cleanup + optional on-device AI rewrite).

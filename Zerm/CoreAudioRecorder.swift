@@ -2,6 +2,7 @@ import Foundation
 import CoreAudio
 import AudioToolbox
 import AVFoundation
+import Atomics
 import os
 
 // MARK: - Core Audio Recorder (AUHAL-based, does not change system default device)
@@ -64,6 +65,23 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private var renderBuffer: UnsafeMutablePointer<Float32>?
     private var renderBufferSize: UInt32 = 0
 
+    // Per-session capture diagnostics. The real-time callback only touches the
+    // atomics; the session dB accumulation rides the meterLock section that is
+    // already taken on every callback.
+    private let statCallbacks = ManagedAtomic<UInt64>(0)
+    private let statFramesRendered = ManagedAtomic<UInt64>(0)
+    private let statFramesWritten = ManagedAtomic<UInt64>(0)
+    private let statRenderErrors = ManagedAtomic<UInt64>(0)
+    private let statOverflows = ManagedAtomic<UInt64>(0)
+    private let statWriteErrors = ManagedAtomic<UInt64>(0)
+    private let statLastRenderStatus = ManagedAtomic<Int32>(0)
+    private let statLastWriteStatus = ManagedAtomic<Int32>(0)
+    private var _sessionPeakDb: Float = -160.0
+    private var _sessionAvgDbSum: Double = 0
+    private var _sessionMeterCount: UInt64 = 0
+    private var sessionStartDate: Date?
+    private var sessionDeviceName = "Unknown"
+
     /// Called on the audio thread with raw PCM data (16-bit, 16kHz, mono) for streaming.
     var onAudioChunk: ((_ data: Data) -> Void)?
 
@@ -84,17 +102,20 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         if deviceID == 0 {
             logger.error("Cannot start recording - no valid audio device (deviceID is 0)")
+            dbg("startRecording FAILED: no valid audio device (deviceID is 0)")
             throw CoreAudioRecorderError.failedToSetDevice(status: 0)
         }
 
         // Validate device still exists before proceeding with setup
         guard isDeviceAvailable(deviceID) else {
             logger.error("Cannot start recording - device \(deviceID, privacy: .public) is no longer available")
+            dbg("startRecording FAILED: device \(deviceID) is no longer available")
             throw CoreAudioRecorderError.deviceNotAvailable
         }
 
         currentDeviceID = deviceID
         recordingURL = url
+        resetSessionStats()
 
         logger.notice("🎙️ Starting recording from device \(deviceID, privacy: .public)")
         logDeviceDetails(deviceID: deviceID)
@@ -118,6 +139,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         try startAudioUnit()
 
         isRecording = true
+        dbg("startRecording: audio unit running, device=\(deviceID) file=\(url.lastPathComponent)")
     }
 
     /// Stops the current recording
@@ -127,6 +149,8 @@ final class CoreAudioRecorder: @unchecked Sendable {
             return
         }
         logger.notice("stopRecording: stopping core audio recorder")
+        let wasRecording = isRecording
+        let sessionURL = recordingURL
 
         // Stop and dispose AudioUnit
         if let unit = audioUnit {
@@ -153,6 +177,10 @@ final class CoreAudioRecorder: @unchecked Sendable {
             buffer.deallocate()
             renderBuffer = nil
             renderBufferSize = 0
+        }
+
+        if wasRecording {
+            dbg("session summary: \(sessionSummary(url: sessionURL))")
         }
 
         isRecording = false
@@ -182,6 +210,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         let oldDeviceID = currentDeviceID
         logger.notice("🎙️ Switching recording device from \(oldDeviceID, privacy: .public) to \(newDeviceID, privacy: .public)")
+        dbg("switchDevice: \(oldDeviceID) → \(newDeviceID)")
 
         // Step 1: Stop the AudioUnit (but keep file open)
         var status = AudioOutputUnitStop(unit)
@@ -278,6 +307,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         // Update stored format
         deviceFormat = newDeviceFormat
         currentDeviceID = newDeviceID
+        sessionDeviceName = getDeviceStringProperty(deviceID: newDeviceID, selector: kAudioDevicePropertyDeviceNameCFString) ?? "Unknown"
 
         // Step 7: Reinitialize and restart
         status = AudioUnitInitialize(unit)
@@ -291,6 +321,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         }
 
         logger.notice("🎙️ Successfully switched to device \(newDeviceID, privacy: .public)")
+        dbg("switchDevice: switched to \(newDeviceID) (\(sessionDeviceName)), fmt=\(Int(newDeviceFormat.mSampleRate))Hz/\(newDeviceFormat.mChannelsPerFrame)ch")
     }
 
     // MARK: - AudioUnit Setup
@@ -445,6 +476,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         if devSampleRate != outSampleRate {
             logger.notice("🎙️ Converting: \(Int(devSampleRate), privacy: .public)Hz → \(Int(outSampleRate), privacy: .public)Hz")
         }
+        dbg("formats: device=\(Int(devSampleRate))Hz/\(devChannels)ch/\(devBits)bit output=\(Int(outSampleRate))Hz/\(outChannels)ch/\(outBits)bit")
 
         // Pre-allocate buffers for real-time callback (avoid malloc in callback)
         let maxFrames: UInt32 = 4096
@@ -576,8 +608,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         // Safety check - shouldn't happen with 4096 max frames
         guard requiredSamples <= renderBufferSize else {
+            statOverflows.wrappingIncrement(ordering: .relaxed)
             return noErr
         }
+
+        statCallbacks.wrappingIncrement(ordering: .relaxed)
 
         let bytesPerFrame = UInt32(MemoryLayout<Float32>.size) * channelCount
         let bufferSize = inNumberFrames * bytesPerFrame
@@ -602,8 +637,12 @@ final class CoreAudioRecorder: @unchecked Sendable {
         )
 
         if status != noErr {
+            statRenderErrors.wrappingIncrement(ordering: .relaxed)
+            statLastRenderStatus.store(status, ordering: .relaxed)
             return status
         }
+
+        statFramesRendered.wrappingIncrement(by: UInt64(inNumberFrames), ordering: .relaxed)
 
         // Calculate audio meters from input buffer
         calculateMeters(from: &bufferList, frameCount: inNumberFrames)
@@ -643,6 +682,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
         _averagePower = avgDb
         _peakPower = peakDb
         _lastInputUptimeNanos = DispatchTime.now().uptimeNanoseconds
+        if peakDb > _sessionPeakDb {
+            _sessionPeakDb = peakDb
+        }
+        _sessionAvgDbSum += Double(avgDb)
+        _sessionMeterCount += 1
         meterLock.unlock()
     }
 
@@ -719,7 +763,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         let writeStatus = ExtAudioFileWrite(file, outputFrameCount, &outputBufferList)
         if writeStatus != noErr {
+            statWriteErrors.wrappingIncrement(ordering: .relaxed)
+            statLastWriteStatus.store(writeStatus, ordering: .relaxed)
             logger.error("🎙️ ExtAudioFileWrite failed with status: \(writeStatus, privacy: .public)")
+        } else {
+            statFramesWritten.wrappingIncrement(by: UInt64(outputFrameCount), ordering: .relaxed)
         }
 
         // Send the same PCM data to the streaming callback if set
@@ -728,6 +776,62 @@ final class CoreAudioRecorder: @unchecked Sendable {
             let data = Data(bytes: outputBuffer, count: byteCount)
             onAudioChunk(data)
         }
+    }
+
+    // MARK: - Session Diagnostics
+
+    private func dbg(_ message: String) {
+        DebugLogger.shared.log("CoreAudioRecorder", message)
+    }
+
+    private func resetSessionStats() {
+        statCallbacks.store(0, ordering: .relaxed)
+        statFramesRendered.store(0, ordering: .relaxed)
+        statFramesWritten.store(0, ordering: .relaxed)
+        statRenderErrors.store(0, ordering: .relaxed)
+        statOverflows.store(0, ordering: .relaxed)
+        statWriteErrors.store(0, ordering: .relaxed)
+        statLastRenderStatus.store(0, ordering: .relaxed)
+        statLastWriteStatus.store(0, ordering: .relaxed)
+        meterLock.lock()
+        _sessionPeakDb = -160.0
+        _sessionAvgDbSum = 0
+        _sessionMeterCount = 0
+        meterLock.unlock()
+        sessionStartDate = Date()
+        sessionDeviceName = "Unknown"
+    }
+
+    /// Snapshot of the current session's capture counters, safe to call from
+    /// any non-realtime thread.
+    func debugSessionStats() -> String {
+        meterLock.lock()
+        let peak = _sessionPeakDb
+        let avg = _sessionMeterCount > 0 ? Float(_sessionAvgDbSum / Double(_sessionMeterCount)) : -160.0
+        meterLock.unlock()
+        return "callbacks=\(statCallbacks.load(ordering: .relaxed)) "
+            + "framesIn=\(statFramesRendered.load(ordering: .relaxed)) "
+            + "framesOut=\(statFramesWritten.load(ordering: .relaxed)) "
+            + "renderErrs=\(statRenderErrors.load(ordering: .relaxed)) "
+            + "lastRenderErr=\(statLastRenderStatus.load(ordering: .relaxed)) "
+            + "overflows=\(statOverflows.load(ordering: .relaxed)) "
+            + "writeErrs=\(statWriteErrors.load(ordering: .relaxed)) "
+            + "lastWriteErr=\(statLastWriteStatus.load(ordering: .relaxed)) "
+            + String(format: "peak=%.1fdB avg=%.1fdB", peak, avg)
+    }
+
+    private func sessionSummary(url: URL?) -> String {
+        let duration = sessionStartDate.map { Date().timeIntervalSince($0) } ?? 0
+        var bytes: UInt64 = 0
+        if let path = url?.path,
+           let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? UInt64 {
+            bytes = size
+        }
+        return "session=\(url?.lastPathComponent ?? "?") device=\(currentDeviceID) name=\(sessionDeviceName) "
+            + "fmt=\(Int(deviceFormat.mSampleRate))Hz/\(deviceFormat.mChannelsPerFrame)ch "
+            + String(format: "dur=%.2fs ", duration)
+            + debugSessionStats()
+            + " bytes=\(bytes)"
     }
 
     // MARK: - Device Info Logging
@@ -747,6 +851,9 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         logger.notice("🎙️ Device info: name=\(deviceName, privacy: .public), uid=\(deviceUID, privacy: .public)")
         logger.notice("🎙️ Device details: transport=\(transportType, privacy: .public), manufacturer=\(manufacturer, privacy: .public)")
+
+        sessionDeviceName = deviceName
+        dbg("device: id=\(deviceID) name=\(deviceName) uid=\(deviceUID) transport=\(transportType) manufacturer=\(manufacturer)")
 
         // Get buffer frame size
         if let bufferSize = getBufferFrameSize(deviceID: deviceID) {

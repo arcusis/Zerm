@@ -13,7 +13,7 @@ Why users saw "Zerm is damaged and can't be opened": every public DMG through v2
 ## Credentials
 
 - Developer ID cert: in login keychain on the release Mac.
-- Notary API key: `~/.appstoreconnect/private_keys/AuthKey_32D372QBLD.p8`; the **issuer UUID** must be fetched from App Store Connect → Users and Access → Integrations, then stored once with `xcrun notarytool store-credentials zerm-notary ...` (exact command in `BUILDING.md`).
+- Notary API key: `~/.appstoreconnect/private_keys/AuthKey_<KEY-ID>.p8` (real key ID kept out of the public repo — it's in the local keychain profile `zerm-notary`); the **issuer UUID** must be fetched from App Store Connect → Users and Access → Integrations, then stored once with `xcrun notarytool store-credentials zerm-notary ...` (exact command in `BUILDING.md`).
 - Note: project `DEVELOPMENT_TEAM` is `V6J6A3VWY2`, which does NOT match the Developer ID team `F9Z784RA6D` — the release script overrides the team on the command line; don't "fix" the project setting without checking dev-machine provisioning.
 - Sparkle EdDSA private key still missing (auto-update signing) — separate issue; `SUEnableAutomaticChecks=false` so releases work without it.
 

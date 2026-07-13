@@ -1,12 +1,23 @@
 import SwiftUI
 
 struct DiagnosticsSettingsView: View {
+    @AppStorage(DebugLogger.defaultsKey) private var isDebugLoggingEnabled = false
     @State private var isExportingLogs = false
     @State private var exportedLogURL: URL?
     @State private var showLogExportError = false
     @State private var logExportError: String = ""
 
     var body: some View {
+        Toggle("Debug Logging", isOn: $isDebugLoggingEnabled)
+
+        if isDebugLoggingEnabled {
+            LabeledContent("Debug Log File") {
+                Button("Show in Finder") {
+                    revealDebugLog()
+                }
+            }
+        }
+
         LabeledContent {
             HStack(spacing: 8) {
                 if let url = exportedLogURL {
@@ -36,6 +47,16 @@ struct DiagnosticsSettingsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(logExportError)
+        }
+    }
+
+    private func revealDebugLog() {
+        let fileURL = DebugLogger.shared.logFileURL
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        } else {
+            try? FileManager.default.createDirectory(at: DebugLogger.shared.logsDirectory, withIntermediateDirectories: true)
+            NSWorkspace.shared.activateFileViewerSelecting([DebugLogger.shared.logsDirectory])
         }
     }
 

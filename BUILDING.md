@@ -92,8 +92,8 @@ Requirements on the release machine:
 
 ```bash
 xcrun notarytool store-credentials zerm-notary \
-  --key ~/.appstoreconnect/private_keys/AuthKey_32D372QBLD.p8 \
-  --key-id 32D372QBLD \
+  --key ~/.appstoreconnect/private_keys/AuthKey_<KEY-ID>.p8 \
+  --key-id <KEY-ID> \
   --issuer <ISSUER-UUID>
 ```
 

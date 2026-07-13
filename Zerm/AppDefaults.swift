@@ -64,6 +64,9 @@ enum AppDefaults {
             // Model
             "PrewarmModelOnWake": true,
 
+            // Diagnostics
+            "DebugLoggingEnabled": false,
+
         ])
 
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 1 {
