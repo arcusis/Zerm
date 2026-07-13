@@ -138,6 +138,32 @@ struct SettingsView: View {
                 }
             }
 
+            // MARK: - Paste Options
+            Section("Paste Options") {
+                ExpandableSettingsRow(
+                    isExpanded: $isRestoreClipboardExpanded,
+                    isEnabled: $restoreClipboardAfterPaste,
+                    label: "Restore Clipboard After Paste"
+                ) {
+                    Picker("Restore Delay", selection: $clipboardRestoreDelay) {
+                        Text("250ms").tag(0.25)
+                        Text("500ms").tag(0.5)
+                        Text("1s").tag(1.0)
+                        Text("2s").tag(2.0)
+                        Text("3s").tag(3.0)
+                        Text("4s").tag(4.0)
+                        Text("5s").tag(5.0)
+                    }
+                }
+
+                Toggle(isOn: $useAppleScriptPaste) {
+                    HStack(spacing: 4) {
+                        Text("Use AppleScript Paste")
+                        InfoTip("Enable this if pasting doesn't work with your keyboard layout (e.g. Neo2). Uses AppleScript instead of simulated key events.")
+                    }
+                }
+            }
+
             // MARK: - Recording Feedback
             Section("Recording Feedback") {
                 // Sound Feedback
@@ -165,30 +191,7 @@ struct SettingsView: View {
                     }
                 }
 
-                // Restore Clipboard
-                ExpandableSettingsRow(
-                    isExpanded: $isRestoreClipboardExpanded,
-                    isEnabled: $restoreClipboardAfterPaste,
-                    label: "Restore Clipboard After Paste"
-                ) {
-                    Picker("Restore Delay", selection: $clipboardRestoreDelay) {
-                        Text("250ms").tag(0.25)
-                        Text("500ms").tag(0.5)
-                        Text("1s").tag(1.0)
-                        Text("2s").tag(2.0)
-                        Text("3s").tag(3.0)
-                        Text("4s").tag(4.0)
-                        Text("5s").tag(5.0)
-                    }
-                }
-
-                // AppleScript Paste
-                Toggle(isOn: $useAppleScriptPaste) {
-                    HStack(spacing: 4) {
-                        Text("Use AppleScript Paste")
-                        InfoTip("Enable this if pasting doesn't work with your keyboard layout (e.g. Neo2). Uses AppleScript instead of simulated key events.")
-                    }
-                }
+                MicTestView()
             }
 
             // MARK: - Power Mode
@@ -461,6 +464,7 @@ struct PowerModeSection: View {
 struct ExperimentalSection: View {
     @ObservedObject private var playbackController = PlaybackController.shared
     @ObservedObject private var mediaController = MediaController.shared
+    @AppStorage("UseVoiceProcessingIO") private var useVoiceProcessingIO = false
     @State private var isPauseMediaExpanded = false
 
     var body: some View {
@@ -478,6 +482,13 @@ struct ExperimentalSection: View {
                     Text("3s").tag(3.0)
                     Text("4s").tag(4.0)
                     Text("5s").tag(5.0)
+                }
+            }
+
+            Toggle(isOn: $useVoiceProcessingIO) {
+                HStack(spacing: 4) {
+                    Text("Echo Cancel / AGC")
+                    InfoTip("Uses VoiceProcessingIO for acoustic echo cancellation and automatic gain control. Helpful in noisy rooms or when speakers are on. Restart recording after changing.")
                 }
             }
         } header: {

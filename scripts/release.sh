@@ -143,3 +143,71 @@ spctl -a -vv -t open --context context:primary-signature "$DMG_PATH" || [ "${SKI
 echo ""
 echo "Done: $DMG_PATH"
 echo "Upload with: gh release upload v$VERSION $DMG_NAME"
+
+# --- Sparkle appcast ----------------------------------------------------------
+# Requires a Sparkle EdDSA private key at SPARKLE_PRIVATE_KEY_FILE (or
+# ~/.zerm/sparkle_eddsa_private.key). Public key must match SUPublicEDKey in Info.plist.
+# Generate once with:  generate_keys  (from Sparkle tools) and store privately.
+echo "==> Generating Sparkle appcast entry (if sign_update available)"
+SPARKLE_PRIVATE_KEY_FILE="${SPARKLE_PRIVATE_KEY_FILE:-$HOME/.zerm/sparkle_eddsa_private.key}"
+SIGN_UPDATE=""
+if command -v sign_update >/dev/null 2>&1; then
+    SIGN_UPDATE="sign_update"
+elif [ -x "$REPO_ROOT/.sparkle-bin/sign_update" ]; then
+    SIGN_UPDATE="$REPO_ROOT/.sparkle-bin/sign_update"
+elif [ -x "/usr/local/bin/sign_update" ]; then
+    SIGN_UPDATE="/usr/local/bin/sign_update"
+fi
+
+UPDATE_ZIP="$WORK_DIR/Zerm-$VERSION-macos.zip"
+mkdir -p "$WORK_DIR"
+ditto -c -k --keepParent "$APP_PATH" "$UPDATE_ZIP"
+UPDATE_LEN=$(stat -f%z "$UPDATE_ZIP" 2>/dev/null || stat -c%s "$UPDATE_ZIP")
+UPDATE_URL="https://github.com/arcusis/Zerm/releases/download/v${VERSION}/Zerm-${VERSION}-macos.zip"
+ED_SIG=""
+if [ -n "$SIGN_UPDATE" ] && [ -f "$SPARKLE_PRIVATE_KEY_FILE" ]; then
+    ED_SIG=$("$SIGN_UPDATE" "$UPDATE_ZIP" -f "$SPARKLE_PRIVATE_KEY_FILE" 2>/dev/null | tr -d '\n' || true)
+    # sign_update often prints: sparkle:edSignature="..." length="..."
+    if echo "$ED_SIG" | grep -q 'edSignature='; then
+        :
+    else
+        # Some versions print only the signature base64
+        if [ -n "$ED_SIG" ]; then
+            ED_SIG="sparkle:edSignature=\"$ED_SIG\" length=\"$UPDATE_LEN\""
+        fi
+    fi
+else
+    echo "warning: sign_update or private key missing — appcast will be unsigned."
+    echo "  Set SPARKLE_PRIVATE_KEY_FILE and install Sparkle's sign_update for real updates."
+fi
+
+PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+APPCAST_OUT="$REPO_ROOT/docs/appcast.xml"
+mkdir -p "$REPO_ROOT/docs"
+# Also keep root appcast.xml in sync for local/dev reference.
+cat > "$APPCAST_OUT" <<APPCAST
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Zerm</title>
+        <item>
+            <title>${VERSION}</title>
+            <description><![CDATA[
+                <h3>What's New in v${VERSION}</h3>
+                <ul>
+                    <li>Deep review fixes: privacy, accuracy, stability, and ops.</li>
+                </ul>
+            ]]></description>
+            <pubDate>${PUB_DATE}</pubDate>
+            <sparkle:version>$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);.*/\1/p' "$REPO_ROOT/Zerm.xcodeproj/project.pbxproj" | head -1)</sparkle:version>
+            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
+            <enclosure url="${UPDATE_URL}" length="${UPDATE_LEN}" type="application/octet-stream" ${ED_SIG}/>
+        </item>
+    </channel>
+</rss>
+APPCAST
+cp "$APPCAST_OUT" "$REPO_ROOT/appcast.xml"
+cp "$UPDATE_ZIP" "$REPO_ROOT/Zerm_${VERSION}_macos.zip" 2>/dev/null || true
+echo "Appcast written to docs/appcast.xml (publish via GitHub Pages)."
+echo "Update zip: $UPDATE_ZIP"

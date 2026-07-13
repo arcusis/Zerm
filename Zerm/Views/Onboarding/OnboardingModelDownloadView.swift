@@ -118,13 +118,14 @@ struct OnboardingModelDownloadView: View {
                             }
                             .buttonStyle(ScaleButtonStyle())
                             .disabled(isDownloading)
-                            
+
+                            // Model download is required before continuing — skipping left
+                            // users with no usable STT and silent recording failures.
                             if !isModelSet {
-                                SkipButton(text: "Skip for now") {
-                                    withAnimation {
-                                        showTutorial = true
-                                    }
-                                }
+                                Text("A speech model is required to start dictating.")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.55))
+                                    .multilineTextAlignment(.center)
                             }
                         }
                         .opacity(opacity)

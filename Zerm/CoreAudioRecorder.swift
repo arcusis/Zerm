@@ -27,6 +27,12 @@ final class CoreAudioRecorder: @unchecked Sendable {
     // Conversion buffer
     private var conversionBuffer: UnsafeMutablePointer<Int16>?
     private var conversionBufferSize: UInt32 = 0
+    /// Fractional input sample index carried across RT callbacks so 48k→16k
+    /// resampling has continuous phase (avoids a click every buffer).
+    private var resampleInputCursor: Double = 0
+    /// Last mono sample from the previous buffer for boundary interpolation.
+    private var resampleLastSample: Float32 = 0
+    private var hasResampleHistory = false
 
     // Audio metering (thread-safe)
     private let meterLock = NSLock()
@@ -139,6 +145,9 @@ final class CoreAudioRecorder: @unchecked Sendable {
         try startAudioUnit()
 
         isRecording = true
+        resampleInputCursor = 0
+        hasResampleHistory = false
+        resampleLastSample = 0
         dbg("startRecording: audio unit running, device=\(deviceID) file=\(url.lastPathComponent)")
     }
 
@@ -260,6 +269,12 @@ final class CoreAudioRecorder: @unchecked Sendable {
         if status != noErr {
             throw CoreAudioRecorderError.failedToGetDeviceFormat(status: status)
         }
+        guard newDeviceFormat.mSampleRate > 0, newDeviceFormat.mChannelsPerFrame > 0 else {
+            throw CoreAudioRecorderError.invalidDeviceFormat(
+                sampleRate: newDeviceFormat.mSampleRate,
+                channels: newDeviceFormat.mChannelsPerFrame
+            )
+        }
 
         // Step 5: Configure callback format for new device
         var callbackFormat = AudioStreamBasicDescription(
@@ -327,17 +342,32 @@ final class CoreAudioRecorder: @unchecked Sendable {
     // MARK: - AudioUnit Setup
 
     private func createAudioUnit() throws {
+        // VoiceProcessingIO adds echo cancel + AGC (opt-in for noisy rooms).
+        // Fall back to HALOutput when VPIO is unavailable or fails.
+        let preferVPIO = UserDefaults.standard.bool(forKey: "UseVoiceProcessingIO")
+        let subType: OSType = preferVPIO
+            ? kAudioUnitSubType_VoiceProcessingIO
+            : kAudioUnitSubType_HALOutput
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
-            componentSubType: kAudioUnitSubType_HALOutput,
+            componentSubType: subType,
             componentManufacturer: kAudioUnitManufacturer_Apple,
             componentFlags: 0,
             componentFlagsMask: 0
         )
 
-        guard let component = AudioComponentFindNext(nil, &desc) else {
+        var component = AudioComponentFindNext(nil, &desc)
+        if component == nil, preferVPIO {
+            logger.warning("VoiceProcessingIO unavailable — falling back to HALOutput")
+            desc.componentSubType = kAudioUnitSubType_HALOutput
+            component = AudioComponentFindNext(nil, &desc)
+        }
+        guard let component else {
             logger.error("AudioUnit not found - HAL Output component unavailable")
             throw CoreAudioRecorderError.audioUnitNotFound
+        }
+        if preferVPIO {
+            dbg("createAudioUnit: VoiceProcessingIO enabled (echo cancel / AGC)")
         }
 
         var unit: AudioUnit?
@@ -422,6 +452,14 @@ final class CoreAudioRecorder: @unchecked Sendable {
         if status != noErr {
             logger.error("Failed to get device format: \(status, privacy: .public)")
             throw CoreAudioRecorderError.failedToGetDeviceFormat(status: status)
+        }
+
+        guard deviceFormat.mSampleRate > 0, deviceFormat.mChannelsPerFrame > 0 else {
+            logger.error("Invalid device format: sampleRate=\(self.deviceFormat.mSampleRate, privacy: .public) channels=\(self.deviceFormat.mChannelsPerFrame, privacy: .public)")
+            throw CoreAudioRecorderError.invalidDeviceFormat(
+                sampleRate: deviceFormat.mSampleRate,
+                channels: deviceFormat.mChannelsPerFrame
+            )
         }
 
         // Configure output format: 16kHz, mono, PCM Int16
@@ -693,89 +731,134 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private func convertAndWriteToFile(inputBuffer: inout AudioBufferList, frameCount: UInt32) {
         guard let file = audioFile else { return }
 
-        let inputChannels = deviceFormat.mChannelsPerFrame
+        let inputChannels = Int(deviceFormat.mChannelsPerFrame)
         let inputSampleRate = deviceFormat.mSampleRate
         let outputSampleRate = outputFormat.mSampleRate
 
-        // Get input samples
+        guard inputChannels > 0, inputSampleRate > 0, frameCount > 0 else { return }
         guard let inputData = inputBuffer.mBuffers.mData else { return }
         let inputSamples = inputData.assumingMemoryBound(to: Float32.self)
 
-        // Calculate output frame count after sample rate conversion
+        // Mix to mono first. Prefer active (non-silent) channels so a dead stereo
+        // channel doesn't dilute speech by −6 dB and trip false auto-stops.
+        var mono = [Float32](repeating: 0, count: Int(frameCount))
+        Self.mixToMono(inputSamples: inputSamples, frameCount: Int(frameCount), channels: inputChannels, output: &mono)
+
         let ratio = outputSampleRate / inputSampleRate
-        let outputFrameCount = UInt32(Double(frameCount) * ratio)
+        guard ratio > 0, let outputBuffer = conversionBuffer else { return }
 
-        guard outputFrameCount > 0,
-              let outputBuffer = conversionBuffer,
-              outputFrameCount <= conversionBufferSize else { return }
-
-        // Convert Float32 multi-channel → Int16 mono (with sample rate conversion if needed)
-        if inputSampleRate == outputSampleRate {
-            // Direct conversion, just format change and channel mixing
+        var produced: UInt32 = 0
+        if abs(inputSampleRate - outputSampleRate) < 0.5 {
+            produced = UInt32(frameCount)
+            guard produced <= conversionBufferSize else { return }
             for i in 0..<Int(frameCount) {
-                var sample: Float32 = 0
-                // Mix all channels to mono
-                for ch in 0..<Int(inputChannels) {
-                    sample += inputSamples[i * Int(inputChannels) + ch]
-                }
-                sample /= Float32(inputChannels)
-
-                // Convert to Int16 with clipping
-                let scaled = sample * 32767.0
-                let clipped = max(-32768.0, min(32767.0, scaled))
-                outputBuffer[i] = Int16(clipped)
+                outputBuffer[i] = Self.floatToInt16(mono[i])
             }
+            resampleInputCursor = 0
+            hasResampleHistory = false
         } else {
-            // Sample rate conversion needed - use linear interpolation
-            for i in 0..<Int(outputFrameCount) {
-                let inputIndex = Double(i) / ratio
-                let inputIndexInt = Int(inputIndex)
-                let frac = Float32(inputIndex - Double(inputIndexInt))
-
-                var sample: Float32 = 0
-                let idx1 = min(inputIndexInt, Int(frameCount) - 1)
-                let idx2 = min(inputIndexInt + 1, Int(frameCount) - 1)
-
-                // Mix channels and interpolate
-                for ch in 0..<Int(inputChannels) {
-                    let s1 = inputSamples[idx1 * Int(inputChannels) + ch]
-                    let s2 = inputSamples[idx2 * Int(inputChannels) + ch]
-                    sample += s1 + frac * (s2 - s1)
+            // Continuous linear SRC with phase carry across RT buffers.
+            let inputCount = Double(frameCount)
+            var outIndex = 0
+            var cursor = resampleInputCursor
+            while cursor < inputCount && outIndex < Int(conversionBufferSize) {
+                let idx = Int(cursor)
+                let frac = Float32(cursor - Double(idx))
+                let s1: Float32
+                if idx < 0 {
+                    s1 = hasResampleHistory ? resampleLastSample : mono[0]
+                } else if idx < mono.count {
+                    s1 = mono[idx]
+                } else {
+                    s1 = mono[mono.count - 1]
                 }
-                sample /= Float32(inputChannels)
-
-                // Convert to Int16
-                let scaled = sample * 32767.0
-                let clipped = max(-32768.0, min(32767.0, scaled))
-                outputBuffer[i] = Int16(clipped)
+                let s2: Float32
+                if idx + 1 < mono.count {
+                    s2 = mono[idx + 1]
+                } else {
+                    s2 = s1
+                }
+                outputBuffer[outIndex] = Self.floatToInt16(s1 + frac * (s2 - s1))
+                outIndex += 1
+                cursor += 1.0 / ratio
+            }
+            produced = UInt32(outIndex)
+            // Carry fractional position into the next buffer relative to a new 0 origin.
+            resampleInputCursor = cursor - inputCount
+            if mono.count > 0 {
+                resampleLastSample = mono[mono.count - 1]
+                hasResampleHistory = true
             }
         }
 
-        // Write to file
+        guard produced > 0 else { return }
+
         var outputBufferList = AudioBufferList(
             mNumberBuffers: 1,
             mBuffers: AudioBuffer(
                 mNumberChannels: 1,
-                mDataByteSize: outputFrameCount * 2,
+                mDataByteSize: produced * 2,
                 mData: outputBuffer
             )
         )
 
-        let writeStatus = ExtAudioFileWrite(file, outputFrameCount, &outputBufferList)
+        let writeStatus = ExtAudioFileWrite(file, produced, &outputBufferList)
         if writeStatus != noErr {
             statWriteErrors.wrappingIncrement(ordering: .relaxed)
             statLastWriteStatus.store(writeStatus, ordering: .relaxed)
             logger.error("🎙️ ExtAudioFileWrite failed with status: \(writeStatus, privacy: .public)")
         } else {
-            statFramesWritten.wrappingIncrement(by: UInt64(outputFrameCount), ordering: .relaxed)
+            statFramesWritten.wrappingIncrement(by: UInt64(produced), ordering: .relaxed)
         }
 
-        // Send the same PCM data to the streaming callback if set
         if let onAudioChunk = onAudioChunk {
-            let byteCount = Int(outputFrameCount) * MemoryLayout<Int16>.size
+            let byteCount = Int(produced) * MemoryLayout<Int16>.size
             let data = Data(bytes: outputBuffer, count: byteCount)
             onAudioChunk(data)
         }
+    }
+
+    /// Mix multi-channel float samples to mono, skipping near-silent channels.
+    private static func mixToMono(
+        inputSamples: UnsafePointer<Float32>,
+        frameCount: Int,
+        channels: Int,
+        output: inout [Float32]
+    ) {
+        guard channels > 0, frameCount > 0 else { return }
+        if channels == 1 {
+            for i in 0..<frameCount { output[i] = inputSamples[i] }
+            return
+        }
+
+        var channelEnergy = [Float](repeating: 0, count: channels)
+        for i in 0..<frameCount {
+            for ch in 0..<channels {
+                let s = inputSamples[i * channels + ch]
+                channelEnergy[ch] += s * s
+            }
+        }
+        let energyThreshold = channelEnergy.max().map { $0 * 0.05 } ?? 0
+        var active: [Int] = []
+        for ch in 0..<channels where channelEnergy[ch] > energyThreshold && channelEnergy[ch] > 1e-8 {
+            active.append(ch)
+        }
+        if active.isEmpty { active = [0] }
+
+        let scale = 1.0 / Float32(active.count)
+        for i in 0..<frameCount {
+            var sample: Float32 = 0
+            for ch in active {
+                sample += inputSamples[i * channels + ch]
+            }
+            output[i] = sample * scale
+        }
+    }
+
+    private static func floatToInt16(_ sample: Float32) -> Int16 {
+        let scaled = sample * 32767.0
+        let clipped = max(-32768.0, min(32767.0, scaled))
+        return Int16(clipped)
     }
 
     // MARK: - Session Diagnostics
@@ -992,6 +1075,7 @@ enum CoreAudioRecorderError: LocalizedError {
     case audioUnitNotFound
     case audioUnitNotInitialized
     case deviceNotAvailable
+    case invalidDeviceFormat(sampleRate: Double, channels: UInt32)
     case failedToCreateAudioUnit(status: OSStatus)
     case failedToEnableInput(status: OSStatus)
     case failedToDisableOutput(status: OSStatus)
@@ -1012,6 +1096,8 @@ enum CoreAudioRecorderError: LocalizedError {
             return "AudioUnit not initialized"
         case .deviceNotAvailable:
             return "Audio device is no longer available"
+        case .invalidDeviceFormat(let sampleRate, let channels):
+            return "Audio device reported invalid format (rate=\(sampleRate), channels=\(channels))"
         case .failedToCreateAudioUnit(let status):
             return "Failed to create AudioUnit: \(status)"
         case .failedToEnableInput(let status):

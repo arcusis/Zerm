@@ -32,15 +32,15 @@ enum AppDefaults {
             "AutoStopInitialSilenceSeconds": 6.0,
             "AutoStopLevelThreshold": 0.12,
             "RemoveFillerWords": true,
-            "SelectedLanguage": "en",
+            "SelectedLanguage": "auto",
             "AppendTrailingSpace": true,
             "RecorderType": "mini",
 
-            // Cleanup
+            // Cleanup — retain raw voice for 14 days by default (privacy)
             "IsTranscriptionCleanupEnabled": false,
             "TranscriptionRetentionMinutes": 1440,
-            "IsAudioCleanupEnabled": false,
-            "AudioRetentionPeriod": 7,
+            "IsAudioCleanupEnabled": true,
+            "AudioRetentionPeriod": 14,
 
             // UI & Behavior
             "IsMenuBarOnly": false,
@@ -67,6 +67,9 @@ enum AppDefaults {
             // Diagnostics
             "DebugLoggingEnabled": false,
 
+            // Echo cancel / AGC for noisy rooms (VoiceProcessingIO)
+            "UseVoiceProcessingIO": false,
+
         ])
 
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 1 {
@@ -85,6 +88,22 @@ enum AppDefaults {
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 2 {
             defaults.set(false, forKey: "restoreClipboardAfterPaste")
             defaults.set(2, forKey: "ZermFastDefaultsVersion")
+        }
+
+        // Deep-review defaults: auto language + audio retention on for privacy.
+        if defaults.integer(forKey: "ZermFastDefaultsVersion") < 3 {
+            if defaults.object(forKey: "SelectedLanguage") as? String == "en"
+                || defaults.object(forKey: "SelectedLanguage") == nil {
+                defaults.set("auto", forKey: "SelectedLanguage")
+            }
+            // Only flip audio cleanup on for installs that never customized it.
+            if defaults.object(forKey: "IsAudioCleanupEnabled") == nil {
+                defaults.set(true, forKey: "IsAudioCleanupEnabled")
+            }
+            if defaults.integer(forKey: "AudioRetentionPeriod") == 0 {
+                defaults.set(14, forKey: "AudioRetentionPeriod")
+            }
+            defaults.set(3, forKey: "ZermFastDefaultsVersion")
         }
 
         PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()

@@ -50,28 +50,43 @@ struct TranscriptionOutputFilter {
     private static let lowercaseTranscriptionKey = "LowercaseTranscription"
     private static let apostropheLikeCharacters = CharacterSet(charactersIn: "'''ʼ＇")
 
-    private static let hallucinationPatterns = [
-        #"\[.*?\]"#,     // []
-        #"\(.*?\)"#,     // ()
-        #"\{.*?\}"#      // {}
+    /// Whisper/model hallucination tokens only — never strip legitimate
+    /// parenthetical content like "the total (about five hundred)".
+    private static let hallucinationTokens: [String] = [
+        "[BLANK_AUDIO]", "[blank_audio]", "[BLANK AUDIO]",
+        "[Music]", "[music]", "[MUSIC]",
+        "[Silence]", "[silence]", "[SILENCE]",
+        "[Applause]", "[applause]",
+        "[Laughter]", "[laughter]",
+        "[INAUDIBLE]", "[inaudible]",
+        "[NOISE]", "[noise]",
+        "[SOUND]", "[sound]",
+        "[CLICK]", "[click]",
+        "[BEEP]", "[beep]",
+        "(blank_audio)", "(BLANK_AUDIO)",
+        "(music)", "(Music)",
+        "(silence)", "(Silence)",
+        "(inaudible)", "(INAUDIBLE)",
+        "♪", "♫",
+        "<|nospeech|>", "<|notimestamps|>",
     ]
 
     static func filter(_ text: String) -> String {
         var filteredText = text
 
-        // Remove <TAG>...</TAG> blocks
-        let tagBlockPattern = #"<([A-Za-z][A-Za-z0-9:_-]*)[^>]*>[\s\S]*?</\1>"#
-        if let regex = try? NSRegularExpression(pattern: tagBlockPattern) {
-            let range = NSRange(filteredText.startIndex..., in: filteredText)
-            filteredText = regex.stringByReplacingMatches(in: filteredText, options: [], range: range, withTemplate: "")
+        // Remove known hallucination tokens only (case-insensitive whole-token match)
+        for token in hallucinationTokens {
+            filteredText = filteredText.replacingOccurrences(
+                of: token,
+                with: "",
+                options: .caseInsensitive
+            )
         }
 
-        // Remove bracketed hallucinations
-        for pattern in hallucinationPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern) {
-                let range = NSRange(filteredText.startIndex..., in: filteredText)
-                filteredText = regex.stringByReplacingMatches(in: filteredText, options: [], range: range, withTemplate: "")
-            }
+        // Strip residual empty bracket pairs that often remain after token removal
+        if let emptyBrackets = try? NSRegularExpression(pattern: #"\[\s*\]|\(\s*\)|\{\s*\}"#) {
+            let range = NSRange(filteredText.startIndex..., in: filteredText)
+            filteredText = emptyBrackets.stringByReplacingMatches(in: filteredText, options: [], range: range, withTemplate: "")
         }
 
         // Remove filler words (if enabled)
@@ -90,9 +105,9 @@ struct TranscriptionOutputFilter {
         filteredText = filteredText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if filteredText != text {
-            logger.notice("📝 Output filter result: \(filteredText, privacy: .public)")
+            logger.notice("📝 Output filter changed text: \(text.count, privacy: .public) → \(filteredText.count, privacy: .public) characters")
         } else {
-            logger.notice("📝 Output filter result (unchanged): \(filteredText, privacy: .public)")
+            logger.notice("📝 Output filter result: \(filteredText.count, privacy: .public) characters (unchanged)")
         }
 
         return filteredText

@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import SwiftData
 import os
 
 class WhisperTranscriptionService: TranscriptionService {
@@ -8,10 +9,12 @@ class WhisperTranscriptionService: TranscriptionService {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperTranscriptionService")
     private let modelsDirectory: URL
     private weak var modelProvider: (any WhisperModelProvider)?
+    private let modelContext: ModelContext?
 
-    init(modelsDirectory: URL, modelProvider: (any WhisperModelProvider)? = nil) {
+    init(modelsDirectory: URL, modelProvider: (any WhisperModelProvider)? = nil, modelContext: ModelContext? = nil) {
         self.modelsDirectory = modelsDirectory
         self.modelProvider = modelProvider
+        self.modelContext = modelContext
     }
 
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
@@ -56,8 +59,15 @@ class WhisperTranscriptionService: TranscriptionService {
         // correctly rather than always skipping 44 bytes (VoiceInk #393).
         let data = try await AudioProcessor().processAudioToSamples(audioURL)
 
-        // Set prompt
-        let currentPrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
+        // Merge style prompt with custom dictionary so Whisper biases toward user terms.
+        let basePrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
+        let dictionarySuffix: String
+        if let modelContext {
+            dictionarySuffix = VocabularyTerms.whisperPromptSuffix(from: modelContext)
+        } else {
+            dictionarySuffix = ""
+        }
+        let currentPrompt = basePrompt + dictionarySuffix
         await whisperContext.setPrompt(currentPrompt)
 
         // Transcribe

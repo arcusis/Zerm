@@ -33,6 +33,7 @@ class HistoryWindowController: NSObject, NSWindowDelegate {
         let historyView = TranscriptionHistoryView()
             .modelContainer(modelContainer)
             .environmentObject(engine)
+            .environmentObject(engine.transcriptionModelManager)
             .environmentObject(engine.enhancementService!)
             .frame(minWidth: 1150, minHeight: 700)
 
