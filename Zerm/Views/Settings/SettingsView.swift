@@ -231,14 +231,33 @@ struct SettingsView: View {
                     }
 
                 HStack {
-                    Button("Check for Updates") {
-                        updaterViewModel.checkForUpdates()
+                    Button(updaterViewModel.updateAvailable ? "Install Update…" : "Check for Updates") {
+                        if updaterViewModel.updateAvailable {
+                            updaterViewModel.installPendingUpdate()
+                        } else {
+                            updaterViewModel.checkForUpdates()
+                        }
                     }
-                    .disabled(!updaterViewModel.canCheckForUpdates)
+                    .disabled(!updaterViewModel.canCheckForUpdates && !updaterViewModel.updateAvailable)
+
+                    if updaterViewModel.updateAvailable, let version = updaterViewModel.availableVersion {
+                        Text("v\(version) available")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if updaterViewModel.isChecking {
+                        ProgressView().controlSize(.small)
+                    }
 
                     Button("Reset Onboarding") {
                         showResetOnboardingAlert = true
                     }
+                }
+
+                if let error = updaterViewModel.lastErrorMessage, !error.isEmpty {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

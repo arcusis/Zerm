@@ -228,10 +228,16 @@ struct MenuBarView: View {
             
             Divider()
             
-            Button("Check for Updates") {
-                updaterViewModel.checkForUpdates()
+            Button(updaterViewModel.updateAvailable
+                   ? "Install Update\(updaterViewModel.availableVersion.map { " v\($0)" } ?? "")…"
+                   : "Check for Updates") {
+                if updaterViewModel.updateAvailable {
+                    updaterViewModel.installPendingUpdate()
+                } else {
+                    updaterViewModel.checkForUpdates()
+                }
             }
-            .disabled(!updaterViewModel.canCheckForUpdates)
+            .disabled(!updaterViewModel.canCheckForUpdates && !updaterViewModel.updateAvailable)
             
             Button("Help and Support") {
                 EmailSupport.openSupportEmail()

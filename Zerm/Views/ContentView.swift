@@ -62,6 +62,7 @@ struct ContentView: View {
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
     @EnvironmentObject private var hotkeyManager: HotkeyManager
+    @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @AppStorage("powerModeUIFlag") private var powerModeUIFlag = false
     @State private var selectedView: ViewType? = .metrics
     let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -110,6 +111,9 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationTitle("Zerm")
             .navigationSplitViewColumnWidth(210)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                SidebarUpdateBanner(updater: updaterViewModel)
+            }
         } detail: {
             if let selectedView = selectedView {
                 detailView(for: selectedView)

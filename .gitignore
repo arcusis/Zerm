@@ -61,3 +61,8 @@ output/
 # Sparkle private keys (never commit)
 *.eddsa
 sparkle_eddsa_private.key
+
+.sparkle-bin/
+Zerm-*.zip
+Zerm_*.zip
+Zerm_*.dmg
