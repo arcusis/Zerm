@@ -57,3 +57,7 @@ output/
 # Release build artifacts
 .release-build/
 *.dmg
+
+# Sparkle private keys (never commit)
+*.eddsa
+sparkle_eddsa_private.key
