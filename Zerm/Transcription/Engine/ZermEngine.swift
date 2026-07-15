@@ -177,14 +177,21 @@ class ZermEngine: NSObject, ObservableObject {
                         pendingChunks.withLock { $0.append(data) }
                     }
 
-                    self.setState(.recording)
-                    self.logger.notice("toggleRecord: state=recording, starting audio hardware")
+                    self.logger.notice("toggleRecord: starting audio hardware")
 
                     self.recorder.startRecording(toOutputFile: permanentURL) { result in
                         Task { @MainActor [self] in
                             do {
                                 try result.get()
                                 self.logger.notice("toggleRecord: audio hardware started successfully")
+
+                                // Enter .recording only now that CoreAudio is delivering
+                                // samples — same reasoning as the start sound below.  Setting
+                                // it before hardware init mounted the AudioVisualizer against
+                                // a zeroed meter, so it rendered flat bars indistinguishable
+                                // from StaticVisualizer and then snapped to life ~280 ms later.
+                                self.setState(.recording)
+                                self.logger.notice("toggleRecord: state=recording")
 
                                 // Play start sound NOW — CoreAudio is running, so this is
                                 // the true "go" cue for the user.  Previously the sound
@@ -464,19 +471,22 @@ class ZermEngine: NSObject, ObservableObject {
     }
 
     private func requestRecordPermission(response: @escaping @MainActor (Bool) -> Void) {
-        Task { @MainActor in
-            let status = AVCaptureDevice.authorizationStatus(for: .audio)
-            DebugLogger.shared.log("ZermEngine", "microphone permission status=\(Self.describe(status))")
-            switch status {
-            case .authorized:
-                response(true)
-            case .notDetermined:
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        DebugLogger.shared.log("ZermEngine", "microphone permission status=\(Self.describe(status))")
+        switch status {
+        case .authorized:
+            // Already on the main actor, and this is a plain enum read — answer inline.
+            // Wrapping it in a Task queued the callback behind the recorder panel's
+            // first render pass, costing ~310 ms of dead UI on every trigger.
+            response(true)
+        case .notDetermined:
+            Task { @MainActor in
                 let granted = await AVCaptureDevice.requestAccess(for: .audio)
                 DebugLogger.shared.log("ZermEngine", "microphone permission requested, granted=\(granted)")
                 response(granted)
-            default:
-                response(false)
             }
+        default:
+            response(false)
         }
     }
 
