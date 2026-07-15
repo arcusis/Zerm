@@ -166,20 +166,25 @@ UPDATE_LEN=$(stat -f%z "$UPDATE_ZIP" 2>/dev/null || stat -c%s "$UPDATE_ZIP")
 UPDATE_URL="https://github.com/arcusis/Zerm/releases/download/v${VERSION}/Zerm-${VERSION}-macos.zip"
 ED_SIG=""
 if [ -n "$SIGN_UPDATE" ] && [ -f "$SPARKLE_PRIVATE_KEY_FILE" ]; then
-    ED_SIG=$("$SIGN_UPDATE" "$UPDATE_ZIP" -f "$SPARKLE_PRIVATE_KEY_FILE" 2>/dev/null | tr -d '\n' || true)
-    # sign_update often prints: sparkle:edSignature="..." length="..."
-    if echo "$ED_SIG" | grep -q 'edSignature='; then
-        :
-    else
-        # Some versions print only the signature base64
-        if [ -n "$ED_SIG" ]; then
-            ED_SIG="sparkle:edSignature=\"$ED_SIG\" length=\"$UPDATE_LEN\""
-        fi
+    SIGN_OUT=$("$SIGN_UPDATE" "$UPDATE_ZIP" -f "$SPARKLE_PRIVATE_KEY_FILE" 2>/dev/null | tr -d '\n' || true)
+    # sign_update prints `sparkle:edSignature="..." length="..."` on current
+    # versions and a bare base64 signature on older ones. Extract just the
+    # signature: the enclosure below already emits length, and a duplicate
+    # attribute makes the feed malformed XML — every client's update check then
+    # fails to parse the feed, silently killing OTA for all users.
+    SIG_VALUE=$(printf '%s' "$SIGN_OUT" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')
+    [ -n "$SIG_VALUE" ] || SIG_VALUE="$SIGN_OUT"
+    if [ -n "$SIG_VALUE" ]; then
+        ED_SIG="sparkle:edSignature=\"$SIG_VALUE\""
     fi
 else
     echo "warning: sign_update or private key missing — appcast will be unsigned."
     echo "  Set SPARKLE_PRIVATE_KEY_FILE and install Sparkle's sign_update for real updates."
 fi
+
+# Per-release notes for the Sparkle feed. Override per release, e.g.
+#   RELEASE_NOTES_HTML='                    <li>Fixed the thing.</li>' scripts/release.sh
+RELEASE_NOTES_HTML="${RELEASE_NOTES_HTML:-                    <li>Maintenance and stability improvements.</li>}"
 
 PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
 APPCAST_OUT="$REPO_ROOT/docs/appcast.xml"
@@ -195,7 +200,7 @@ cat > "$APPCAST_OUT" <<APPCAST
             <description><![CDATA[
                 <h3>What's New in v${VERSION}</h3>
                 <ul>
-                    <li>Deep review fixes: privacy, accuracy, stability, and ops.</li>
+${RELEASE_NOTES_HTML}
                 </ul>
             ]]></description>
             <pubDate>${PUB_DATE}</pubDate>

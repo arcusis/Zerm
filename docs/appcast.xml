@@ -3,20 +3,19 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.3.2</title>
+            <title>2.3.3</title>
             <description><![CDATA[
-                <h3>What's New in v2.3.2</h3>
+                <h3>What's New in v2.3.3</h3>
                 <ul>
-                    <li>Update banner only appears when a strictly newer build is available, and clears after install/dismiss.</li>
-                    <li>Whisper retries without VAD when the first pass is empty but the mic picked up real audio.</li>
-                    <li>Clearer empty-transcript messaging for short vs failed captures.</li>
+                    <li>Dictation starts about 4x faster — the recorder now shows live audio ~150 ms after the hotkey, down from ~610 ms.</li>
+                    <li>The waveform animates as soon as the microphone is actually live, instead of sitting flat and then jumping into sync.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 13 Jul 2026 18:40:24 +0000</pubDate>
-            <sparkle:version>232</sparkle:version>
-            <sparkle:shortVersionString>2.3.2</sparkle:shortVersionString>
+            <pubDate>Wed, 15 Jul 2026 17:24:50 +0000</pubDate>
+            <sparkle:version>233</sparkle:version>
+            <sparkle:shortVersionString>2.3.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.2/Zerm-2.3.2-macos.zip" length="23826136" type="application/octet-stream" sparkle:edSignature="/w2cbp0ebgt0MlrKvGLNn5beXIWmdwV3hWp3I1U4UVKunN7OKTf7vytrjOIxABnNxckGCu4rM/uJZodEKKb2Bw=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.3/Zerm-2.3.3-macos.zip" length="23825546" type="application/octet-stream" sparkle:edSignature="vQysOYLrkCXMW5oeUYGuShEntVSVzDAfP4EZ1qTNNpuP3GsUs0bEkmTgBF43HkXuw/B6mf6uIBbl7rZxAekJCw=="/>
         </item>
     </channel>
 </rss>
