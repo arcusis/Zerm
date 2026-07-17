@@ -13,6 +13,7 @@ enum ModelProvider: String, Codable, Hashable, CaseIterable {
     case speechmatics = "Speechmatics"
     case xai = "xAI"
     case openai = "OpenAI"
+    case assemblyAI = "AssemblyAI"
     case custom = "Custom"
     case nativeApple = "Native Apple"
 

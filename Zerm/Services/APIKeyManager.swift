@@ -23,7 +23,8 @@ final class APIKeyManager {
         "inworld": "inworldAPIKey",
         "cartesia": "cartesiaAPIKey",
         "anthropic": "anthropicAPIKey",
-        "openrouter": "openRouterAPIKey"
+        "openrouter": "openRouterAPIKey",
+        "assemblyai": "assemblyAIAPIKey"
     ]
 
     private init() {}
