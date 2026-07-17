@@ -6,9 +6,8 @@ import OSLog
 // ViewType enum with all cases
 enum ViewType: String, CaseIterable, Identifiable {
     case metrics = "Dashboard"
-    case transcribeAudio = "Transcribe Audio"
     case history = "History"
-    case models = "AI Models"
+    case models = "Dictation Models"
     case enhancement = "Enhancement"
     case powerMode = "Power Mode"
     case permissions = "Permissions"
@@ -22,9 +21,8 @@ enum ViewType: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .metrics: return "gauge.medium"
-        case .transcribeAudio: return "waveform.circle.fill"
         case .history: return "doc.text.fill"
-        case .models: return "brain.head.profile"
+        case .models: return "text.bubble.fill"
         case .enhancement: return "wand.and.stars"
         case .powerMode: return "sparkles.square.fill.on.square"
         case .permissions: return "shield.fill"
@@ -139,7 +137,7 @@ struct ContentView: View {
                 switch destination {
                 case "Settings":
                     selectedView = .settings
-                case "AI Models":
+                case "Dictation Models":
                     selectedView = .models
                 case "Zerm Pro":
                     selectedView = .settings
@@ -149,8 +147,6 @@ struct ContentView: View {
                     selectedView = .permissions
                 case "Enhancement":
                     selectedView = .enhancement
-                case "Transcribe Audio":
-                    selectedView = .transcribeAudio
                 case "Power Mode":
                     selectedView = .powerMode
                 default:
@@ -169,8 +165,6 @@ struct ContentView: View {
             ModelManagementView()
         case .enhancement:
             EnhancementSettingsView()
-        case .transcribeAudio:
-            AudioTranscribeView()
         case .history:
             InlineHistoryView()
         case .audioInput:

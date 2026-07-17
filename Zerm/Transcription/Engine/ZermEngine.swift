@@ -133,7 +133,7 @@ class ZermEngine: NSObject, ObservableObject {
                     type: .error,
                     duration: 5.0,
                     actionButton: (label: "Open Models", action: {
-                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                     })
                 )
                 return
@@ -155,7 +155,7 @@ class ZermEngine: NSObject, ObservableObject {
                     type: .error,
                     duration: 5.0,
                     actionButton: (label: "Open Models", action: {
-                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                     })
                 )
                 return
@@ -513,7 +513,7 @@ class ZermEngine: NSObject, ObservableObject {
                 type: .error,
                 duration: 5.0,
                 actionButton: (label: "Open Models", action: {
-                    MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                    MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                 })
             )
             return
