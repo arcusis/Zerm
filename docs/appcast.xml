@@ -3,19 +3,21 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.3.3</title>
+            <title>2.4.0</title>
             <description><![CDATA[
-                <h3>What's New in v2.3.3</h3>
+                <h3>What's New in v2.4.0</h3>
                 <ul>
-                    <li>Dictation starts about 4x faster — the recorder now shows live audio ~150 ms after the hotkey, down from ~610 ms.</li>
-                    <li>The waveform animates as soon as the microphone is actually live, instead of sitting flat and then jumping into sync.</li>
+                    <li>Renamed the "AI Models" tab to "Dictation Models", and removed the unused "Transcribe Audio" tab.</li>
+                    <li>Refreshed the transcription model list: dropped slow, outdated local models, added a compact Small option, and added OpenAI and AssemblyAI as cloud options.</li>
+                    <li>Enhancement now lets you download and switch between several on-device models (Gemma 1B through 27B).</li>
+                    <li>New Coding and Chat enhancement prompts for cleaner dictation of code and casual messages.</li>
                 </ul>
             ]]></description>
-            <pubDate>Wed, 15 Jul 2026 17:24:50 +0000</pubDate>
-            <sparkle:version>233</sparkle:version>
-            <sparkle:shortVersionString>2.3.3</sparkle:shortVersionString>
+            <pubDate>Fri, 17 Jul 2026 13:24:29 +0000</pubDate>
+            <sparkle:version>234</sparkle:version>
+            <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.3.3/Zerm-2.3.3-macos.zip" length="23825546" type="application/octet-stream" sparkle:edSignature="vQysOYLrkCXMW5oeUYGuShEntVSVzDAfP4EZ1qTNNpuP3GsUs0bEkmTgBF43HkXuw/B6mf6uIBbl7rZxAekJCw=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.4.0/Zerm-2.4.0-macos.zip" length="23723736" type="application/octet-stream" sparkle:edSignature="mCRqspO1LqK/UmefEdfgrCam0u30roVRuv5zXrv4xw0JRUERrvEdFP97Nl2Q2Z/keBPX6EpZR8ewGR2V3jn3Bw=="/>
         </item>
     </channel>
 </rss>
