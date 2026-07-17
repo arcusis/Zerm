@@ -284,7 +284,7 @@ struct APIKeyManagementView: View {
                     Text("Runs entirely on your Mac — no API key, nothing leaves the device. Used to clean up dictation and to make Read Aloud sound natural.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    LocalLLMModelCardView()
+                    LocalLLMModelListView()
 
                 } else {
                     if aiService.isAPIKeyValid {
