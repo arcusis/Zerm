@@ -2,28 +2,29 @@ import SwiftUI
 import AVFoundation
 import Cocoa
 import KeyboardShortcuts
+import ScreenCaptureKit
 
 class PermissionManager: ObservableObject {
     @Published var audioPermissionStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     @Published var isAccessibilityEnabled = false
     @Published var isScreenRecordingEnabled = false
     @Published var isKeyboardShortcutSet = false
-    
+    /// Shown when Screen Recording is toggled on in Settings but the process must relaunch.
+    @Published var screenRecordingNeedsRelaunch = false
+
+    private var pollTask: Task<Void, Never>?
+
     init() {
-        // Start observing system events that might indicate permission changes
         setupNotificationObservers()
-        
-        // Initial permission checks
         checkAllPermissions()
     }
-    
-    
+
     deinit {
         NotificationCenter.default.removeObserver(self)
+        pollTask?.cancel()
     }
-    
+
     private func setupNotificationObservers() {
-        // Only observe when app becomes active, as this is a likely time for permissions to have changed
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(applicationDidBecomeActive),
@@ -31,42 +32,119 @@ class PermissionManager: ObservableObject {
             object: nil
         )
     }
-    
+
     @objc private func applicationDidBecomeActive() {
+        // After returning from System Settings, re-check several times —
+        // macOS often updates TCC a beat after the toggle flips.
         checkAllPermissions()
+        pollPermissions(forSeconds: 4)
     }
-    
+
     func checkAllPermissions() {
         checkAccessibilityPermissions()
         checkScreenRecordingPermission()
         checkAudioPermissionStatus()
         checkKeyboardShortcut()
     }
-    
+
+    /// Re-check on an interval so refresh / Settings return picks up grants without relaunch when possible.
+    func pollPermissions(forSeconds seconds: TimeInterval = 3) {
+        pollTask?.cancel()
+        pollTask = Task { @MainActor in
+            let steps = max(1, Int(seconds / 0.5))
+            for _ in 0..<steps {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+                self.checkAllPermissions()
+                if self.isAccessibilityEnabled && self.isScreenRecordingEnabled {
+                    self.screenRecordingNeedsRelaunch = false
+                    return
+                }
+            }
+        }
+    }
+
     func checkAccessibilityPermissions() {
+        // Prefer the non-prompting check; also accept plain AXIsProcessTrusted.
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false]
-        let accessibilityEnabled = AXIsProcessTrustedWithOptions(options)
+        let withOptions = AXIsProcessTrustedWithOptions(options)
+        let plain = AXIsProcessTrusted()
+        let accessibilityEnabled = withOptions || plain
         DispatchQueue.main.async {
             self.isAccessibilityEnabled = accessibilityEnabled
         }
     }
-    
+
+    /// Opens System Settings and optionally shows the system accessibility prompt to re-bind trust.
+    func openAccessibilitySettings(promptIfNeeded: Bool = true) {
+        if promptIfNeeded, !isAccessibilityEnabled {
+            // This presents the system dialog that links this exact binary to TCC.
+            let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+            _ = AXIsProcessTrustedWithOptions(options)
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+        pollPermissions(forSeconds: 8)
+    }
+
     func checkScreenRecordingPermission() {
+        let preflight = CGPreflightScreenCaptureAccess()
         DispatchQueue.main.async {
-            self.isScreenRecordingEnabled = CGPreflightScreenCaptureAccess()
+            self.isScreenRecordingEnabled = preflight
+            if preflight {
+                self.screenRecordingNeedsRelaunch = false
+            }
+        }
+        // Secondary async probe via ScreenCaptureKit — on some macOS versions
+        // CGPreflight lags behind the Settings toggle until relaunch.
+        if !preflight {
+            Task { @MainActor in
+                let kitGranted = await Self.probeScreenCaptureKitAccess()
+                if kitGranted {
+                    // TCC is effectively granted; process just needs a relaunch for CGPreflight.
+                    self.screenRecordingNeedsRelaunch = true
+                }
+            }
         }
     }
-    
+
     func requestScreenRecordingPermission() {
-        CGRequestScreenCaptureAccess()
+        let already = CGPreflightScreenCaptureAccess()
+        if !already {
+            CGRequestScreenCaptureAccess()
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+        pollPermissions(forSeconds: 8)
+        // After the user toggles, macOS often still returns false until relaunch.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            let preflight = CGPreflightScreenCaptureAccess()
+            let kit = await Self.probeScreenCaptureKitAccess()
+            if !preflight && kit {
+                self.screenRecordingNeedsRelaunch = true
+            }
+        }
     }
-    
+
+    /// True if ScreenCaptureKit can enumerate displays (permission present for this process).
+    private static func probeScreenCaptureKitAccess() async -> Bool {
+        do {
+            _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func checkAudioPermissionStatus() {
         DispatchQueue.main.async {
             self.audioPermissionStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         }
     }
-    
+
     func requestAudioPermission() {
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async {
@@ -74,7 +152,7 @@ class PermissionManager: ObservableObject {
             }
         }
     }
-    
+
     func checkKeyboardShortcut() {
         DispatchQueue.main.async {
             self.isKeyboardShortcutSet = KeyboardShortcuts.getShortcut(for: .toggleMiniRecorder) != nil
@@ -253,30 +331,36 @@ struct PermissionsView: View {
                         isGranted: permissionManager.isAccessibilityEnabled,
                         buttonTitle: "Open System Settings",
                         buttonAction: {
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                                NSWorkspace.shared.open(url)
-                            }
+                            permissionManager.openAccessibilitySettings(promptIfNeeded: true)
                         },
-                        checkPermission: { permissionManager.checkAccessibilityPermissions() },
-                        infoTipMessage: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac."
+                        checkPermission: {
+                            permissionManager.checkAccessibilityPermissions()
+                            permissionManager.pollPermissions(forSeconds: 3)
+                        },
+                        infoTipMessage: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."
                     )
-                    
+
                     // Screen Recording Permission
                     PermissionCard(
                         icon: "rectangle.on.rectangle",
                         title: "Screen Recording Access",
-                        description: "Allow Zerm to understand context from your screen for transcript Enhancement",
+                        description: permissionManager.screenRecordingNeedsRelaunch
+                            ? "Permission looks granted — fully quit Zerm (Cmd+Q) and reopen to finish enabling Screen Recording"
+                            : "Allow Zerm to understand context from your screen for transcript Enhancement",
                         isGranted: permissionManager.isScreenRecordingEnabled,
-                        buttonTitle: "Request Permission",
+                        buttonTitle: permissionManager.screenRecordingNeedsRelaunch ? "Quit Zerm to Finish" : "Request Permission",
                         buttonAction: {
-                            permissionManager.requestScreenRecordingPermission()
-                            // After requesting, open system preferences as fallback
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                                NSWorkspace.shared.open(url)
+                            if permissionManager.screenRecordingNeedsRelaunch {
+                                NSApp.terminate(nil)
+                            } else {
+                                permissionManager.requestScreenRecordingPermission()
                             }
                         },
-                        checkPermission: { permissionManager.checkScreenRecordingPermission() },
-                        infoTipMessage: "Zerm captures on-screen text to understand the context of your voice input, which significantly improves transcription accuracy. Your privacy is important: this data is processed locally and is not stored.",
+                        checkPermission: {
+                            permissionManager.checkScreenRecordingPermission()
+                            permissionManager.pollPermissions(forSeconds: 3)
+                        },
+                        infoTipMessage: "Zerm captures on-screen text to understand the context of your voice input, which significantly improves transcription accuracy. Your privacy is important: this data is processed locally and is not stored. After toggling Screen Recording on, macOS often requires a full quit and relaunch before the check turns green.",
                         infoTipLink: "https://tryzerm.com/docs/contextual-awareness"
                     )
                 }
@@ -286,6 +370,7 @@ struct PermissionsView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear {
             permissionManager.checkAllPermissions()
+            permissionManager.pollPermissions(forSeconds: 2)
         }
     }
 }
