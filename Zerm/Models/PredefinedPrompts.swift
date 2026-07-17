@@ -7,6 +7,8 @@ enum PredefinedPrompts {
     // Static UUIDs for predefined prompts
     static let defaultPromptId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     static let assistantPromptId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+    static let codingPromptId = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+    static let chatPromptId = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
     
     static var all: [CustomPrompt] {
         // Always return the latest predefined prompts from source code
@@ -33,6 +35,26 @@ enum PredefinedPrompts {
                 description: "AI assistant that provides direct answers to queries",
                 isPredefined: true,
                 useSystemInstructions: false
+            ),
+
+            CustomPrompt(
+                id: codingPromptId,
+                title: "Coding",
+                promptText: PromptTemplates.all.first { $0.title == "Coding" }?.promptText ?? "",
+                icon: "curlybraces",
+                description: "Cleans dictated code and technical talk without writing or answering",
+                isPredefined: true,
+                useSystemInstructions: true
+            ),
+
+            CustomPrompt(
+                id: chatPromptId,
+                title: "Chat",
+                promptText: PromptTemplates.all.first { $0.title == "Chat" }?.promptText ?? "",
+                icon: "message.fill",
+                description: "Casual chat-style formatting for messages",
+                isPredefined: true,
+                useSystemInstructions: true
             )
         ]
     }
