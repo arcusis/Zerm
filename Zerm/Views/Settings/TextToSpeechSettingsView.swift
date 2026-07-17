@@ -190,7 +190,7 @@ struct TextToSpeechSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                LocalLLMModelCardView()
+                LocalLLMModelListView()
             }
             .padding(8)
         }
