@@ -23,7 +23,8 @@ enum CloudProviderRegistry {
         SonioxProvider(),
         SpeechmaticsProvider(),
         XAIProvider(),
-        OpenAIProvider()
+        OpenAIProvider(),
+        AssemblyAIProvider()
     ]
 
     static func provider(for modelProvider: ModelProvider) -> (any CloudProvider)? {
