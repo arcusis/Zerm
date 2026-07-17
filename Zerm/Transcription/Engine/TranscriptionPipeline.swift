@@ -138,7 +138,7 @@ class TranscriptionPipeline {
                             type: .warning,
                             duration: 4.0,
                             actionButton: (label: "Open Models", action: {
-                                MenuBarManager.shared?.openMainWindowAndNavigate(to: "AI Models")
+                                MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                             })
                         )
                     }

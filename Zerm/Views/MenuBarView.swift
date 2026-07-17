@@ -43,7 +43,7 @@ struct MenuBarView: View {
                 Divider()
 
                 Button("Manage Models") {
-                    menuBarManager.openMainWindowAndNavigate(to: "AI Models")
+                    menuBarManager.openMainWindowAndNavigate(to: "Dictation Models")
                 }
             } label: {
                 HStack {

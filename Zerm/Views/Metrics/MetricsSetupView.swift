@@ -203,7 +203,7 @@ struct MetricsSetupView: View {
         NotificationCenter.default.post(
             name: .navigateToDestination,
             object: nil,
-            userInfo: ["destination": "AI Models"]
+            userInfo: ["destination": "Dictation Models"]
         )
     }
 }

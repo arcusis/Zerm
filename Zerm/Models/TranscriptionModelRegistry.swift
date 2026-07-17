@@ -83,24 +83,24 @@ enum TranscriptionModelRegistry {
                 ramUsage: 0.5
             ),
             WhisperModel(
-                name: "ggml-large-v2",
-                displayName: "Large v2",
-                size: "2.9 GB",
+                name: "ggml-small",
+                displayName: "Small",
+                size: "466 MB",
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .whisper),
-                description: "Large model v2, slower than Medium but more accurate",
-                speed: 0.3,
-                accuracy: 0.96,
-                ramUsage: 3.8
+                description: "Small model, a solid speed/accuracy balance for everyday dictation",
+                speed: 0.8,
+                accuracy: 0.82,
+                ramUsage: 0.7
             ),
             WhisperModel(
-                name: "ggml-large-v3",
-                displayName: "Large v3",
-                size: "2.9 GB",
-                supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .whisper),
-                description: "Large model v3, very slow but most accurate",
-                speed: 0.3,
-                accuracy: 0.98,
-                ramUsage: 3.9
+                name: "ggml-small.en",
+                displayName: "Small (English)",
+                size: "466 MB",
+                supportedLanguages: LanguageDictionary.forProvider(isMultilingual: false, provider: .whisper),
+                description: "Small model optimized for English, a solid speed/accuracy balance",
+                speed: 0.8,
+                accuracy: 0.84,
+                ramUsage: 0.7
             ),
             WhisperModel(
                 name: "ggml-large-v3-turbo",
