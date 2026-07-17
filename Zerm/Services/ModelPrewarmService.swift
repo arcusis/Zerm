@@ -16,6 +16,9 @@ final class ModelPrewarmService: ObservableObject {
     )
     private let prewarmAudioURL = Bundle.main.url(forResource: "esc", withExtension: "wav")
     private let prewarmEnabledKey = "PrewarmModelOnWake"
+    /// Last successful prewarm — brief lid-close cycles shouldn't re-run a full transcription.
+    private var lastPrewarmDate: Date?
+    private let prewarmCooldown: TimeInterval = 10 * 60
 
     init(transcriptionModelManager: TranscriptionModelManager, whisperModelManager: WhisperModelManager, modelContext: ModelContext) {
         self.transcriptionModelManager = transcriptionModelManager
@@ -83,6 +86,7 @@ final class ModelPrewarmService: ObservableObject {
             let _ = try await serviceRegistry.transcribe(audioURL: audioURL, model: currentModel)
             let duration = Date().timeIntervalSince(startTime)
 
+            lastPrewarmDate = Date()
             logger.notice("Prewarm completed in \(String(format: "%.2f", duration), privacy: .public)s")
 
         } catch {
@@ -97,6 +101,23 @@ final class ModelPrewarmService: ObservableObject {
         let isEnabled = UserDefaults.standard.bool(forKey: prewarmEnabledKey)
         guard isEnabled else {
             logger.notice("Prewarm disabled by user")
+            return false
+        }
+
+        // Don't burn battery for a latency optimization.
+        let process = ProcessInfo.processInfo
+        if process.isLowPowerModeEnabled {
+            logger.notice("Skipping prewarm — Low Power Mode is on")
+            return false
+        }
+        if process.thermalState == .serious || process.thermalState == .critical {
+            logger.notice("Skipping prewarm — thermal pressure")
+            return false
+        }
+
+        // A recent prewarm means the model is still resident; short sleeps don't evict it.
+        if let last = lastPrewarmDate, Date().timeIntervalSince(last) < prewarmCooldown {
+            logger.notice("Skipping prewarm — last prewarm was \(Int(-last.timeIntervalSinceNow))s ago")
             return false
         }
 

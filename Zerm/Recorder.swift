@@ -207,7 +207,9 @@ class Recorder: NSObject, ObservableObject {
 
     private func startAudioMeterTimer() {
         let timer = DispatchSource.makeTimerSource(queue: audioMeterQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(17)) 
+        // 30 Hz is smooth for the visualizer at roughly half the wakeup cost of the
+        // previous 17 ms cadence — this runs for the whole recording.
+        timer.schedule(deadline: .now(), repeating: .milliseconds(33))
         timer.setEventHandler { [weak self] in
             self?.updateAudioMeter()
         }
@@ -218,9 +220,9 @@ class Recorder: NSObject, ObservableObject {
     private func updateAudioMeter() {
         guard let recorder = recorder else { return }
 
-        // ~1 Hz capture-health heartbeat while debug logging is on (17 ms ticks)
+        // ~1 Hz capture-health heartbeat while debug logging is on (33 ms ticks)
         meterTickCount += 1
-        if meterTickCount % 59 == 0 {
+        if meterTickCount % 30 == 0 {
             DebugLogger.shared.log("Recorder", "heartbeat: \(recorder.debugSessionStats())")
         }
 
