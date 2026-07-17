@@ -42,7 +42,7 @@ class FluidAudioModelManager: ObservableObject {
     // MARK: - Download
 
     func downloadFluidAudioModel(_ model: FluidAudioModel) async {
-        if isFluidAudioModelDownloaded(model) {
+        if isFluidAudioModelDownloaded(model) || model.hardwareFit.blocksInstall {
             return
         }
 
