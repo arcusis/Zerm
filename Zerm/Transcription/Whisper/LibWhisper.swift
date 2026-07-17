@@ -33,7 +33,8 @@ actor WhisperContext {
     func fullTranscribe(samples: [Float], forceDisableVAD: Bool = false) -> Bool {
         guard let context = context else { return false }
         
-        let maxThreads = max(1, min(8, cpuCount() - 2))
+        // P-core-bound and thermal/Low-Power-aware — see HardwareCapability.
+        let maxThreads = HardwareCapability.inferenceThreadCount
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         
         // Read language directly from UserDefaults
@@ -184,8 +185,4 @@ actor WhisperContext {
     func setPrompt(_ prompt: String?) {
         self.prompt = prompt
     }
-}
-
-fileprivate func cpuCount() -> Int {
-    ProcessInfo.processInfo.processorCount
 }

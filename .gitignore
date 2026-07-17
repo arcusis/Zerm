@@ -23,6 +23,7 @@ playground.xcworkspace
 .build/
 build/
 .local-build/
+.test-build/
 .ci-packages/
 
 # Carthage / Accio (unused, kept for safety)

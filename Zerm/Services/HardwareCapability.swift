@@ -39,6 +39,31 @@ enum HardwareCapability {
         "\(chipName) · \(Int(physicalMemoryGB.rounded())) GB RAM"
     }
 
+    /// Performance cores on Apple Silicon (`hw.perflevel0.physicalcpu`); physical cores
+    /// elsewhere. Spilling inference threads onto efficiency cores or hyperthreads slows
+    /// the P-core work down and costs battery.
+    static let performanceCoreCount: Int = {
+        for key in ["hw.perflevel0.physicalcpu", "hw.physicalcpu"] {
+            var count: Int32 = 0
+            var size = MemoryLayout<Int32>.size
+            if sysctlbyname(key, &count, &size, nil, 0) == 0, count > 0 {
+                return Int(count)
+            }
+        }
+        return ProcessInfo.processInfo.processorCount
+    }()
+
+    /// Thread count for CPU-side inference: stay on the performance cores, and back off
+    /// to half when macOS reports thermal pressure or Low Power Mode.
+    static var inferenceThreadCount: Int {
+        let base = max(1, min(8, performanceCoreCount))
+        let process = ProcessInfo.processInfo
+        if process.isLowPowerModeEnabled || process.thermalState == .serious || process.thermalState == .critical {
+            return max(1, base / 2)
+        }
+        return base
+    }
+
     // MARK: - Per-model fit
 
     enum ModelFit {
