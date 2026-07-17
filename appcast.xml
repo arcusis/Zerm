@@ -3,21 +3,21 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.4.0</title>
+            <title>2.5.0</title>
             <description><![CDATA[
-                <h3>What's New in v2.4.0</h3>
+                <h3>What's New in v2.5.0</h3>
                 <ul>
-                    <li>Renamed the "AI Models" tab to "Dictation Models", and removed the unused "Transcribe Audio" tab.</li>
-                    <li>Refreshed the transcription model list: dropped slow, outdated local models, added a compact Small option, and added OpenAI and AssemblyAI as cloud options.</li>
-                    <li>Enhancement now lets you download and switch between several on-device models (Gemma 1B through 27B).</li>
-                    <li>New Coding and Chat enhancement prompts for cleaner dictation of code and casual messages.</li>
+                    <li>Zerm now rates your Mac and tunes model recommendations to it — models too heavy for your machine show a warning or cannot be installed.</li>
+                    <li>Faster, cooler local transcription: Whisper runs on performance cores only and backs off under Low Power Mode or thermal pressure.</li>
+                    <li>Less battery drain from model prewarming and audio metering while recording.</li>
+                    <li>Permissions screen now detects Screen Recording grants that need a relaunch and guides you through finishing the setup.</li>
                 </ul>
             ]]></description>
-            <pubDate>Fri, 17 Jul 2026 13:24:29 +0000</pubDate>
-            <sparkle:version>234</sparkle:version>
-            <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
+            <pubDate>Fri, 17 Jul 2026 20:33:07 +0000</pubDate>
+            <sparkle:version>250</sparkle:version>
+            <sparkle:shortVersionString>2.5.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.4.0/Zerm-2.4.0-macos.zip" length="23723736" type="application/octet-stream" sparkle:edSignature="mCRqspO1LqK/UmefEdfgrCam0u30roVRuv5zXrv4xw0JRUERrvEdFP97Nl2Q2Z/keBPX6EpZR8ewGR2V3jn3Bw=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.5.0/Zerm-2.5.0-macos.zip" length="23759373" type="application/octet-stream" sparkle:edSignature="wCaZl41lGgYvN2fJk0Gbh5BLnLQQHsvb5Hed/sr2yGEimujPvhoOzkwzALGQIP+ExU3Y9bgh5e5AVuPnTixoBg=="/>
         </item>
     </channel>
 </rss>
