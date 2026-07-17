@@ -193,6 +193,7 @@ class WhisperModelManager: ObservableObject {
     }
 
     func downloadModel(_ model: WhisperModel) async {
+        guard !model.hardwareFit.blocksInstall else { return }
         guard let url = URL(string: model.downloadURL) else { return }
         await performModelDownload(model, url)
     }

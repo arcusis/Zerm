@@ -66,18 +66,23 @@ struct LocalLLMModelCardView: View {
                         Button("Cancel") { manager.cancelDownload(package) }.controlSize(.small)
                     }
                 }
+            } else if package.hardwareFit.blocksInstall {
+                HardwareFitNotice(fit: package.hardwareFit)
             } else {
-                HStack {
-                    Text("Download once to use on-device. No API key needed.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        manager.select(package)
-                        Task { await manager.download(package) }
-                    } label: {
-                        Label("Download", systemImage: "arrow.down.circle")
+                VStack(alignment: .leading, spacing: 4) {
+                    HardwareFitNotice(fit: package.hardwareFit)
+                    HStack {
+                        Text("Download once to use on-device. No API key needed.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            manager.select(package)
+                            Task { await manager.download(package) }
+                        } label: {
+                            Label("Download", systemImage: "arrow.down.circle")
+                        }
+                        .controlSize(.small)
                     }
-                    .controlSize(.small)
                 }
             }
         }

@@ -45,6 +45,8 @@ struct ModelManagementView: View {
             VStack(alignment: .leading, spacing: 24) {
                 if SystemArchitecture.isIntelMac {
                     intelMacWarningBanner
+                } else if HardwareCapability.tier == .limited {
+                    limitedMemoryBanner
                 }
 
                 defaultModelSection
@@ -303,16 +305,33 @@ struct ModelManagementView: View {
         .cornerRadius(8)
     }
 
+    private var limitedMemoryBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "memorychip")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.orange)
+
+            Text("\(HardwareCapability.summary) — recommendations are tuned for this Mac; models that need more memory are marked or unavailable")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.primary.opacity(0.85))
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.orange.opacity(0.08))
+        .cornerRadius(8)
+    }
+
     private var filteredModels: [any TranscriptionModel] {
         switch selectedFilter {
         case .recommended:
+            let recommendedNames = HardwareCapability.recommendedTranscriptionModelNames
             return transcriptionModelManager.allAvailableModels.filter {
-                let recommendedNames = ["ggml-base.en", "parakeet-tdt-0.6b-v2", "ggml-large-v3-turbo-q5_0", "whisper-large-v3-turbo"]
-                return recommendedNames.contains($0.name)
+                recommendedNames.contains($0.name)
             }.sorted { model1, model2 in
-                let recommendedOrder = ["ggml-base.en", "parakeet-tdt-0.6b-v2", "ggml-large-v3-turbo-q5_0", "whisper-large-v3-turbo"]
-                let index1 = recommendedOrder.firstIndex(of: model1.name) ?? Int.max
-                let index2 = recommendedOrder.firstIndex(of: model2.name) ?? Int.max
+                let index1 = recommendedNames.firstIndex(of: model1.name) ?? Int.max
+                let index2 = recommendedNames.firstIndex(of: model2.name) ?? Int.max
                 return index1 < index2
             }
         case .local:

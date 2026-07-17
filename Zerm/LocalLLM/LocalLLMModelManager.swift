@@ -6,6 +6,8 @@ struct LocalLLMPackage: Identifiable, Hashable {
     let fileName: String
     let displayName: String
     let approxSize: String
+    /// Rough peak RAM (GB) while generating: weights + KV cache + runtime overhead.
+    let estimatedRAMGB: Double
     let downloadURL: URL
 
     /// `fileName` is the stable identity/key (also the on-disk name).
@@ -28,30 +30,35 @@ final class LocalLLMModelManager: ObservableObject {
             fileName: "gemma-3-1b-it-Q4_K_M.gguf",
             displayName: "Gemma 3 1B (on-device)",
             approxSize: "~806 MB",
+            estimatedRAMGB: 1.5,
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf")!
         ),
         LocalLLMPackage(
             fileName: "gemma-4-E2B-it-Q4_K_M.gguf",
             displayName: "Gemma 4 E2B (on-device)",
             approxSize: "~3.1 GB",
+            estimatedRAMGB: 4.0,
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf")!
         ),
         LocalLLMPackage(
             fileName: "gemma-4-E4B-it-Q4_K_M.gguf",
             displayName: "Gemma 4 E4B (on-device)",
             approxSize: "~5.0 GB",
+            estimatedRAMGB: 6.0,
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf")!
         ),
         LocalLLMPackage(
             fileName: "gemma-4-12b-it-Q4_K_M.gguf",
             displayName: "Gemma 4 12B (on-device)",
             approxSize: "~7.1 GB",
+            estimatedRAMGB: 9.0,
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q4_K_M.gguf")!
         ),
         LocalLLMPackage(
             fileName: "gemma-3-27b-it-Q4_K_M.gguf",
             displayName: "Gemma 3 27B (on-device)",
             approxSize: "~16.5 GB",
+            estimatedRAMGB: 19.0,
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-27b-it-GGUF/resolve/main/gemma-3-27b-it-Q4_K_M.gguf")!
         )
     ]
@@ -142,6 +149,10 @@ final class LocalLLMModelManager: ObservableObject {
     // MARK: - Download
 
     func download(_ package: LocalLLMPackage) async {
+        guard !package.hardwareFit.blocksInstall else {
+            statusText = "\(package.displayName) needs more memory than this Mac has available"
+            return
+        }
         guard downloadProgress[package.fileName] == nil else { return }
         downloadProgress[package.fileName] = 0
         statusText = nil

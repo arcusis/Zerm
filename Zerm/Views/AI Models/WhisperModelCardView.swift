@@ -25,6 +25,9 @@ struct WhisperModelCardView: View {
                 headerSection
                 metadataSection
                 descriptionSection
+                if !isDownloaded {
+                    HardwareFitNotice(fit: model.hardwareFit)
+                }
                 progressSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -128,6 +131,14 @@ struct WhisperModelCardView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+            } else if model.hardwareFit.blocksInstall {
+                Text("Unavailable")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color(.tertiaryLabelColor))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color(.quaternaryLabelColor).opacity(0.3)))
+                    .help("This model needs more memory than this Mac has available")
             } else {
                 Button(action: downloadAction) {
                     HStack(spacing: 4) {
