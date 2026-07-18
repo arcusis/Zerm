@@ -3,21 +3,19 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.5.0</title>
+            <title>2.5.1</title>
             <description><![CDATA[
-                <h3>What's New in v2.5.0</h3>
+                <h3>What's New in v2.5.1</h3>
                 <ul>
-                    <li>Zerm now rates your Mac and tunes model recommendations to it — models too heavy for your machine show a warning or cannot be installed.</li>
-                    <li>Faster, cooler local transcription: Whisper runs on performance cores only and backs off under Low Power Mode or thermal pressure.</li>
-                    <li>Less battery drain from model prewarming and audio metering while recording.</li>
-                    <li>Permissions screen now detects Screen Recording grants that need a relaunch and guides you through finishing the setup.</li>
+                    <li>New menu bar icon — the Zerm microphone, crisp on both light and dark menu bars.</li>
+                    <li>Decluttered menu bar menu: model, prompt, provider, language, and audio-input pickers moved out of the tray (all still available in the main window).</li>
                 </ul>
             ]]></description>
-            <pubDate>Fri, 17 Jul 2026 20:33:07 +0000</pubDate>
-            <sparkle:version>250</sparkle:version>
-            <sparkle:shortVersionString>2.5.0</sparkle:shortVersionString>
+            <pubDate>Sat, 18 Jul 2026 09:08:06 +0000</pubDate>
+            <sparkle:version>251</sparkle:version>
+            <sparkle:shortVersionString>2.5.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.5.0/Zerm-2.5.0-macos.zip" length="23759373" type="application/octet-stream" sparkle:edSignature="wCaZl41lGgYvN2fJk0Gbh5BLnLQQHsvb5Hed/sr2yGEimujPvhoOzkwzALGQIP+ExU3Y9bgh5e5AVuPnTixoBg=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.5.1/Zerm-2.5.1-macos.zip" length="23738601" type="application/octet-stream" sparkle:edSignature="9jGaSqiweUZr0pX1sE88ihCh0EG/4bWgNsa0/KyzY6fZwHhdneLbrw5hq6/Amc+i+p/dvlSr5A1l4BcffR7bCQ=="/>
         </item>
     </channel>
 </rss>
