@@ -14,18 +14,23 @@ struct WhisperModelFile: Identifiable {
     var isCoreMLDownloaded: Bool { coreMLEncoderURL != nil }
 
     var downloadURL: String {
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(filename)"
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(filename)"
     }
 
     var filename: String {
         "\(name).bin"
     }
 
+    /// Pinned SHA-256 for the main `.bin`, if this is a known catalog model.
+    var expectedSHA256: String? {
+        ModelIntegrity.whisperSHA256[name]
+    }
+
     // Core ML related properties
     var coreMLZipDownloadURL: String? {
         // Only non-quantized models have Core ML versions
         guard !name.contains("q5") && !name.contains("q8") else { return nil }
-        return "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(name)-encoder.mlmodelc.zip"
+        return "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(name)-encoder.mlmodelc.zip"
     }
 
     var coreMLEncoderDirectoryName: String? {
@@ -227,6 +232,13 @@ class WhisperModelManager: ObservableObject {
         let destinationURL = modelsDirectory.appendingPathComponent(model.filename)
         try data.write(to: destinationURL)
 
+        // Reject a tampered/corrupt download before whisper.cpp ever parses it.
+        if !ModelIntegrity.verify(fileURL: destinationURL, expectedSHA256: ModelIntegrity.whisperSHA256[model.name]) {
+            try? FileManager.default.removeItem(at: destinationURL)
+            logger.error("Checksum mismatch for model \(model.name, privacy: .public); download rejected")
+            throw ZermEngineError.modelLoadFailed
+        }
+
         return WhisperModelFile(name: model.name, url: destinationURL)
     }
 
@@ -248,6 +260,37 @@ class WhisperModelManager: ObservableObject {
         return try verifyAndCleanupCoreMLFiles(model, coreMLDestination, zipPath, progressKey)
     }
 
+    /// Rejects a zip whose entries would escape the extraction directory (zip-slip). The
+    /// bundled Zip library performs no containment check and the app is not sandboxed, so a
+    /// malicious `.mlmodelc.zip` could otherwise write anywhere the user can. Lists entry
+    /// names with `/usr/bin/unzip -Z1` and fails closed on any absolute path or `..` component.
+    static func assertNoPathTraversal(inZipAt zipPath: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-Z1", zipPath.path]
+        let out = Pipe()
+        let err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+        try process.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        _ = err.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw ZermEngineError.unzipFailed
+        }
+        let names = (String(data: data, encoding: .utf8) ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        for name in names where !name.isEmpty {
+            let isAbsolute = name.hasPrefix("/")
+            let hasTraversal = name == ".." || name.hasPrefix("../") || name.contains("/../") || name.hasSuffix("/..")
+            if isAbsolute || hasTraversal {
+                throw ZermEngineError.unzipFailed
+            }
+        }
+    }
+
     private func unzipCoreMLFile(_ zipPath: URL, to destination: URL) async throws {
         let finished = ManagedAtomic(false)
 
@@ -259,6 +302,7 @@ class WhisperModelManager: ObservableObject {
             }
 
             do {
+                try Self.assertNoPathTraversal(inZipAt: zipPath)
                 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
                 try Zip.unzipFile(zipPath, destination: destination, overwrite: true, password: nil)
                 finishOnce(.success(()))

@@ -130,10 +130,11 @@ class BrowserURLService {
                     throw BrowserURLError.noActiveTab
                 }
                 if output.lowercased().contains("error") {
-                    logger.error("❌ AppleScript error for \(browser.displayName, privacy: .public): \(output, privacy: .public)")
+                    // The active-tab URL can carry tokens/session IDs — keep it out of logs.
+                    logger.error("❌ AppleScript error for \(browser.displayName, privacy: .public): \(output, privacy: .private)")
                     throw BrowserURLError.executionFailed
                 }
-                logger.debug("✅ Retrieved URL from \(browser.displayName, privacy: .public): \(output, privacy: .public)")
+                logger.debug("✅ Retrieved URL from \(browser.displayName, privacy: .public): \(output, privacy: .private)")
                 return output
             } else {
                 throw BrowserURLError.executionFailed

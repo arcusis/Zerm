@@ -203,7 +203,7 @@ struct WhisperModel: TranscriptionModel {
     let provider: ModelProvider = .whisper
 
     var downloadURL: String {
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(filename)"
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(filename)"
     }
 
     var filename: String {
@@ -213,7 +213,7 @@ struct WhisperModel: TranscriptionModel {
     var isMultilingualModel: Bool {
         supportedLanguages.count > 1
     }
-} 
+}
 
 // User-imported local models 
 struct ImportedWhisperModel: TranscriptionModel {
