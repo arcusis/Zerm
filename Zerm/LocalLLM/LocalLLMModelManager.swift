@@ -9,6 +9,8 @@ struct LocalLLMPackage: Identifiable, Hashable {
     /// Rough peak RAM (GB) while generating: weights + KV cache + runtime overhead.
     let estimatedRAMGB: Double
     let downloadURL: URL
+    /// Pinned SHA-256 of the GGUF at the revision in `downloadURL`, verified after download.
+    let sha256: String
 
     /// `fileName` is the stable identity/key (also the on-disk name).
     var id: String { fileName }
@@ -31,35 +33,40 @@ final class LocalLLMModelManager: ObservableObject {
             displayName: "Gemma 3 1B (on-device)",
             approxSize: "~806 MB",
             estimatedRAMGB: 1.5,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf")!
+            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/f0b45be0aac41bd6a100a4b5734cad5f67255bfb/gemma-3-1b-it-Q4_K_M.gguf")!,
+            sha256: "8270790f3ab69fdfe860b7b64008d9a19986d8df7e407bb018184caa08798ebd"
         ),
         LocalLLMPackage(
             fileName: "gemma-4-E2B-it-Q4_K_M.gguf",
             displayName: "Gemma 4 E2B (on-device)",
             approxSize: "~3.1 GB",
             estimatedRAMGB: 4.0,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf")!
+            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/0314792d7f1f7e229411f620751375812bb9faf2/gemma-4-E2B-it-Q4_K_M.gguf")!,
+            sha256: "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8"
         ),
         LocalLLMPackage(
             fileName: "gemma-4-E4B-it-Q4_K_M.gguf",
             displayName: "Gemma 4 E4B (on-device)",
             approxSize: "~5.0 GB",
             estimatedRAMGB: 6.0,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf")!
+            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/bfc15c382204943c3a8fff0c750b94ae2364d7a3/gemma-4-E4B-it-Q4_K_M.gguf")!,
+            sha256: "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87"
         ),
         LocalLLMPackage(
             fileName: "gemma-4-12b-it-Q4_K_M.gguf",
             displayName: "Gemma 4 12B (on-device)",
             approxSize: "~7.1 GB",
             estimatedRAMGB: 9.0,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q4_K_M.gguf")!
+            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/fc034cfff751157913579611efad8462ac1be606/gemma-4-12b-it-Q4_K_M.gguf")!,
+            sha256: "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42"
         ),
         LocalLLMPackage(
             fileName: "gemma-3-27b-it-Q4_K_M.gguf",
             displayName: "Gemma 3 27B (on-device)",
             approxSize: "~16.5 GB",
             estimatedRAMGB: 19.0,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-27b-it-GGUF/resolve/main/gemma-3-27b-it-Q4_K_M.gguf")!
+            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-27b-it-GGUF/resolve/7cd0121f2530b00e42c4df952d4cad4418c0b3c1/gemma-3-27b-it-Q4_K_M.gguf")!,
+            sha256: "f1b699659942c777bd3ec0bcb527d6ebf34ae14ca76e3af103d58d0c9cbdadee"
         )
     ]
 
@@ -160,6 +167,13 @@ final class LocalLLMModelManager: ObservableObject {
 
         do {
             let file = try await downloadFile(for: package)
+            // Reject a tampered/corrupt GGUF before llama.cpp ever parses it.
+            guard ModelIntegrity.verify(fileURL: file, expectedSHA256: package.sha256) else {
+                try? FileManager.default.removeItem(at: file)
+                logger.error("Checksum mismatch for \(package.fileName, privacy: .public); download rejected")
+                statusText = "Download failed integrity check and was discarded"
+                return
+            }
             let dest = path(for: package)
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.moveItem(at: file, to: dest)

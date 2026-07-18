@@ -1,5 +1,9 @@
 # Define a directory for dependencies in the user's home folder
 DEPS_DIR := $(HOME)/Zerm-Dependencies
+# Pinned upstream revisions of the native parsers compiled into the shipped binary.
+# Bump these deliberately (and re-verify) rather than tracking a moving branch head.
+WHISPER_COMMIT := fc674574ca27cac59a15e5b22a09b9d9ad62aafe
+SHERPA_COMMIT := 6faa8142d49d4d47d2a6c1e06350a976661fe046
 WHISPER_CPP_DIR := $(DEPS_DIR)/whisper.cpp
 FRAMEWORK_PATH := $(WHISPER_CPP_DIR)/build-apple/whisper.xcframework
 SHERPA_DIR := $(DEPS_DIR)/sherpa-onnx
@@ -34,8 +38,9 @@ whisper:
 		if [ ! -d "$(WHISPER_CPP_DIR)" ]; then \
 			git clone https://github.com/ggerganov/whisper.cpp.git $(WHISPER_CPP_DIR); \
 		else \
-			(cd $(WHISPER_CPP_DIR) && git pull); \
+			(cd $(WHISPER_CPP_DIR) && git fetch origin); \
 		fi; \
+		(cd $(WHISPER_CPP_DIR) && git checkout --quiet $(WHISPER_COMMIT)); \
 		cd $(WHISPER_CPP_DIR) && ./build-xcframework.sh; \
 	else \
 		echo "whisper.xcframework already built in $(DEPS_DIR), skipping build"; \
@@ -47,8 +52,9 @@ sherpa:
 	@if [ ! -d "$(SHERPA_XCFRAMEWORK)" ]; then \
 		echo "Building sherpa-onnx.xcframework in $(DEPS_DIR)..."; \
 		if [ ! -d "$(SHERPA_DIR)" ]; then \
-			git clone --depth 1 https://github.com/k2-fsa/sherpa-onnx.git $(SHERPA_DIR); \
+			git clone https://github.com/k2-fsa/sherpa-onnx.git $(SHERPA_DIR); \
 		fi; \
+		(cd $(SHERPA_DIR) && git fetch origin && git checkout --quiet $(SHERPA_COMMIT)); \
 		cd $(SHERPA_DIR) && ./build-swift-macos.sh; \
 	else \
 		echo "sherpa-onnx.xcframework already built, skipping"; \

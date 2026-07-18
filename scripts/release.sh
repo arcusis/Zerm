@@ -177,9 +177,16 @@ if [ -n "$SIGN_UPDATE" ] && [ -f "$SPARKLE_PRIVATE_KEY_FILE" ]; then
     if [ -n "$SIG_VALUE" ]; then
         ED_SIG="sparkle:edSignature=\"$SIG_VALUE\""
     fi
-else
-    echo "warning: sign_update or private key missing — appcast will be unsigned."
-    echo "  Set SPARKLE_PRIVATE_KEY_FILE and install Sparkle's sign_update for real updates."
+fi
+
+# Fail closed: an unsigned appcast would either be rejected by every client (dead OTA)
+# or, worse, ship an unverifiable update. Never publish one by accident.
+# Set SKIP_APPCAST_SIGNATURE=1 only for an intentional dry run.
+if [ -z "$ED_SIG" ] && [ "${SKIP_APPCAST_SIGNATURE:-0}" != "1" ]; then
+    echo "error: could not EdDSA-sign the update (sign_update or private key missing)."
+    echo "  Install Sparkle's sign_update and set SPARKLE_PRIVATE_KEY_FILE=$SPARKLE_PRIVATE_KEY_FILE."
+    echo "  Refusing to write an unsigned appcast. (Set SKIP_APPCAST_SIGNATURE=1 to override for a dry run.)"
+    exit 1
 fi
 
 # Per-release notes for the Sparkle feed. Override per release, e.g.

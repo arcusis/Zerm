@@ -191,6 +191,18 @@ class ImportExportService {
                         self.showAlert(title: "Version Mismatch", message: "The imported settings file (version \(importedSettings.version)) is from a different version than your application (version \(self.currentSettingsVersion)). Proceeding with import, but be aware of potential incompatibilities.")
                     }
 
+                    // A settings file is untrusted input that overwrites prompts, power modes,
+                    // custom model endpoints, and the dictionary. Require explicit confirmation.
+                    let confirm = NSAlert()
+                    confirm.messageText = "Import these settings?"
+                    confirm.informativeText = "This replaces your prompts, power modes, custom models, and dictionary with the contents of \"\(url.lastPathComponent)\". Only import files you trust."
+                    confirm.alertStyle = .warning
+                    confirm.addButton(withTitle: "Import")
+                    confirm.addButton(withTitle: "Cancel")
+                    guard confirm.runModal() == .alertFirstButtonReturn else {
+                        return
+                    }
+
                     let predefinedPrompts = enhancementService.customPrompts.filter { $0.isPredefined }
                     enhancementService.customPrompts = predefinedPrompts + importedSettings.customPrompts
                     

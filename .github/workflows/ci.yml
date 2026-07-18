@@ -107,3 +107,27 @@ jobs:
             exit 1
           fi
           echo "No hardcoded home paths — OK"
+
+      - name: Validate Sparkle appcast integrity
+        run: |
+          # The appcast XML itself is not signed — only the enclosure bytes are.
+          # Guard the two properties that keep OTA safe: every advertised update
+          # must carry an EdDSA signature and be served from the official
+          # GitHub Releases host. A missing/blank signature or an off-host
+          # enclosure fails the PR instead of shipping a bad or unverifiable feed.
+          for feed in docs/appcast.xml appcast.xml; do
+            [ -f "$feed" ] || continue
+            echo "Checking $feed"
+            enclosures=$(grep -c "<enclosure " "$feed" || true)
+            if [ "$enclosures" -eq 0 ]; then
+              echo "FAIL: $feed has no <enclosure> element"; exit 1
+            fi
+            sigs=$(grep -c 'sparkle:edSignature="[^"]\{20,\}"' "$feed" || true)
+            if [ "$sigs" -ne "$enclosures" ]; then
+              echo "FAIL: $feed has $enclosures enclosure(s) but $sigs signed — every update must be EdDSA-signed"; exit 1
+            fi
+            if grep -q '<enclosure ' "$feed" && ! grep 'url="https://github.com/arcusis/Zerm/releases/download/' "$feed" >/dev/null; then
+              echo "FAIL: $feed enclosure is not served from the official GitHub Releases host"; exit 1
+            fi
+          done
+          echo "Appcast integrity — OK"

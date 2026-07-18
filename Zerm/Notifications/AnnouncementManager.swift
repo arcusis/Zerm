@@ -20,7 +20,9 @@ final class AnnouncementManager {
                 self?.dismiss()
             },
             onLearnMore: { [weak self] in
-                if let url = learnMoreURL {
+                // Announcements come from a remote feed; only open web links, never arbitrary
+                // URL schemes that could launch a helper app.
+                if let url = learnMoreURL, ["http", "https"].contains(url.scheme?.lowercased()) {
                     NSWorkspace.shared.open(url)
                 }
                 onDismiss()

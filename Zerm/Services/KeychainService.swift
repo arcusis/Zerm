@@ -2,21 +2,33 @@ import Foundation
 import Security
 import os
 
-/// Securely stores and retrieves API keys using Keychain with iCloud sync.
-/// For local (unsigned) builds, uses UserDefaults instead since Keychain
-/// requires stable code signing to reliably persist data across rebuilds.
+/// Securely stores and retrieves API keys.
+///
+/// Shipped (Release) builds use the macOS Keychain with data protection. Local *developer*
+/// builds (`#if DEBUG`) fall back to UserDefaults because unsigned/ad-hoc dev binaries don't
+/// keep a stable code-signing identity across rebuilds, which makes Keychain items unreliable.
+/// The fallback is gated on `DEBUG` — never on the release flag — so shipped builds always use
+/// the Keychain. On first launch of a Keychain build, any keys left in the old plaintext
+/// UserDefaults store by a previous release are migrated into the Keychain and then purged.
 final class KeychainService {
     static let shared = KeychainService()
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "KeychainService")
     private let service = "com.arcusis.zerm"
 
-    #if LOCAL_BUILD
-    private let defaults = UserDefaults.standard
+    /// Prefix used by the DEBUG UserDefaults store and by the legacy plaintext store that
+    /// shipped Release builds used before keys moved to the Keychain.
     private let localPrefix = "LocalKeychain_"
+
+    #if DEBUG
+    private let defaults = UserDefaults.standard
     #endif
 
-    private init() {}
+    private init() {
+        #if !DEBUG
+        migrateLegacyPlaintextKeysIfNeeded()
+        #endif
+    }
 
     // MARK: - Public API
 
@@ -33,7 +45,7 @@ final class KeychainService {
     /// Saves data to Keychain.
     @discardableResult
     func save(data: Data, forKey key: String, syncable: Bool = true) -> Bool {
-        #if LOCAL_BUILD
+        #if DEBUG
         defaults.set(data, forKey: localPrefix + key)
         return true
         #else
@@ -65,7 +77,7 @@ final class KeychainService {
 
     /// Retrieves data from Keychain.
     func getData(forKey key: String, syncable: Bool = true) -> Data? {
-        #if LOCAL_BUILD
+        #if DEBUG
         return defaults.data(forKey: localPrefix + key)
         #else
         var query = baseQuery(forKey: key, syncable: syncable)
@@ -88,7 +100,7 @@ final class KeychainService {
     /// Deletes an item from Keychain.
     @discardableResult
     func delete(forKey key: String, syncable: Bool = true) -> Bool {
-        #if LOCAL_BUILD
+        #if DEBUG
         defaults.removeObject(forKey: localPrefix + key)
         return true
         #else
@@ -109,7 +121,7 @@ final class KeychainService {
 
     /// Checks if a key exists in Keychain.
     func exists(forKey key: String, syncable: Bool = true) -> Bool {
-        #if LOCAL_BUILD
+        #if DEBUG
         return defaults.data(forKey: localPrefix + key) != nil
         #else
         var query = baseQuery(forKey: key, syncable: syncable)
@@ -122,21 +134,49 @@ final class KeychainService {
 
     // MARK: - Private Helpers
 
-    #if !LOCAL_BUILD
+    #if !DEBUG
     /// Creates base Keychain query dictionary.
+    ///
+    /// Uses the traditional login Keychain (not the data-protection Keychain) so it works for
+    /// a Developer-ID, non-sandboxed app without a `keychain-access-groups` entitlement. The
+    /// app reads back its own items without a prompt because it created them. `syncable` is
+    /// accepted for source compatibility but intentionally unused: iCloud Keychain sync
+    /// requires the data-protection Keychain, which our entitlements don't grant, and shipped
+    /// builds never synced keys.
     private func baseQuery(forKey key: String, syncable: Bool) -> [String: Any] {
-        var query: [String: Any] = [
+        return [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
-            kSecUseDataProtectionKeychain as String: true
+            // Only readable while the device is unlocked; excluded from unencrypted backups.
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
         ]
+    }
 
-        if syncable {
-            query[kSecAttrSynchronizable as String] = kCFBooleanTrue
+    /// One-time move of API keys that a prior Release build wrote in plaintext to
+    /// `~/Library/Preferences` (UserDefaults `LocalKeychain_*`) into the Keychain, then
+    /// deletes the plaintext copies. Idempotent via a persisted flag.
+    private func migrateLegacyPlaintextKeysIfNeeded() {
+        let migrationFlagKey = "KeychainPlaintextMigration_v1_done"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: migrationFlagKey) else { return }
+
+        var migrated = 0
+        for (defaultsKey, value) in defaults.dictionaryRepresentation() where defaultsKey.hasPrefix(localPrefix) {
+            let realKey = String(defaultsKey.dropFirst(localPrefix.count))
+            // Values were stored as Data; skip anything unexpected but still purge it.
+            if let data = value as? Data, !exists(forKey: realKey) {
+                if save(data: data, forKey: realKey, syncable: true) {
+                    migrated += 1
+                }
+            }
+            defaults.removeObject(forKey: defaultsKey)
         }
 
-        return query
+        defaults.set(true, forKey: migrationFlagKey)
+        if migrated > 0 {
+            logger.notice("Migrated \(migrated, privacy: .public) API key(s) from plaintext storage into the Keychain")
+        }
     }
     #endif
 }
