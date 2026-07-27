@@ -35,6 +35,7 @@ class ZermEngine: NSObject, ObservableObject {
     private var busyWatchdogTask: Task<Void, Never>?
     private var whisperIdleUnloadTask: Task<Void, Never>?
     private let whisperIdleUnloadSeconds: TimeInterval = 120
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     init(
         modelContext: ModelContext,
@@ -70,6 +71,7 @@ class ZermEngine: NSObject, ObservableObject {
 
         setupNotifications()
         createRecordingsDirectoryIfNeeded()
+        startMemoryPressureMonitor()
     }
 
     private func createRecordingsDirectoryIfNeeded() {
@@ -595,11 +597,35 @@ class ZermEngine: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(self.whisperIdleUnloadSeconds * 1_000_000_000))
             guard !Task.isCancelled else { return }
             guard self.recordingState == .idle else { return }
-            self.logger.notice("Whisper idle unload after \(self.whisperIdleUnloadSeconds, privacy: .public)s")
-            await self.whisperModelManager.cleanupResources()
-            // Invert Gemma: unload when idle so VRAM isn't pinned forever.
+            // Gemma is only needed for opt-in enhancement / Read Aloud rewrites, so dropping
+            // it after an idle spell is cheap. Whisper is the hot path — it stays resident and
+            // is released only under real memory pressure (see startMemoryPressureMonitor).
+            self.logger.notice("Idle after \(self.whisperIdleUnloadSeconds, privacy: .public)s — unloading on-device LLM, keeping Whisper warm")
             LocalLLMModelManager.shared.unloadIfIdle()
         }
+    }
+
+    /// Releases the Whisper context only when the system is actually short of memory.
+    ///
+    /// Previously the context was unloaded on a flat 120 s idle timer, which meant any
+    /// dictation started more than two minutes after the last one paid a full model reload
+    /// (~800 ms for large-v3-turbo-q5_0, measured via ModelPrewarmService) before a single
+    /// sample was transcribed. That is the difference between "instant" and "sometimes it
+    /// hangs". Keeping the model resident and yielding it on memory pressure gives the fast
+    /// path all the time while still being a good citizen when the machine is squeezed.
+    private func startMemoryPressureMonitor() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.recordingState == .idle else { return }
+                self.logger.notice("Memory pressure — releasing Whisper context")
+                await self.whisperModelManager.cleanupResources()
+                LocalLLMModelManager.shared.unloadIfIdle()
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
     }
 
     // MARK: - Notification Handling

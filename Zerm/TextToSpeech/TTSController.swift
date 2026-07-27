@@ -125,10 +125,19 @@ final class TTSController: ObservableObject {
 
         var startedPlaying = false
         do {
-            for chunk in chunks {
+            for (index, chunk) in chunks.enumerated() {
                 try Task.checkCancellation()
+                // The first chunk is the audio the user is waiting on, so it is never sent
+                // through the on-device LLM — that rewrite costs ~2 s and, when the model
+                // declines to rewrite, the result is discarded anyway. Later chunks are
+                // rewritten while the earlier ones are already playing, so their cost is free.
                 let spokenChunk: String
-                if useAI {
+                // Chunks 0 AND 1 skip the LLM. Chunk 0 is what the user is waiting for; chunk 1
+                // has to be ready before chunk 0 finishes playing, and a first sentence is often
+                // under a second of audio while a rewrite takes 3–5 s — which produced an audible
+                // stall right after the opening sentence. From chunk 2 on, ~220 chars is ~15 s of
+                // buffered audio, comfortably more than a rewrite costs.
+                if useAI, index > 1 {
                     spokenChunk = await naturalizer.naturalize(chunk, isCancelled: { Task.isCancelled }) ?? chunk
                 } else {
                     spokenChunk = chunk

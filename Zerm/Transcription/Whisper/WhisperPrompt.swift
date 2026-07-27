@@ -108,7 +108,17 @@ class WhisperPrompt: ObservableObject {
         if let customPrompt = customPrompts[language], !customPrompt.isEmpty {
             return customPrompt
         }
-        
+
+        // "auto" is the shipped default for SelectedLanguage, but there is no "auto" key in
+        // either table — so this used to fall all the way through to languagePrompts["default"],
+        // which is the empty string. That silently discarded the initial prompt for every
+        // default-config user, including the English number-word hint. The prompt is a style
+        // hint, not a language lock (Whisper still auto-detects because params.language stays
+        // nil), so borrowing the English entry is safe and restores the intended behaviour.
+        if language == LanguagePreference.autoCode {
+            return languagePrompts["en"] ?? languagePrompts["default"] ?? ""
+        }
+
         // Otherwise return the default prompt, with safe fallback
         return languagePrompts[language] ?? languagePrompts["default"] ?? ""
     }

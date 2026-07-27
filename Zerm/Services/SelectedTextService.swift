@@ -20,7 +20,14 @@ class SelectedTextService {
         // (e.g. Claude Code, cmux), which render text in custom views that do not
         // expose AXSelectedText (.accessibility) and have no standard Edit ▸ Copy
         // menu item (.menuAction). Keep it last so the cheaper strategies win first.
-        let strategies: [TextStrategy] = [.accessibility, .menuAction, .shortcut]
+        //
+        // Never post the synthetic ⌘C when Zerm itself is frontmost: the keystroke lands on
+        // our own focused control rather than a document, and a focused shortcut recorder
+        // reads it as the user binding ⌘C — which raises a "used by Edit ▸ Copy" modal sheet.
+        // AX still reads selections in our own windows, so nothing useful is lost.
+        let strategies: [TextStrategy] = isSelfFrontmost
+            ? [.accessibility, .menuAction]
+            : [.accessibility, .menuAction, .shortcut]
         do {
             if let selectedText = try await SelectedTextManager.shared.getSelectedText(strategies: strategies),
                !selectedText.isEmpty {
@@ -34,7 +41,14 @@ class SelectedTextService {
         // after posting ⌘C. Embedded terminals (IDE panes, Electron apps, remote
         // UIs) often take longer than that to service a copy, so retry once
         // ourselves with a longer window before giving up.
+        guard !isSelfFrontmost else { return nil }
         return await fetchViaClipboardCopy()
+    }
+
+    /// Whether Zerm is the frontmost app, i.e. a synthetic ⌘C would land on our own UI.
+    @MainActor
+    private static var isSelfFrontmost: Bool {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
     }
 
     /// Waits until no modifier keys are physically held (or the timeout passes).

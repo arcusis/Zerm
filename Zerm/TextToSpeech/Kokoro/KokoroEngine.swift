@@ -24,7 +24,11 @@ actor KokoroEngine {
         let kokoro = sherpaOnnxOfflineTtsKokoroModelConfig(
             model: modelPath, voices: voicesPath, tokens: tokensPath, dataDir: dataDir
         )
-        let modelConfig = sherpaOnnxOfflineTtsModelConfig(kokoro: kokoro, numThreads: 2, provider: "cpu")
+        // Two intra-op threads left most of the machine idle during synthesis, and Kokoro sits
+        // directly on the hotkey → first-spoken-word path. Scale with the box, leaving a couple
+        // of cores for the UI and any concurrent dictation work.
+        let threads = min(6, max(2, ProcessInfo.processInfo.activeProcessorCount - 2))
+        let modelConfig = sherpaOnnxOfflineTtsModelConfig(kokoro: kokoro, numThreads: threads, provider: "cpu")
         var config = sherpaOnnxOfflineTtsConfig(model: modelConfig)
         let wrapper = SherpaOnnxOfflineTtsWrapper(config: &config)
         guard wrapper.tts != nil else {
@@ -34,8 +38,20 @@ actor KokoroEngine {
     }
 
     /// Loads the model ahead of time so the first `generate` is instant.
+    ///
+    /// Constructing the ORT session is not enough: onnxruntime allocates its activation arena
+    /// on the first `Run`, espeak-ng opens its dictionary files on the first phonemize, and the
+    /// model pages fault in on first touch. Without a throwaway inference the first real read
+    /// still paid all of that. This runs on the actor's executor, off the main thread.
     func warmUp() throws {
+        // Constructing the ORT session reads onnxruntime's global OpSchema registry, which is a
+        // C++ static. If the process calls exit() while this is in flight, __cxa_finalize_ranges
+        // destroys that registry underneath us and the load segfaults. Nothing here is
+        // cancellable once inside sherpa-onnx, so the only safe move is not to start.
+        guard !ProcessLifecycle.isTerminating else { return }
         try ensureLoaded()
+        guard !ProcessLifecycle.isTerminating else { return }
+        _ = tts?.generate(text: "ok", sid: 0, speed: 1.0)
     }
 
     func generate(text: String, sid: Int, speed: Float) throws -> (samples: [Float], sampleRate: Int) {

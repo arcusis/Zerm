@@ -63,6 +63,13 @@ class HotkeyManager: ObservableObject {
     var onReadAloudTriggered: (() -> Void)?
     private var readAloudKeyState = false
 
+    /// True while a `KeyboardShortcuts.Recorder` field has focus and is capturing keys.
+    private var isRecordingShortcut = false
+    private var recorderActiveObserver: NSObjectProtocol?
+    /// Posted by KeyboardShortcuts whenever a recorder gains/loses focus. The name is
+    /// internal to the package, so it is reconstructed from its raw value here.
+    private static let recorderActiveStatusDidChange = Notification.Name("KeyboardShortcuts_recorderActiveStatusDidChange")
+
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "HotkeyManager")
     private var engine: ZermEngine
     private var recorderUIManager: RecorderUIManager
@@ -223,15 +230,48 @@ class HotkeyManager: ObservableObject {
             }
         }
 
+        // While the user is recording a shortcut, every one of our own triggers must stand
+        // down. Otherwise pressing the modifier they want to bind (⌥, right ⌘, …) fires
+        // dictation or Read Aloud instead: the recorder widget pops up, Read Aloud injects a
+        // synthetic ⌘C into the focused window — which is the settings window — and the
+        // recorder captures that ⌘C, sees it is taken by Edit ▸ Copy and puts up a modal
+        // sheet. Repeat and the sheets nest, deadlocking the app. KeyboardShortcuts already
+        // broadcasts recorder focus for exactly this purpose.
+        recorderActiveObserver = NotificationCenter.default.addObserver(
+            forName: Self.recorderActiveStatusDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            let isActive = (notification.userInfo?["isActive"] as? Bool) ?? false
+            Task { @MainActor in self?.setShortcutRecordingActive(isActive) }
+        }
+
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 100_000_000)
             self.setupHotkeyMonitoring()
         }
     }
-    
+
+    /// Suspends (and later restores) every Zerm-owned trigger while a shortcut recorder has focus.
+    private func setShortcutRecordingActive(_ isActive: Bool) {
+        guard isRecordingShortcut != isActive else { return }
+        isRecordingShortcut = isActive
+
+        if isActive {
+            logger.notice("Shortcut recorder focused — suspending hotkey monitoring")
+            removeAllMonitoring()
+        } else {
+            logger.notice("Shortcut recorder dismissed — restoring hotkey monitoring")
+            setupHotkeyMonitoring()
+        }
+    }
+
     private func setupHotkeyMonitoring() {
         removeAllMonitoring()
-        
+
+        // Stay silent until the recorder gives focus back.
+        guard !isRecordingShortcut else { return }
+
         setupModifierKeyMonitoring()
         setupCustomShortcutMonitoring()
         setupMiddleClickMonitoring()
@@ -329,7 +369,10 @@ class HotkeyManager: ObservableObject {
         }
         if readAloudHotkey == .custom {
             KeyboardShortcuts.onKeyDown(for: .readSelectedTextAloud) { [weak self] in
-                Task { @MainActor in self?.onReadAloudTriggered?() }
+                Task { @MainActor in
+                    guard let self, !self.isRecordingShortcut else { return }
+                    self.onReadAloudTriggered?()
+                }
             }
         }
     }
@@ -372,14 +415,60 @@ class HotkeyManager: ObservableObject {
         readAloudKeyState = false
     }
     
+    /// Device-dependent modifier bits AppKit keeps in the raw flags (IOKit `NX_DEVICE*KEYMASK`).
+    /// Unlike `NSEvent.ModifierFlags.option` and friends, these distinguish the two physical keys.
+    private enum SidedModifier {
+        static let leftControl: UInt = 0x0000_0001
+        static let leftShift: UInt = 0x0000_0002
+        static let rightShift: UInt = 0x0000_0004
+        static let leftCommand: UInt = 0x0000_0008
+        static let rightCommand: UInt = 0x0000_0010
+        static let leftOption: UInt = 0x0000_0020
+        static let rightOption: UInt = 0x0000_0040
+        static let rightControl: UInt = 0x0000_2000
+    }
+
+    /// Whether the *specific physical key* bound to `option` is currently held.
+    ///
+    /// `NSEvent.ModifierFlags` only carries side-agnostic bits — `.option` is set by either
+    /// Option key — so a left-Option binding and a right-Option binding were indistinguishable.
+    /// That desynchronised the press/release state machines: releasing one Option key while the
+    /// other was still held looked like "still pressed", and the flag stayed stuck down, after
+    /// which that hotkey never fired again for the rest of the session (the failure mode behind
+    /// Read Aloud going dead when it shares a modifier family with the dictation hotkey).
+    ///
+    /// Falls back to the side-agnostic bit when neither device bit is present, so remapping
+    /// software that strips them keeps working as before.
     static func isModifierPressed(_ option: HotkeyOption, flags: NSEvent.ModifierFlags) -> Bool {
+        func isDown(left: UInt, right: UInt, wanted: UInt, generic: NSEvent.ModifierFlags) -> Bool {
+            let raw = flags.rawValue
+            guard raw & (left | right) != 0 else { return flags.contains(generic) }
+            return raw & wanted != 0
+        }
+
         switch option {
-        case .rightOption, .leftOption: return flags.contains(.option)
-        case .leftControl, .rightControl: return flags.contains(.control)
-        case .fn: return flags.contains(.function)
-        case .rightCommand: return flags.contains(.command)
-        case .rightShift: return flags.contains(.shift)
-        case .custom, .none: return false
+        case .leftOption:
+            return isDown(left: SidedModifier.leftOption, right: SidedModifier.rightOption,
+                          wanted: SidedModifier.leftOption, generic: .option)
+        case .rightOption:
+            return isDown(left: SidedModifier.leftOption, right: SidedModifier.rightOption,
+                          wanted: SidedModifier.rightOption, generic: .option)
+        case .leftControl:
+            return isDown(left: SidedModifier.leftControl, right: SidedModifier.rightControl,
+                          wanted: SidedModifier.leftControl, generic: .control)
+        case .rightControl:
+            return isDown(left: SidedModifier.leftControl, right: SidedModifier.rightControl,
+                          wanted: SidedModifier.rightControl, generic: .control)
+        case .rightCommand:
+            return isDown(left: SidedModifier.leftCommand, right: SidedModifier.rightCommand,
+                          wanted: SidedModifier.rightCommand, generic: .command)
+        case .rightShift:
+            return isDown(left: SidedModifier.leftShift, right: SidedModifier.rightShift,
+                          wanted: SidedModifier.rightShift, generic: .shift)
+        case .fn:
+            return flags.contains(.function)
+        case .custom, .none:
+            return false
         }
     }
 
@@ -413,15 +502,13 @@ class HotkeyManager: ObservableObject {
 
         guard let hotkey = activeHotkey else { return }
 
-        var isKeyPressed = false
+        // Same sided test as the Read Aloud branch above — see `isModifierPressed`.
+        let isKeyPressed = Self.isModifierPressed(hotkey, flags: flags)
 
         switch hotkey {
-        case .rightOption, .leftOption:
-            isKeyPressed = flags.contains(.option)
-        case .leftControl, .rightControl:
-            isKeyPressed = flags.contains(.control)
+        case .custom, .none:
+            return // Should not reach here
         case .fn:
-            isKeyPressed = flags.contains(.function)
             pendingFnKeyState = isKeyPressed
             pendingFnEventTime = eventTime
             fnDebounceTask?.cancel()
@@ -453,12 +540,8 @@ class HotkeyManager: ObservableObject {
                 }
             }
             return
-        case .rightCommand:
-            isKeyPressed = flags.contains(.command)
-        case .rightShift:
-            isKeyPressed = flags.contains(.shift)
-        case .custom, .none:
-            return // Should not reach here
+        case .rightOption, .leftOption, .leftControl, .rightControl, .rightCommand, .rightShift:
+            break
         }
 
         await processKeyPress(isKeyPressed: isKeyPressed, eventTime: eventTime, mode: activeMode)
@@ -522,6 +605,8 @@ class HotkeyManager: ObservableObject {
     }
     
     private func handleCustomShortcutKeyDown(eventTime: TimeInterval, mode: HotkeyMode) async {
+        guard !isRecordingShortcut else { return }
+
         if let lastTrigger = lastShortcutTriggerTime,
            Date().timeIntervalSince(lastTrigger) < shortcutCooldownInterval {
             return
@@ -601,6 +686,9 @@ class HotkeyManager: ObservableObject {
     }
     
     deinit {
+        if let recorderActiveObserver {
+            NotificationCenter.default.removeObserver(recorderActiveObserver)
+        }
         Task { @MainActor in
             removeAllMonitoring()
         }

@@ -124,6 +124,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
         resetSessionStats()
 
         logger.notice("🎙️ Starting recording from device \(deviceID, privacy: .public)")
+
+        // This is the user-visible "press hotkey → actually capturing" latency, so a
+        // regression here needs to be visible in the field log, not just in a profiler.
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
         logDeviceDetails(deviceID: deviceID)
 
         // Step 1: Create and configure the AudioUnit (AUHAL)
@@ -143,6 +148,8 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         // Step 6: Initialize and start the AudioUnit
         try startAudioUnit()
+
+        logger.notice("⏱️ startRecording: \((ProcessInfo.processInfo.systemUptime - startedAt) * 1000, privacy: .public) ms")
 
         isRecording = true
         resampleInputCursor = 0
@@ -602,6 +609,10 @@ final class CoreAudioRecorder: @unchecked Sendable {
             throw CoreAudioRecorderError.failedToInitialize(status: status)
         }
 
+        // Measured on an M4 Max: AudioUnitInitialize ~10 ms, AudioOutputUnitStart ~43 ms.
+        // The Start cost is the OS spinning the input device up and is not avoidable without
+        // holding the microphone stream open between dictations — which would light the
+        // privacy indicator permanently. Treat ~45 ms as the floor for this path.
         status = AudioOutputUnitStart(audioUnit)
         if status != noErr {
             logger.error("Failed to start AudioUnit: \(status, privacy: .public)")
