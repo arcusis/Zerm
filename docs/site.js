@@ -11,9 +11,15 @@
     return assets.find((a) => /x64|x86_64|amd64/i.test(a.name) && /\.dmg$/i.test(a.name));
   }
 
+  // The plain macOS archive, for people who would rather not mount a disk image
+  function assetForZip(assets) {
+    return assets.find((a) => /\.zip$/i.test(a.name) && /mac/i.test(a.name));
+  }
+
   function assetFor(platform, assets) {
     if (platform === "mac-arm") return assetForArm(assets);
     if (platform === "mac-x86") return assetForIntel(assets);
+    if (platform === "mac-zip") return assetForZip(assets);
     return null;
   }
 
@@ -69,7 +75,16 @@
       cards.forEach((card) => {
         const platform = card.getAttribute("data-platform");
         const asset = assetFor(platform, assets);
-        if (!asset?.browser_download_url) return;
+
+        // No build for this platform in the current release — say so rather
+        // than leaving the card pointing at an anchor that goes nowhere.
+        if (!asset?.browser_download_url) {
+          card.classList.add("unavailable");
+          card.href = `https://github.com/${REPO}/releases`;
+          const hint = card.querySelector("small");
+          if (hint) hint.textContent = "Not in this release · see all releases";
+          return;
+        }
 
         card.href = asset.browser_download_url;
         const hint = card.querySelector("small");
@@ -91,7 +106,8 @@
         }
         if (primarySub) {
           const size = formatSize(primaryAsset.size);
-          primarySub.textContent = [tag, primaryAsset.name.includes("aarch64") ? "Apple Silicon" : "Intel", size]
+          const arch = /aarch64|arm64/i.test(primaryAsset.name) ? "Apple Silicon" : "Intel";
+          primarySub.textContent = [tag, arch, size]
             .filter(Boolean)
             .join(" · ");
         }
@@ -109,12 +125,41 @@
     }
   }
 
+  // Fade sections in as they enter the viewport. Degrades to "always visible".
+  function initReveals() {
+    const targets = document.querySelectorAll(".reveal");
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (reduced || !("IntersectionObserver" in window)) {
+      document.body.classList.add("no-reveal");
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add("in");
+          observer.unobserve(entry.target);
+        });
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.08 }
+    );
+
+    targets.forEach((el) => observer.observe(el));
+  }
+
   const year = document.getElementById("year");
   if (year) year.textContent = new Date().getFullYear();
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", hydrateDownloads);
-  } else {
+  function init() {
+    initReveals();
     hydrateDownloads();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
   }
 })();
