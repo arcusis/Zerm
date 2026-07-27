@@ -192,7 +192,16 @@ class TranscriptionPipeline {
                     transcription.enhancementDuration = enhancementDuration
                     transcription.aiRequestSystemMessage = enhancementService.lastSystemMessageSent
                     transcription.aiRequestUserMessage = enhancementService.lastUserMessageSent
-                    finalPastedText = enhancedText
+                    // An empty enhancement must never replace a good transcript. The on-device
+                    // path can return "" without throwing (a failed llama_decode breaks out of
+                    // the token loop and still yields a valid empty string), which silently
+                    // pasted nothing at all — worst on long dictations, where losing the text
+                    // hurts most. Fall back to the raw transcript for every provider.
+                    if enhancedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        logger.error("AI enhancement returned empty text — pasting the raw transcript instead")
+                    } else {
+                        finalPastedText = enhancedText
+                    }
                 } catch {
                     // A cancelled enhancement is not a failure — let it propagate to
                     // the outer cancellation handler instead of relabelling it.

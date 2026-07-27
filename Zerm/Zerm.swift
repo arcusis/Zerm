@@ -5,6 +5,7 @@ import AppKit
 import OSLog
 import AppIntents
 import FluidAudio
+import Security
 
 @main
 struct ZermApp: App {
@@ -176,9 +177,22 @@ struct ZermApp: App {
             await recorderUIManager.resetOnLaunch()
         }
 
-        // Pre-warm the on-device Read Aloud models so the first read is instant.
+        // Warm the launch-at-login cache off the main thread — reading it lazily from a
+        // view would block the main thread on XPC. See `LaunchAtLoginStore`.
+        LaunchAtLoginStore.shared.loadIfNeeded()
+
+        // Never load native ML runtimes in the XCTest host. It launches the whole app and then
+        // immediately calls exit(), which races C++ static destruction against an in-flight
+        // onnxruntime session construction and segfaults on the way out.
+        ProcessLifecycle.isTerminating = NSClassFromString("XCTestCase") != nil
+
+        // Pre-warm Kokoro (~330 MB) so the first Read Aloud is instant.
+        //
+        // Gemma is deliberately NOT pre-warmed here: the GGUF is 3.1 GB and it is only needed
+        // for the optional "natural reading" rewrite of the *second and later* chunks, by which
+        // point audio is already playing. Loading it at launch pinned gigabytes on every user,
+        // including those who never trigger Read Aloud at all. It now loads on first use.
         Task { await KokoroModelManager.shared.prewarmIfNeeded() }
-        Task { await LocalLLMModelManager.shared.prewarmIfNeeded() }
 
         AppShortcuts.updateAppShortcutParameters()
 
@@ -212,11 +226,13 @@ struct ZermApp: App {
 
             // Dictionary configuration
             let dictionarySchema = Schema([VocabularyWord.self, WordReplacement.self])
-            #if LOCAL_BUILD
-            let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase = .none
-            #else
-            let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase = .private("iCloud.com.arcusis.zerm")
-            #endif
+            let cloudContainer = "iCloud.com.arcusis.zerm"
+            let canUseCloudKit = hasCloudKitEntitlement(for: cloudContainer)
+            if !canUseCloudKit {
+                logger.notice("iCloud container entitlement absent — dictionary sync disabled for this build")
+            }
+            let dictionaryCloudKit: ModelConfiguration.CloudKitDatabase =
+                canUseCloudKit ? .private(cloudContainer) : .none
             let dictionaryConfig = ModelConfiguration(
                 "dictionary",
                 schema: dictionarySchema,
@@ -233,6 +249,31 @@ struct ZermApp: App {
             logger.error("❌ Failed to create persistent ModelContainer: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    /// Whether the running binary actually carries the iCloud container entitlement.
+    ///
+    /// `Zerm.entitlements` declares the container, but an entitlement is only *granted* by a
+    /// signature backed by a provisioning profile. Ad-hoc and unsigned builds — `make local`,
+    /// a plain `xcodebuild` Debug build, and the unit-test host — are signed with no team, so
+    /// the entitlement is absent at runtime. CoreData+CloudKit does not degrade gracefully
+    /// there: `PFCloudKitSetupAssistant` asks CloudKit for the container and CloudKit traps
+    /// (`EXC_BREAKPOINT` on `com.apple.coredata.cloudkit.queue`), killing the app during
+    /// launch. Checking the real entitlement — rather than a `#if LOCAL_BUILD` flag that only
+    /// covers one of those build paths — keeps every unsigned build alive with sync disabled,
+    /// while a properly signed Release still gets iCloud.
+    private static func hasCloudKitEntitlement(for container: String) -> Bool {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(
+                task,
+                "com.apple.developer.icloud-container-identifiers" as CFString,
+                nil
+              ),
+              let identifiers = value as? [String]
+        else {
+            return false
+        }
+        return identifiers.contains(container)
     }
 
     private static func createInMemoryContainer(schema: Schema, logger: Logger) -> ModelContainer? {
@@ -305,7 +346,11 @@ struct ZermApp: App {
                     })
                     .onDisappear {
                         AnnouncementsService.shared.stop()
-                        whisperModelManager.unloadModel()
+                        // Deliberately NOT unloading Whisper here. For a menu-bar dictation
+                        // app, "main window closed" is the steady state — evicting the model
+                        // on window close threw away the warm context and made the next
+                        // dictation pay a ~800 ms reload. Release is driven by real memory
+                        // pressure instead (ZermEngine.startMemoryPressureMonitor).
 
                         // Stop the automatic audio cleanup process
                         audioCleanupManager.stopAutomaticCleanup()

@@ -1,7 +1,6 @@
 import SwiftUI
 import Cocoa
 import KeyboardShortcuts
-import LaunchAtLogin
 import AVFoundation
 
 struct SettingsView: View {
@@ -16,6 +15,7 @@ struct SettingsView: View {
     @ObservedObject private var soundManager = SoundManager.shared
     @ObservedObject private var mediaController = MediaController.shared
     @ObservedObject private var playbackController = PlaybackController.shared
+    @ObservedObject private var launchAtLogin = LaunchAtLoginStore.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
     @AppStorage("autoUpdateCheck") private var autoUpdateCheck = true
     @AppStorage("enableAnnouncements") private var enableAnnouncements = true
@@ -214,7 +214,10 @@ struct SettingsView: View {
             Section("General") {
                 Toggle("Hide Dock Icon", isOn: $menuBarManager.isMenuBarOnly)
 
-                LaunchAtLogin.Toggle("Launch at Login")
+                // Not `LaunchAtLogin.Toggle` — it re-reads SMAppService.status (a blocking
+                // XPC call) on every body evaluation. See `LaunchAtLoginStore`.
+                Toggle("Launch at Login", isOn: launchAtLogin.binding)
+                    .onAppear { launchAtLogin.loadIfNeeded() }
 
                 Toggle("Auto-check Updates", isOn: $autoUpdateCheck)
                     .onChange(of: autoUpdateCheck) { _, newValue in
