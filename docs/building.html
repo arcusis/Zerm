@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Build from source — Zerm</title>
+    <meta name="description" content="Requirements, build commands, and release tooling for the native macOS app." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Build from source — Zerm" />
+    <meta property="og:description" content="Requirements, build commands, and release tooling for the native macOS app." />
+    <meta property="og:image" content="./icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="./icon.png" />
+    <link rel="apple-touch-icon" href="./icon.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="./" aria-label="Zerm home">
+          <img src="./icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="./#models">Models</a>
+          <a href="./#dictation">Dictation</a>
+          <a href="./#read-aloud">Read aloud</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="./#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">For developers</p>
+        <h1>Build from source</h1>
+        <p class="lede">Requirements, build commands, and release tooling for the native macOS app.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<h1 dir="auto">Building Zerm</h1>
+<p dir="auto">This guide provides detailed instructions for building Zerm from source.</p>
+<h2 dir="auto">Prerequisites</h2>
+<p dir="auto">Before you begin, ensure you have:</p>
+<ul dir="auto">
+<li>macOS 14.4 or later</li>
+<li>Xcode (latest version recommended)</li>
+<li>Swift (latest version recommended)</li>
+<li>Git (for cloning repositories)</li>
+</ul>
+<h2 dir="auto">Quick Start with Makefile (Recommended)</h2>
+<p dir="auto">The easiest way to build Zerm is using the included Makefile, which automates the entire build process including building and linking the whisper framework.</p>
+<h3 dir="auto">Simple Build Commands</h3>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate"><span class="pl-c"><span class="pl-c">#</span> Clone the repository</span>
+git clone https://github.com/Arcusis/Zerm.git
+<span class="pl-c1">cd</span> Zerm
+
+<span class="pl-c"><span class="pl-c">#</span> Build everything (recommended for first-time setup)</span>
+make all
+
+<span class="pl-c"><span class="pl-c">#</span> Or for development (build and run)</span>
+make dev</pre></div>
+<h3 dir="auto">Available Makefile Commands</h3>
+<ul dir="auto">
+<li><code class="notranslate">make check</code> or <code class="notranslate">make healthcheck</code> - Verify all required tools are installed</li>
+<li><code class="notranslate">make whisper</code> - Clone and build whisper.cpp XCFramework automatically</li>
+<li><code class="notranslate">make setup</code> - Prepare the whisper framework for linking</li>
+<li><code class="notranslate">make build</code> - Build the Zerm Xcode project</li>
+<li><code class="notranslate">make local</code> - Build for local use (no Apple Developer certificate needed)</li>
+<li><code class="notranslate">make release</code> - Build the Developer ID signed + notarized release DMG (maintainers only)</li>
+<li><code class="notranslate">make run</code> - Launch the built Zerm app</li>
+<li><code class="notranslate">make dev</code> - Build and run (ideal for development workflow)</li>
+<li><code class="notranslate">make all</code> - Complete build process (default)</li>
+<li><code class="notranslate">make clean</code> - Remove build artifacts and dependencies</li>
+<li><code class="notranslate">make help</code> - Show all available commands</li>
+</ul>
+<h3 dir="auto">How the Makefile Helps</h3>
+<p dir="auto">The Makefile automatically:</p>
+<ol dir="auto">
+<li><strong>Manages Dependencies</strong>: Creates a dedicated <code class="notranslate">~/Zerm-Dependencies</code> directory for all external frameworks</li>
+<li><strong>Builds Whisper Framework</strong>: Clones whisper.cpp and builds the XCFramework with the correct configuration</li>
+<li><strong>Handles Framework Linking</strong>: Sets up the whisper.xcframework in the proper location for Xcode to find</li>
+<li><strong>Verifies Prerequisites</strong>: Checks that git, xcodebuild, and swift are installed before building</li>
+<li><strong>Streamlines Development</strong>: Provides convenient shortcuts for common development tasks</li>
+</ol>
+<p dir="auto">This approach ensures consistent builds across different machines and eliminates manual framework setup errors.</p>
+<hr>
+<h2 dir="auto">Building for Local Use (No Apple Developer Certificate)</h2>
+<p dir="auto">If you don't have an Apple Developer certificate, use <code class="notranslate">make local</code>:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">git clone https://github.com/Arcusis/Zerm.git
+<span class="pl-c1">cd</span> Zerm
+make <span class="pl-k">local</span>
+open <span class="pl-k">~</span>/Downloads/Zerm.app</pre></div>
+<p dir="auto">This builds Zerm with ad-hoc signing using a separate build configuration (<code class="notranslate">LocalBuild.xcconfig</code>) that requires no Apple Developer account.</p>
+<h3 dir="auto">How It Works</h3>
+<p dir="auto">The <code class="notranslate">make local</code> command uses:</p>
+<ul dir="auto">
+<li><code class="notranslate">LocalBuild.xcconfig</code> to override signing and entitlements settings</li>
+<li><code class="notranslate">Zerm.local.entitlements</code> (stripped-down, no CloudKit/keychain groups)</li>
+<li><code class="notranslate">LOCAL_BUILD</code> Swift compilation flag for conditional code paths</li>
+</ul>
+<p dir="auto">Your normal <code class="notranslate">make all</code> / <code class="notranslate">make build</code> commands are completely unaffected.</p>
+<hr>
+<h2 dir="auto">Building a Release (Maintainers)</h2>
+<p dir="auto">Public DMGs must be Developer ID signed <strong>and notarized</strong>, otherwise Gatekeeper<br>
+rejects the app on other Macs ("Zerm is damaged and can't be opened" /<br>
+"Apple could not verify Zerm is free of malware").</p>
+<p dir="auto">Requirements on the release machine:</p>
+<ul dir="auto">
+<li>The <code class="notranslate">Developer ID Application: Arcusis LTD (F9Z784RA6D)</code> certificate in the login keychain</li>
+<li>One-time notarization credential setup:</li>
+</ul>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">xcrun notarytool store-credentials zerm-notary \
+  --key <span class="pl-k">~</span>/.appstoreconnect/private_keys/AuthKey_<span class="pl-k">&lt;</span>KEY-ID<span class="pl-k">&gt;</span>.p8 \
+  --key-id <span class="pl-k">&lt;</span>KEY-ID<span class="pl-k">&gt;</span> \
+  --issuer <span class="pl-k">&lt;</span>ISSUER-UUID<span class="pl-k">&gt;</span></pre></div>
+<p dir="auto">The issuer UUID is shown in App Store Connect under<br>
+<strong>Users and Access → Integrations → App Store Connect API</strong>.</p>
+<p dir="auto">Then build the release:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">make release            <span class="pl-c"><span class="pl-c">#</span> or: scripts/release.sh</span></pre></div>
+<p dir="auto">This builds the Release configuration, signs the app with Developer ID and the<br>
+hardened runtime, notarizes app and DMG with Apple, staples the tickets, and<br>
+verifies the result with <code class="notranslate">spctl</code>. The DMG lands in the repo root as<br>
+<code class="notranslate">Zerm_X.Y.Z_aarch64.dmg</code>, ready for <code class="notranslate">gh release upload</code>.</p>
+<p dir="auto"><code class="notranslate">SKIP_NOTARIZE=1 scripts/release.sh</code> does a signing-only dry run.</p>
+<hr>
+<h2 dir="auto">Manual Build Process (Alternative)</h2>
+<p dir="auto">If you prefer to build manually or need more control over the build process, follow these steps:</p>
+<h3 dir="auto">Building whisper.cpp Framework</h3>
+<ol dir="auto">
+<li>Clone and build whisper.cpp:</li>
+</ol>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">git clone https://github.com/ggerganov/whisper.cpp.git
+<span class="pl-c1">cd</span> whisper.cpp
+./build-xcframework.sh</pre></div>
+<p dir="auto">This will create the XCFramework at <code class="notranslate">build-apple/whisper.xcframework</code>.</p>
+<h3 dir="auto">Building Zerm</h3>
+<ol dir="auto">
+<li>Clone the Zerm repository:</li>
+</ol>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">git clone https://github.com/Arcusis/Zerm.git
+<span class="pl-c1">cd</span> Zerm</pre></div>
+<ol start="2" dir="auto">
+<li>
+<p dir="auto">Add the whisper.xcframework to your project:</p>
+<ul dir="auto">
+<li>Drag and drop <code class="notranslate">../whisper.cpp/build-apple/whisper.xcframework</code> into the project navigator, or</li>
+<li>Add it manually in the "Frameworks, Libraries, and Embedded Content" section of project settings</li>
+</ul>
+</li>
+<li>
+<p dir="auto">Build and Run</p>
+<ul dir="auto">
+<li>Build the project using Cmd+B or Product &gt; Build</li>
+<li>Run the project using Cmd+R or Product &gt; Run</li>
+</ul>
+</li>
+</ol>
+<h2 dir="auto">Development Setup</h2>
+<ol dir="auto">
+<li>
+<p dir="auto"><strong>Xcode Configuration</strong></p>
+<ul dir="auto">
+<li>Ensure you have the latest Xcode version</li>
+<li>Install any required Xcode Command Line Tools</li>
+</ul>
+</li>
+<li>
+<p dir="auto"><strong>Dependencies</strong></p>
+<ul dir="auto">
+<li>The project uses <a href="https://github.com/ggerganov/whisper.cpp" rel="noopener noreferrer" target="_blank">whisper.cpp</a> for transcription</li>
+<li>Ensure the whisper.xcframework is properly linked in your Xcode project</li>
+<li>Test the whisper.cpp installation independently before proceeding</li>
+</ul>
+</li>
+<li>
+<p dir="auto"><strong>Building for Development</strong></p>
+<ul dir="auto">
+<li>Use the Debug configuration for development</li>
+<li>Enable relevant debugging options in Xcode</li>
+</ul>
+</li>
+<li>
+<p dir="auto"><strong>Testing</strong></p>
+<ul dir="auto">
+<li>Run the test suite before making changes</li>
+<li>Ensure all tests pass after your modifications</li>
+</ul>
+</li>
+</ol>
+<h2 dir="auto">Troubleshooting</h2>
+<p dir="auto">If you encounter any build issues:</p>
+<ol dir="auto">
+<li>Clean the build folder (Cmd+Shift+K)</li>
+<li>Clean the build cache (Cmd+Shift+K twice)</li>
+<li>Check Xcode and macOS versions</li>
+<li>Verify all dependencies are properly installed</li>
+<li>Make sure whisper.xcframework is properly built and linked</li>
+</ol>
+<p dir="auto">For more help, please check the <a href="https://github.com/Arcusis/Zerm/issues" rel="noopener noreferrer" target="_blank">issues</a> section or create a new issue.</p>
+      </div></section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="./icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="./#download">Download</a>
+          <a href="./changelog.html">Changelog</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./building.html">Build from source</a>
+          <a href="./notice.html">Attribution</a>
+          <a href="./license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="./site.js" defer></script>
+  </body>
+</html>

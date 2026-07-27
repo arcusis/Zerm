@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Privacy — Zerm</title>
+    <meta
+      name="description"
+      content="What Zerm records, what stays on your Mac, what leaves it and only when you ask, and which macOS permissions are needed for what."
+    />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Privacy — Zerm" />
+    <meta
+      property="og:description"
+      content="Zerm is a voice app with microphone and Accessibility access. That deserves specifics rather than a slogan."
+    />
+    <meta property="og:image" content="./icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="./icon.png" />
+    <link rel="apple-touch-icon" href="./icon.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="./" aria-label="Zerm home">
+          <img src="./icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="./#models">Models</a>
+          <a href="./#dictation">Dictation</a>
+          <a href="./#read-aloud">Read aloud</a>
+          <a href="./privacy.html" aria-current="page">Privacy</a>
+          <a href="./changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="./#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Privacy model</p>
+        <h1>What leaves your Mac, and when.</h1>
+        <p class="lede">
+          Zerm listens to your microphone and can type into any application. Two
+          capabilities worth being specific about. This page says exactly what
+          happens to your audio, your text, and your permissions — and none of it
+          requires taking our word for it, because the source is public.
+        </p>
+      </section>
+
+      <section class="doc">
+        <div class="prose">
+          <h2>The short version</h2>
+          <p>
+            On the default configuration, nothing leaves your Mac. Speech-to-text,
+            text-to-speech, and the enhancement model all run locally. There is no
+            account, no telemetry service, and no server belonging to us in the
+            path. Cloud providers exist as an option, and they stay dormant until
+            you add a key and select one.
+          </p>
+
+          <h2>Audio</h2>
+          <ul>
+            <li>
+              Recording happens through the standard macOS microphone APIs, which
+              means the orange recording indicator in the menu bar applies to Zerm
+              exactly as it does to any other app.
+            </li>
+            <li>
+              On the local transcription path — Whisper, FluidAudio, or Apple
+              Speech — the audio is processed on the machine and is never
+              transmitted.
+            </li>
+            <li>
+              If you select a cloud transcription provider, the audio for that
+              request is sent to that provider under your own API key, subject to
+              their terms. This only happens for providers you configure yourself.
+            </li>
+            <li>
+              Recordings are kept locally alongside their transcripts in History,
+              and can be deleted individually or wholesale.
+            </li>
+          </ul>
+
+          <h2>Text</h2>
+          <ul>
+            <li>
+              Transcripts are stored locally in History so you can search, copy, or
+              retry them. Deleting an entry deletes it.
+            </li>
+            <li>
+              AI enhancement runs on the on-device model by default. Choosing a
+              cloud provider sends the transcript to that provider instead.
+            </li>
+            <li>
+              Storage of AI request payloads is a separate setting from making the
+              requests at all. Turning on enhancement does not silently start
+              logging what you dictated.
+            </li>
+            <li>
+              Read Aloud reads the current selection. Smart Reading cleans that text
+              before it is spoken — on-device unless you have picked a cloud voice.
+            </li>
+          </ul>
+
+          <h2>Permissions, and what each one buys</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Permission</th>
+                <th>Needed for</th>
+                <th>If you decline</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Microphone</td>
+                <td>Recording anything at all</td>
+                <td>Dictation cannot work</td>
+              </tr>
+              <tr>
+                <td>Accessibility</td>
+                <td>Pasting at your cursor, reading the current selection</td>
+                <td>Zerm falls back to the clipboard</td>
+              </tr>
+              <tr>
+                <td>Screen Recording</td>
+                <td>Power Mode reading the active window or browser URL</td>
+                <td>Power Mode context features stay off; everything else works</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            Each is requested in context, at the point the feature needs it, rather
+            than in a wall of prompts at first launch. Setup failures are surfaced
+            instead of being swallowed.
+          </p>
+
+          <h2>Power Mode context</h2>
+          <p>
+            Power Mode adapts the prompt to where you are writing, which means it
+            reads the frontmost application and, for browsers, the current URL.
+            That context is used to select a prompt for workflows you have
+            configured. It is not accumulated into a history or a profile.
+          </p>
+
+          <h2>Network</h2>
+          <p>
+            Zerm reaches the network for three things: downloading the models on
+            first use, checking for application updates, and any cloud provider you
+            have explicitly configured. With models already downloaded and no cloud
+            provider selected, the dictation and read-aloud loop works with the
+            network off entirely.
+          </p>
+
+          <h2>Verifying any of this</h2>
+          <p>
+            Zerm is GPLv3. The source for every claim on this page is public, and
+            the parts that matter most — the recorder, the transcription pipeline,
+            the paste path, and the provider clients — are readable without
+            building anything.
+          </p>
+          <p>
+            <a href="https://github.com/arcusis/Zerm" rel="noopener noreferrer" target="_blank">Read the source</a>
+            · <a href="./license.html">License</a>
+            · <a href="./notice.html">Attribution</a>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="./icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="./#download">Download</a>
+          <a href="./changelog.html">Changelog</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./building.html">Build from source</a>
+          <a href="./notice.html">Attribution</a>
+          <a href="./license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="./site.js" defer></script>
+  </body>
+</html>
