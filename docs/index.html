@@ -3,15 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Zerm - on-device voice for macOS (dictation + read aloud)</title>
+    <title>Zerm — on-device voice for macOS (dictation + read aloud)</title>
     <meta
       name="description"
-      content="Zerm is a GPLv3 macOS app for dictation and read-aloud, powered by three on-device AI models (speech-to-text, text-to-speech, and a small LLM). Based on VoiceInk."
+      content="Zerm dictates clean text at your cursor and reads any selection back aloud. Three on-device models — Whisper, Kokoro, Gemma — so it is fast, private, and works offline. GPLv3, based on VoiceInk."
     />
-    <meta property="og:title" content="Zerm - on-device voice for macOS" />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Zerm — on-device voice for macOS" />
     <meta
       property="og:description"
-      content="Dictate and paste, or read any text aloud — on three on-device AI models, fast and private. GPLv3, based on VoiceInk by Beingpax."
+      content="Dictate anywhere. Read anything aloud. Three on-device models, nothing leaves your Mac unless you ask. GPLv3, based on VoiceInk by Beingpax."
     />
     <meta property="og:image" content="./icon.png" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -20,227 +21,431 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <div class="announce">
+      <span class="announce-dot" aria-hidden="true"></span>
+      <span
+        >Zerm <span id="release-tag">latest</span> — dictation and read aloud,
+        running on-device.</span
+      >
+      <a href="https://github.com/arcusis/Zerm/releases">Release notes</a>
+    </div>
+
     <header class="topbar">
-      <a class="brand" href="./" aria-label="Zerm home">
-        <img src="./icon.png" alt="" class="brand-logo" />
-        <span>Zerm</span>
-      </a>
-      <nav class="topbar-nav" aria-label="Primary navigation">
-        <a href="#download">Download</a>
-        <a href="#native">Native layer</a>
-        <a href="#origin">Origin</a>
-        <a href="#privacy">Privacy</a>
-        <a href="https://github.com/arcusis/Zerm" rel="noreferrer">GitHub</a>
-      </nav>
+      <div class="topbar-inner">
+        <a class="brand" href="./" aria-label="Zerm home">
+          <img src="./icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="#models">Models</a>
+          <a href="#dictation">Dictation</a>
+          <a href="#read-aloud">Read aloud</a>
+          <a href="#privacy">Privacy</a>
+          <a href="#origin">Origin</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="#download">Download</a>
+        </div>
+      </div>
     </header>
 
-    <main>
+    <main id="main">
       <section class="hero">
-        <div class="hero-copy">
-          <img src="./icon.png" alt="Zerm app logo" class="hero-logo" />
-          <p class="kicker">GPLv3 · on-device voice for macOS</p>
-          <h1>Zerm turns speech into clean text — and reads it back.</h1>
-          <p class="hero-lede">
-            Tap a hotkey to dictate and paste, or select any text and have Zerm
-            read it aloud. It runs on three on-device AI models — speech-to-text,
-            text-to-speech, and a small agentic LLM — so the core experience is
-            fast, private, and works offline. Based on VoiceInk by Beingpax,
-            adapted for Arcusis under GPLv3.
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Three on-device models · macOS</p>
+          <h1>Dictate anywhere.<br />Read anything aloud.</h1>
+          <p class="lede">
+            Press a shortcut and Zerm drops clean text at your cursor. Select any
+            text and it reads back in a natural voice. Whisper, Kokoro, and Gemma
+            run locally — fast, private, offline. Cloud providers stay optional,
+            and off by default.
           </p>
+
           <div class="hero-actions">
-            <a id="primary-download" class="button primary" href="#download">
+            <a id="primary-download" class="btn btn-light btn-lg" href="#download">
               <span class="btn-label">Download for macOS</span>
-              <span class="btn-sub" id="primary-download-sub">loading…</span>
+              <span class="btn-sub" id="primary-download-sub">checking latest…</span>
             </a>
-            <a class="button secondary" href="https://github.com/arcusis/Zerm">View source</a>
-            <a class="button secondary" href="https://github.com/Beingpax/VoiceInk">VoiceInk upstream</a>
+            <a class="btn btn-dark btn-lg" href="https://github.com/arcusis/Zerm">
+              <span class="btn-label">View source</span>
+              <span class="btn-sub">GPLv3 · Swift</span>
+            </a>
           </div>
-          <div class="release-line" aria-live="polite">
-            <span id="release-tag">latest release</span>
-            <span>GPLv3 licensed</span>
-            <span>VoiceInk credited</span>
-          </div>
+
+          <ul class="hero-meta" aria-label="Requirements">
+            <li>macOS 14.4+</li>
+            <li>Apple Silicon</li>
+            <li>No account</li>
+            <li>GPLv3</li>
+          </ul>
         </div>
 
-        <div class="workflow-panel" aria-label="Zerm recording workflow">
-          <div class="pill-preview">
-            <span class="record-dot"></span>
-            <span class="wave" style="--h: 10px"></span>
-            <span class="wave" style="--h: 18px"></span>
-            <span class="wave" style="--h: 26px"></span>
-            <span class="wave" style="--h: 16px"></span>
-            <span class="wave" style="--h: 22px"></span>
-            <span class="wave" style="--h: 12px"></span>
-          </div>
-          <div class="workflow-steps">
-            <div>
-              <span>01</span>
-              <strong>Record</strong>
-              <p>Use a global macOS shortcut or push-to-talk style recording.</p>
+        <div class="hero-stage reveal" aria-hidden="true">
+          <div class="window">
+            <div class="window-bar">
+              <span class="dot dot-r"></span>
+              <span class="dot dot-y"></span>
+              <span class="dot dot-g"></span>
+              <span class="window-title">Zerm</span>
             </div>
-            <div>
-              <span>02</span>
-              <strong>Transcribe</strong>
-              <p>Use local and explicitly configured transcription engines.</p>
-            </div>
-            <div>
-              <span>03</span>
-              <strong>Paste</strong>
-              <p>The result lands in your clipboard, with optional native auto-paste on macOS.</p>
+
+            <div class="window-body">
+              <div class="pill">
+                <span class="rec"></span>
+                <span class="wave">
+                  <i style="--h: 8px"></i><i style="--h: 17px"></i><i style="--h: 26px"></i
+                  ><i style="--h: 14px"></i><i style="--h: 22px"></i><i style="--h: 30px"></i
+                  ><i style="--h: 12px"></i><i style="--h: 20px"></i><i style="--h: 9px"></i>
+                </span>
+                <span class="pill-time">00:04</span>
+              </div>
+
+              <div class="cue">
+                <kbd>Right ⌘</kbd>
+                <span>hold to talk · release to paste</span>
+              </div>
+
+              <div class="transcript">
+                <p>
+                  Ship the release notes before standup and mention the new
+                  read-aloud shortcut.<span class="caret"></span>
+                </p>
+              </div>
+
+              <div class="window-foot">
+                <span><b>whisper</b> large-v3-turbo</span>
+                <span class="sep"></span>
+                <span>on-device</span>
+                <span class="sep"></span>
+                <span>1.2s</span>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="strip" aria-label="Highlights">
-        <div>
-          <strong>Local first</strong>
-          <span>Local transcription paths keep audio on the machine.</span>
-        </div>
-        <div>
-          <strong>VoiceInk lineage</strong>
-          <span>Built from the GPLv3 VoiceInk foundation with public credit.</span>
-        </div>
-        <div>
-          <strong>Auditable</strong>
-          <span>Swift, SwiftUI, transparent source, and GPLv3 license terms.</span>
-        </div>
+      <section class="logostrip" aria-label="Runtimes">
+        <p>Local runtimes bundled and managed for you</p>
+        <ul>
+          <li>whisper.cpp</li>
+          <li>sherpa-onnx</li>
+          <li>llama.cpp</li>
+          <li>FluidAudio</li>
+          <li>Apple Speech</li>
+        </ul>
       </section>
 
-      <section id="native" class="section native-layer">
-        <div class="section-head">
-          <p class="kicker">Native writing layer</p>
-          <h2>Built around the OS behaviors that make dictation reliable.</h2>
-          <p>
-            Zerm focuses on the macOS behaviors that matter for fast dictation:
-            permissions, active app context, insertion state, model selection,
-            recording feedback, and reliable paste behavior.
+      <section id="models" class="section">
+        <div class="section-head reveal">
+          <p class="eyebrow">The engine room</p>
+          <h2>Three models. All on your Mac.</h2>
+          <p class="sub">
+            Zerm downloads and manages each one for you. No API key, no signup, no
+            round trip — the whole loop from microphone to pasted text to spoken
+            playback can run with the network off.
           </p>
         </div>
 
-        <div class="native-grid">
-          <div>
-            <span>01</span>
-            <strong>macOS auto-paste</strong>
-            <p>Uses native macOS permissions and insertion paths to paste the transcript at your cursor.</p>
-          </div>
-          <div>
-            <span>02</span>
-            <strong>Power Mode context</strong>
-            <p>Detects active apps and browser URLs so prompts can adapt to the place you are writing.</p>
-          </div>
-          <div>
-            <span>03</span>
-            <strong>Visible permissions</strong>
-            <p>Surfaces microphone, Accessibility, and screen-context requirements instead of hiding setup failures.</p>
-          </div>
+        <div class="model-grid">
+          <article class="card model-card reveal">
+            <span class="card-idx">01</span>
+            <h3>Whisper</h3>
+            <p class="card-role">Speech&nbsp;→&nbsp;Text</p>
+            <p>
+              Dictation and audio-file transcription. Runs on
+              <code>whisper.cpp</code> with Metal acceleration, so a paragraph
+              lands in about a second.
+            </p>
+            <span class="tag">whisper.cpp</span>
+          </article>
+
+          <article class="card model-card reveal">
+            <span class="card-idx">02</span>
+            <h3>Kokoro</h3>
+            <p class="card-role">Text&nbsp;→&nbsp;Speech</p>
+            <p>
+              The Read Aloud voice. Runs on <code>sherpa-onnx</code> and sounds
+              natural enough to listen to a long document without fatigue.
+            </p>
+            <span class="tag">sherpa-onnx</span>
+          </article>
+
+          <article class="card model-card reveal">
+            <span class="card-idx">03</span>
+            <h3>Gemma</h3>
+            <p class="card-role">The agentic layer</p>
+            <p>
+              Cleans up dictated text and rewrites messy source into something
+              worth hearing. Runs on <code>llama.cpp</code>.
+            </p>
+            <span class="tag">llama.cpp</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="dictation" class="section split">
+        <div class="split-copy reveal">
+          <p class="eyebrow">Dictation</p>
+          <h2>Talk. It types.</h2>
+          <p class="sub">
+            A global shortcut works in every app — editor, terminal, browser,
+            Slack. Zerm handles the parts that usually break: permissions, the
+            active insertion point, and pasting without stealing focus.
+          </p>
+
+          <ol class="steps">
+            <li>
+              <b>Hold the shortcut</b>
+              <span>Push-to-talk, or tap to toggle with auto-stop on silence.</span>
+            </li>
+            <li>
+              <b>Speak normally</b>
+              <span>Whisper transcribes locally while you are still talking.</span>
+            </li>
+            <li>
+              <b>Release</b>
+              <span>Clean text is pasted at your cursor, or copied if you prefer.</span>
+            </li>
+          </ol>
+
+          <a class="text-link" href="https://github.com/arcusis/Zerm/blob/Production/docs/native-writing-layer-verification.md"
+            >Native writing layer verification</a
+          >
         </div>
 
-        <a class="text-link" href="https://github.com/arcusis/Zerm/blob/Production/docs/native-writing-layer-verification.md">Read native verification checklist</a>
+        <div class="split-visual reveal" aria-hidden="true">
+          <div class="panel">
+            <div class="panel-row">
+              <span class="panel-key"><kbd>Right ⌘</kbd></span>
+              <span class="panel-label">Dictate &amp; paste — the default</span>
+            </div>
+            <div class="panel-row">
+              <span class="panel-key"><kbd>⌥</kbd><kbd>⌃</kbd><kbd>Fn</kbd></span>
+              <span class="panel-label">Or any other modifier, left or right</span>
+            </div>
+            <div class="panel-row">
+              <span class="panel-key"><kbd>Assign</kbd></span>
+              <span class="panel-label">Read selection aloud — pick your own key</span>
+            </div>
+            <div class="panel-row muted">
+              <span class="panel-key"><kbd>Esc</kbd></span>
+              <span class="panel-label">Cancel — nothing is written</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="read-aloud" class="section split reverse">
+        <div class="split-copy reveal">
+          <p class="eyebrow">Read aloud</p>
+          <h2>Select text. Hear it.</h2>
+          <p class="sub">
+            Zerm reads whatever you have highlighted, anywhere in macOS. Before it
+            speaks, Smart Reading cleans the text so the voice does not read your
+            markup out loud.
+          </p>
+
+          <ul class="checks">
+            <li>Acronyms and units expanded the way a person would say them</li>
+            <li>URLs, code blocks, and tables summarised rather than spelled out</li>
+            <li>Emoji and markdown syntax dropped</li>
+            <li>Optional rewrite pass by the on-device LLM</li>
+          </ul>
+        </div>
+
+        <div class="split-visual reveal" aria-hidden="true">
+          <div class="panel read-panel">
+            <p class="read-source">
+              See <mark>§4.2</mark> — the <code>POST /v1/ingest</code> endpoint
+              returns <mark>202</mark> ✅
+            </p>
+            <div class="read-arrow">Smart Reading</div>
+            <p class="read-out">
+              “See section four point two — the ingest endpoint returns a two
+              oh two accepted.”
+            </p>
+            <div class="speaker">
+              <span class="speaker-icon"></span>
+              <span class="speaker-bars"><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="speaker-name">Kokoro · on-device</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head reveal">
+          <p class="eyebrow">Everything else</p>
+          <h2>The rest of the workflow.</h2>
+        </div>
+
+        <div class="feature-grid">
+          <div class="card reveal">
+            <h3>Power Mode</h3>
+            <p>
+              Detects the active app and browser URL, then swaps the prompt to
+              match where you are writing.
+            </p>
+          </div>
+          <div class="card reveal">
+            <h3>Personal dictionary</h3>
+            <p>
+              Teach it the names, products, and jargon that transcription models
+              reliably get wrong.
+            </p>
+          </div>
+          <div class="card reveal">
+            <h3>History</h3>
+            <p>
+              Every transcript kept locally, searchable, and deletable — including
+              the audio, if you keep it.
+            </p>
+          </div>
+          <div class="card reveal">
+            <h3>Audio files</h3>
+            <p>
+              Drop in a recording or a voice memo and get a transcript with the
+              same local pipeline.
+            </p>
+          </div>
+          <div class="card reveal">
+            <h3>Local or cloud</h3>
+            <p>
+              Whisper, FluidAudio, or Apple for speech; Gemma or Ollama for the
+              LLM; plus any cloud provider you configure yourself.
+            </p>
+          </div>
+          <div class="card reveal">
+            <h3>Honest permissions</h3>
+            <p>
+              Microphone, Accessibility, and screen context are each requested in
+              context — and setup failures are surfaced, not swallowed.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="privacy" class="section split">
+        <div class="split-copy reveal">
+          <p class="eyebrow">Privacy model</p>
+          <h2>The boundaries, stated plainly.</h2>
+          <p class="sub">
+            Zerm is a voice app with microphone and Accessibility access. That
+            deserves specifics rather than a slogan.
+          </p>
+        </div>
+        <div class="split-visual reveal">
+          <ul class="boundaries">
+            <li><b>Local by default.</b> Audio stays on the machine on the local transcription path.</li>
+            <li><b>Cloud is opt-in.</b> No provider is contacted until you add a key and select it.</li>
+            <li><b>Request storage is separate.</b> Logging AI payloads is its own setting, off from runtime calls.</li>
+            <li><b>Power Mode context is scoped.</b> Active app and URL are read only for workflows you configure.</li>
+            <li><b>Auto-paste needs Accessibility.</b> Decline it and Zerm falls back to the clipboard.</li>
+            <li><b>Auditable.</b> All of the above is in the source, under GPLv3.</li>
+          </ul>
+        </div>
       </section>
 
       <section id="download" class="section">
-        <div class="section-head">
-          <p class="kicker">Downloads</p>
-          <h2>Install the macOS app or compile from source.</h2>
-          <p>
-            Download links are populated directly from the latest release.
-            Current version: <span id="release-tag-2">loading…</span>.
+        <div class="section-head reveal">
+          <p class="eyebrow">Download</p>
+          <h2>Install it, or build it yourself.</h2>
+          <p class="sub">
+            Links resolve straight to the assets of the latest published release —
+            currently <span id="release-tag-2">loading…</span>.
           </p>
         </div>
 
         <div class="download-grid">
-          <a class="download-card featured" data-platform="mac-arm" href="#download">
-            <span>macOS Apple Silicon</span>
+          <a class="card download-card featured reveal" data-platform="mac-arm" href="#download">
+            <span class="dl-kind">macOS · Apple Silicon</span>
             <strong>.dmg</strong>
             <small>M1 and newer</small>
           </a>
-          <a class="download-card" data-platform="mac-x86" href="#download">
-            <span>macOS Intel</span>
-            <strong>.dmg</strong>
-            <small>x86_64</small>
+          <a class="card download-card reveal" data-platform="mac-zip" href="#download">
+            <span class="dl-kind">macOS · archive</span>
+            <strong>.zip</strong>
+            <small>Unzip into /Applications</small>
           </a>
-          <a class="download-card source-card" href="https://github.com/arcusis/Zerm/blob/Production/BUILDING.md">
-            <span>Source</span>
+          <a class="card download-card reveal" href="https://github.com/arcusis/Zerm/blob/Production/BUILDING.md">
+            <span class="dl-kind">Source</span>
             <strong>xcodebuild</strong>
-            <small>Build the Swift macOS app locally</small>
+            <small>Xcode 16 · Swift &amp; SwiftUI</small>
           </a>
         </div>
       </section>
 
-      <section id="origin" class="section attribution">
-        <div class="section-head">
-          <p class="kicker">Origin and license</p>
-          <h2>Based on VoiceInk, credited in public, and licensed under GPLv3.</h2>
-          <p>
-            Zerm is a modified derivative of VoiceInk by Beingpax. VoiceInk
-            provided the foundation for the native macOS dictation workflow,
-            transcription pipeline, Power Mode, model handling, and supporting
-            services. Zerm keeps the GPLv3 license and links back to upstream.
+      <section id="origin" class="section">
+        <div class="section-head reveal">
+          <p class="eyebrow">Origin &amp; license</p>
+          <h2>Built on VoiceInk. Credited in public.</h2>
+          <p class="sub">
+            Zerm is a modified GPLv3 derivative of VoiceInk by Beingpax, which
+            provided the foundation for the macOS app architecture, dictation
+            workflow, transcription pipeline, Power Mode, and model management.
+            The license stays, the attribution stays, and upstream is linked from
+            everywhere it should be.
           </p>
         </div>
-        <div class="attribution-grid">
-          <a href="https://github.com/Beingpax/VoiceInk">
-            <span>Upstream project</span>
+
+        <div class="origin-grid">
+          <a class="card origin-card reveal" href="https://github.com/Beingpax/VoiceInk">
+            <span class="dl-kind">Upstream</span>
             <strong>Beingpax/VoiceInk</strong>
-            <small>Original GPLv3 foundation</small>
+            <small>The original GPLv3 project</small>
           </a>
-          <a href="https://github.com/arcusis/Zerm/blob/Production/NOTICE">
-            <span>Attribution notice</span>
+          <a class="card origin-card reveal" href="https://github.com/arcusis/Zerm/blob/Production/NOTICE">
+            <span class="dl-kind">Attribution</span>
             <strong>NOTICE</strong>
             <small>Migration and modification notes</small>
           </a>
-          <a href="https://github.com/arcusis/Zerm/blob/Production/LICENSE">
-            <span>License</span>
+          <a class="card origin-card reveal" href="https://github.com/arcusis/Zerm/blob/Production/LICENSE">
+            <span class="dl-kind">License</span>
             <strong>GNU GPLv3</strong>
             <small>Source license for Zerm</small>
           </a>
         </div>
       </section>
 
-      <section id="privacy" class="section split">
-        <div class="section-head left">
-          <p class="kicker">Privacy model</p>
-          <h2>Clear boundaries for local and configured services.</h2>
+      <section class="closer reveal">
+        <h2>Read the code. File issues. Send patches.</h2>
+        <p>
+          The repository carries the architecture notes, build instructions, and
+          contributor guidance.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-light btn-lg" href="https://github.com/arcusis/Zerm">
+            <span class="btn-label">Open repository</span>
+            <span class="btn-sub">github.com/arcusis/Zerm</span>
+          </a>
+          <a class="btn btn-dark btn-lg" href="https://github.com/arcusis/Zerm/issues">
+            <span class="btn-label">Issues</span>
+            <span class="btn-sub">Bugs &amp; requests</span>
+          </a>
         </div>
-        <div class="privacy-list">
-          <p>
-            Zerm records through macOS microphone APIs, supports local
-            transcription paths, and only uses cloud or AI providers that the
-            user configures. Context-aware features may require additional
-            macOS permissions so the app can understand where text is going.
-          </p>
-          <ul>
-            <li>Local transcription paths keep audio on the device.</li>
-            <li>Cloud transcription providers require explicit setup.</li>
-            <li>AI request payload storage is controlled separately from runtime requests.</li>
-            <li>Power Mode uses active app and browser context only for configured workflows.</li>
-            <li>macOS auto-paste requires Accessibility permission.</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="section repo">
-        <div>
-          <p class="kicker">Open source</p>
-          <h2>Read the code, file issues, send patches.</h2>
-          <p>
-            The README includes VoiceInk attribution, GPLv3 licensing,
-            architecture notes, build instructions, and contributor guidance.
-          </p>
-        </div>
-        <a class="button primary" href="https://github.com/arcusis/Zerm">Open repository</a>
       </section>
     </main>
 
     <footer class="site-foot">
-      <span>© <span id="year"></span> Arcusis. GPLv3. Based on VoiceInk by Beingpax.</span>
-      <span class="foot-links">
-        <a href="https://github.com/arcusis/Zerm">Repository</a>
-        <a href="https://github.com/Beingpax/VoiceInk">VoiceInk</a>
-        <a href="#download">Download</a>
-        <a href="https://github.com/arcusis/Zerm/issues">Issues</a>
-      </span>
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="./icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="#download">Download</a>
+          <a href="https://github.com/arcusis/Zerm">Repository</a>
+          <a href="https://github.com/arcusis/Zerm/issues">Issues</a>
+          <a href="https://github.com/arcusis/Zerm/wiki">Wiki</a>
+          <a href="https://github.com/Beingpax/VoiceInk">VoiceInk</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
     </footer>
 
     <script src="./site.js" defer></script>
