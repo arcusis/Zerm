@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Native writing layer verification — Zerm</title>
+    <meta name="description" content="How the macOS insertion, permission, and paste behaviours are verified." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Native writing layer verification — Zerm" />
+    <meta property="og:description" content="How the macOS insertion, permission, and paste behaviours are verified." />
+    <meta property="og:image" content="./icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="./icon.png" />
+    <link rel="apple-touch-icon" href="./icon.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="./" aria-label="Zerm home">
+          <img src="./icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="./#models">Models</a>
+          <a href="./#dictation">Dictation</a>
+          <a href="./#read-aloud">Read aloud</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="./#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Engineering</p>
+        <h1>Native writing layer verification</h1>
+        <p class="lede">How the macOS insertion, permission, and paste behaviours are verified.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<h1 dir="auto">Native Writing-Layer Verification</h1>
+<p dir="auto">This checklist covers the native OS behaviors that make Zerm feel like a writing<br>
+layer instead of only a transcription app. It is meant for release candidates,<br>
+local app replacements, and regressions involving the floating pill,<br>
+Accessibility, or auto-paste.</p>
+<p dir="auto">Run the read-only diagnostics script first:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">scripts/verify-native-writing-layer.sh</pre></div>
+<p dir="auto">For release artifacts, make signing problems fail the run:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">scripts/verify-native-writing-layer.sh --app /Applications/Zerm.app --strict-release</pre></div>
+<p dir="auto">The script is non-destructive by default. The auto-paste self-test can insert<br>
+text into the focused application and is only enabled when both an explicit flag<br>
+and an acknowledgement environment variable are present:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">ZERM_VERIFY_ALLOW_INPUT=1 scripts/verify-native-writing-layer.sh --run-autopaste-self-test</pre></div>
+<h2 dir="auto">macOS Signing And Accessibility</h2>
+<p dir="auto">Accessibility trust must be evaluated against the currently running binary, not<br>
+only the visible row in System Settings. A replaced or ad-hoc signed local build<br>
+can leave System Settings showing <code class="notranslate">Zerm.app</code> enabled while<br>
+<code class="notranslate">AXIsProcessTrusted()</code> returns false for the new process.</p>
+<p dir="auto">Release builds must satisfy all of these checks:</p>
+<ul dir="auto">
+<li>Bundle path is the expected installed bundle, usually <code class="notranslate">/Applications/Zerm.app</code>.</li>
+<li><code class="notranslate">CFBundleIdentifier</code> is <code class="notranslate">com.arcusis.zerm</code>.</li>
+<li><code class="notranslate">codesign --verify --deep --strict</code> succeeds.</li>
+<li><code class="notranslate">codesign -dv --verbose=4</code> reports <code class="notranslate">Identifier=com.arcusis.zerm</code>.</li>
+<li><code class="notranslate">TeamIdentifier</code> is present.</li>
+<li><code class="notranslate">Authority=Developer ID Application: ...</code> is present for public macOS builds.</li>
+<li><code class="notranslate">spctl -a -vv --type exec</code> accepts the app.</li>
+<li>The dashboard permission diagnostics report Accessibility as trusted after the<br>
+app is opened from the installed bundle.</li>
+</ul>
+<p dir="auto">If a local build is ad-hoc signed, expect TCC instability. Remove and re-add the<br>
+exact installed <code class="notranslate">Zerm.app</code> in System Settings -&gt; Privacy &amp; Security -&gt;<br>
+Accessibility after the build is installed. Do not use this local result to<br>
+judge release-signing behavior.</p>
+<p dir="auto">Automation is separate from Accessibility. It is only required for the System<br>
+Events fallback path. Direct Accessibility insertion and CoreGraphics event<br>
+posting can work without Automation, so diagnostics should report them<br>
+separately.</p>
+<h2 dir="auto">Auto-Paste Self-Test</h2>
+<p dir="auto">Use a disposable target such as a scratch TextEdit document.</p>
+<ol dir="auto">
+<li>
+<p dir="auto">Install the exact app bundle being tested.</p>
+</li>
+<li>
+<p dir="auto">Open the app once from the installed bundle.</p>
+</li>
+<li>
+<p dir="auto">Confirm Zerm is enabled in Accessibility for that exact bundle.</p>
+</li>
+<li>
+<p dir="auto">Focus a scratch text field.</p>
+</li>
+<li>
+<p dir="auto">Run:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">ZERM_VERIFY_ALLOW_INPUT=1 scripts/verify-native-writing-layer.sh --run-autopaste-self-test</pre></div>
+</li>
+<li>
+<p dir="auto">Confirm the generated <code class="notranslate">ZERM_AUTOPASTE_SELF_TEST_*</code> token appears exactly<br>
+once in the target field.</p>
+</li>
+<li>
+<p dir="auto">If the command succeeds but text does not appear, capture:</p>
+<ul dir="auto">
+<li>target app name and bundle id,</li>
+<li>whether the target is native, browser, Electron, terminal, or secure field,</li>
+<li>dashboard insertion diagnostics,</li>
+<li>Accessibility and Automation status,</li>
+<li>whether Zerm was signed, ad-hoc signed, or rejected by Gatekeeper.</li>
+</ul>
+</li>
+</ol>
+<p dir="auto">The self-test only proves that Zerm can post its current paste path. It does not<br>
+replace target-specific testing in real apps.</p>
+<h2 dir="auto">Full-Screen Pill Manual Test</h2>
+<p dir="auto">The pill must be treated as native overlay behavior. Test across full-screen<br>
+Spaces and multiple displays.</p>
+<ol dir="auto">
+<li>Open TextEdit, Arc or Chrome, Slack or Discord, and a terminal/editor.</li>
+<li>Put one target app into macOS full-screen mode.</li>
+<li>Move the pointer to that full-screen display.</li>
+<li>Press the Zerm hotkey.</li>
+<li>Expected result: the floating pill appears immediately above the full-screen<br>
+app on the active display.</li>
+<li>Speak for two or three seconds.</li>
+<li>Expected result: the pill stays visible while recording, shows processing,<br>
+then shows copied, pasted, or failure state.</li>
+<li>Switch Spaces and repeat.</li>
+<li>Move to a second display and repeat.</li>
+</ol>
+<p dir="auto">Capture failures with these fields:</p>
+<ul dir="auto">
+<li>target app and bundle id,</li>
+<li>number of displays,</li>
+<li>whether the target is full-screen, tiled, or normal windowed,</li>
+<li>whether the pill did not show, showed behind the app, or appeared on another<br>
+display,</li>
+<li>whether the hotkey still started recording,</li>
+<li>screenshot or screen recording if available.</li>
+</ul>
+<h2 dir="auto">Cross-Platform Paste Support Matrix</h2>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Platform</th>
+<th>Current expectation</th>
+<th>Required permissions and caveats</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td>Auto-paste is supported and under active hardening.</td>
+<td>Accessibility is required. Automation is only required for the System Events fallback. Release builds must be Developer ID signed for stable TCC trust.</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>Clipboard copy is supported; native auto-paste should stay gated until the helper path is implemented.</td>
+<td>Requires SendInput integration, modifier masking, clipboard sequence tracking, timeouts, helper crash handling, and diagnostics before production auto-paste is claimed.</td>
+</tr>
+<tr>
+<td>Linux X11</td>
+<td>Clipboard copy is supported; native auto-paste should stay gated until the X11 strategy is implemented.</td>
+<td>Requires X11 clipboard plus key synthesis support and dependency checks such as <code class="notranslate">libxdo</code>.</td>
+</tr>
+<tr>
+<td>Linux Wayland</td>
+<td>Copy-only or explicit unsupported state.</td>
+<td>Wayland paste support is compositor and portal dependent. Do not present it as a generic Linux capability.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h2 dir="auto">Release-Candidate Checklist</h2>
+<ul dir="auto">
+<li>Run the normal CI verification commands from the README.</li>
+<li>Run <code class="notranslate">scripts/verify-native-writing-layer.sh --strict-release</code> against the<br>
+installed macOS artifact.</li>
+<li>Confirm the dashboard permission diagnostics agree with macOS Accessibility<br>
+after toggling the permission.</li>
+<li>Run the interactive auto-paste self-test in a scratch field.</li>
+<li>Run the target matrix for TextEdit, browser, Electron, terminal/editor, and<br>
+secure field refusal.</li>
+<li>Run the full-screen pill test on at least one full-screen app and one<br>
+multi-display setup.</li>
+<li>Record unsupported or copy-only behavior clearly for Windows, Linux X11, and<br>
+Linux Wayland until those native helpers are production-ready.</li>
+</ul>
+      </div></section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="./icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="./#download">Download</a>
+          <a href="./changelog.html">Changelog</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./building.html">Build from source</a>
+          <a href="./notice.html">Attribution</a>
+          <a href="./license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="./site.js" defer></script>
+  </body>
+</html>

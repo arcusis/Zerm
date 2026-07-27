@@ -178,3 +178,6 @@ help:
 	@echo "  all                Run full build process (default)"
 	@echo "  clean              Remove build artifacts"
 	@echo "  help               Show this help message"
+# Regenerate the derived site pages (changelog, notice, license, building)
+site:
+	node scripts/build-site.mjs

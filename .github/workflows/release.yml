@@ -25,6 +25,10 @@ on:
         required: true
         type: string
 
+  # Keep the published changelog in step with GitHub Releases
+  release:
+    types: [published, edited, released, deleted]
+
 permissions:
   contents: write
 
@@ -60,3 +64,32 @@ jobs:
             echo "Upload a DMG with:"
             echo "  gh release upload $TAG path/to/Zerm_VERSION_aarch64.dmg"
           fi
+
+  publish-changelog:
+    name: Regenerate site changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: Production
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Regenerate derived pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/build-site.mjs
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- docs/; then
+            echo "No changelog changes."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git commit -m "Regenerate site changelog from releases"
+          git push origin HEAD:Production
