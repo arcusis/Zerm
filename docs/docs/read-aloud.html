@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Read aloud — Zerm</title>
+    <meta name="description" content="Select any text on your Mac and hear it back — with the markup, code and symbols cleaned up first." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Read aloud — Zerm" />
+    <meta property="og:description" content="Select any text on your Mac and hear it back — with the markup, code and symbols cleaned up first." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Speech</p>
+        <h1>Read aloud</h1>
+        <p class="lede">Select any text on your Mac and hear it back — with the markup, code and symbols cleaned up first.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Read Aloud is the other half of the app. Highlight text anywhere in macOS, press your<br>
+Read Aloud key, and Zerm speaks it. Press again to stop.</p>
+<p><img src="img/read-aloud.png" alt="Read Aloud settings" style="max-width: 100%;"></p>
+<h2>The trigger</h2>
+<p>Read Aloud gets its own hotkey, configured the same way as the dictation one: a modifier<br>
+key on its own, or a custom combination you record. It is unset until you choose one.</p>
+<p>Reading whatever is selected needs Accessibility permission — the same permission<br>
+dictation uses to paste. See <a href="permissions.html">permissions</a>.</p>
+<h2>Smart Reading</h2>
+<p>Raw text is usually not speakable text. Documentation is full of markup, code spans,<br>
+URLs, and symbols that a voice will happily read out character by character.</p>
+<p>Smart Reading is on by default and cleans the text before it reaches the voice, offline<br>
+and instantly:</p>
+<ul>
+<li>Acronyms and units are expanded the way a person would say them.</li>
+<li>URLs, code blocks, and tables are summarised rather than spelled out.</li>
+<li>Markdown syntax and emoji are dropped.</li>
+<li>Section markers, symbols, and status codes are turned into words.</li>
+</ul>
+<p>So <code class="notranslate">See §4.2 — the POST /v1/ingest endpoint returns 202 ✅</code> is read as "See section four<br>
+point two — the ingest endpoint returns a two oh two accepted."</p>
+<h2>Natural Reading</h2>
+<p>A second, optional pass that sends the cleaned text through the on-device language model<br>
+to rewrite it into something that sounds like prose rather than a document being read<br>
+out. It is off by default because it needs the local model downloaded, and it adds a<br>
+moment before playback starts.</p>
+<p>Worth turning on for reference material and specifications. Unnecessary for anything<br>
+already written to be read.</p>
+<h2>Voices</h2>
+<p><strong>Kokoro</strong> is the bundled local voice, running on <code class="notranslate">sherpa-onnx</code>. It downloads once and<br>
+then works offline, and it is good enough to listen to a long document without fatigue.<br>
+Nine voices are available.</p>
+<p><strong>Cloud voices</strong> — Deepgram, ElevenLabs, OpenAI, Gemini, Inworld, and Cartesia — are<br>
+available if you add a key. They send the text you are reading to that provider. Kokoro<br>
+sends nothing anywhere.</p>
+<p>Each provider keeps its own voice selection, so switching provider and switching back<br>
+does not lose your choice.</p>
+<h2>Playback</h2>
+<p><strong>Speed</strong> runs from 0.5× to 2×, defaulting to 1×. It applies to every provider.</p>
+<p>Reading is interruptible: pressing the key again stops playback immediately. Starting a<br>
+dictation while Zerm is speaking is blocked rather than overlapped — one voice at a<br>
+time.</p>
+<p><strong>Restore clipboard</strong> puts back whatever was on your clipboard when Read Aloud is done<br>
+capturing the selection.</p>
+<h2>Statistics</h2>
+<p>Words read and sessions completed are counted for the dashboard. They are counters only<br>
+— no text is retained. See <a href="privacy-retention.html">privacy and retention</a>.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

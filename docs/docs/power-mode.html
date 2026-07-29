@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Power Mode — Zerm</title>
+    <meta name="description" content="Swap your dictation settings automatically based on the app you are in — or the website you are on." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Power Mode — Zerm" />
+    <meta property="og:description" content="Swap your dictation settings automatically based on the app you are in — or the website you are on." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Context</p>
+        <h1>Power Mode</h1>
+        <p class="lede">Swap your dictation settings automatically based on the app you are in — or the website you are on.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>A Power Mode is a named bundle of dictation settings that switches itself on when you<br>
+are somewhere specific. Writing in Mail should not use the same prompt as dictating a<br>
+commit message into a terminal, and Power Mode is how Zerm stops you switching those by<br>
+hand.</p>
+<p>Each mode carries its own transcription model, language, enhancement setting, formatting<br>
+rules, and optional auto-send key. When a mode activates, those settings replace your<br>
+current ones for the duration of the recording.</p>
+<p><img src="img/power-mode.png" alt="The Power Mode list, with a mode selected" style="max-width: 100%;"></p>
+<h2>What triggers a mode</h2>
+<p>Every mode can list applications, websites, or both. When you start a recording, Zerm<br>
+resolves which mode applies in a fixed order:</p>
+<ol>
+<li><strong>Website.</strong> If the frontmost app is a supported browser, Zerm reads the URL of the<br>
+active tab and looks for a mode whose website list matches it.</li>
+<li><strong>Application.</strong> Otherwise — or if no website matched — Zerm looks for a mode whose<br>
+application list contains the frontmost app.</li>
+<li><strong>Default.</strong> If neither matched, the mode marked as default applies.</li>
+</ol>
+<p>Disabled modes are skipped at every step. Where two enabled modes could both match, the<br>
+first one in the list wins, so drag the more specific mode above the general one.</p>
+<h3>Application triggers</h3>
+<p>Applications match on bundle identifier, exactly. You pick them from a list of installed<br>
+apps rather than typing a name, so there is nothing to get wrong — but it also means a<br>
+mode attached to Visual Studio Code will not fire for a different build of the same<br>
+editor.</p>
+<h3>Website triggers — how matching really works</h3>
+<p>This is the part the interface does not spell out, and it surprises people.</p>
+<p><strong>A website trigger is a substring match on a cleaned URL.</strong> Before comparing, Zerm<br>
+lowercases both the current URL and the one you configured, and strips <code class="notranslate">https://</code>,<br>
+<code class="notranslate">http://</code> and <code class="notranslate">www.</code> from each. It then checks whether the cleaned current URL<br>
+<em>contains</em> the cleaned trigger.</p>
+<p>So a trigger of <code class="notranslate">github.com</code> matches all of these:</p>
+<table role="table">
+<thead>
+<tr>
+<th>Current URL</th>
+<th>Matches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">https://github.com/arcusis/Zerm</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code class="notranslate">https://www.github.com</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code class="notranslate">https://gist.github.com/someone</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code class="notranslate">https://notgithub.com.example.net</code></td>
+<td>yes — the string still appears</td>
+</tr>
+</tbody>
+</table>
+<p>Two consequences worth knowing:</p>
+<ul>
+<li>A short trigger catches more than you expect. <code class="notranslate">mail</code> matches <code class="notranslate">gmail.com</code>,<br>
+<code class="notranslate">mail.proton.me</code>, and any page with <code class="notranslate">mail</code> anywhere in its path or query string.</li>
+<li>Only the scheme and <code class="notranslate">www.</code> are stripped. Everything else — subdomain, path, query —<br>
+is still part of the string being searched, so you can scope a mode to<br>
+<code class="notranslate">github.com/arcusis</code> or <code class="notranslate">docs.google.com/spreadsheets</code> if you want it narrower.</li>
+</ul>
+<p>Reading the active tab's URL uses AppleScript, so macOS will ask for Automation<br>
+permission for that browser the first time. Decline it and website triggers simply never<br>
+match; application triggers keep working.</p>
+<p>Supported browsers: Safari, Chrome, Edge, Brave, Firefox, Zen, Arc, Opera, Vivaldi,<br>
+Orion, and Yandex.</p>
+<h2>The default mode</h2>
+<p>Exactly one mode is marked as the default. It is what applies everywhere you have not<br>
+configured something more specific, which in practice is most of your Mac. Zerm ships<br>
+with three modes seeded on first launch:</p>
+<ul>
+<li><strong>General</strong> — the default. No app or website triggers, enhancement off.</li>
+<li><strong>Code</strong> — Cursor, Visual Studio Code, Xcode, Terminal, iTerm, Warp, plus the website<br>
+trigger <code class="notranslate">github.com</code>.</li>
+<li><strong>Writing</strong> — Mail, Notes, Chrome, Safari.</li>
+</ul>
+<p>They are ordinary modes. Rename them, retrigger them, or delete them.</p>
+<h2>What a mode can change</h2>
+<p><strong>Transcription model.</strong> Each mode can pin its own model. A mode used for quick replies<br>
+can run a small local model while a mode used for long-form dictation runs a large one.</p>
+<p><strong>Language.</strong> Pinned per mode too, so a mode for one language does not force you to<br>
+change the global setting every time you switch.</p>
+<p><strong>AI enhancement.</strong> A mode can turn enhancement on or off, and select which prompt,<br>
+which provider, and which model to use when it is on. This is the most common reason to<br>
+create a mode: a prompt that formats email is wrong for a terminal.</p>
+<p><strong>Screen context.</strong> Whether the enhancement gets to see on-screen text. See<br>
+<a href="contextual-awareness.html">contextual awareness</a>.</p>
+<p><strong>Formatting.</strong> Text formatting, punctuation cleanup, and forcing lowercase output are<br>
+each per-mode. Lowercase plus punctuation removal is a common combination for chat and<br>
+commit messages.</p>
+<p><strong>Auto-send.</strong> A mode can press a key for you once the text is inserted: Return,<br>
+Shift + Return, or Command + Return. Set on a mode scoped to a chat app, this turns<br>
+dictation into speak-and-send. Leave it as None everywhere you might still want to edit<br>
+before sending.</p>
+<h2>Per-mode keyboard shortcuts</h2>
+<p>A mode can be given its own shortcut, which activates that mode and starts recording in<br>
+one press — useful when you want a specific mode regardless of where you are.</p>
+<p>While the recorder is on screen, ⌘1 through ⌘0 select the first ten modes directly. That<br>
+is the same key range used for enhancement prompts; which one it drives depends on what<br>
+the recorder is showing.</p>
+<h2>Persisting preferences</h2>
+<p>By default, whatever a mode changed is reverted when the recording finishes. Turn on<br>
+<strong>Persist Configured Preferences</strong> in Settings and the mode's settings stay active until<br>
+a different mode activates instead. Use it if you find yourself surprised that a model<br>
+switch did not stick.</p>
+<h2>Turning Power Mode off</h2>
+<p>The master toggle in Settings will not switch off while any mode is still enabled — Zerm<br>
+tells you to disable or remove the modes first, rather than silently keeping matching<br>
+logic running behind a switch that reads off.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

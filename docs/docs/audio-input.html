@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Audio input — Zerm</title>
+    <meta name="description" content="Choosing a microphone, and what to do when the one you want keeps disconnecting." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Audio input — Zerm" />
+    <meta property="og:description" content="Choosing a microphone, and what to do when the one you want keeps disconnecting." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Setup</p>
+        <h1>Audio input</h1>
+        <p class="lede">Choosing a microphone, and what to do when the one you want keeps disconnecting.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Zerm records from one microphone at a time. Which one is decided by the input mode.</p>
+<p><img src="img/audio-input.png" alt="Audio input settings" style="max-width: 100%;"></p>
+<h2>Input modes</h2>
+<p><strong>System Default.</strong> Zerm uses whatever macOS is currently using. Change the input in<br>
+System Settings or plug in a headset and Zerm follows. The simplest option, and the<br>
+right one if you only ever have one microphone.</p>
+<p><strong>Custom Device.</strong> Pin one specific device. Zerm always records from it and ignores what<br>
+macOS considers the default. Use this when your Mac keeps choosing the built-in mic over<br>
+the good one.</p>
+<p><strong>Prioritised.</strong> An ordered list. Zerm records from the highest-ranked device that is<br>
+actually connected, and moves down the list when it is not.</p>
+<p>Prioritised is the mode for anyone who moves between setups: put your headset first,<br>
+your desk microphone second, and the built-in mic last. Plug the headset in and it wins;<br>
+unplug it and Zerm falls back without you touching anything.</p>
+<h2>Testing</h2>
+<p>The microphone test shows a live level meter, so you can confirm the right device is<br>
+active and that it is actually hearing you before you rely on it. Speak normally and<br>
+watch the meter move.</p>
+<p>If the meter does not move at all, check the microphone permission first — see<br>
+<a href="permissions.html">permissions</a>.</p>
+<h2>Device changes while recording</h2>
+<p>Zerm watches for devices appearing and disappearing. A device that vanishes mid-session<br>
+does not take the app down with it, and the list refreshes on its own; there is a<br>
+refresh button for the times macOS is slow to notice.</p>
+<p>Changing the selected device while a recording is in progress takes effect on the next<br>
+recording, not the current one.</p>
+<h2>Echo cancellation and gain control</h2>
+<p>An experimental setting routes capture through VoiceProcessingIO, which adds acoustic<br>
+echo cancellation and automatic gain control.</p>
+<p>Worth enabling in a noisy room, or when you dictate with speakers on and the microphone<br>
+is picking them up. It changes the character of the audio, so if transcription accuracy<br>
+drops after enabling it, turn it back off. Stop and restart recording after changing the<br>
+setting.</p>
+<h2>Level and auto-stop</h2>
+<p>Auto-stop decides you have finished speaking by watching the input level against a<br>
+threshold. A microphone with very low gain can therefore trip auto-stop early. If<br>
+recordings are cutting off while you are still talking, raise your input level in<br>
+System Settings, or increase the silence duration. See <a href="dictation.html">dictation</a>.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

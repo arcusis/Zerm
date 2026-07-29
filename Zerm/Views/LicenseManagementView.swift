@@ -83,7 +83,7 @@ struct LicenseManagementView: View {
                         .buttonStyle(.plain)
                         
                         Button {
-                            if let url = URL(string: "https://tryzerm.com/docs") {
+                            if let url = Optional(Links.docs) {
                                 NSWorkspace.shared.open(url)
                             }
                         } label: {
@@ -126,7 +126,7 @@ struct LicenseManagementView: View {
                 
                 // Purchase Button 
                 Button(action: {
-                    if let url = URL(string: "https://tryzerm.com/buy") {
+                    if let url = Optional(Links.site) {
                         NSWorkspace.shared.open(url)
                     }
                 }) {

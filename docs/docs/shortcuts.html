@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Keyboard shortcuts — Zerm</title>
+    <meta name="description" content="Every shortcut Zerm offers — global triggers, recorder controls, and the ones that are unset until you choose them." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Keyboard shortcuts — Zerm" />
+    <meta property="og:description" content="Every shortcut Zerm offers — global triggers, recorder controls, and the ones that are unset until you choose them." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Reference</p>
+        <h1>Keyboard shortcuts</h1>
+        <p class="lede">Every shortcut Zerm offers — global triggers, recorder controls, and the ones that are unset until you choose them.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Zerm is driven from the keyboard. Nothing here is fixed: every shortcut on this page can<br>
+be rebound, and most start unset so they cannot collide with what you already use.</p>
+<p><img src="img/shortcuts.png" alt="Shortcut settings" style="max-width: 100%;"></p>
+<h2>Dictation</h2>
+<p>You can configure two independent dictation shortcuts, each with its own trigger style.</p>
+<p>A shortcut can be a <strong>bare modifier key</strong> — Right Option, Left Option, Right Command,<br>
+Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason<br>
+Zerm feels quick: no chord to remember, just a key your other hand is not using.</p>
+<p>Or choose <strong>Custom</strong> and record any combination you like.</p>
+<p>Each shortcut has a mode:</p>
+<table role="table">
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Push to talk</td>
+<td>Records while held. Release to stop.</td>
+</tr>
+<tr>
+<td>Toggle</td>
+<td>Press to start, press again to stop.</td>
+</tr>
+<tr>
+<td>Hybrid</td>
+<td>A tap toggles; holding past half a second becomes push to talk.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fn is handled specially.</strong> Pressing Fn together with another key — Fn+F1, Fn+F11,<br>
+brightness, volume — cancels the recording trigger, so binding Zerm to Fn does not break<br>
+your function row.</p>
+<p><strong>Middle click</strong> can also start and stop recording, with a configurable hold delay. Off<br>
+by default.</p>
+<h2>Read Aloud</h2>
+<p>Read Aloud has its own trigger, configured the same way — a bare modifier or a custom<br>
+combination. Unset by default. See <a href="read-aloud.html">read aloud</a>.</p>
+<h2>While the recorder is visible</h2>
+<p>These only apply when the recorder is on screen, so they never interfere with the app<br>
+you are typing into.</p>
+<table role="table">
+<thead>
+<tr>
+<th>Shortcut</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">Esc</code></td>
+<td>Cancel. Nothing is transcribed, written, or saved.</td>
+</tr>
+<tr>
+<td><code class="notranslate">⌘E</code></td>
+<td>Toggle AI enhancement for this recording.</td>
+</tr>
+<tr>
+<td><code class="notranslate">⌘1</code> – <code class="notranslate">⌘0</code></td>
+<td>Select one of the first ten enhancement prompts.</td>
+</tr>
+<tr>
+<td><code class="notranslate">⌘1</code> – <code class="notranslate">⌘0</code></td>
+<td>Select one of the first ten Power Modes, when the recorder is showing them.</td>
+</tr>
+</tbody>
+</table>
+<p>A second, custom cancel shortcut can be assigned if Escape is taken.</p>
+<p>See <a href="enhancement-shortcuts.html">enhancement shortcuts</a> for what the enhancement keys<br>
+do in detail.</p>
+<h2>Global shortcuts</h2>
+<p>All unset by default. Assign the ones you want.</p>
+<table role="table">
+<thead>
+<tr>
+<th>Action</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Paste last transcription</td>
+<td>Re-pastes the most recent transcript at your cursor.</td>
+</tr>
+<tr>
+<td>Paste last enhancement</td>
+<td>Re-pastes the enhanced version instead of the raw one.</td>
+</tr>
+<tr>
+<td>Retry last transcription</td>
+<td>Runs the last recording through the pipeline again.</td>
+</tr>
+<tr>
+<td>Open history</td>
+<td>Opens the history window from anywhere.</td>
+</tr>
+<tr>
+<td>Quick add to dictionary</td>
+<td>Adds a word to your <a href="dictionary.html">dictionary</a> without opening the app.</td>
+</tr>
+</tbody>
+</table>
+<p><em>Retry</em> is the one to know about: it re-runs the audio you already captured, so<br>
+switching model or prompt after a disappointing result does not mean saying it all<br>
+again.</p>
+<h2>Power Mode shortcuts</h2>
+<p>Any <a href="power-mode.html">Power Mode</a> can be given its own global shortcut, which activates<br>
+that mode and starts recording in one press.</p>
+<h2>System-wide</h2>
+<p>Zerm registers Shortcuts actions, so dictation can be toggled from the Shortcuts app,<br>
+Spotlight, or anything else that can run one.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

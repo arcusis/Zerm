@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Announcements — Zerm</title>
+    <meta name="description" content="What the in-app banner is, where it comes from, and how to turn it off." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Announcements — Zerm" />
+    <meta property="og:description" content="What the in-app banner is, where it comes from, and how to turn it off." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">About</p>
+        <h1>Announcements</h1>
+        <p class="lede">What the in-app banner is, where it comes from, and how to turn it off.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Occasionally Zerm shows a small banner in the app: a release worth knowing about, a<br>
+change in behaviour, or something that needs your attention. This page explains what<br>
+that is, because a notification appearing in a privacy-focused app deserves an<br>
+explanation rather than a dismissal button.</p>
+<p><img src="img/announcements.png" alt="An announcement banner" style="max-width: 100%;"></p>
+<h2>Where it comes from</h2>
+<p>Zerm fetches a small JSON file from this site — <code class="notranslate">arcusis.github.io/Zerm</code> — a few<br>
+seconds after launch and every four hours thereafter.</p>
+<p>The file lists announcements, each with a title, a short description, an optional link,<br>
+and a start and end date. Zerm shows the first one that is currently active and that you<br>
+have not already dismissed.</p>
+<h2>What is sent</h2>
+<p>Nothing. It is an ordinary GET for a static file on GitHub Pages. No identifier, no<br>
+usage data, no transcript content, no account — Zerm has no account system at all.</p>
+<p>Serving the file means GitHub's servers see a request from your IP address, the same as<br>
+any web page you load. That is the entire footprint.</p>
+<h2>What is stored</h2>
+<p>The identifiers of announcements you have dismissed, so you are not shown the same one<br>
+twice. Only the two most recent are kept.</p>
+<h2>Turning it off</h2>
+<p>Settings → <strong>Announcements</strong>. Off means no fetch at all, not a fetch with the banner<br>
+hidden.</p>
+<p>You will still get release notes on the <a href="../changelog.html">changelog</a>, and update<br>
+checks are a separate setting.</p>
+<h2>Update checks</h2>
+<p>Zerm also checks for new versions through Sparkle, against a signed feed hosted here.<br>
+That is <strong>Automatic update checks</strong> in Settings, independent of announcements, and can<br>
+be switched off on its own.</p>
+<p>Every advertised update carries a signature that is verified before installation, and<br>
+builds are served from GitHub Releases. Neither check sends anything about you.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

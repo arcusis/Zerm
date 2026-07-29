@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Contextual awareness — Zerm</title>
+    <meta name="description" content="The three optional context sources — selected text, clipboard, and screen — and exactly what each one sends." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Contextual awareness — Zerm" />
+    <meta property="og:description" content="The three optional context sources — selected text, clipboard, and screen — and exactly what each one sends." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Privacy</p>
+        <h1>Contextual awareness</h1>
+        <p class="lede">The three optional context sources — selected text, clipboard, and screen — and exactly what each one sends.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>An <a href="enhancement.html">enhancement</a> prompt does better work when it knows what you are<br>
+writing about. Zerm can supply three kinds of context, each optional and each off unless<br>
+you switch it on.</p>
+<p>None of them apply when your <a href="output-modes.html">output mode</a> is Instant, because no<br>
+model runs at all in that mode.</p>
+<p><img src="img/contextual-awareness.png" alt="Context settings" style="max-width: 100%;"></p>
+<h2>Selected text</h2>
+<p>Whatever is highlighted in the frontmost application is passed to the model alongside<br>
+your transcript.</p>
+<p>This is what makes instructions work. Select a paragraph, dictate "make this shorter and<br>
+drop the second sentence", and the model has the paragraph to act on.</p>
+<p>Requires Accessibility permission. Without it, nothing is read and the transcript goes<br>
+to the model alone.</p>
+<h2>Clipboard context</h2>
+<p>The current contents of your clipboard are passed to the model.</p>
+<p>Useful when you have just copied the thing you are replying to. Off by default.</p>
+<p>The clipboard is read at the moment the recording starts, and the captured value is<br>
+cleared once the enhancement finishes.</p>
+<h2>Screen context</h2>
+<p>Text visible on your screen is captured and passed to the model.</p>
+<p>This is the broadest of the three, and the one to think about before enabling. It reads<br>
+what is on screen rather than what you selected, which means it may include whatever<br>
+else happens to be visible.</p>
+<p><strong>How it works:</strong> Zerm captures the screen, extracts text from the image, and includes<br>
+that text in the prompt. What is sent to the model is text, not the image.</p>
+<p><strong>What is kept:</strong> nothing. The extracted text is held only for the duration of the<br>
+enhancement and then cleared. It is not written to disk and not saved to history.</p>
+<p><strong>Permission:</strong> requires Screen Recording. macOS often needs Zerm fully quit and<br>
+reopened before a fresh grant takes effect — see <a href="permissions.html">permissions</a>.</p>
+<p>Screen context is also per-<a href="power-mode.html">Power Mode</a>, so you can enable it only for<br>
+the apps where it earns its keep and leave it off everywhere else.</p>
+<h2>Where the context goes</h2>
+<p>Context is added to the system message sent to your enhancement provider, in labelled<br>
+sections alongside the transcript. That means:</p>
+<ul>
+<li>With the <strong>on-device</strong> provider, context never leaves your Mac.</li>
+<li>With <strong>Ollama</strong> or a <strong>local CLI</strong>, it goes to whatever you are running locally.</li>
+<li>With a <strong>cloud provider</strong>, it goes to that provider along with the transcript.</li>
+</ul>
+<p>If you enable screen context, know which provider you are pointing it at.</p>
+<h2>Vocabulary</h2>
+<p>Your <a href="dictionary.html">dictionary</a> vocabulary is also included whenever enhancement<br>
+runs, as spelling guidance. It is a fixed list you wrote yourself, not captured content,<br>
+and it has no permission or switch of its own.</p>
+<h2>Turning it all off</h2>
+<p>Set the output mode to <strong>Instant</strong>. No context is gathered, no model is called, and the<br>
+transcript goes straight to your cursor.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

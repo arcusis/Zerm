@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Permissions — Zerm</title>
+    <meta name="description" content="The three permissions Zerm asks for, what each one actually unlocks, and how to fix the one that keeps going red." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Permissions — Zerm" />
+    <meta property="og:description" content="The three permissions Zerm asks for, what each one actually unlocks, and how to fix the one that keeps going red." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Setup</p>
+        <h1>Permissions</h1>
+        <p class="lede">The three permissions Zerm asks for, what each one actually unlocks, and how to fix the one that keeps going red.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Zerm asks for three macOS permissions. Each buys a specific capability, each can be<br>
+declined, and declining one degrades the app rather than breaking it.</p>
+<p><img src="img/permissions.png" alt="The permissions screen" style="max-width: 100%;"></p>
+<h2>Microphone</h2>
+<p><strong>Required.</strong> Without it there is no audio to transcribe.</p>
+<p>macOS prompts once, on first use. If you dismissed the prompt, grant it in<br>
+System Settings → Privacy &amp; Security → Microphone.</p>
+<h2>Accessibility</h2>
+<p><strong>Needed to paste at your cursor.</strong> This is what lets Zerm put text into another<br>
+application's text field, and what lets Read Aloud see what you have selected.</p>
+<p>Decline it and Zerm falls back to the clipboard: the transcript is copied and you paste<br>
+it yourself. Everything else works.</p>
+<p>It is also what makes <a href="output-modes.html">Instant + Refine</a> able to improve text in<br>
+place. Without Accessibility, Refine has nothing to write through.</p>
+<h3>If it stays red after you grant it</h3>
+<p>This is the one that catches people, and it is macOS rather than Zerm.</p>
+<ol>
+<li>Enable Zerm in System Settings → Privacy &amp; Security → Accessibility.</li>
+<li>Come back to Zerm and press the refresh button on the permission card.</li>
+<li>If it is still red, <strong>quit Zerm completely (⌘Q) and reopen it.</strong> macOS binds<br>
+Accessibility trust at process launch, so a running process sometimes cannot see a<br>
+grant that was made after it started.</li>
+</ol>
+<p>Closing the window is not quitting — Zerm keeps running in the menu bar. Use ⌘Q or<br>
+Quit from the menu bar item.</p>
+<p>If it is still red after a relaunch, remove Zerm from the Accessibility list with the<br>
+minus button, then add it back. That clears a stale entry, which usually happens after<br>
+the app has been moved or replaced by an update.</p>
+<h2>Screen Recording</h2>
+<p><strong>Optional.</strong> Only needed if you want the enhancement to see what is on your screen. See<br>
+<a href="contextual-awareness.html">contextual awareness</a>.</p>
+<p>Everything works without it. Dictation, Read Aloud, and enhancement using the transcript<br>
+alone are all unaffected.</p>
+<p>Screen Recording has the same launch-time binding problem as Accessibility, and Zerm<br>
+detects it: if the permission looks granted but the process cannot use it yet, the card<br>
+says so and offers to quit for you. Reopen and it will be green.</p>
+<h2>Automation — per browser</h2>
+<p>Not on the permissions screen, because macOS asks for it in context.</p>
+<p>The first time a <a href="power-mode.html">Power Mode</a> website trigger needs to read the URL of<br>
+your active tab, macOS asks whether Zerm may control that browser. It asks separately<br>
+for each browser.</p>
+<p>Decline it and website triggers never match. Application triggers and everything else<br>
+are unaffected.</p>
+<h2>What Zerm does not ask for</h2>
+<p>No Full Disk Access, no Contacts, no Calendar, no Input Monitoring beyond the modifier<br>
+keys used as hotkeys, and no account of any kind. All of it is in the source, under<br>
+GPLv3.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

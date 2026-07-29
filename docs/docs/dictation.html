@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Dictation — Zerm</title>
+    <meta name="description" content="Press a key, talk, and the text lands at your cursor — plus everything that happens in between." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Dictation — Zerm" />
+    <meta property="og:description" content="Press a key, talk, and the text lands at your cursor — plus everything that happens in between." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Getting started</p>
+        <h1>Dictation</h1>
+        <p class="lede">Press a key, talk, and the text lands at your cursor — plus everything that happens in between.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Dictation is the core loop: hold a shortcut, speak, release, and clean text appears<br>
+wherever your cursor already was. It works in every app, because Zerm inserts text the<br>
+same way you would paste it rather than integrating with anything.</p>
+<p><img src="img/dictation.png" alt="The recorder during dictation" style="max-width: 100%;"></p>
+<h2>The loop</h2>
+<ol>
+<li><strong>Start.</strong> Press your dictation shortcut. The recorder appears and Zerm starts<br>
+capturing from your chosen microphone.</li>
+<li><strong>Speak.</strong> Transcription runs while you talk. On a local model this is entirely on<br>
+your Mac.</li>
+<li><strong>Stop.</strong> Release the key, press it again, or say nothing for a couple of seconds and<br>
+let auto-stop end it.</li>
+<li><strong>Insert.</strong> The text is pasted at your cursor.</li>
+</ol>
+<p>Press Escape at any point before insertion and the recording is discarded. Nothing is<br>
+written and nothing is saved to history.</p>
+<h2>Trigger styles</h2>
+<p>Each shortcut has a mode that decides what pressing it means:</p>
+<ul>
+<li><strong>Push to talk</strong> — record while held, stop on release. The most predictable, and the<br>
+best default for short dictation.</li>
+<li><strong>Toggle</strong> — press to start, press again to stop. Better for anything long, since you<br>
+are not holding a key for two minutes.</li>
+<li><strong>Hybrid</strong> — a quick tap toggles; holding the key past half a second becomes push to<br>
+talk. You get both without deciding in advance.</li>
+</ul>
+<p>You can configure two independent dictation shortcuts, each with its own mode, so push<br>
+to talk and toggle can live on different keys. See <a href="shortcuts.html">shortcuts</a> for the<br>
+full list.</p>
+<h2>Auto-stop on silence</h2>
+<p>Auto-stop is on by default. When Zerm hears nothing above the level threshold for long<br>
+enough, it ends the recording for you.</p>
+<ul>
+<li><strong>Silence before stopping</strong> — 2.5 seconds by default. This was raised from a much<br>
+shorter value because a normal thinking pause in long-form dictation was tripping it<br>
+and cutting people off mid-sentence.</li>
+<li><strong>Initial silence</strong> — 6 seconds. If you never start speaking, the recording gives up<br>
+rather than sitting open.</li>
+<li><strong>Minimum recording length</strong> — 0.8 seconds, so a mis-press does not immediately<br>
+produce an empty transcript.</li>
+</ul>
+<p>Auto-stop applies to toggle-style recordings. In push to talk you are already holding<br>
+the key, so releasing it is the stop.</p>
+<h2>The recorder</h2>
+<p>Two styles, chosen in Settings:</p>
+<ul>
+<li><strong>Mini</strong> — a small floating pill you can position where you like.</li>
+<li><strong>Notch</strong> — anchored to the notch on Macs that have one, out of the way of everything<br>
+else.</li>
+</ul>
+<p>Both show the level meter, the elapsed time, the active <a href="power-mode.html">Power Mode</a>,<br>
+and the enhancement state. Both offer the same shortcuts while visible.</p>
+<h2>Insertion</h2>
+<p>Text is placed on the clipboard and pasted with a synthetic ⌘V at the current insertion<br>
+point. That needs Accessibility permission; without it Zerm can copy but not paste. See<br>
+<a href="permissions.html">permissions</a>.</p>
+<p><strong>Restore clipboard after paste</strong> is off by default. Turn it on and Zerm puts your<br>
+previous clipboard contents back a couple of seconds after pasting — worth it if you<br>
+rely on your clipboard, at the cost of a small window where the two can race.</p>
+<p>While it holds the clipboard, Zerm marks the entry as transient and auto-generated, so<br>
+well-behaved clipboard managers do not record your transcripts in their history.</p>
+<p><strong>AppleScript paste</strong> is an alternative insertion path for the rare app where the<br>
+synthetic keystroke does not land.</p>
+<p><strong>Append trailing space</strong> is on by default, so consecutive dictations do not run<br>
+together.</p>
+<h2>What happens to the text before you see it</h2>
+<p>In order, and all locally:</p>
+<ol>
+<li>Formatting from the transcription model is normalised.</li>
+<li>Filler words are removed, if enabled.</li>
+<li>Your <a href="dictionary.html">dictionary</a> replacements are applied.</li>
+<li>Per-mode punctuation and lowercase rules are applied.</li>
+<li>The result is inserted — and, depending on your<br>
+<a href="output-modes.html">output mode</a>, may then be improved by a language model.</li>
+</ol>
+<h2>While recording</h2>
+<ul>
+<li><strong>Pause media</strong> — playing audio is paused when recording starts and resumed<br>
+afterwards, with a configurable delay. Off by default.</li>
+<li><strong>Mute system audio</strong> — on by default, so system sounds do not end up in the<br>
+recording.</li>
+<li><strong>Sound feedback</strong> — a short cue on start and stop. On by default, and the sounds are<br>
+replaceable.</li>
+</ul>
+<h2>Audio files</h2>
+<p>Dictation is not the only input. Drop an existing recording or voice memo into Zerm and<br>
+it runs through the same pipeline, with the same models and the same post-processing.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>
