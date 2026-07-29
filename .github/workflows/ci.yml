@@ -34,8 +34,35 @@ jobs:
             -clonedSourcePackagesDirPath .ci-packages \
             2>&1 | tail -5
 
+      # `make setup` stages whisper and sherpa. There is no target for llama, which is
+      # built out of band, so the app cannot currently be compiled on a clean machine —
+      # see the tracking issue. Until that is fixed this job cannot honestly claim to
+      # build the app, so it asserts the frameworks are present and fails loudly rather
+      # than reporting success on a build that never happened.
+      - name: Check native dependencies are available
+        id: deps
+        run: |
+          set -euo pipefail
+          MISSING=0
+          for fw in \
+            "$HOME/Zerm-Dependencies/whisper.cpp/build-apple/whisper.xcframework" \
+            "$HOME/Zerm-Dependencies/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework" \
+            "$HOME/Zerm-Dependencies/sherpa-onnx/build-swift-macos/onnxruntime.xcframework" \
+            "$HOME/Zerm-Dependencies/llama/build-apple/llama.xcframework"; do
+            if [ ! -d "$fw" ]; then echo "missing: $fw"; MISSING=1; fi
+          done
+          if [ $MISSING -eq 1 ]; then
+            echo "::error::Native XCFrameworks are absent, so the app cannot be built or tested here."
+            echo "::error::This job previously piped xcodebuild into xcpretty/tail, which discarded the"
+            echo "::error::exit code and reported success for a build that failed on every run."
+            exit 1
+          fi
+
+      # set -o pipefail is load-bearing: without it the pipeline takes xcpretty's exit
+      # code and a failed build reports success.
       - name: Build (no signing)
         run: |
+          set -euo pipefail
           xcodebuild \
             -project Zerm.xcodeproj \
             -scheme Zerm \
@@ -45,22 +72,14 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=YES \
             DEVELOPMENT_TEAM="" \
-            build \
-            2>&1 | xcpretty || xcodebuild \
-              -project Zerm.xcodeproj \
-              -scheme Zerm \
-              -configuration Debug \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=YES \
-              DEVELOPMENT_TEAM="" \
-              build 2>&1 | tail -20
+            build 2>&1 | xcpretty
 
       # The scheme has always had a TestAction wired to ZermTests, but nothing ever
       # invoked it, so the suite never ran. Debug is required: `@testable import Zerm`
       # needs ENABLE_TESTABILITY, which Release turns off.
       - name: Unit tests
         run: |
+          set -euo pipefail
           xcodebuild test \
             -project Zerm.xcodeproj \
             -scheme Zerm \
@@ -70,8 +89,7 @@ jobs:
             -clonedSourcePackagesDirPath .ci-packages \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tail -40
+            CODE_SIGNING_ALLOWED=NO 2>&1 | xcpretty
 
   # ── Website lint ─────────────────────────────────────────────────────────
   website-lint:
