@@ -241,6 +241,13 @@ struct SettingsView: View {
                     label: "Mute Audio While Recording",
                     infoMessage: "Silences your Mac's output for the length of the recording, then restores the previous volume. Stops music or a video call leaking into the microphone and being transcribed as speech."
                 ) {
+                    Toggle(isOn: $mediaController.skipMuteWithHeadphones) {
+                        HStack(spacing: 4) {
+                            Text("Keep Playing on Headphones")
+                            InfoTip("Skips the mute when you're on Bluetooth headphones or the headphone jack. Nothing reaches the microphone from headphones, so there's nothing to silence. Speakers, USB and HDMI outputs still mute.")
+                        }
+                    }
+
                     Picker(selection: $mediaController.audioResumptionDelay) {
                         Text("0s").tag(0.0)
                         Text("1s").tag(1.0)

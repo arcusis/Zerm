@@ -21,6 +21,7 @@ struct GeneralSettings: Codable {
 
     let isSoundFeedbackEnabled: Bool?
     let isSystemMuteEnabled: Bool?
+    let skipMuteWithHeadphones: Bool?
     let isPauseMediaEnabled: Bool?
     let audioResumptionDelay: Double?
     let isTextFormattingEnabled: Bool?
@@ -114,6 +115,7 @@ class ImportExportService {
 
             isSoundFeedbackEnabled: soundManager.isEnabled,
             isSystemMuteEnabled: mediaController.isSystemMuteEnabled,
+            skipMuteWithHeadphones: mediaController.skipMuteWithHeadphones,
             isPauseMediaEnabled: playbackController.isPauseMediaEnabled,
             audioResumptionDelay: mediaController.audioResumptionDelay,
             isTextFormattingEnabled: UserDefaults.standard.bool(forKey: keyIsTextFormattingEnabled),
@@ -329,6 +331,9 @@ class ImportExportService {
                         }
                         if let muteSystem = general.isSystemMuteEnabled {
                             mediaController.isSystemMuteEnabled = muteSystem
+                        }
+                        if let skipOnHeadphones = general.skipMuteWithHeadphones {
+                            mediaController.skipMuteWithHeadphones = skipOnHeadphones
                         }
                         if let pauseMedia = general.isPauseMediaEnabled {
                             playbackController.isPauseMediaEnabled = pauseMedia

@@ -1,16 +1,35 @@
 import Foundation
 import CoreAudio
+import os
 
 final class MediaController: ObservableObject {
 
     static let shared = MediaController()
 
-    private var didMuteAudio = false
-    private var wasAudioMutedBeforeRecording = false
-    private var unmuteTask: Task<Void, Never>?
-    private var muteTask: Task<Void, Never>?
-    private var muteGeneration: Int = 0
-    private let lock = NSLock()
+    /// Mute bookkeeping, guarded as one unit.
+    ///
+    /// `generation` is what makes a late mute safe to ignore: every start/stop bumps
+    /// it, so a mute scheduled behind the start sound can tell whether the recording
+    /// it belonged to is still the current one before touching system volume.
+    private struct MuteState {
+        var didMuteAudio = false
+        var wasAudioMutedBeforeRecording = false
+        var unmuteTask: Task<Void, Never>?
+        var muteTask: Task<Void, Never>?
+        var generation = 0
+
+        /// Invalidates in-flight work and returns the new generation.
+        mutating func nextGeneration() -> Int {
+            generation += 1
+            return generation
+        }
+    }
+
+    // OSAllocatedUnfairLock rather than NSLock: every caller here is async, and
+    // NSLock's lock()/unlock() are unavailable from async contexts (a hard error
+    // under the Swift 6 language mode) because nothing stops a suspension point
+    // from landing between them.
+    private let state = OSAllocatedUnfairLock(initialState: MuteState())
 
     @Published var isSystemMuteEnabled: Bool = UserDefaults.standard.bool(forKey: "isSystemMuteEnabled") {
         didSet { UserDefaults.standard.set(isSystemMuteEnabled, forKey: "isSystemMuteEnabled") }
@@ -20,30 +39,33 @@ final class MediaController: ObservableObject {
         didSet { UserDefaults.standard.set(audioResumptionDelay, forKey: "audioResumptionDelay") }
     }
 
+    @Published var skipMuteWithHeadphones: Bool = UserDefaults.standard.bool(forKey: "SkipMuteWithHeadphones") {
+        didSet { UserDefaults.standard.set(skipMuteWithHeadphones, forKey: "SkipMuteWithHeadphones") }
+    }
+
     private init() {}
 
     /// Cancels any deferred mute so a quick cancel cannot leave the system muted
     /// after a late start-sound completion. Call from stop/cancel paths.
     func cancelPendingMute() {
-        lock.lock()
-        muteTask?.cancel()
-        muteTask = nil
-        muteGeneration += 1
-        lock.unlock()
+        state.withLock { state in
+            state.muteTask?.cancel()
+            state.muteTask = nil
+            _ = state.nextGeneration()
+        }
     }
 
     /// Mutes system audio immediately (decoupled from start-sound playback).
     func muteSystemAudio() async -> Bool {
         guard isSystemMuteEnabled else { return false }
 
-        lock.lock()
-        unmuteTask?.cancel()
-        unmuteTask = nil
-        muteTask?.cancel()
-        muteTask = nil
-        muteGeneration += 1
-        let myGeneration = muteGeneration
-        lock.unlock()
+        let myGeneration = state.withLock { state -> Int in
+            state.unmuteTask?.cancel()
+            state.unmuteTask = nil
+            state.muteTask?.cancel()
+            state.muteTask = nil
+            return state.nextGeneration()
+        }
 
         return await performMute(generation: myGeneration)
     }
@@ -52,13 +74,12 @@ final class MediaController: ObservableObject {
     func scheduleMuteSystemAudio(after delay: TimeInterval = 0) {
         guard isSystemMuteEnabled else { return }
 
-        lock.lock()
-        unmuteTask?.cancel()
-        unmuteTask = nil
-        muteTask?.cancel()
-        muteGeneration += 1
-        let myGeneration = muteGeneration
-        lock.unlock()
+        let myGeneration = state.withLock { state -> Int in
+            state.unmuteTask?.cancel()
+            state.unmuteTask = nil
+            state.muteTask?.cancel()
+            return state.nextGeneration()
+        }
 
         let task = Task { [weak self] in
             if delay > 0 {
@@ -68,107 +89,93 @@ final class MediaController: ObservableObject {
             guard let self else { return }
             _ = await self.performMute(generation: myGeneration)
         }
-        lock.lock()
-        muteTask = task
-        lock.unlock()
+        state.withLock { $0.muteTask = task }
     }
 
     private func performMute(generation: Int) async -> Bool {
-        lock.lock()
-        let stillValid = muteGeneration == generation
-        lock.unlock()
-        guard stillValid else { return false }
+        guard state.withLock({ $0.generation == generation }) else { return false }
 
-        let currentlyMuted = isSystemAudioMuted()
-
-        if currentlyMuted {
-            lock.lock()
-            if didMuteAudio {
-                wasAudioMutedBeforeRecording = false
-            } else {
-                wasAudioMutedBeforeRecording = true
-                didMuteAudio = false
+        // Headphones cannot bleed back into the microphone, so there is nothing to
+        // protect the transcript from. Checked here rather than at scheduling time so
+        // that plugging in — or pulling out — headphones right before speaking counts.
+        if skipMuteWithHeadphones, isOutputOnHeadphones() {
+            state.withLock { state in
+                state.didMuteAudio = false
+                state.wasAudioMutedBeforeRecording = false
             }
-            lock.unlock()
+            return false
+        }
+
+        if isSystemAudioMuted() {
+            // Already muted before we got here — remember that, so the unmute path
+            // does not un-mute something the user muted themselves.
+            state.withLock { state in
+                state.wasAudioMutedBeforeRecording = !state.didMuteAudio
+                if !state.didMuteAudio {
+                    state.didMuteAudio = false
+                }
+            }
             return true
         }
 
-        lock.lock()
-        wasAudioMutedBeforeRecording = false
-        lock.unlock()
+        state.withLock { $0.wasAudioMutedBeforeRecording = false }
+
         let success = setSystemMuted(true)
-        lock.lock()
-        // Only commit mute ownership if this generation is still current
-        if muteGeneration == generation {
-            didMuteAudio = success
-        } else if success {
-            // We muted after cancel — reverse it immediately
+        let raced = state.withLock { state -> Bool in
+            // Only claim mute ownership while this generation is still current.
+            guard state.generation == generation else { return success }
+            state.didMuteAudio = success
+            return false
+        }
+        if raced {
+            // Muted after a cancel landed — undo it rather than stranding the output.
             _ = setSystemMuted(false)
         }
-        lock.unlock()
         return success
     }
 
     func unmuteSystemAudio() async {
         guard isSystemMuteEnabled else { return }
 
-        lock.lock()
-        muteTask?.cancel()
-        muteTask = nil
-        muteGeneration += 1
         let delay = audioResumptionDelay
-        let shouldUnmute = didMuteAudio && !wasAudioMutedBeforeRecording
-        let myGeneration = muteGeneration
-        lock.unlock()
+        let (shouldUnmute, myGeneration) = state.withLock { state -> (Bool, Int) in
+            state.muteTask?.cancel()
+            state.muteTask = nil
+            let shouldUnmute = state.didMuteAudio && !state.wasAudioMutedBeforeRecording
+            return (shouldUnmute, state.nextGeneration())
+        }
 
         let task = Task { [weak self] in
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
 
-            guard let self = self else { return }
-            guard !Task.isCancelled else { return }
-            self.lock.lock()
-            let stillValid = self.muteGeneration == myGeneration
-            let doUnmute = shouldUnmute
-            self.lock.unlock()
-            guard stillValid else { return }
+            guard let self, !Task.isCancelled else { return }
+            guard self.state.withLock({ $0.generation == myGeneration }) else { return }
 
-            if doUnmute {
+            if shouldUnmute {
                 _ = self.setSystemMuted(false)
             }
-
-            self.lock.lock()
-            self.didMuteAudio = false
-            self.lock.unlock()
+            self.state.withLock { $0.didMuteAudio = false }
         }
 
-        lock.lock()
-        unmuteTask = task
-        lock.unlock()
+        state.withLock { $0.unmuteTask = task }
         await task.value
     }
 
+    /// True when the current default output is a Bluetooth device or the built-in
+    /// headphone jack. Anything else — internal speakers, USB DACs, HDMI, AirPlay —
+    /// is assumed to play into the room.
+    func isOutputOnHeadphones() -> Bool {
+        guard let deviceID = getDefaultOutputDevice() else { return false }
+        return AudioOutputRoute.current(for: deviceID) == .headphones
+    }
+
     private func getDefaultOutputDevice() -> AudioDeviceID? {
-        var deviceID = AudioDeviceID(0)
-        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
-
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        let status = AudioObjectGetPropertyData(
+        AudioObjectProperty.uint32(
             AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &propertySize,
-            &deviceID
+            selector: kAudioHardwarePropertyDefaultOutputDevice
         )
-
-        return status == noErr ? deviceID : nil
     }
 
     // Returns the mute elements that are currently readable on the given device
@@ -180,14 +187,12 @@ final class MediaController: ObservableObject {
         // Probe elements: master (0) + first 8 channels
         let candidates: [UInt32] = (0...8).map { UInt32($0) }
         return candidates.filter { element in
-            var address = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyMute,
-                mScope: kAudioDevicePropertyScopeOutput,
-                mElement: element
+            AudioObjectProperty.isSettable(
+                deviceID,
+                selector: kAudioDevicePropertyMute,
+                scope: kAudioDevicePropertyScopeOutput,
+                element: element
             )
-            guard AudioObjectHasProperty(deviceID, &address) else { return false }
-            var isSettable: DarwinBoolean = false
-            return AudioObjectIsPropertySettable(deviceID, &address, &isSettable) == noErr && isSettable.boolValue
         }
     }
 
@@ -196,19 +201,14 @@ final class MediaController: ObservableObject {
 
         // Check any mutable element — if the master element is muted, or every
         // channel is muted, consider the device muted.
-        for element in muteableElements(for: deviceID) {
-            var muted: UInt32 = 0
-            var propertySize = UInt32(MemoryLayout<UInt32>.size)
-            var address = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyMute,
-                mScope: kAudioDevicePropertyScopeOutput,
-                mElement: element
-            )
-            if AudioObjectGetPropertyData(deviceID, &address, 0, nil, &propertySize, &muted) == noErr && muted != 0 {
-                return true
-            }
+        return muteableElements(for: deviceID).contains { element in
+            AudioObjectProperty.uint32(
+                deviceID,
+                selector: kAudioDevicePropertyMute,
+                scope: kAudioDevicePropertyScopeOutput,
+                element: element
+            ).map { $0 != 0 } ?? false
         }
-        return false
     }
 
     private func setSystemMuted(_ muted: Bool) -> Bool {
