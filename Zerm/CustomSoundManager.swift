@@ -154,21 +154,20 @@ class CustomSoundManager: ObservableObject {
             return .failure(.fileNotFound)
         }
 
-        let asset = AVAsset(url: url)
-        let duration = asset.duration.seconds
+        // AVAudioPlayer both proves the file is decodable and reports its duration
+        // synchronously. AVAsset.duration is deprecated in favour of the async
+        // load(.duration), which this synchronous validator cannot await.
+        guard let player = try? AVAudioPlayer(contentsOf: url) else {
+            return .failure(.invalidAudioFile)
+        }
 
-        guard duration.isFinite && duration > 0 else {
+        let duration = player.duration
+        guard duration.isFinite, duration > 0 else {
             return .failure(.invalidAudioFile)
         }
 
         if duration > maxSoundDuration {
             return .failure(.durationTooLong(duration: duration, maxDuration: maxSoundDuration))
-        }
-
-        do {
-            _ = try AVAudioPlayer(contentsOf: url)
-        } catch {
-            return .failure(.invalidAudioFile)
         }
 
         return .success(())

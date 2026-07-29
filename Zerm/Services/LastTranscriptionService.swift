@@ -128,12 +128,20 @@ class LastTranscriptionService: ObservableObject {
                 let newTranscription = try await transcriptionService.retranscribeAudio(from: audioURL, using: currentModel)
 
                 let textToCopy = newTranscription.enhancedText?.isEmpty == false ? newTranscription.enhancedText! : newTranscription.text
-                ClipboardManager.copyToClipboard(textToCopy)
 
-                NotificationManager.shared.showNotification(
-                    title: "Copied to clipboard",
-                    type: .success
-                )
+                // copyToClipboard reports whether the pasteboard write landed; the
+                // result was dropped, so a failed copy still claimed success.
+                if ClipboardManager.copyToClipboard(textToCopy) {
+                    NotificationManager.shared.showNotification(
+                        title: "Copied to clipboard",
+                        type: .success
+                    )
+                } else {
+                    NotificationManager.shared.showNotification(
+                        title: "Could not copy to clipboard",
+                        type: .error
+                    )
+                }
             } catch {
                 NotificationManager.shared.showNotification(
                     title: "Retry failed: \(error.localizedDescription)",

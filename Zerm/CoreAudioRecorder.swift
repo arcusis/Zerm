@@ -89,7 +89,27 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private var sessionDeviceName = "Unknown"
 
     /// Called on the audio thread with raw PCM data (16-bit, 16kHz, mono) for streaming.
-    var onAudioChunk: ((_ data: Data) -> Void)?
+    ///
+    /// Lock-guarded because the render callback reads this on the realtime audio
+    /// thread while the transcription engine swaps it from the main actor *during*
+    /// a live recording (it installs the streaming callback once the session has
+    /// prepared, and clears it when there is none). A closure is a two-word value,
+    /// so an unsynchronized swap can be read torn — context from one closure paired
+    /// with the function pointer of another.
+    private let audioChunkLock = NSLock()
+    private var _onAudioChunk: ((_ data: Data) -> Void)?
+    var onAudioChunk: ((_ data: Data) -> Void)? {
+        get {
+            audioChunkLock.lock()
+            defer { audioChunkLock.unlock() }
+            return _onAudioChunk
+        }
+        set {
+            audioChunkLock.lock()
+            _onAudioChunk = newValue
+            audioChunkLock.unlock()
+        }
+    }
 
     // MARK: - Initialization
 
@@ -957,28 +977,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
     }
 
     private func getDeviceStringProperty(deviceID: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var propertySize = UInt32(MemoryLayout<CFString>.size)
-        var property: CFString?
-
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &propertySize,
-            &property
-        )
-
-        if status == noErr, let cfString = property {
-            return cfString as String
-        }
-        return nil
+        AudioObjectProperty.string(deviceID, selector: selector)
     }
 
     private func getTransportType(deviceID: AudioDeviceID) -> String {

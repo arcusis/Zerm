@@ -132,7 +132,7 @@ struct InlineHistoryView: View {
         }
         .onChange(of: searchText) { _, _ in
             Task {
-                await resetPagination()
+                resetPagination()
                 await loadInitialContent()
             }
         }
@@ -140,7 +140,7 @@ struct InlineHistoryView: View {
             guard isViewCurrentlyVisible else { return }
             if newId != oldId {
                 Task {
-                    await resetPagination()
+                    resetPagination()
                     await loadInitialContent()
                 }
             }

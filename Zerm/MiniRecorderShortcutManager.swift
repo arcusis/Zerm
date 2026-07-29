@@ -28,6 +28,18 @@ extension KeyboardShortcuts.Name {
     static let selectPowerMode8 = Self("selectPowerMode8")
     static let selectPowerMode9 = Self("selectPowerMode9")
     static let selectPowerMode10 = Self("selectPowerMode10")
+
+    /// Ordered slots 1…10, so callers can index by position instead of repeating
+    /// ten near-identical lines per operation.
+    static let promptSlots: [Self] = [
+        .selectPrompt1, .selectPrompt2, .selectPrompt3, .selectPrompt4, .selectPrompt5,
+        .selectPrompt6, .selectPrompt7, .selectPrompt8, .selectPrompt9, .selectPrompt10
+    ]
+
+    static let powerModeSlots: [Self] = [
+        .selectPowerMode1, .selectPowerMode2, .selectPowerMode3, .selectPowerMode4, .selectPowerMode5,
+        .selectPowerMode6, .selectPowerMode7, .selectPowerMode8, .selectPowerMode9, .selectPowerMode10
+    ]
 }
 
 @MainActor
@@ -81,7 +93,7 @@ class MiniRecorderShortcutManager: ObservableObject {
         KeyboardShortcuts.onKeyDown(for: .escapeRecorder) { [weak self] in
             Task { @MainActor in
                 guard let self = self,
-                      await self.recorderUIManager.isMiniRecorderVisible else { return }
+                      self.recorderUIManager.isMiniRecorderVisible else { return }
 
                 // Don't process if custom shortcut is configured
                 guard KeyboardShortcuts.getShortcut(for: .cancelRecorder) == nil else { return }
@@ -124,7 +136,7 @@ class MiniRecorderShortcutManager: ObservableObject {
         KeyboardShortcuts.onKeyDown(for: .cancelRecorder) { [weak self] in
             Task { @MainActor in
                 guard let self = self,
-                      await self.recorderUIManager.isMiniRecorderVisible,
+                      self.recorderUIManager.isMiniRecorderVisible,
                       KeyboardShortcuts.getShortcut(for: .cancelRecorder) != nil else { return }
 
                 await self.recorderUIManager.cancelActiveOperation()
@@ -151,8 +163,8 @@ class MiniRecorderShortcutManager: ObservableObject {
         KeyboardShortcuts.onKeyDown(for: .toggleEnhancement) { [weak self] in
             Task { @MainActor in
                 guard let self = self,
-                      await self.recorderUIManager.isMiniRecorderVisible,
-                      let enhancementService = await self.engine.getEnhancementService() else { return }
+                      self.recorderUIManager.isMiniRecorderVisible,
+                      let enhancementService = self.engine.getEnhancementService() else { return }
                 enhancementService.isEnhancementEnabled.toggle()
             }
         }
@@ -190,7 +202,7 @@ class MiniRecorderShortcutManager: ObservableObject {
         KeyboardShortcuts.onKeyDown(for: shortcutName) { [weak self] in
             Task { @MainActor in
                 guard let self = self,
-                      await self.recorderUIManager.isMiniRecorderVisible else { return }
+                      self.recorderUIManager.isMiniRecorderVisible else { return }
                 
                 let powerModeManager = PowerModeManager.shared
                 
@@ -207,16 +219,7 @@ class MiniRecorderShortcutManager: ObservableObject {
     }
     
     private func removePowerModeShortcuts() {
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode1)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode2)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode3)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode4)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode5)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode6)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode7)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode8)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode9)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPowerMode10)
+        KeyboardShortcuts.Name.powerModeSlots.forEach { KeyboardShortcuts.setShortcut(nil, for: $0) }
     }
     
     private func setupPromptShortcuts() {
@@ -248,9 +251,9 @@ class MiniRecorderShortcutManager: ObservableObject {
         KeyboardShortcuts.onKeyDown(for: shortcutName) { [weak self] in
             Task { @MainActor in
                 guard let self = self,
-                      await self.recorderUIManager.isMiniRecorderVisible else { return }
+                      self.recorderUIManager.isMiniRecorderVisible else { return }
 
-                guard let enhancementService = await self.engine.getEnhancementService() else { return }
+                guard let enhancementService = self.engine.getEnhancementService() else { return }
                 
                 let availablePrompts = enhancementService.allPrompts
                 if index < availablePrompts.count {
@@ -265,26 +268,28 @@ class MiniRecorderShortcutManager: ObservableObject {
     }
     
     private func removePromptShortcuts() {
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt1)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt2)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt3)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt4)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt5)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt6)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt7)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt8)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt9)
-        KeyboardShortcuts.setShortcut(nil, for: .selectPrompt10)
+        KeyboardShortcuts.Name.promptSlots.forEach { KeyboardShortcuts.setShortcut(nil, for: $0) }
+    }
+
+    /// Clears every shortcut this manager owns.
+    ///
+    /// Static on purpose: `deinit` needs to run this, and a `Task` spawned from
+    /// `deinit` that calls instance methods resurrects an object that is already
+    /// being torn down (a hard error under the Swift 6 language mode).
+    @MainActor
+    private static func clearManagedShortcuts() {
+        KeyboardShortcuts.disable(.toggleEnhancement)
+        KeyboardShortcuts.setShortcut(nil, for: .escapeRecorder)
+        for slot in KeyboardShortcuts.Name.promptSlots + KeyboardShortcuts.Name.powerModeSlots {
+            KeyboardShortcuts.setShortcut(nil, for: slot)
+        }
     }
     
     deinit {
         visibilityTask?.cancel()
+        escapeTimeoutTask?.cancel()
         Task { @MainActor in
-            KeyboardShortcuts.disable(.toggleEnhancement)
-            deactivateEscapeShortcut()
-            deactivateCancelShortcut()
-            removePromptShortcuts()
-            removePowerModeShortcuts()
+            MiniRecorderShortcutManager.clearManagedShortcuts()
         }
     }
-} 
+}

@@ -13,8 +13,11 @@ final class TTSNaturalizer {
     private let llm: LocalLLMModelManager
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TTSNaturalizer")
 
-    init(llm: LocalLLMModelManager = .shared) {
-        self.llm = llm
+    /// `nil` resolves to the shared manager. It cannot be a default argument:
+    /// default arguments are evaluated in the caller's isolation, and
+    /// `LocalLLMModelManager.shared` is main-actor isolated.
+    init(llm: LocalLLMModelManager? = nil) {
+        self.llm = llm ?? .shared
     }
 
     var isModelInstalled: Bool { llm.isInstalled }

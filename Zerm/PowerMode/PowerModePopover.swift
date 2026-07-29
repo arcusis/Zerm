@@ -56,7 +56,7 @@ struct PowerModePopover: View {
         .onAppear {
             selectedConfig = powerModeManager.activeConfiguration
         }
-        .onChange(of: powerModeManager.activeConfiguration) { newValue in
+        .onChange(of: powerModeManager.activeConfiguration) { _, newValue in
             selectedConfig = newValue
         }
     }

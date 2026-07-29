@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+/// Every member drives AppKit windows, so the whole type is main-actor isolated
+/// rather than annotating methods one at a time — that left the timer and close
+/// callbacks reaching main-actor state from nonisolated closures.
+@MainActor
 class NotificationManager {
     static let shared = NotificationManager()
 
@@ -9,7 +13,6 @@ class NotificationManager {
 
     private init() {}
 
-    @MainActor
     func showNotification(
         title: String,
         type: AppNotificationView.NotificationType,
@@ -75,8 +78,12 @@ class NotificationManager {
         dismissTimer = Timer.scheduledTimer(
             withTimeInterval: duration,
             repeats: false
-        ) { [weak self] _ in
-            self?.dismissNotification()
+        ) { _ in
+            // Timer callbacks are nonisolated even though this one fires on the main
+            // run loop, so hop explicitly rather than touching AppKit state from it.
+            Task { @MainActor in
+                NotificationManager.shared.dismissNotification()
+            }
         }
     }
 
