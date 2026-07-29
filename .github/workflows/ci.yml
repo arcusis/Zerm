@@ -56,6 +56,23 @@ jobs:
               DEVELOPMENT_TEAM="" \
               build 2>&1 | tail -20
 
+      # The scheme has always had a TestAction wired to ZermTests, but nothing ever
+      # invoked it, so the suite never ran. Debug is required: `@testable import Zerm`
+      # needs ENABLE_TESTABILITY, which Release turns off.
+      - name: Unit tests
+        run: |
+          xcodebuild test \
+            -project Zerm.xcodeproj \
+            -scheme Zerm \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -only-testing:ZermTests \
+            -clonedSourcePackagesDirPath .ci-packages \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tail -40
+
   # ── Website lint ─────────────────────────────────────────────────────────
   website-lint:
     name: Website lint
@@ -80,6 +97,84 @@ jobs:
             exit 1
           fi
           echo "No GitHub Releases redirect found — OK"
+
+      - name: Check every in-app doc link has a published page
+        run: |
+          # Zerm/Resources/Links.swift is the single registry of URLs the app opens.
+          # Every Links.Doc slug must have a generated page under docs/docs/, or the
+          # app ships a link to a 404 — which is exactly how it ended up pointing at
+          # an unregistered domain for seventeen call sites.
+          REGISTRY=Zerm/Resources/Links.swift
+          test -f "$REGISTRY" || (echo "$REGISTRY missing" && exit 1)
+
+          SLUGS=$(sed -n 's/^ *case [A-Za-z]* = "\([a-z0-9-]*\)"$/\1/p' "$REGISTRY")
+          test -n "$SLUGS" || (echo "FAIL: no doc slugs parsed out of $REGISTRY" && exit 1)
+
+          MISSING=0
+          while IFS= read -r slug; do
+            if [ ! -f "docs/docs/$slug.html" ]; then
+              echo "FAIL: Links.Doc \"$slug\" has no page at docs/docs/$slug.html"
+              MISSING=1
+            fi
+          done <<< "$SLUGS"
+
+          # And the other way round, so a page never quietly stops being linked
+          for page in docs/docs/*.html; do
+            slug=$(basename "$page" .html)
+            [ "$slug" = "index" ] && continue
+            if ! echo "$SLUGS" | grep -qx "$slug"; then
+              echo "FAIL: docs/docs/$slug.html has no matching Links.Doc case"
+              MISSING=1
+            fi
+          done
+
+          [ "$MISSING" -eq 0 ] || exit 1
+          echo "All $(echo "$SLUGS" | wc -l | tr -d ' ') doc links resolve to a published page — OK"
+
+      - name: Check every docs screenshot exists
+        run: |
+          # The docs pages embed screenshots of the app. A missing file renders as a
+          # broken image on a published page, and nothing else in the pipeline notices.
+          MISSING=0
+          for page in docs/docs/*.html; do
+            for img in $(grep -oE 'src="img/[^"]+"' "$page" | sed 's/src="//; s/"$//'); do
+              if [ ! -s "docs/docs/$img" ]; then
+                echo "FAIL: $page references docs/docs/$img, which is missing or empty"
+                MISSING=1
+              fi
+            done
+          done
+          [ $MISSING -eq 0 ] || exit 1
+          echo "All docs screenshots resolve — OK"
+
+      - name: Check the announcements feed is published and parses
+        run: |
+          # AnnouncementsService fetches docs/announcements.json on every launch.
+          # An unpublished or malformed feed is a silent failure in the app, so it
+          # fails the PR instead. `make site` mirrors the repo-root source into docs/.
+          test -f docs/announcements.json || (echo "FAIL: docs/announcements.json missing — run 'make site'" && exit 1)
+
+          node -e '
+            const fs = require("fs");
+            const feed = JSON.parse(fs.readFileSync("docs/announcements.json", "utf8"));
+            if (!Array.isArray(feed)) throw new Error("announcements feed must be a JSON array");
+            const source = fs.readFileSync("announcements.json", "utf8");
+            if (source !== fs.readFileSync("docs/announcements.json", "utf8")) {
+              throw new Error("docs/announcements.json has drifted from the repo-root source — run \"make site\"");
+            }
+            console.log(`Announcements feed OK — ${feed.length} entries`);
+          '
+
+      - name: Check nothing points at the unregistered domain
+        run: |
+          # tryzerm.com is a find/replace artefact inherited from upstream VoiceInk's
+          # tryvoiceink.com. It has never been registered, so every one of these was a
+          # link to nowhere. Zerm/Resources/Links.swift is the replacement.
+          if git grep -n "tryzerm\.com" -- "*.swift" "*.json" "*.html" "*.md"; then
+            echo "FAIL: tryzerm.com is not a registered domain — use Links.swift"
+            exit 1
+          fi
+          echo "No links to the unregistered domain — OK"
 
   # ── Security scan ────────────────────────────────────────────────────────
   # Secret detection is handled by the GitGuardian app check and CodeQL, which

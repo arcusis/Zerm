@@ -12,7 +12,7 @@ SHERPA_XCFRAMEWORK := $(SHERPA_BUILD)/sherpa-onnx.xcframework
 ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 
-.PHONY: all clean whisper sherpa setup build local check healthcheck help dev run install reset-permissions release
+.PHONY: all clean whisper sherpa setup build test local check healthcheck help dev run install reset-permissions release site
 
 # Default target
 all: check build
@@ -162,6 +162,17 @@ clean:
 	@rm -rf $(DEPS_DIR)
 	@echo "Clean complete"
 
+# Run the unit tests. The scheme has always had a TestAction wired to ZermTests, but
+# nothing invoked it — no make target and no CI step — so the suite never ran.
+# Debug is required, not incidental: `@testable import Zerm` needs ENABLE_TESTABILITY,
+# which Release turns off, and the tests fail to compile without it.
+test: setup
+	xcodebuild test -project Zerm.xcodeproj -scheme Zerm \
+		-configuration Debug \
+		-destination 'platform=macOS' \
+		-only-testing:ZermTests \
+		CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
 # Help
 help:
 	@echo "Available targets:"
@@ -169,6 +180,7 @@ help:
 	@echo "  whisper            Clone and build whisper.cpp XCFramework"
 	@echo "  setup              Copy whisper XCFramework to Zerm project"
 	@echo "  build              Build the Zerm Xcode project"
+	@echo "  test               Run the ZermTests unit suite"
 	@echo "  local              Build for local use (no Apple Developer certificate needed)"
 	@echo "  release            Build Developer ID signed + notarized release DMG"
 	@echo "  install            Build, install to /Applications, and reset Launchpad"
@@ -178,6 +190,8 @@ help:
 	@echo "  all                Run full build process (default)"
 	@echo "  clean              Remove build artifacts"
 	@echo "  help               Show this help message"
-# Regenerate the derived site pages (changelog, notice, license, building)
+# Regenerate the derived site pages: changelog, notice, license, building,
+# verification, and the docs/ section from site-content/docs/*.md.
+# Needs an authenticated `gh` — markdown is rendered through the GitHub API.
 site:
 	node scripts/build-site.mjs
