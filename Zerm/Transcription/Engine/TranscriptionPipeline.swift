@@ -55,6 +55,9 @@ class TranscriptionPipeline {
 
         var finalPastedText: String?
         var promptDetectionResult: PromptDetectionService.PromptDetectionResult?
+        // Set once the mode and the enhancement preconditions are known, and read again
+        // after the paste, which happens outside this do/catch.
+        var shouldRefineAfterPaste = false
 
         logger.notice("🔄 Starting transcription...")
 
@@ -153,10 +156,20 @@ class TranscriptionPipeline {
             transcription.powerModeEmoji = powerModeEmoji
             finalPastedText = cleanedText
 
-            let instantTranscriptionMode = UserDefaults.standard.bool(forKey: "InstantTranscriptionMode")
+            let autoSendKey = activePowerModeConfig?.autoSendKey
+            // Auto-send submits the field about half a second after the paste, so there is
+            // nothing left to refine afterwards. Where both are configured the only
+            // coherent outcome is to enhance first and send the enhanced text, so this
+            // falls back to Enhanced rather than silently dropping the enhancement.
+            let outputMode: DictationOutputMode = {
+                let configured = DictationOutputMode.current
+                guard configured == .instantRefine, autoSendKey?.isEnabled == true else { return configured }
+                return .enhanced
+            }()
+            let blocksOnEnhancement = outputMode == .enhanced
             let allowPromptTriggeredEnhancement = UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement")
 
-            if !instantTranscriptionMode,
+            if blocksOnEnhancement,
                allowPromptTriggeredEnhancement,
                let enhancementService,
                enhancementService.isConfigured {
@@ -170,11 +183,14 @@ class TranscriptionPipeline {
             let shortEnhancementWordThreshold = savedThreshold > 0 ? savedThreshold : 3
             let shouldSkipEnhancement = isSkipShortEnhancementEnabled && WordCounter.count(in: text) <= shortEnhancementWordThreshold && !(promptDetectionResult?.shouldEnableAI == true)
 
+            let canEnhance = enhancementService?.isEnhancementEnabled == true
+                && enhancementService?.isConfigured == true
+                && !shouldSkipEnhancement
+            shouldRefineAfterPaste = outputMode == .instantRefine && canEnhance
+
             if let enhancementService,
-               !instantTranscriptionMode,
-               enhancementService.isEnhancementEnabled,
-               enhancementService.isConfigured,
-               !shouldSkipEnhancement {
+               blocksOnEnhancement,
+               canEnhance {
                 if shouldCancel() { await onCleanup(); return }
 
                 onStateChange(.enhancing)
@@ -263,6 +279,14 @@ class TranscriptionPipeline {
         }
 
         try? modelContext.save()
+
+        // Recorded to the separate usage store, which transcript retention never touches.
+        // Without this the Dashboard is only ever a view of whatever history has not been
+        // auto-deleted yet, which is why it appeared to reset itself.
+        if transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
+            UsageStatsService.shared.record(transcription)
+        }
+
         NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
 
         if shouldCancel() || !isRunStillValid() { await onCleanup(); return }
@@ -273,9 +297,30 @@ class TranscriptionPipeline {
            isRunStillValid() {
             let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
             let pastedText = textToPaste + (appendSpace ? " " : "")
-            _ = await CursorPaster.startPasteAtCursor(pastedText).value
+
+            var anchorSnapshot: AXTextAnchorCapture.PrePasteSnapshot?
+            if shouldRefineAfterPaste {
+                anchorSnapshot = await CursorPaster.pasteAtCursorCapturingAnchor(pastedText).snapshot
+            } else {
+                _ = await CursorPaster.startPasteAtCursor(pastedText).value
+            }
+
             let autoSendKey = PowerModeManager.shared.currentActiveConfiguration?.autoSendKey
             SoundManager.shared.playStopSound()
+
+            // Hand off before the recorder dismisses. Refinement runs entirely after this
+            // point and never blocks the pipeline, so the pill goes away exactly as it
+            // does in Instant mode.
+            if shouldRefineAfterPaste, let enhancementService {
+                RefineInPlaceCoordinator.shared.start(
+                    snapshot: anchorSnapshot,
+                    pastedText: pastedText,
+                    transcription: transcription,
+                    modelContext: modelContext,
+                    enhancementService: enhancementService,
+                    isSuperseded: { !isRunStillValid() }
+                )
+            }
             if let autoSendKey, autoSendKey.isEnabled {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 500_000_000)

@@ -140,15 +140,30 @@ class PowerModeSessionManager {
               let stateProvider = stateProvider else { return }
 
         await MainActor.run {
-            let instantTranscriptionMode = UserDefaults.standard.bool(forKey: "InstantTranscriptionMode")
-            enhancementService.isEnhancementEnabled = instantTranscriptionMode ? false : config.isAIEnhancementEnabled
-            enhancementService.useScreenCaptureContext = instantTranscriptionMode ? false : config.useScreenCapture
+            let outputMode = DictationOutputMode.current
+            let enhancementWanted: Bool
+            switch outputMode {
+            case .instant:
+                // Instant genuinely never enhances, whatever the config says.
+                enhancementWanted = false
+            case .instantRefine, .enhanced:
+                switch config.enhancementOverride {
+                case .inherit: enhancementWanted = enhancementService.isEnhancementEnabled
+                case .on: enhancementWanted = true
+                case .off: enhancementWanted = false
+                }
+            }
+
+            enhancementService.isEnhancementEnabled = enhancementWanted
+            // Screen context costs a capture plus OCR, which no refine budget can absorb.
+            enhancementService.useScreenCaptureContext =
+                (outputMode == .enhanced) ? config.useScreenCapture : false
 
             if let promptId = config.selectedPrompt, let uuid = UUID(uuidString: promptId) {
                 enhancementService.selectedPromptId = uuid
             }
 
-            if !instantTranscriptionMode, config.isAIEnhancementEnabled {
+            if enhancementWanted {
                 if let aiService = enhancementService.getAIService() {
                     if let providerName = config.selectedAIProvider, let provider = AIProvider(rawValue: providerName) {
                         aiService.selectedProvider = provider

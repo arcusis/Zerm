@@ -35,7 +35,7 @@ class CursorPaster {
     @discardableResult
     static func startPasteAtCursor(_ text: String) -> Task<PasteResult, Never> {
         Task { @MainActor in
-            await performPasteSession(text)
+            await performPasteSession(text).result
         }
     }
 
@@ -44,12 +44,35 @@ class CursorPaster {
         await startPasteAtCursor(text).value
     }
 
+    /// Pastes and, alongside it, reads where the caret was so the text can be found again
+    /// afterwards.
+    ///
+    /// The read is issued concurrently with the clipboard write and resolves inside the
+    /// pre-paste delay that already exists, so it adds no time to the paste. If it is not
+    /// ready by then the paste proceeds regardless and the caller simply gets no anchor.
     @MainActor
-    private static func performPasteSession(_ text: String) async -> PasteResult {
+    static func pasteAtCursorCapturingAnchor(
+        _ text: String
+    ) async -> (result: PasteResult, snapshot: AXTextAnchorCapture.PrePasteSnapshot?) {
+        await performPasteSession(text, captureAnchor: true)
+    }
+
+    @MainActor
+    @discardableResult
+    private static func performPasteSession(
+        _ text: String,
+        captureAnchor: Bool = false
+    ) async -> (result: PasteResult, snapshot: AXTextAnchorCapture.PrePasteSnapshot?) {
         let pasteboard = NSPasteboard.general
         let shouldRestoreClipboard = UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste")
         let savedContents = shouldRestoreClipboard ? snapshotClipboard(from: pasteboard) : []
         let sessionID = UUID().uuidString
+
+        // Every accessibility read is a synchronous round-trip into the target process, so
+        // it runs detached rather than on the main actor even with a messaging timeout set.
+        let anchorTask: Task<AXTextAnchorCapture.PrePasteSnapshot?, Never>? = captureAnchor
+            ? Task.detached(priority: .userInitiated) { AXTextAnchorCapture.capture() }
+            : nil
 
         guard ClipboardManager.setClipboard(
             text,
@@ -57,10 +80,13 @@ class CursorPaster {
             sessionID: shouldRestoreClipboard ? sessionID : nil
         ) else {
             logger.error("Failed to prepare clipboard for paste")
-            return .commandNotPosted
+            anchorTask?.cancel()
+            return (.commandNotPosted, nil)
         }
 
         await wait(prePasteDelay)
+
+        let snapshot = await anchorTask?.value
 
         let pasteResult = await postPasteCommand()
         if shouldRestoreClipboard {
@@ -72,7 +98,7 @@ class CursorPaster {
             )
         }
 
-        return pasteResult
+        return (pasteResult, snapshot)
     }
 
     private static func snapshotClipboard(from pasteboard: NSPasteboard) -> ClipboardSnapshot {

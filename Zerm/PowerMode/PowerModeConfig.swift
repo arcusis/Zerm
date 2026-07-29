@@ -21,6 +21,28 @@ enum AutoSendKey: String, Codable, CaseIterable {
     }
 }
 
+/// What a Power Mode does to AI enhancement when it becomes active.
+///
+/// The old plain `isAIEnhancementEnabled` bool could not express "leave it alone", so
+/// every Power Mode — including the seeded default one, which matches when nothing else
+/// does — forced enhancement off on every recording. Turning enhancement on in Settings
+/// therefore appeared to do nothing.
+enum PowerModeEnhancementOverride: String, Codable, CaseIterable, Identifiable {
+    case inherit
+    case on
+    case off
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .inherit: return "Use global setting"
+        case .on: return "Always on"
+        case .off: return "Always off"
+        }
+    }
+}
+
 struct PowerModeConfig: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
@@ -28,6 +50,7 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
     var appConfigs: [AppConfig]?
     var urlConfigs: [URLConfig]?
     var isAIEnhancementEnabled: Bool
+    var enhancementOverride: PowerModeEnhancementOverride = .inherit
     var selectedPrompt: String?
     var selectedTranscriptionModelName: String?
     var selectedLanguage: String?
@@ -43,7 +66,7 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
     var hotkeyShortcut: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, name, emoji, appConfigs, urlConfigs, isAIEnhancementEnabled, selectedPrompt, selectedLanguage
+        case id, name, emoji, appConfigs, urlConfigs, isAIEnhancementEnabled, enhancementOverride, selectedPrompt, selectedLanguage
         case isTextFormattingEnabled, punctuationCleanupMode, removePunctuation, lowercaseTranscription
         case useScreenCapture, selectedAIProvider, selectedAIModel, isAutoSendEnabled, autoSendKey
         case isEnabled, isDefault, hotkeyShortcut
@@ -52,7 +75,8 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
     }
 
     init(id: UUID = UUID(), name: String, emoji: String, appConfigs: [AppConfig]? = nil,
-         urlConfigs: [URLConfig]? = nil, isAIEnhancementEnabled: Bool, selectedPrompt: String? = nil,
+         urlConfigs: [URLConfig]? = nil, isAIEnhancementEnabled: Bool,
+         enhancementOverride: PowerModeEnhancementOverride? = nil, selectedPrompt: String? = nil,
          selectedTranscriptionModelName: String? = nil, selectedLanguage: String? = nil, useScreenCapture: Bool = false,
          isTextFormattingEnabled: Bool = false, punctuationCleanupMode: PunctuationCleanupMode = .keep,
          lowercaseTranscription: Bool = false,
@@ -65,6 +89,7 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         self.appConfigs = appConfigs
         self.urlConfigs = urlConfigs
         self.isAIEnhancementEnabled = isAIEnhancementEnabled
+        self.enhancementOverride = enhancementOverride ?? (isAIEnhancementEnabled ? .on : .inherit)
         self.selectedPrompt = selectedPrompt
         self.useScreenCapture = useScreenCapture
         self.isTextFormattingEnabled = isTextFormattingEnabled
@@ -88,6 +113,16 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         appConfigs = try container.decodeIfPresent([AppConfig].self, forKey: .appConfigs)
         urlConfigs = try container.decodeIfPresent([URLConfig].self, forKey: .urlConfigs)
         isAIEnhancementEnabled = try container.decode(Bool.self, forKey: .isAIEnhancementEnabled)
+        // Migrate from the plain bool. An explicit `true` was always a deliberate choice
+        // and is preserved; a `false` was almost always just the seeded default rather
+        // than an instruction to suppress enhancement, so it becomes "inherit" and the
+        // global setting wins.
+        if let raw = try container.decodeIfPresent(String.self, forKey: .enhancementOverride),
+           let override = PowerModeEnhancementOverride(rawValue: raw) {
+            enhancementOverride = override
+        } else {
+            enhancementOverride = isAIEnhancementEnabled ? .on : .inherit
+        }
         selectedPrompt = try container.decodeIfPresent(String.self, forKey: .selectedPrompt)
         selectedLanguage = try container.decodeIfPresent(String.self, forKey: .selectedLanguage)
         isTextFormattingEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTextFormattingEnabled) ?? false
@@ -132,6 +167,7 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(appConfigs, forKey: .appConfigs)
         try container.encodeIfPresent(urlConfigs, forKey: .urlConfigs)
         try container.encode(isAIEnhancementEnabled, forKey: .isAIEnhancementEnabled)
+        try container.encode(enhancementOverride.rawValue, forKey: .enhancementOverride)
         try container.encodeIfPresent(selectedPrompt, forKey: .selectedPrompt)
         try container.encodeIfPresent(selectedLanguage, forKey: .selectedLanguage)
         try container.encode(isTextFormattingEnabled, forKey: .isTextFormattingEnabled)
