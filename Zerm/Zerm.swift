@@ -53,7 +53,8 @@ struct ZermApp: App {
         let schema = Schema([
             Transcription.self,
             VocabularyWord.self,
-            WordReplacement.self
+            WordReplacement.self,
+            UsageDay.self
         ])
         var initializationFailed = false
 
@@ -196,6 +197,12 @@ struct ZermApp: App {
 
         AppShortcuts.updateAppShortcutParameters()
 
+        // Durable usage metrics. The backfill must land before the first recording of the
+        // run, otherwise that session would be counted once live and once by the sweep.
+        UsageStatsService.shared.configure(container: container)
+        let transcriptContext = container.mainContext
+        Task { await UsageStatsService.shared.backfillIfNeeded(from: transcriptContext) }
+
         // Start cleanup service for the app's lifetime, not tied to window lifecycle
         TranscriptionAutoCleanupService.shared.startMonitoring(modelContext: container.mainContext)
     }
@@ -214,6 +221,7 @@ struct ZermApp: App {
             // Define storage locations
             let defaultStoreURL = appSupportURL.appendingPathComponent("default.store")
             let dictionaryStoreURL = appSupportURL.appendingPathComponent("dictionary.store")
+            let usageStoreURL = appSupportURL.appendingPathComponent("usage.store")
 
             // Transcript configuration
             let transcriptSchema = Schema([Transcription.self])
@@ -240,10 +248,20 @@ struct ZermApp: App {
                 cloudKitDatabase: dictionaryCloudKit
             )
 
+            // Usage configuration — aggregate counts only, kept out of `default.store` so
+            // transcript retention can never delete the user's lifetime metrics. See `UsageDay`.
+            let usageSchema = Schema([UsageDay.self])
+            let usageConfig = ModelConfiguration(
+                "usage",
+                schema: usageSchema,
+                url: usageStoreURL,
+                cloudKitDatabase: .none
+            )
+
             // Initialize container
             return try ModelContainer(
                 for: schema,
-                configurations: transcriptConfig, dictionaryConfig
+                configurations: transcriptConfig, dictionaryConfig, usageConfig
             )
         } catch {
             logger.error("❌ Failed to create persistent ModelContainer: \(error.localizedDescription, privacy: .public)")
@@ -294,7 +312,15 @@ struct ZermApp: App {
                 isStoredInMemoryOnly: true
             )
 
-            return try ModelContainer(for: schema, configurations: transcriptConfig, dictionaryConfig)
+            // Usage configuration
+            let usageSchema = Schema([UsageDay.self])
+            let usageConfig = ModelConfiguration(
+                "usage",
+                schema: usageSchema,
+                isStoredInMemoryOnly: true
+            )
+
+            return try ModelContainer(for: schema, configurations: transcriptConfig, dictionaryConfig, usageConfig)
         } catch {
             logger.error("❌ Failed to create in-memory ModelContainer: \(error.localizedDescription, privacy: .public)")
             return nil

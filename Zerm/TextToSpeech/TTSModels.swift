@@ -124,10 +124,25 @@ enum TTSSettings {
     static var sessionsReadAloud: Int { defaults.integer(forKey: Keys.sessionsReadAloud) }
 
     /// Records one successful Read Aloud of `text`.
+    ///
+    /// The monotonic `UserDefaults` counters stay for compatibility; the dashboard now
+    /// reads the durable per-day store instead.
     static func recordReadAloud(of text: String) {
         let words = text.split(whereSeparator: \.isWhitespace).count
         defaults.set(wordsReadAloud + words, forKey: Keys.wordsReadAloud)
         defaults.set(sessionsReadAloud + 1, forKey: Keys.sessionsReadAloud)
+
+        let countedWords = WordCounter.count(in: text)
+        Task { @MainActor in
+            UsageStatsService.shared.recordReadAloud(words: countedWords)
+        }
+    }
+
+    /// Clears the legacy counters alongside the durable store, so "clear statistics"
+    /// leaves nothing behind.
+    static func resetCounters() {
+        defaults.removeObject(forKey: Keys.wordsReadAloud)
+        defaults.removeObject(forKey: Keys.sessionsReadAloud)
     }
 
     /// Resolves the selected voice for a provider, falling back to its first voice.

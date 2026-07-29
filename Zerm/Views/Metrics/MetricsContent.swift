@@ -1,33 +1,30 @@
 import SwiftUI
 import SwiftData
-import os
 
 struct MetricsContent: View {
-    private let logger = Logger(subsystem: "com.arcusis.zerm", category: "MetricsContent")
-    let modelContext: ModelContext
-    let licenseState: LicenseViewModel.LicenseState
-
-    @State private var totalCount: Int = 0
-    @State private var totalWords: Int = 0
-    @State private var totalDuration: TimeInterval = 0
-    @State private var isLoadingMetrics: Bool = true
-    @State private var metricsTask: Task<Void, Never>?
-    @AppStorage(TTSSettings.Keys.wordsReadAloud) private var wordsReadAloud: Int = 0
+    @State private var range: UsageRange = .month
+    @State private var buckets: [UsageBucket] = []
+    @State private var rangeTotals = UsageTotals()
+    @State private var allTimeTotals = UsageTotals()
+    @State private var currentStreak: Int = 0
+    @State private var longestStreak: Int = 0
+    @State private var isLoadingMetrics = true
 
     var body: some View {
         Group {
-            if totalCount == 0 && !isLoadingMetrics {
-                emptyStateView
-            } else if isLoadingMetrics {
+            if isLoadingMetrics {
                 ProgressView("Loading metrics...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if allTimeTotals.sessions == 0 && allTimeTotals.readAloudSessions == 0 {
+                emptyStateView
             } else {
                 GeometryReader { geometry in
                     ScrollView {
                         VStack(spacing: 24) {
                             heroSection
+                            rangePicker
                             metricsSection
-                            DashboardPromotionsSection(licenseState: licenseState)
+                            UsageTrendCharts(range: range, buckets: buckets)
 
                             Spacer(minLength: 20)
 
@@ -45,88 +42,38 @@ struct MetricsContent: View {
             }
         }
         .task {
-            await loadMetricsEfficiently()
+            reload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptionCreated)) { _ in
-            metricsTask?.cancel()
-            metricsTask = Task {
-                await loadMetricsEfficiently()
-            }
+        .onChange(of: range) { _, _ in
+            reload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptionCompleted)) { _ in
-            metricsTask?.cancel()
-            metricsTask = Task {
-                await loadMetricsEfficiently()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptionDeleted)) { _ in
-            metricsTask?.cancel()
-            metricsTask = Task {
-                await loadMetricsEfficiently()
-            }
-        }
-        .onDisappear {
-            metricsTask?.cancel()
+        .onReceive(NotificationCenter.default.publisher(for: .usageStatsUpdated)) { _ in
+            reload()
         }
     }
-    
-    private func loadMetricsEfficiently() async {
-        await MainActor.run {
-            self.isLoadingMetrics = true
-        }
 
-        let modelContainer = modelContext.container
+    // MARK: - Loading
 
-        let backgroundContext = ModelContext(modelContainer)
+    private func reload() {
+        let service = UsageStatsService.shared
+        let allDays = service.allDays()
 
-        do {
-            guard !Task.isCancelled else {
-                await MainActor.run {
-                    self.isLoadingMetrics = false
-                }
-                return
-            }
+        allTimeTotals = UsageStatsService.sum(allDays)
+        buckets = UsageSeries.buckets(for: range, days: rangeDays(from: allDays))
+        rangeTotals = UsageSeries.totals(buckets)
 
-            let completedFilter = #Predicate<Transcription> { $0.transcriptionStatus == "completed" }
-            let count = try backgroundContext.fetchCount(FetchDescriptor<Transcription>(predicate: completedFilter))
+        let activeDays = Set(allDays.filter { $0.sessions > 0 }.map(\.day))
+        currentStreak = UsageStatsService.currentStreak(activeDays: activeDays, today: Date())
+        longestStreak = UsageStatsService.longestStreak(activeDays: activeDays)
 
-            guard !Task.isCancelled else {
-                await MainActor.run {
-                    self.isLoadingMetrics = false
-                }
-                return
-            }
+        isLoadingMetrics = false
+    }
 
-            var descriptor = FetchDescriptor<Transcription>(predicate: completedFilter)
-            descriptor.propertiesToFetch = [\.text, \.duration]
-
-            var words = 0
-            var duration: TimeInterval = 0
-
-            try backgroundContext.enumerate(descriptor) { transcription in
-                words += transcription.text.split(whereSeparator: \.isWhitespace).count
-                duration += transcription.duration
-            }
-
-            guard !Task.isCancelled else {
-                await MainActor.run {
-                    self.isLoadingMetrics = false
-                }
-                return
-            }
-
-            await MainActor.run {
-                self.totalCount = count
-                self.totalWords = words
-                self.totalDuration = duration
-                self.isLoadingMetrics = false
-            }
-        } catch {
-            logger.error("Error loading metrics: \(error.localizedDescription, privacy: .public)")
-            await MainActor.run {
-                self.isLoadingMetrics = false
-            }
-        }
+    /// All-time already has every row in hand, so the window is applied in memory
+    /// rather than paying for a second fetch.
+    private func rangeDays(from allDays: [UsageDay]) -> [UsageDay] {
+        guard let window = UsageSeries.fetchRange(for: range) else { return allDays }
+        return allDays.filter { window.contains($0.day) }
     }
 
     private var emptyStateView: some View {
@@ -142,14 +89,14 @@ struct MetricsContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.windowBackgroundColor))
     }
-    
+
     // MARK: - Sections
-    
+
     private var heroSection: some View {
         VStack(spacing: 10) {
             HStack {
                 Spacer(minLength: 0)
-                
+
                 (Text("You have saved ")
                     .fontWeight(.bold)
                     .foregroundColor(.white.opacity(0.85))
@@ -165,18 +112,18 @@ struct MetricsContent: View {
                 )
                 .font(.system(size: 30))
                 .multilineTextAlignment(.center)
-                
+
                 Spacer(minLength: 0)
             }
             .lineLimit(1)
             .minimumScaleFactor(0.5)
-            
+
             Text(heroSubtitle)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.white.opacity(0.85))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-            
+
         }
         .padding(28)
         .frame(maxWidth: .infinity)
@@ -190,73 +137,110 @@ struct MetricsContent: View {
         )
         .shadow(color: Color.black.opacity(0.08), radius: 30, x: 0, y: 16)
     }
-    
+
+    /// One control above everything it scopes — the cards and both charts move together.
+    private var rangePicker: some View {
+        HStack {
+            Picker("", selection: $range) {
+                ForEach(UsageRange.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 360)
+
+            Spacer()
+        }
+    }
+
     private var metricsSection: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
             MetricCard(
                 icon: "mic.fill",
                 title: "Sessions Recorded",
-                value: "\(totalCount)",
-                detail: "Zerm sessions completed",
+                value: UsageFormatters.number(rangeTotals.sessions),
+                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.sessions)) all time"),
                 color: .purple
             )
 
             MetricCard(
                 icon: "text.alignleft",
                 title: "Words Dictated",
-                value: Formatters.formattedNumber(totalWords),
-                detail: "words generated",
+                value: UsageFormatters.number(rangeTotals.words),
+                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.words)) all time"),
                 color: Color(nsColor: .controlAccentColor)
             )
-            
+
             MetricCard(
                 icon: "speedometer",
                 title: "Words Per Minute",
-                value: averageWordsPerMinute > 0
-                    ? String(format: "%.1f", averageWordsPerMinute)
-                    : "–",
-                detail: "Zerm vs. typing by hand",
+                value: formattedRate(rangeTotals),
+                detail: allTimeDetail("\(formattedRate(allTimeTotals)) all time"),
                 color: .yellow
             )
-            
+
             MetricCard(
                 icon: "keyboard.fill",
                 title: "Keystrokes Saved",
-                value: Formatters.formattedNumber(totalKeystrokesSaved),
-                detail: "fewer keystrokes",
+                value: UsageFormatters.number(rangeTotals.keystrokesSaved),
+                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.keystrokesSaved)) all time"),
                 color: .orange
             )
 
             MetricCard(
                 icon: "speaker.wave.2.fill",
                 title: "Words Read Aloud",
-                value: Formatters.formattedNumber(wordsReadAloud),
-                detail: "spoken by Read Aloud",
+                value: UsageFormatters.number(rangeTotals.readAloudWords),
+                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.readAloudWords)) all time"),
                 color: .blue
+            )
+
+            MetricCard(
+                icon: "flame.fill",
+                title: "Current Streak",
+                value: currentStreak == 1 ? "1 day" : "\(currentStreak) days",
+                detail: longestStreak == 1 ? "Longest 1 day" : "Longest \(longestStreak) days",
+                color: .red
             )
         }
     }
-    
+
     private var footerActionsView: some View {
         CopySystemInfoButton()
     }
-    
-    private var formattedTimeSaved: String {
-        let formatted = Formatters.formattedDuration(timeSaved, style: .full, fallback: "Time savings coming soon")
-        return formatted
+
+    // MARK: - Formatting
+
+    /// The range number on its own is ambiguous, so every card names its window and
+    /// carries the lifetime figure beside it.
+    private func allTimeDetail(_ lifetime: String) -> String {
+        "\(range.caption) · \(lifetime)"
     }
-    
+
+    private func formattedRate(_ totals: UsageTotals) -> String {
+        totals.wordsPerMinute > 0 ? String(format: "%.1f", totals.wordsPerMinute) : "–"
+    }
+
+    private var formattedTimeSaved: String {
+        UsageFormatters.duration(
+            allTimeTotals.timeSaved,
+            style: .full,
+            fallback: "Time savings coming soon"
+        )
+    }
+
     private var heroSubtitle: String {
-        guard totalCount > 0 else {
+        guard allTimeTotals.sessions > 0 else {
             return "Your Zerm journey starts with your first recording."
         }
 
-        let wordsText = Formatters.formattedNumber(totalWords)
-        let sessionText = totalCount == 1 ? "session" : "sessions"
+        let wordsText = UsageFormatters.number(allTimeTotals.words)
+        let sessionText = allTimeTotals.sessions == 1 ? "session" : "sessions"
 
-        return "Dictated \(wordsText) words across \(totalCount) \(sessionText)."
+        return "Dictated \(wordsText) words across \(allTimeTotals.sessions) \(sessionText), all time."
     }
-    
+
     private var heroGradient: LinearGradient {
         LinearGradient(
             gradient: Gradient(colors: [
@@ -267,59 +251,6 @@ struct MetricsContent: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-    }
-    
-    // MARK: - Computed Metrics
-
-    private var estimatedTypingTime: TimeInterval {
-        let averageTypingSpeed: Double = 35 // words per minute
-        let estimatedTypingTimeInMinutes = Double(totalWords) / averageTypingSpeed
-        return estimatedTypingTimeInMinutes * 60
-    }
-
-    private var timeSaved: TimeInterval {
-        max(estimatedTypingTime - totalDuration, 0)
-    }
-
-    private var averageWordsPerMinute: Double {
-        guard totalDuration > 0 else { return 0 }
-        return Double(totalWords) / (totalDuration / 60.0)
-    }
-
-    private var totalKeystrokesSaved: Int {
-        Int(Double(totalWords) * 5.0)
-    }
-    
-    private var dateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }
-}
-
-private enum Formatters {
-    static let numberFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter
-    }()
-    
-    static let durationFormatter: DateComponentsFormatter = {
-        let formatter = DateComponentsFormatter()
-        formatter.maximumUnitCount = 2
-        return formatter
-    }()
-    
-    static func formattedNumber(_ value: Int) -> String {
-        return numberFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    }
-    
-    static func formattedDuration(_ interval: TimeInterval, style: DateComponentsFormatter.UnitsStyle, fallback: String = "–") -> String {
-        guard interval > 0 else { return fallback }
-        durationFormatter.unitsStyle = style
-        durationFormatter.allowedUnits = interval >= 3600 ? [.hour, .minute] : [.minute, .second]
-        return durationFormatter.string(from: interval) ?? fallback
     }
 }
 
