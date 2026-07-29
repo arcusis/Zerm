@@ -21,6 +21,9 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Release Signing]] — Developer ID + notarization pipeline (fixes the Gatekeeper "damaged app" reports)
 - [[Zerm Latency Budget]] — measured start/stop costs; the ~45 ms audio floor; the two fixes that mattered
 - [[Zerm Native Runtime Teardown]] — why whisper/onnx/llama crash at exit, and the `_exit(0)` rule
+- [[Zerm Native Writing Layer Verification]] — how the insertion, permission, and paste behaviours are checked
+- [[Zerm Refine In Place]] — instant paste + AI enhancement at once; the AX swap and where it cannot work
+- [[Zerm Usage Statistics]] — the durable `usage.store` behind the Dashboard, and why it is a separate store
 - [[Zerm Known Follow Ups]]
 
 ## Current State (2026-07-13)
