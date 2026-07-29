@@ -1200,6 +1200,31 @@ pre.plain {
   max-width: 760px;
 }
 
+.doc-more {
+  margin: 0;
+}
+
+/* ---------- Documentation index ---------- */
+
+.doc-group + .doc-group {
+  margin-top: clamp(40px, 5vw, 64px);
+}
+
+.doc-group > h2 {
+  margin: 0 0 18px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.doc-card h3 {
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+
 /* ---------- Changelog ---------- */
 
 .rel-list {

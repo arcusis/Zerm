@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Common issues — Zerm</title>
+    <meta name="description" content="The problems that come up most, and what actually fixes them." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Common issues — Zerm" />
+    <meta property="og:description" content="The problems that come up most, and what actually fixes them." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Support</p>
+        <h1>Common issues</h1>
+        <p class="lede">The problems that come up most, and what actually fixes them.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Work down the section that matches your symptom. If none of it helps, the last section<br>
+covers what to send us.</p>
+<h2>Text is not appearing at my cursor</h2>
+<p><strong>The transcript is on the clipboard instead.</strong> Accessibility permission is not<br>
+granted, or macOS has not noticed that it is. Grant it, then quit Zerm completely with<br>
+⌘Q and reopen — closing the window is not quitting. See<br>
+<a href="permissions.html">permissions</a>.</p>
+<p><strong>It works in some apps and not others.</strong> A few applications reject synthetic<br>
+keystrokes. Turn on <strong>AppleScript paste</strong> in Settings, which uses a different insertion<br>
+path.</p>
+<p><strong>Text goes to the wrong place.</strong> Zerm pastes at whatever had focus when the recording<br>
+started. If you clicked elsewhere mid-recording, that is where it lands.</p>
+<p><strong>Nothing at all, and no error.</strong> Check whether the recording was cancelled — Escape<br>
+during a recording discards it silently by design.</p>
+<h2>Refined text is not replacing what was typed</h2>
+<p>Expected in Electron apps (Slack, VS Code, Cursor, Discord, Notion), in browser web<br>
+content, and in terminals. Those applications do not support the accessibility writes<br>
+that in-place replacement needs, so Zerm offers the refined text instead of changing<br>
+what you already have. This is documented behaviour, not a fault — see<br>
+<a href="output-modes.html">output modes</a>.</p>
+<p>If you want final text on the first paste in those apps, use <strong>Enhanced</strong> mode.</p>
+<h2>The recording stops while I am still talking</h2>
+<p>Auto-stop on silence is ending it. Two causes:</p>
+<ul>
+<li><strong>Your pauses are longer than the threshold.</strong> Increase the silence duration in<br>
+Settings.</li>
+<li><strong>Your microphone level is too low</strong> for the level threshold to register as speech.<br>
+Raise the input gain in System Settings → Sound, or test it in Zerm's microphone<br>
+test. See <a href="audio-input.html">audio input</a>.</li>
+</ul>
+<p>You can also turn auto-stop off entirely and stop recordings yourself.</p>
+<h2>Recording does not start</h2>
+<ul>
+<li><strong>Check the microphone permission</strong> in System Settings → Privacy &amp; Security →<br>
+Microphone.</li>
+<li><strong>Check the shortcut is still bound.</strong> Another app may have claimed the same key.<br>
+Try a different modifier.</li>
+<li><strong>If it is bound to Fn</strong>, note that Fn plus any other key cancels the trigger, which<br>
+is intentional so your function row keeps working.</li>
+<li><strong>Zerm ignores triggers while it is busy</strong> transcribing, enhancing, or speaking. Wait<br>
+for the current one to finish.</li>
+</ul>
+<h2>Enhancement is not running</h2>
+<p>Go through these in order:</p>
+<ol>
+<li>The <a href="output-modes.html">output mode</a> is <strong>Instant</strong>, which never calls a model.</li>
+<li>The transcript was at or under the <strong>skip-short-transcriptions</strong> threshold — three<br>
+words by default.</li>
+<li>No provider is configured, or its API key stopped validating. Zerm switches<br>
+enhancement off when a key fails rather than erroring on every recording.</li>
+<li>The active <a href="power-mode.html">Power Mode</a> has enhancement switched off for this app<br>
+or website.</li>
+</ol>
+<h2>Enhancement is slow, or times out</h2>
+<p>Raise the <strong>timeout duration</strong> in enhancement settings — 15 seconds is the default and a<br>
+large cloud model on a slow connection can need more. Set <strong>On timeout</strong> to <em>Retry</em>.</p>
+<p>A timeout never costs you the words: you get the raw transcript.</p>
+<p>For consistently low latency, use the on-device provider or a small hosted model.</p>
+<h2>Power Mode is not switching</h2>
+<p><strong>Application triggers</strong> match on bundle identifier, exactly. A different build of the<br>
+same app is a different identifier — remove and re-add it from the app picker.</p>
+<p><strong>Website triggers</strong> need Automation permission for that specific browser. macOS asks<br>
+once per browser; if you declined, re-enable Zerm under System Settings → Privacy &amp;<br>
+Security → Automation.</p>
+<p><strong>Matching is a substring match on a cleaned URL</strong>, which catches more than people<br>
+expect. A short trigger like <code class="notranslate">mail</code> matches a great many pages. See<br>
+<a href="power-mode.html">Power Mode</a>.</p>
+<p><strong>Order matters.</strong> The first enabled mode that matches wins. Move the specific mode<br>
+above the general one.</p>
+<h2>Transcription accuracy is poor</h2>
+<ul>
+<li><strong>Use a larger model.</strong> Large v3 Turbo (Quantized) is the best accuracy-per-megabyte<br>
+in the list. See <a href="models.html">models</a>.</li>
+<li><strong>Set the language explicitly</strong> if you always dictate the same one. Automatic<br>
+detection occasionally guesses wrong on short recordings.</li>
+<li><strong>Add the words it gets wrong</strong> to your <a href="dictionary.html">dictionary</a>.</li>
+<li><strong>Check your microphone</strong>, not the model. A laptop mic across a room is the usual<br>
+culprit.</li>
+<li><strong>Try turning echo cancellation off</strong> if you enabled it. It changes the audio<br>
+character and can cost accuracy in a quiet room.</li>
+</ul>
+<h2>Local models will not run</h2>
+<p>On <strong>Intel Macs</strong>, local models do not run reliably and Zerm says so. Use Apple Speech<br>
+or a cloud provider.</p>
+<p>Apple Speech requires <strong>macOS 26</strong>.</p>
+<p>If a model download failed partway, delete it and download again.</p>
+<h2>Read Aloud says nothing</h2>
+<ul>
+<li>The <strong>Read Aloud hotkey is unset by default.</strong> Assign one.</li>
+<li>Reading the selection needs <strong>Accessibility permission</strong>.</li>
+<li>A cloud voice needs a valid API key; the bundled Kokoro voice needs its model<br>
+downloaded.</li>
+</ul>
+<p>See <a href="read-aloud.html">read aloud</a>.</p>
+<h2>History is empty, or emptier than expected</h2>
+<p>Transcript auto-delete is probably on. With the retention period at zero, each<br>
+transcript is deleted the moment it completes.</p>
+<p>Audio auto-delete is a <strong>different setting</strong> and removes only the audio, keeping the<br>
+text. See <a href="privacy-retention.html">privacy and retention</a>.</p>
+<h2>My statistics changed unexpectedly</h2>
+<p>Usage statistics live in their own store and are not affected by deleting transcripts.<br>
+If your totals moved, it was not history cleanup.</p>
+<p>Two things do change them. <strong>Reset Statistics</strong> in Privacy settings clears them<br>
+permanently, and it cannot be undone. And the upgrade to this version backfills your<br>
+history from the transcripts that still exist — if earlier retention had already deleted<br>
+them, those sessions cannot be counted retrospectively.</p>
+<p>If your statistics are empty after a reset, that is final: keeping transcripts will not<br>
+bring them back. See <a href="privacy-retention.html">privacy and retention</a>.</p>
+<h2>Reporting something else</h2>
+<p>Enable <strong>debug logging</strong> in Settings, reproduce the problem, then export the logs. Open<br>
+an issue at <a href="https://github.com/arcusis/Zerm/issues" rel="noopener noreferrer" target="_blank">github.com/arcusis/Zerm/issues</a><br>
+with:</p>
+<ul>
+<li>What you did, what you expected, and what happened instead.</li>
+<li>Your macOS version and Mac model.</li>
+<li>The model and provider you were using.</li>
+<li>The exported log, and a short screen recording if the problem is visual.</li>
+</ul>
+<p>A screen recording is worth more than any description. Please check the logs for<br>
+anything you would rather not share before attaching them.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

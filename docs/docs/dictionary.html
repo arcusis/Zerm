@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Dictionary — Zerm</title>
+    <meta name="description" content="Teach Zerm the names, products and jargon that transcription models reliably get wrong." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Dictionary — Zerm" />
+    <meta property="og:description" content="Teach Zerm the names, products and jargon that transcription models reliably get wrong." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Accuracy</p>
+        <h1>Dictionary</h1>
+        <p class="lede">Teach Zerm the names, products and jargon that transcription models reliably get wrong.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Every speech model mishears the same category of word: proper nouns, product names,<br>
+internal jargon, and anything spelled unusually. The dictionary is where you fix that<br>
+once instead of every time.</p>
+<p>It has two halves that work in completely different ways, and picking the right one<br>
+matters.</p>
+<p><img src="img/dictionary.png" alt="The dictionary" style="max-width: 100%;"></p>
+<h2>Vocabulary — spelling guidance</h2>
+<p>A vocabulary entry is a word you tell Zerm to expect. The list is passed to the model as<br>
+guidance: when these words, or words that sound like them, appear in your speech, spell<br>
+them exactly this way.</p>
+<p>Use it for names and terms whose <em>spelling</em> is the problem — colleagues' names, product<br>
+names, libraries, medical or legal terms.</p>
+<p>Vocabulary is guidance, not a rule. It shifts the odds; it does not guarantee. It is<br>
+also only consulted where the pipeline can use it, which means it helps most when<br>
+<a href="enhancement.html">enhancement</a> is running.</p>
+<p>Add several at once by separating them with commas. Duplicates are rejected rather than<br>
+silently added twice.</p>
+<h2>Word replacement — an exact rule</h2>
+<p>A replacement is a find-and-replace applied to the finished transcript, locally, before<br>
+the text reaches your cursor. It always fires, on every recording, in every output mode.</p>
+<p>Use it when you know exactly what comes out and exactly what you want instead:</p>
+<table role="table">
+<thead>
+<tr>
+<th>You say</th>
+<th>You get</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"my website link"</td>
+<td><code class="notranslate">https://arcusis.github.io/Zerm/</code></td>
+</tr>
+<tr>
+<td>"Voicing" or "Voice ink"</td>
+<td><code class="notranslate">Zerm</code></td>
+</tr>
+<tr>
+<td>"em dash"</td>
+<td><code class="notranslate">—</code></td>
+</tr>
+</tbody>
+</table>
+<h3>How matching works</h3>
+<ul>
+<li><strong>Case-insensitive.</strong> "zerm", "Zerm", and "ZERM" all match.</li>
+<li><strong>Whole words.</strong> Matches respect word boundaries, with punctuation counting as a<br>
+boundary, so a replacement for "ink" does not corrupt "thinking". For scripts that do<br>
+not space words, Zerm falls back to plain substring matching.</li>
+<li><strong>Longest first.</strong> When several rules could apply, the longest original is tried<br>
+first, so a specific phrase beats a shorter overlapping one.</li>
+<li><strong>Several originals, one replacement.</strong> Separate the originals with commas — every<br>
+variant maps to the same output. This is how you catch the four ways a model spells<br>
+one name.</li>
+</ul>
+<p>Each rule can be switched off without deleting it.</p>
+<h2>Which one to use</h2>
+<table role="table">
+<thead>
+<tr>
+<th></th>
+<th>Vocabulary</th>
+<th>Word replacement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What it does</td>
+<td>tells the model what to expect</td>
+<td>rewrites the finished text</td>
+</tr>
+<tr>
+<td>Certainty</td>
+<td>improves the odds</td>
+<td>always applies</td>
+</tr>
+<tr>
+<td>Needs enhancement</td>
+<td>mostly</td>
+<td>no</td>
+</tr>
+<tr>
+<td>Good for</td>
+<td>names, jargon, unusual spellings</td>
+<td>fixed phrases, expansions, known mistakes</td>
+</tr>
+</tbody>
+</table>
+<p>If the model already produces something recognisable and you just want it spelled<br>
+differently, use a replacement. If the model is producing nonsense because it has never<br>
+heard the word, use vocabulary.</p>
+<h2>Quick add</h2>
+<p>There is a global shortcut for adding to the dictionary without opening the app — for<br>
+the moment you notice a mistake, rather than the moment you remember to fix it. See<br>
+<a href="shortcuts.html">shortcuts</a>.</p>
+<h2>Import and export</h2>
+<p>The dictionary can be exported and imported, so it moves with you between Macs.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

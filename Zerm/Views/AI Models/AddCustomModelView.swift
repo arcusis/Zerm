@@ -102,7 +102,12 @@ struct AddCustomModelCardView: View {
                         FormField(title: "API Key", text: $apiKey, placeholder: "your-api-key", isSecure: true)
                         FormField(title: "Model Name", text: $modelName, placeholder: "whisper-1")
                         
-                        Toggle("Multilingual Model", isOn: $isMultilingual)
+                        Toggle(isOn: $isMultilingual) {
+                            HStack(spacing: 4) {
+                                Text("Multilingual Model")
+                                InfoTip("Turn on if this endpoint transcribes languages other than English. It only controls whether Zerm offers you a language picker for the model — leave it off for English-only endpoints so the choice is not presented.")
+                            }
+                        }
                     }
                     
                     // Action buttons

@@ -22,7 +22,7 @@ struct EmailSupport {
 
 
         ## 📋 COMMON ISSUES:
-        Check out our Common Issues page before sending an email: https://tryzerm.com/common-issues
+        Check out our Common Issues page before sending an email: \(Links.docString(.commonIssues))
         ------------------------
 
         System Information:
@@ -31,10 +31,16 @@ struct EmailSupport {
 
         """
         
-        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        
-        return URL(string: "mailto:prakashjoshipax@gmail.com?subject=\(encodedSubject)&body=\(encodedBody)")
+        // This used to open a mail draft addressed to the upstream VoiceInk maintainer's
+        // personal address, so every Zerm support report — including the attached system
+        // information — was being sent to an unrelated person. Zerm's actual support
+        // channel is its issue tracker.
+        var components = URLComponents(string: "https://github.com/arcusis/Zerm/issues/new")
+        components?.queryItems = [
+            URLQueryItem(name: "title", value: subject),
+            URLQueryItem(name: "body", value: body)
+        ]
+        return components?.url ?? Links.issues
     }
     
     @MainActor

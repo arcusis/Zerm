@@ -3,18 +3,22 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.6.1</title>
+            <title>2.7.0</title>
             <description><![CDATA[
-                <h3>What's New in v2.6.1</h3>
+                <h3>What's New in v2.7.0</h3>
                 <ul>
-                    <li>Maintenance and stability improvements.</li>
+                    <li>Dashboard statistics are now stored separately from your transcripts, so deleting history no longer resets them. Existing history is imported once.</li>
+                    <li>AI enhancement works again. It runs after the paste instead of before it, so dictation stays instant.</li>
+                    <li>New output modes: Instant, Instant + Refine, and Enhanced.</li>
+                    <li>Every setting now explains itself, with a full documentation site behind the info icons.</li>
+                    <li>Fixed: an unset retention period could delete your entire transcript history at launch.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 27 Jul 2026 11:46:13 +0000</pubDate>
-            <sparkle:version>261</sparkle:version>
-            <sparkle:shortVersionString>2.6.1</sparkle:shortVersionString>
+            <pubDate>Wed, 29 Jul 2026 13:49:26 +0000</pubDate>
+            <sparkle:version>270</sparkle:version>
+            <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.6.1/Zerm-2.6.1-macos.zip" length="23756686" type="application/octet-stream" sparkle:edSignature="y7Gpuy6V7qMtrDf1MmrWvTt+zFo4/h1Zb/X7xygOwCBXj8M8ZDJrfLvykvebACAXwRgDv8eJlFewD7KNsnSCBA=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.7.0/Zerm-2.7.0-macos.zip" length="23991191" type="application/octet-stream" sparkle:edSignature="c46MCgOCarhzLNVKStjU8zFoZOT/i4vx84G146AQvjjlUHP3Nd9OMv0YDNZHten84J3r97ml90uzv0x9/Be5AA=="/>
         </item>
     </channel>
 </rss>

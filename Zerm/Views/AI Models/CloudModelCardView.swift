@@ -81,15 +81,22 @@ struct CloudModelCardView: View {
     }
     
     private var streamingModeBadge: some View {
-        Toggle("Real-time", isOn: $streamingEnabled)
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundColor(Color(.secondaryLabelColor))
-            .onChange(of: streamingEnabled) { _, newValue in
-                UserDefaults.standard.set(newValue, forKey: streamingDefaultsKey)
-            }
-            .help(streamingEnabled ? "Live streaming enabled — click to switch to batch" : "Batch mode — click to enable live streaming")
+        HStack(spacing: 2) {
+            Toggle("Real-time", isOn: $streamingEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Color(.secondaryLabelColor))
+                .onChange(of: streamingEnabled) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: streamingDefaultsKey)
+                }
+                .help(streamingEnabled ? "Live streaming enabled — click to switch to batch" : "Batch mode — click to enable live streaming")
+
+            InfoTip(
+                "On, words are sent as you speak and appear in the recorder live, so the transcript is ready the moment you stop. Off, the whole recording is uploaded once you finish, which is usually a little more accurate on long or noisy audio.",
+                doc: .models
+            )
+        }
     }
 
     private var metadataSection: some View {

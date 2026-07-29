@@ -62,6 +62,11 @@ struct VocabularyView: View {
                     .font(.system(size: 13))
                     .onSubmit { addWords() }
 
+                InfoTip(
+                    "Names, jargon and product names the model keeps mishearing — add them here and they are passed along as context so it knows to expect them. Separate several with commas. This only takes effect with AI enhancement on; for a guaranteed fix regardless, use a Word Replacement instead.",
+                    doc: .dictionary
+                )
+
                 if shouldShowAddButton {
                     Button(action: addWords) {
                         Image(systemName: "plus.circle.fill")

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Custom local models — Zerm</title>
+    <meta name="description" content="Import your own fine-tuned Whisper model and use it exactly like a bundled one." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Custom local models — Zerm" />
+    <meta property="og:description" content="Import your own fine-tuned Whisper model and use it exactly like a bundled one." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Advanced</p>
+        <h1>Custom local models</h1>
+        <p class="lede">Import your own fine-tuned Whisper model and use it exactly like a bundled one.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>If you have a Whisper model that fits your work better than the standard ones — a<br>
+fine-tune on your domain's vocabulary, your accent, or a language the general models<br>
+handle poorly — you can import it and Zerm will treat it as a first-class local model.</p>
+<p><img src="img/custom-local-whisper-models.png" alt="Importing a local model" style="max-width: 100%;"></p>
+<h2>What Zerm accepts</h2>
+<p>A <strong><code class="notranslate">.bin</code> file in <code class="notranslate">ggml</code> format</strong>, the format <code class="notranslate">whisper.cpp</code> uses. That is the same<br>
+format as the models Zerm downloads for you.</p>
+<p>If your model is in a different format — a PyTorch checkpoint, safetensors, a Hugging<br>
+Face repository — convert it to <code class="notranslate">ggml</code> first with the conversion scripts in the<br>
+<code class="notranslate">whisper.cpp</code> project. Zerm does not convert anything.</p>
+<p>Quantised <code class="notranslate">ggml</code> models work and are usually the better choice: much smaller, with a<br>
+small accuracy cost.</p>
+<h2>Importing</h2>
+<ol>
+<li>Open <strong>AI Models</strong> and choose the <strong>Local</strong> filter.</li>
+<li>Scroll to the end of the list and select <strong>Import Local Model…</strong></li>
+<li>Choose your <code class="notranslate">.bin</code> file.</li>
+</ol>
+<p>The model is copied into Zerm's model directory and appears in the list next to the<br>
+bundled ones. Select it like any other model, set it as default, or pin it to a<br>
+<a href="power-mode.html">Power Mode</a>.</p>
+<p>Delete it from the same list. That removes Zerm's copy; your original file is untouched.</p>
+<h2>What to expect</h2>
+<p><strong>It runs locally.</strong> Same as any bundled model — no key, no network, Metal acceleration<br>
+on Apple Silicon.</p>
+<p><strong>Everything downstream is identical.</strong> Filler-word removal,<br>
+<a href="dictionary.html">dictionary</a> replacements, formatting, and<br>
+<a href="enhancement.html">enhancement</a> all behave the same. The only thing that changes is<br>
+what produces the first draft.</p>
+<p><strong>Language support comes from the model.</strong> Zerm cannot know what your fine-tune covers,<br>
+so it does not restrict the language picker. Choose a language the model actually<br>
+handles, or leave it automatic.</p>
+<p><strong>Size and memory are on you.</strong> The warnings Zerm shows for bundled models are based on<br>
+published sizes it knows in advance. An imported model of the same footprint has the<br>
+same requirements; a very large one will be slow or will not load.</p>
+<h2>If it does not work</h2>
+<ul>
+<li><strong>The file is rejected.</strong> It is not <code class="notranslate">ggml</code>. Convert it.</li>
+<li><strong>It loads but produces nonsense.</strong> Usually a language mismatch, or a model trained<br>
+for a task other than transcription.</li>
+<li><strong>It is much slower than a bundled model of similar size.</strong> Check whether it is<br>
+quantised. An unquantised model is several times the size and correspondingly slower.</li>
+</ul>
+<h2>Custom cloud models are separate</h2>
+<p>This page is about local files. To point Zerm at a hosted transcription API, use the<br>
+<strong>Custom</strong> filter in AI Models instead — that path accepts any OpenAI-compatible<br>
+transcription endpoint. See <a href="models.html">models</a>.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

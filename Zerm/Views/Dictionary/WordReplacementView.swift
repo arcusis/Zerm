@@ -93,6 +93,11 @@ struct WordReplacementView: View {
                     .font(.system(size: 13))
                     .onSubmit { addReplacement() }
 
+                InfoTip(
+                    "Every transcript is scanned for the original text and the replacement is swapped in before pasting. Use it for spellings the model always gets wrong, or as an expander — say \"my email\" and have your address typed out. Comma-separate several originals to map them all to the same replacement.",
+                    doc: .dictionary
+                )
+
                 if shouldShowAddButton {
                     Button(action: addReplacement) {
                         Image(systemName: "plus.circle.fill")
@@ -255,7 +260,7 @@ struct WordReplacementInfoPopover: View {
                         Text("Replacement:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("https://tryzerm.com")
+                        Text("https://arcusis.github.io/Zerm/")
                             .font(.callout)
                     }
                 }

@@ -13,6 +13,13 @@ class TranscriptionAutoCleanupService {
 
     private let defaultRetentionMinutes: Int = 24 * 60
 
+    /// An unset key must not read as 0: `integer(forKey:)` returns 0 for a missing value,
+    /// which reads as "Immediately" and wiped the entire history. An explicit 0 is the
+    /// user actually picking "Immediately" and is honoured.
+    private var retentionMinutes: Int {
+        (UserDefaults.standard.object(forKey: keyRetentionMinutes) as? Int) ?? defaultRetentionMinutes
+    }
+
     private var recordingsDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("com.arcusis.zerm")
@@ -52,8 +59,7 @@ class TranscriptionAutoCleanupService {
         let isEnabled = UserDefaults.standard.bool(forKey: keyIsEnabled)
         guard isEnabled else { return }
 
-        let minutes = UserDefaults.standard.integer(forKey: keyRetentionMinutes)
-        if minutes > 0 {
+        if retentionMinutes > 0 {
             if let modelContext = self.modelContext {
                 Task { [weak self] in
                     guard let self = self else { return }
@@ -93,7 +99,6 @@ class TranscriptionAutoCleanupService {
             return
         }
 
-        let retentionMinutes = UserDefaults.standard.integer(forKey: keyRetentionMinutes)
         let effectiveMinutes = max(retentionMinutes, 0)
 
         let cutoffDate = Date().addingTimeInterval(TimeInterval(-effectiveMinutes * 60))

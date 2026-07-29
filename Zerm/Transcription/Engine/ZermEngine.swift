@@ -273,20 +273,29 @@ class ZermEngine: NSObject, ObservableObject {
                                     if let enhancementService = await self.enhancementService {
                                         let captureSettings = await MainActor.run {
                                             (
-                                                instant: UserDefaults.standard.bool(forKey: "InstantTranscriptionMode"),
+                                                mode: DictationOutputMode.current,
                                                 enabled: enhancementService.isEnhancementEnabled,
                                                 clipboard: enhancementService.useClipboardContext,
                                                 screen: enhancementService.useScreenCaptureContext
                                             )
                                         }
 
-                                        if !captureSettings.instant && captureSettings.enabled {
+                                        // Refine has a few seconds in total, so the on-device model must
+                                        // already be resident by the time transcription finishes — a cold
+                                        // Gemma load alone would exhaust the whole budget.
+                                        if captureSettings.mode == .instantRefine, captureSettings.enabled {
+                                            await LocalLLMModelManager.shared.prewarm()
+                                        }
+
+                                        if captureSettings.mode.usesEnhancement && captureSettings.enabled {
                                             if captureSettings.clipboard {
                                                 await MainActor.run {
                                                     enhancementService.captureClipboardContext()
                                                 }
                                             }
-                                            if captureSettings.screen {
+                                            // Screen capture is only affordable when the paste waits for
+                                            // the result anyway.
+                                            if captureSettings.screen, captureSettings.mode == .enhanced {
                                                 await enhancementService.captureScreenContext()
                                             }
                                         } else {
@@ -542,6 +551,12 @@ class ZermEngine: NSObject, ObservableObject {
         currentSession = nil
         let runToken = pipelineRunToken
 
+        // Refine and Read Aloud queue on the same on-device model actor. Read Aloud is
+        // something the user just asked for; a refine is speculative, so it gives way.
+        RefineInPlaceCoordinator.shared.shouldYield = { [weak self] in
+            self?.recorderUIManager?.isReadAloudActive ?? false
+        }
+
         await pipeline.run(
             transcription: transcription,
             audioURL: audioURL,
@@ -597,6 +612,9 @@ class ZermEngine: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(self.whisperIdleUnloadSeconds * 1_000_000_000))
             guard !Task.isCancelled else { return }
             guard self.recordingState == .idle else { return }
+            // A refine runs after the recorder has gone back to idle, so the state check
+            // above does not cover it.
+            guard !RefineInPlaceCoordinator.shared.isRefining else { return }
             // Gemma is only needed for opt-in enhancement / Read Aloud rewrites, so dropping
             // it after an idle spell is cheap. Whisper is the hot path — it stays resident and
             // is released only under real memory pressure (see startMemoryPressureMonitor).

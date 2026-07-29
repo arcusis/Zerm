@@ -111,7 +111,8 @@ class AudioTranscriptionService: ObservableObject {
                         aiRequestSystemMessage: enhancementService.lastSystemMessageSent,
                         aiRequestUserMessage: enhancementService.lastUserMessageSent,
                         powerModeName: powerModeName,
-                        powerModeEmoji: powerModeEmoji
+                        powerModeEmoji: powerModeEmoji,
+                        transcriptionStatus: .completed
                     )
                     modelContext.insert(newTranscription)
                     do {
@@ -121,6 +122,7 @@ class AudioTranscriptionService: ObservableObject {
                     } catch {
                         logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
                     }
+                    UsageStatsService.shared.record(newTranscription)
 
                     // Restore original prompt settings if AI was temporarily enabled
                     if let result = promptDetectionResult,
@@ -142,7 +144,10 @@ class AudioTranscriptionService: ObservableObject {
                         promptName: nil,
                         transcriptionDuration: transcriptionDuration,
                         powerModeName: powerModeName,
-                        powerModeEmoji: powerModeEmoji
+                        powerModeEmoji: powerModeEmoji,
+                        // The transcription itself succeeded — only the optional enhancement
+                        // failed — so the record is complete and belongs in the metrics.
+                        transcriptionStatus: .completed
                     )
                     modelContext.insert(newTranscription)
                     do {
@@ -152,6 +157,7 @@ class AudioTranscriptionService: ObservableObject {
                     } catch {
                         logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
                     }
+                    UsageStatsService.shared.record(newTranscription)
 
                     await MainActor.run {
                         isTranscribing = false
@@ -168,7 +174,8 @@ class AudioTranscriptionService: ObservableObject {
                     promptName: nil,
                     transcriptionDuration: transcriptionDuration,
                     powerModeName: powerModeName,
-                    powerModeEmoji: powerModeEmoji
+                    powerModeEmoji: powerModeEmoji,
+                    transcriptionStatus: .completed
                 )
                 modelContext.insert(newTranscription)
                 do {
@@ -177,6 +184,7 @@ class AudioTranscriptionService: ObservableObject {
                 } catch {
                     logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
                 }
+                UsageStatsService.shared.record(newTranscription)
 
                 await MainActor.run {
                     isTranscribing = false

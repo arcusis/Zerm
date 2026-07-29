@@ -51,6 +51,7 @@ enum AppDefaults {
             "middleClickActivationDelay": 200,
 
             // Enhancement
+            DictationOutputMode.storageKey: DictationOutputMode.instant.rawValue,
             "InstantTranscriptionMode": true,
             "AllowPromptTriggeredEnhancement": false,
             "isAIEnhancementEnabled": false,
@@ -58,8 +59,11 @@ enum AppDefaults {
             "useScreenCaptureContext": false,
             "SkipShortEnhancement": true,
             "ShortEnhancementWordThreshold": 3,
-            "EnhancementTimeoutSeconds": 2,
-            "EnhancementRetryOnTimeout": false,
+            // Applies to Enhanced mode, where the user is waiting on the result. Refine
+            // runs after the paste and uses its own, much shorter budget — see
+            // AIEnhancementService.timeout(for:).
+            "EnhancementTimeoutSeconds": 15,
+            "EnhancementRetryOnTimeout": true,
 
             // Model
             "PrewarmModelOnWake": true,
@@ -104,6 +108,28 @@ enum AppDefaults {
                 defaults.set(14, forKey: "AudioRetentionPeriod")
             }
             defaults.set(3, forKey: "ZermFastDefaultsVersion")
+        }
+
+        // Fold the hidden InstantTranscriptionMode flag into an explicit output mode, and
+        // undo the 2-second enhancement timeout the v1 block forced on everyone. Two
+        // seconds is shorter than almost any LLM round-trip, so Enhanced mode timed out
+        // and silently pasted the raw transcript — one of the reasons enhancement looked
+        // switched off while its toggle read ON.
+        if defaults.integer(forKey: "ZermFastDefaultsVersion") < 4 {
+            if defaults.string(forKey: DictationOutputMode.storageKey) == nil {
+                let wasInstant = defaults.object(forKey: "InstantTranscriptionMode") as? Bool ?? true
+                defaults.set(
+                    (wasInstant ? DictationOutputMode.instant : .enhanced).rawValue,
+                    forKey: DictationOutputMode.storageKey
+                )
+            }
+            // Only raise the timeout where it is still the value v1 forced, so a user who
+            // deliberately chose a short timeout keeps it.
+            if defaults.integer(forKey: "EnhancementTimeoutSeconds") == 2 {
+                defaults.set(15, forKey: "EnhancementTimeoutSeconds")
+                defaults.set(true, forKey: "EnhancementRetryOnTimeout")
+            }
+            defaults.set(4, forKey: "ZermFastDefaultsVersion")
         }
 
         PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()

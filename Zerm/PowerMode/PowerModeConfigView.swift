@@ -15,6 +15,7 @@ struct ConfigurationView: View {
     @State private var isShowingEmojiPicker = false
     @State private var isShowingAppPicker = false
     @State private var isAIEnhancementEnabled: Bool
+    @State private var enhancementOverride: PowerModeEnhancementOverride = .inherit
     @State private var selectedPromptId: UUID?
     @State private var selectedTranscriptionModelName: String?
     @State private var selectedLanguage: String?
@@ -64,6 +65,7 @@ struct ConfigurationView: View {
             let newId = UUID()
             _powerModeConfigId = State(initialValue: newId)
             _isAIEnhancementEnabled = State(initialValue: false)
+            _enhancementOverride = State(initialValue: .inherit)
             _selectedPromptId = State(initialValue: nil)
             _selectedTranscriptionModelName = State(initialValue: nil)
             _selectedLanguage = State(initialValue: nil)
@@ -80,6 +82,7 @@ struct ConfigurationView: View {
             let latestConfig = powerModeManager.getConfiguration(with: config.id) ?? config
             _powerModeConfigId = State(initialValue: latestConfig.id)
             _isAIEnhancementEnabled = State(initialValue: latestConfig.isAIEnhancementEnabled)
+            _enhancementOverride = State(initialValue: latestConfig.enhancementOverride)
             _selectedPromptId = State(initialValue: latestConfig.selectedPrompt.flatMap { UUID(uuidString: $0) })
             _selectedTranscriptionModelName = State(initialValue: latestConfig.selectedTranscriptionModelName)
             _selectedLanguage = State(initialValue: latestConfig.selectedLanguage)
@@ -154,6 +157,10 @@ struct ConfigurationView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("Applications")
+                            InfoTip(
+                                "This mode switches on whenever one of these apps is the one you are working in. Apps are matched exactly, so adding Mail here has no effect while you are in a browser reading webmail — use a website trigger for that.",
+                                doc: .powerMode
+                            )
                             Spacer()
                             AddIconButton(helpText: "Add application") {
                                 loadInstalledApps()
@@ -212,7 +219,13 @@ struct ConfigurationView: View {
                     .padding(.vertical, 2)
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Websites")
+                        HStack {
+                            Text("Websites")
+                            InfoTip(
+                                "Matching is a substring test, not an exact one. Both the address you are on and the entry you type here are lowercased and stripped of \"https://\", \"http://\" and \"www.\" first, then Zerm checks whether the address contains your entry. So \"github.com\" matches every page on the site, and \"github.com/arcusis\" narrows it to one account. The first time this runs, macOS asks to let Zerm control your browser — that is how it reads the current address.",
+                                doc: .powerMode
+                            )
+                        }
 
                         HStack {
                             TextField("Enter website URL", text: $newWebsiteURL)
@@ -269,9 +282,17 @@ struct ConfigurationView: View {
                             set: { selectedTranscriptionModelName = $0 }
                         )
 
-                        Picker("Model", selection: modelBinding) {
+                        Picker(selection: modelBinding) {
                             ForEach(transcriptionModelManager.usableModels, id: \.name) { model in
                                 Text(model.displayName).tag(model.name as String?)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Model")
+                                InfoTip(
+                                    "The transcription model used while this mode is active, overriding your usual one. Worth setting when an app calls for something different — a larger model for accuracy in long-form writing, a fast local one for quick chat replies.",
+                                    doc: .models
+                                )
                             }
                         }
                         .onChange(of: selectedTranscriptionModelName) { _, newModelName in
@@ -285,9 +306,14 @@ struct ConfigurationView: View {
                     }
 
                     if languageSelectionDisabled() {
-                        LabeledContent("Language") {
+                        LabeledContent {
                             Text("Autodetected")
                                 .foregroundColor(.secondary)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Language")
+                                InfoTip("The model above works out the language on its own, so there is nothing to choose here. Switch to a different model if you need to pin one language.")
+                            }
                         }
                         .onAppear {
                             selectedLanguage = "auto"
@@ -300,13 +326,18 @@ struct ConfigurationView: View {
                             set: { selectedLanguage = $0 }
                         )
 
-                        Picker("Language", selection: languageBinding) {
+                        Picker(selection: languageBinding) {
                             ForEach(modelInfo.supportedLanguages.sorted(by: {
                                 if $0.key == "auto" { return true }
                                 if $1.key == "auto" { return false }
                                 return $0.value < $1.value
                             }), id: \.key) { key, value in
                                 Text(value).tag(key as String?)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Language")
+                                InfoTip("The language you will be speaking while this mode is active. Naming it explicitly is more accurate than Auto-detect, which is the point of setting it per mode — say, German in your work chat and English everywhere else.")
                             }
                         }
                     } else if let selectedModel = effectiveModelName,
@@ -322,8 +353,24 @@ struct ConfigurationView: View {
                 }
 
                 Section("AI Enhancement") {
-                    Toggle("AI Enhancement", isOn: $isAIEnhancementEnabled)
-                        .onChange(of: isAIEnhancementEnabled) { _, newValue in
+                    Picker(selection: $enhancementOverride) {
+                        ForEach(PowerModeEnhancementOverride.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("AI Enhancement")
+                            InfoTip(
+                                "Choose whether this Power Mode changes AI enhancement at all. \"Use global setting\" leaves your Enhancement setting exactly as it is — pick that unless this app specifically needs enhancement forced on or off.",
+                                learnMoreURL: Links.docString(.powerMode)
+                            )
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: enhancementOverride) { _, newValue in
+                        isAIEnhancementEnabled = (newValue == .on)
+                    }
+                    .onChange(of: isAIEnhancementEnabled) { _, newValue in
                             if newValue {
                                 if selectedAIProvider == nil {
                                     selectedAIProvider = aiService.selectedProvider.rawValue
@@ -351,7 +398,9 @@ struct ConfigurationView: View {
                         }
                     )
 
-                    if isAIEnhancementEnabled {
+                    // Shown for "inherit" too: those settings still apply whenever the
+                    // global switch has enhancement on.
+                    if enhancementOverride != .off {
                         if aiService.connectedProviders.isEmpty {
                             LabeledContent("AI Provider") {
                                 Text("No providers connected")
@@ -359,9 +408,14 @@ struct ConfigurationView: View {
                                     .italic()
                             }
                         } else {
-                            Picker("AI Provider", selection: providerBinding) {
+                            Picker(selection: providerBinding) {
                                 ForEach(aiService.connectedProviders.filter { $0 != .elevenLabs && $0 != .deepgram }, id: \.self) { provider in
                                     Text(provider.rawValue).tag(provider)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("AI Provider")
+                                    InfoTip("Which connected service enhances transcripts in this mode. Handy for keeping work text on a local provider while using a cloud one elsewhere. Only providers you have already connected appear here.")
                                 }
                             }
                             .onChange(of: selectedAIProvider) { _, newValue in
@@ -392,9 +446,14 @@ struct ConfigurationView: View {
                                     }
                                 )
 
-                                Picker("AI Model", selection: modelBinding) {
+                                Picker(selection: modelBinding) {
                                     ForEach(models, id: \.self) { model in
                                         Text(model).tag(model)
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text("AI Model")
+                                        InfoTip("The specific model from that provider. Smaller models return faster and cost less, which suits quick messages; larger ones handle long or carefully worded text better.")
                                     }
                                 }
 
@@ -413,14 +472,30 @@ struct ConfigurationView: View {
                                     .foregroundColor(.secondary)
                             }
                         } else {
-                            Picker("Enhancement Prompt", selection: $selectedPromptId) {
+                            Picker(selection: $selectedPromptId) {
                                 ForEach(enhancementService.allPrompts) { prompt in
                                     Text(prompt.title).tag(prompt.id as UUID?)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("Enhancement Prompt")
+                                    InfoTip(
+                                        "The instructions the AI follows in this mode — this is what makes a Power Mode feel tailored. Pick your email prompt for the mail app, a terse one for chat, a note-taking one for your editor.",
+                                        doc: .enhancement
+                                    )
                                 }
                             }
                         }
 
-                        Toggle("Context Awareness", isOn: $useScreenCapture)
+                        Toggle(isOn: $useScreenCapture) {
+                            HStack(spacing: 4) {
+                                Text("Context Awareness")
+                                InfoTip(
+                                    "Reads the text visible on screen and passes it to the AI along with your transcript, so replies can pick up names and details from what you are looking at. Needs Screen Recording permission, and means on-screen text is sent to your enhancement provider.",
+                                    doc: .contextualAwareness
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -552,6 +627,7 @@ struct ConfigurationView: View {
                 appConfigs: selectedAppConfigs.isEmpty ? nil : selectedAppConfigs,
                 urlConfigs: websiteConfigs.isEmpty ? nil : websiteConfigs,
                 isAIEnhancementEnabled: isAIEnhancementEnabled,
+                enhancementOverride: enhancementOverride,
                 selectedPrompt: selectedPromptId?.uuidString,
                 selectedTranscriptionModelName: selectedTranscriptionModelName,
                 selectedLanguage: selectedLanguage,
@@ -567,6 +643,7 @@ struct ConfigurationView: View {
             updatedConfig.name = configName
             updatedConfig.emoji = selectedEmoji
             updatedConfig.isAIEnhancementEnabled = isAIEnhancementEnabled
+            updatedConfig.enhancementOverride = enhancementOverride
             updatedConfig.selectedPrompt = selectedPromptId?.uuidString
             updatedConfig.selectedTranscriptionModelName = selectedTranscriptionModelName
             updatedConfig.selectedLanguage = selectedLanguage

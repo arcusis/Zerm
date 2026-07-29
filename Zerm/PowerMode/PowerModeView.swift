@@ -80,12 +80,12 @@ struct PowerModeView: View {
                                     .foregroundColor(.primary)
                                 
                                 InfoTip(
-                                    "Automatically apply custom configurations based on the app/website you are using.",
-                                    learnMoreURL: "https://tryzerm.com/docs/power-mode"
+                                    "A Power Mode is a set of dictation settings — model, language, enhancement prompt, auto-send key — that switches itself on when you are in a particular app or on a particular website. Zerm checks the frontmost app first, then the browser's current address, and applies the first mode that matches. If none does, the mode marked as default is used.",
+                                    doc: .powerMode
                                 )
                             }
-                            
-                            Text("Automate your workflows with context-aware configurations.")
+
+                            Text("Different settings for different apps, applied automatically as you move between them.")
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
                         }
@@ -128,6 +128,11 @@ struct PowerModeView: View {
                                 )
                             }
                             .buttonStyle(PlainButtonStyle())
+
+                            InfoTip(
+                                "Order decides which mode wins when more than one could match — the topmost match is applied. Put your most specific modes above the broader ones.",
+                                doc: .powerMode
+                            )
                         }
                     }
                 }
@@ -157,11 +162,12 @@ struct PowerModeView: View {
                                                         .font(.system(size: 20, weight: .medium))
                                                         .foregroundColor(.primary)
                                                     
-                                                    Text("Create first power mode to automate your Zerm workflow based on apps/website you are using")
+                                                    Text("Create one to have Zerm switch settings by itself — a formal prompt in your mail client, a code-friendly model in your editor, plain transcription everywhere else.")
                                                         .font(.system(size: 14))
                                                         .foregroundColor(.secondary)
                                                         .multilineTextAlignment(.center)
                                                         .lineSpacing(2)
+                                                        .frame(maxWidth: 420)
                                                 }
                                             }
                                             

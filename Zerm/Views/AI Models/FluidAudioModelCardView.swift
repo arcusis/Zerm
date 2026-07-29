@@ -67,6 +67,11 @@ struct FluidAudioModelCardView: View {
                         UserDefaults.standard.set(newValue, forKey: streamingDefaultsKey)
                     }
                     .help(streamingEnabled ? "Live streaming enabled — click to switch to batch" : "Batch mode — click to enable live streaming")
+
+                InfoTip(
+                    "On, the model transcribes as you speak and the text appears in the recorder live. Off, it waits for the full recording, which tends to read better on long dictations because it has the whole sentence to work with.",
+                    doc: .models
+                )
             }
 
             Spacer()

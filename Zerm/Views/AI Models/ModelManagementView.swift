@@ -106,9 +106,15 @@ struct ModelManagementView: View {
     
     private var defaultModelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Default Model")
-                .font(.headline)
-                .foregroundColor(.secondary)
+            HStack(spacing: 4) {
+                Text("Default Model")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                InfoTip(
+                    "The model that transcribes your speech unless a Power Mode says otherwise. Choose a different one with Set as Default on any card below.",
+                    doc: .models
+                )
+            }
             Text(transcriptionModelManager.currentTranscriptionModel?.displayName ?? "No model selected")
                 .font(.title2)
                 .fontWeight(.bold)
@@ -146,24 +152,36 @@ struct ModelManagementView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
+
+                    InfoTip(
+                        "Recommended is a short list that suits most people. Local models run on this Mac with no network and no per-word cost. Cloud models are usually more accurate but send your audio to a provider and need an API key. Custom is for your own OpenAI-compatible endpoint.",
+                        doc: .models
+                    )
                 }
-                
+
                 Spacer()
-                
+
                 Button(action: {
                     withAnimation(.smooth(duration: 0.3)) {
                         isShowingSettings.toggle()
                     }
                 }) {
-                    Image(systemName: "gear")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(isShowingSettings ? .accentColor : .primary.opacity(0.7))
-                        .padding(12)
-                        .background(
-                            CardBackground(isSelected: isShowingSettings, cornerRadius: 22)
-                        )
+                    // A bare gear glyph gave no clue what it opened; the label does.
+                    HStack(spacing: 5) {
+                        Image(systemName: "gear")
+                        Text("Settings")
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(isShowingSettings ? .accentColor : .primary.opacity(0.7))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        CardBackground(isSelected: isShowingSettings, cornerRadius: 22)
+                    )
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Output format, formatting, VAD and filler words")
+                .accessibilityLabel("Model settings")
             }
             .padding(.bottom, 12)
             
@@ -236,7 +254,7 @@ struct ModelManagementView: View {
 
                             InfoTip(
                                 "Add a custom fine-tuned whisper model to use with Zerm. Select the downloaded .bin file.",
-                                learnMoreURL: "https://tryzerm.com/docs/custom-local-whisper-models"
+                                learnMoreURL: Links.docString(.customLocalWhisperModels)
                             )
                             .help("Read more about custom local models")
                         }

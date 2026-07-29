@@ -41,8 +41,16 @@ struct TextToSpeechSettingsView: View {
 
                 GroupBox {
                     VStack(alignment: .leading, spacing: 16) {
-                        Toggle("Enable Read Aloud", isOn: $enabled)
-                            .font(.headline)
+                        Toggle(isOn: $enabled) {
+                            HStack(spacing: 4) {
+                                Text("Enable Read Aloud")
+                                InfoTip(
+                                    "Turns on the shortcut that speaks whatever text you have selected, in any app. Useful for proofreading your own writing or getting through a long article without staring at it. Off means the shortcut does nothing.",
+                                    doc: .readAloud
+                                )
+                            }
+                        }
+                        .font(.headline)
 
                         Divider()
 
@@ -91,6 +99,10 @@ struct TextToSpeechSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Trigger key", systemImage: "command")
+                InfoTip(
+                    "Press this key with text selected and Zerm reads it out; press it again to stop. Pick a key you do not use for dictation — if the two clash, one press would try to do both.",
+                    doc: .readAloud
+                )
                 Spacer()
                 Picker("", selection: $hotkeyManager.readAloudHotkey) {
                     ForEach(HotkeyManager.HotkeyOption.allCases, id: \.self) { option in
@@ -104,6 +116,7 @@ struct TextToSpeechSettingsView: View {
             if hotkeyManager.readAloudHotkey == .custom {
                 HStack {
                     Text("Custom shortcut").foregroundStyle(.secondary)
+                    InfoTip("Click the field and press the key combination you want. Include a modifier such as Control or Option so it does not fire while you are typing.")
                     Spacer()
                     KeyboardShortcuts.Recorder(for: .readSelectedTextAloud)
                 }
@@ -127,6 +140,10 @@ struct TextToSpeechSettingsView: View {
     private var providerRow: some View {
         HStack {
             Label("Voice provider", systemImage: "waveform")
+            InfoTip(
+                "Who synthesises the speech. Kokoro runs entirely on your Mac — nothing leaves the machine and it works offline, after a one-off model download. The cloud providers sound more natural but send the selected text to their servers and need an API key.",
+                doc: .readAloud
+            )
             Spacer()
             Picker("", selection: $providerRaw) {
                 ForEach(TTSProviderKind.allCases, id: \.self) { kind in
@@ -141,6 +158,7 @@ struct TextToSpeechSettingsView: View {
     private var voiceRow: some View {
         HStack {
             Label("Voice", systemImage: "person.wave.2")
+            InfoTip("The voice used by the provider above. Each provider has its own set, so this list changes when you switch provider. Use Preview voice at the bottom to hear one before settling on it.")
             Spacer()
             Picker("", selection: $voiceID) {
                 ForEach(provider.voices) { voice in
@@ -159,6 +177,7 @@ struct TextToSpeechSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Label("Speed", systemImage: "speedometer")
+                InfoTip("Playback rate, from half speed to double. Around 1.3× is a common choice for skimming long text; drop below 1× for dense material or an unfamiliar language.")
                 Spacer()
                 Text(String(format: "%.2f×", speed))
                     .monospacedDigit()
@@ -176,7 +195,15 @@ struct TextToSpeechSettingsView: View {
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Smart text cleanup", isOn: $smartCleanup)
+                    Toggle(isOn: $smartCleanup) {
+                        HStack(spacing: 4) {
+                            Text("Smart text cleanup")
+                            InfoTip(
+                                "Rewrites the awkward parts before speaking: \"https://example.com/a\" becomes a spoken address rather than a string of slashes, \"~/Library\" is read as a path, and acronyms are spelled out. Turn it off if you want the text read literally, character for character.",
+                                doc: .readAloud
+                            )
+                        }
+                    }
                     Text("Instantly reads acronyms, URLs, file paths, code, and symbols the way a person would — offline, no delay.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -184,8 +211,16 @@ struct TextToSpeechSettingsView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Natural reading (AI)", isOn: $naturalReadingAI)
-                        .disabled(!localLLM.isInstalled)
+                    Toggle(isOn: $naturalReadingAI) {
+                        HStack(spacing: 4) {
+                            Text("Natural reading (AI)")
+                            InfoTip(
+                                "Goes further than cleanup: the on-device model rewrites the passage into something a person would actually say aloud, smoothing lists, tables and dense punctuation. It needs Zerm's local language model downloaded — the toggle stays dimmed until it is — and it adds a pause before the first word.",
+                                doc: .readAloud
+                            )
+                        }
+                    }
+                    .disabled(!localLLM.isInstalled)
                     Text("Rewrites text into natural spoken language using Zerm's on-device model before reading. Fully offline; adds a moment before the first word.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -202,8 +237,14 @@ struct TextToSpeechSettingsView: View {
     private var apiKeySection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(provider.displayName) API key")
-                    .font(.headline)
+                HStack(spacing: 4) {
+                    Text("\(provider.displayName) API key")
+                        .font(.headline)
+                    InfoTip(
+                        "Required for this provider — Read Aloud will not speak without it. Save & Verify checks the key against the provider before storing it in your macOS Keychain. Switch to Kokoro if you would rather not use an account at all.",
+                        doc: .readAloud
+                    )
+                }
                 HStack {
                     SecureField("Paste API key", text: $apiKey)
                         .textFieldStyle(.roundedBorder)
@@ -238,6 +279,7 @@ struct TextToSpeechSettingsView: View {
                 Label(isPreviewing ? "Speaking…" : "Preview voice", systemImage: "play.circle.fill")
             }
             .disabled(isPreviewing || (providerKind.isLocal && !kokoro.isInstalled))
+            InfoTip("Speaks a sample sentence with the current provider, voice and speed, using the same recorder widget a real trigger uses. A quick way to check your key and settings work before relying on them.")
             Spacer()
         }
     }
@@ -250,6 +292,10 @@ struct TextToSpeechSettingsView: View {
                 HStack {
                     Image(systemName: "cpu")
                     Text(KokoroModelManager.package.displayName).font(.headline)
+                    InfoTip(
+                        "The offline voice model. Download it once and Read Aloud works with no account, no API key and no text ever leaving your Mac — including on a plane. Deleting it frees the disk space; you can download it again later.",
+                        doc: .readAloud
+                    )
                     Spacer()
                     Text(KokoroModelManager.package.approxSize)
                         .font(.caption).foregroundStyle(.secondary)

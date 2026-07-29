@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Models — Zerm</title>
+    <meta name="description" content="Which transcription model to use, what each one costs you in speed, size and memory, and how local and cloud differ." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Models — Zerm" />
+    <meta property="og:description" content="Which transcription model to use, what each one costs you in speed, size and memory, and how local and cloud differ." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Setup</p>
+        <h1>Models</h1>
+        <p class="lede">Which transcription model to use, what each one costs you in speed, size and memory, and how local and cloud differ.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Zerm separates the model that turns speech into text from the model that improves that<br>
+text afterwards. This page covers the first one. For the second, see<br>
+<a href="enhancement.html">AI enhancement</a>.</p>
+<p><img src="img/models.png" alt="The model list" style="max-width: 100%;"></p>
+<h2>Local models</h2>
+<p>Local models download once and then run entirely on your Mac, with Metal acceleration.<br>
+No key, no account, no network — dictation keeps working on a plane.</p>
+<h3>Whisper</h3>
+<p>The default family, running on <code class="notranslate">whisper.cpp</code>.</p>
+<table role="table">
+<thead>
+<tr>
+<th>Model</th>
+<th>Size</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tiny</td>
+<td>75 MB</td>
+<td>Fastest, least accurate. Fine for short commands.</td>
+</tr>
+<tr>
+<td>Tiny (English)</td>
+<td>75 MB</td>
+<td>Same, English only, slightly more accurate on it.</td>
+</tr>
+<tr>
+<td>Base</td>
+<td>142 MB</td>
+<td>The smallest one worth using for real dictation.</td>
+</tr>
+<tr>
+<td>Base (English)</td>
+<td>142 MB</td>
+<td>English-only Base.</td>
+</tr>
+<tr>
+<td>Small</td>
+<td>466 MB</td>
+<td>A solid everyday speed/accuracy balance.</td>
+</tr>
+<tr>
+<td>Small (English)</td>
+<td>466 MB</td>
+<td>English-only Small.</td>
+</tr>
+<tr>
+<td>Large v3 Turbo</td>
+<td>1.5 GB</td>
+<td>The most accurate. Around 1.8 GB of memory in use.</td>
+</tr>
+<tr>
+<td>Large v3 Turbo (Quantized)</td>
+<td>547 MB</td>
+<td>Nearly the same accuracy for a third of the disk.</td>
+</tr>
+</tbody>
+</table>
+<p>If you are not sure: <strong>Large v3 Turbo (Quantized)</strong>. It is the best accuracy-per-megabyte<br>
+in the list, and on Apple Silicon it is fast enough that you will not notice the<br>
+difference against Small.</p>
+<p>The <code class="notranslate">.en</code> variants only handle English, and are marginally better at it than the<br>
+multilingual model of the same size. Take one only if you never dictate anything else.</p>
+<p>You can also import your own fine-tuned Whisper model — see<br>
+<a href="custom-local-whisper-models.html">custom local models</a>.</p>
+<h3>Parakeet</h3>
+<p>NVIDIA's Parakeet, running through FluidAudio. Both variants are around half a gigabyte<br>
+and noticeably faster than Whisper at comparable accuracy, and both support streaming.</p>
+<ul>
+<li><strong>Parakeet V2</strong> — English only.</li>
+<li><strong>Parakeet V3</strong> — English plus 25 European languages.</li>
+</ul>
+<p>Worth trying if Whisper Large feels slow on your machine.</p>
+<h3>Apple Speech</h3>
+<p>The transcription built into macOS, used through the Speech framework. Nothing to<br>
+download, and it is the lightest option on memory. <strong>Requires macOS 26.</strong></p>
+<h2>Cloud models</h2>
+<p>Cloud models send your audio to a provider. Nothing is contacted until you add a key and<br>
+select the model, and you can keep local and cloud models installed side by side and<br>
+switch per <a href="power-mode.html">Power Mode</a>.</p>
+<p>Providers: Groq, OpenAI, Deepgram, ElevenLabs, Gemini, Mistral, Soniox, Speechmatics,<br>
+xAI, and AssemblyAI. Several of them also support streaming, where text starts appearing<br>
+before you stop talking.</p>
+<p>Use them when you need a language the local models handle poorly, or accuracy beyond<br>
+what Large v3 Turbo gives you. Everything else about the app works identically.</p>
+<h3>Custom models</h3>
+<p>If your provider exposes an <strong>OpenAI-compatible transcription API</strong>, add it yourself<br>
+with a base URL, key, and model name. Nothing else is supported through this path — a<br>
+provider with its own bespoke API needs its own integration.</p>
+<h2>Choosing a model</h2>
+<p><strong>Disk and memory.</strong> Each model card shows the download size and roughly how much memory<br>
+it wants. Zerm warns you before you pick something your Mac cannot comfortably hold.</p>
+<p><strong>Language.</strong> Multilingual models list which languages they support. Language is set<br>
+globally and can be overridden per Power Mode; leave it on automatic if you switch<br>
+often.</p>
+<p><strong>Intel Macs.</strong> Local models do not run reliably on Intel hardware and Zerm says so in<br>
+the interface. On an Intel Mac, use Apple Speech or a cloud provider.</p>
+<h2>Downloading and managing</h2>
+<p>Models download in the background with progress shown, and are verified after download.<br>
+Delete one at any time to reclaim the space; deleting the model you are currently using<br>
+prompts you to choose another first.</p>
+<p><strong>Prewarm on wake</strong> is on by default: after your Mac wakes, the active model is loaded<br>
+before you press anything, so the first dictation of the day is not the slow one.</p>
+<h2>The enhancement model is separate</h2>
+<p>If you turn on <a href="enhancement.html">enhancement</a>, that runs on a second model —<br>
+on-device Gemma via <code class="notranslate">llama.cpp</code>, Ollama, a local CLI, or a cloud provider. It is chosen<br>
+separately and downloaded separately. The bundled on-device options range from a 1B<br>
+model up to 27B, so it is worth matching the choice to your Mac rather than taking the<br>
+largest.</p>
+<p>Read Aloud uses a third model again. See <a href="read-aloud.html">read aloud</a>.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

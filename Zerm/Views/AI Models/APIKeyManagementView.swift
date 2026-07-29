@@ -19,9 +19,17 @@ struct APIKeyManagementView: View {
     var body: some View {
         Section("AI Provider Integration") {
             HStack {
-                Picker("Provider", selection: $aiService.selectedProvider) {
+                Picker(selection: $aiService.selectedProvider) {
                     ForEach(AIProvider.allCases.filter { $0 != .elevenLabs && $0 != .deepgram && $0 != .soniox && $0 != .speechmatics }, id: \.self) { provider in
                         Text(provider.rawValue).tag(provider)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Provider")
+                        InfoTip(
+                            "Who runs the AI that cleans up your transcripts. The hosted services need an API key and send your text to their servers; Ollama and the on-device option keep everything on this Mac. Transcription is configured separately — this only affects enhancement.",
+                            doc: .enhancement
+                        )
                     }
                 }
                 .pickerStyle(.automatic)
@@ -92,12 +100,17 @@ struct APIKeyManagementView: View {
                         }
                     } else {
                         HStack {
-                            Picker("Model", selection: Binding(
+                            Picker(selection: Binding(
                                 get: { aiService.currentModel },
                                 set: { aiService.selectModel($0) }
                             )) {
                                 ForEach(aiService.availableModels, id: \.self) { model in
                                     Text(model).tag(model)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("Model")
+                                    InfoTip("Which model this provider should use for enhancement. Faster models keep the pause after you stop speaking short; larger ones follow long or fussy prompts more reliably.")
                                 }
                             }
 
@@ -116,12 +129,17 @@ struct APIKeyManagementView: View {
                 } else if !aiService.availableModels.isEmpty &&
                             aiService.selectedProvider != .ollama &&
                             aiService.selectedProvider != .custom {
-                    Picker("Model", selection: Binding(
+                    Picker(selection: Binding(
                         get: { aiService.currentModel },
                         set: { aiService.selectModel($0) }
                     )) {
                         ForEach(aiService.availableModels, id: \.self) { model in
                             Text(model).tag(model)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Model")
+                            InfoTip("Which model this provider should use for enhancement. Faster models keep the pause after you stop speaking short; larger ones follow long or fussy prompts more reliably.")
                         }
                     }
                 }
@@ -157,9 +175,14 @@ struct APIKeyManagementView: View {
                     if !ollamaModels.isEmpty {
                         Divider()
 
-                        Picker("Model", selection: $selectedOllamaModel) {
+                        Picker(selection: $selectedOllamaModel) {
                             ForEach(ollamaModels) { model in
                                 Text(model.name).tag(model.name)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Model")
+                                InfoTip("Models already pulled on your Ollama server. Nothing appears here until you have pulled at least one; run ollama pull in a terminal, then reconnect.")
                             }
                         }
                         .onChange(of: selectedOllamaModel) { oldValue, newValue in
@@ -205,7 +228,7 @@ struct APIKeyManagementView: View {
                             }
                     }
 
-                    Picker("Timeout", selection: $localCLITimeoutSeconds) {
+                    Picker(selection: $localCLITimeoutSeconds) {
                         Text("15s").tag(15.0)
                         Text("30s").tag(30.0)
                         Text("45s").tag(45.0)
@@ -214,6 +237,11 @@ struct APIKeyManagementView: View {
                         Text("120s").tag(120.0)
                         Text("180s").tag(180.0)
                         Text("300s").tag(300.0)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Timeout")
+                            InfoTip("How long to let the command run before giving up on it. Local models loading from cold can take a while on the first request, so allow more time than you would for a hosted API.")
+                        }
                     }
                     .onChange(of: localCLITimeoutSeconds) { _, newValue in
                         aiService.updateLocalCLITimeoutSeconds(newValue)

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Output modes — Zerm</title>
+    <meta name="description" content="Instant, Instant + Refine, and Enhanced — what each one does to the text, and when the difference actually shows." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Output modes — Zerm" />
+    <meta property="og:description" content="Instant, Instant + Refine, and Enhanced — what each one does to the text, and when the difference actually shows." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Dictation</p>
+        <h1>Output modes</h1>
+        <p class="lede">Instant, Instant + Refine, and Enhanced — what each one does to the text, and when the difference actually shows.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>When a recording finishes, Zerm has to decide between two things you cannot have at<br>
+once: text in front of you immediately, or text that the AI has already improved. The<br>
+output mode is where you make that trade explicitly.</p>
+<p><img src="img/output-modes.png" alt="The output mode picker" style="max-width: 100%;"></p>
+<h2>Instant</h2>
+<p>The transcript is pasted at your cursor the moment transcription finishes. No language<br>
+model is involved at any point — nothing is sent to a provider, nothing is waited on.</p>
+<p>This is the default, and it is the fastest path in the app. Filler-word removal, your<br>
+<a href="dictionary.html">dictionary</a> replacements, and formatting still apply, because those<br>
+run locally and cost nothing.</p>
+<p>Choose Instant if you dictate short messages, if you are offline, or if you would rather<br>
+fix the occasional word yourself than wait.</p>
+<h2>Instant + Refine</h2>
+<p>The transcript is pasted immediately — byte-for-byte the same path as Instant, with the<br>
+same latency. The enhancement then runs in the background and, when it comes back,<br>
+quietly replaces what was already typed.</p>
+<p>The paste never waits for the model. If the enhancement fails, times out, or you have<br>
+already moved on, what you have is the raw transcript, which is exactly what Instant<br>
+would have given you.</p>
+<h3>Where in-place replacement works, and where it does not</h3>
+<p>Rewriting text that has already been typed into another application means writing<br>
+through the macOS Accessibility API, and not every application implements the parts<br>
+required to do that.</p>
+<p><strong>It works</strong> in native macOS text views — Mail, Notes, TextEdit, Xcode, most AppKit and<br>
+SwiftUI apps, and simple form fields.</p>
+<p><strong>It does not work</strong> in:</p>
+<ul>
+<li><strong>Electron apps</strong> — Slack, Visual Studio Code, Cursor, Discord, Notion, and most of<br>
+the category. They expose a value and a selection but no working setter.</li>
+<li><strong>Web content in browsers.</strong> <code class="notranslate">contenteditable</code> surfaces nothing that can be set, which<br>
+covers most web apps.</li>
+<li><strong>Terminals</strong> — Terminal, iTerm, Ghostty, WezTerm, kitty, Alacritty, Hyper, Warp, and<br>
+the rest. The shell owns the line buffer; accessibility only mirrors a read-only<br>
+screen, so writing to it would be meaningless.</li>
+</ul>
+<p>In all of those, Refine still runs — but instead of changing text you have already<br>
+typed, the refined version is <strong>offered</strong> to you, and what is on screen is left alone.<br>
+Nothing is silently rewritten and nothing is silently lost.</p>
+<p>Zerm does not guess. Terminals are on a fixed deny-list, and every other application is<br>
+probed once for a working setter; the answer is cached per app, so the second dictation<br>
+into a given app costs nothing to decide.</p>
+<p>Refine is also skipped entirely while a password field is focused anywhere on the<br>
+system — Zerm will not so much as read the focused element in that state.</p>
+<h2>Enhanced</h2>
+<p>Zerm waits for the enhancement to return, then pastes once. Nothing appears until the<br>
+final text is ready.</p>
+<p>It is the slowest of the three by exactly the round-trip time of your provider, and it<br>
+is the right choice when you want the pasted text to be final the moment it appears —<br>
+into a document, or into an app where Refine could only offer rather than replace.</p>
+<p>The wait is bounded by the enhancement timeout, which defaults to 15 seconds. If it<br>
+expires, Zerm falls back to the raw transcript rather than losing what you said. See<br>
+<a href="enhancement.html">AI enhancement</a> for the timeout and retry settings.</p>
+<h2>Choosing</h2>
+<table role="table">
+<thead>
+<tr>
+<th></th>
+<th>Text appears</th>
+<th>AI improves it</th>
+<th>Good for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Instant</strong></td>
+<td>immediately</td>
+<td>never</td>
+<td>speed, offline, short messages</td>
+</tr>
+<tr>
+<td><strong>Instant + Refine</strong></td>
+<td>immediately</td>
+<td>afterwards, where supported</td>
+<td>most dictation in native apps</td>
+</tr>
+<tr>
+<td><strong>Enhanced</strong></td>
+<td>after the model</td>
+<td>before you see it</td>
+<td>documents, Electron apps, terminals</td>
+</tr>
+</tbody>
+</table>
+<p>The mode is a global setting, but a <a href="power-mode.html">Power Mode</a> can turn enhancement<br>
+on or off per app and per website, which in practice is the finer control.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Privacy and retention — Zerm</title>
+    <meta name="description" content="What Zerm keeps, for how long, and which of the two auto-delete settings actually deletes what." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Privacy and retention — Zerm" />
+    <meta property="og:description" content="What Zerm keeps, for how long, and which of the two auto-delete settings actually deletes what." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Privacy</p>
+        <h1>Privacy and retention</h1>
+        <p class="lede">What Zerm keeps, for how long, and which of the two auto-delete settings actually deletes what.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Zerm stores two different things after a recording, and they are governed by two<br>
+different settings. Confusing them is the usual reason people find audio still on disk<br>
+when they expected it gone, or history emptier than they wanted.</p>
+<ul>
+<li>The <strong>transcript</strong> — the text, plus its timestamp, duration, model, and enhancement<br>
+result. Stored in the app's local database.</li>
+<li>The <strong>audio</strong> — the recording itself, as a file in the app's Application Support<br>
+folder.</li>
+</ul>
+<p>Both stay on your Mac. Neither is uploaded anywhere by Zerm.</p>
+<p><img src="img/privacy-retention.png" alt="Retention settings" style="max-width: 100%;"></p>
+<h2>Transcript auto-delete</h2>
+<p><em>Setting: "Delete transcripts automatically", off by default.</em></p>
+<p>When enabled, transcripts older than the retention period are deleted, and their audio<br>
+goes with them. The default period is 24 hours.</p>
+<p>The sweep runs at launch and again after every completed transcription, so a long<br>
+uptime does not let old entries linger.</p>
+<p>Set the retention period to zero and each transcript is deleted the moment it completes<br>
+— the text goes to your cursor and nothing is written to history at all. If you want a<br>
+dictation tool that keeps no record, this is the setting.</p>
+<p>Enabling transcript auto-delete also cleans up <strong>orphan audio files</strong>: recordings left<br>
+on disk with no transcript pointing at them.</p>
+<h2>Audio auto-delete</h2>
+<p><em>Setting: "Delete audio files automatically", on by default, 14 days.</em></p>
+<p>This deletes the recordings and keeps the transcripts. The history entry survives with<br>
+its text intact; only the playable audio and its disk space go away.</p>
+<p>The check runs at launch and once a day thereafter. You can also run it on demand from<br>
+Settings, which first tells you how many files it would remove and how much space that<br>
+frees.</p>
+<p>This is the setting most people want. Audio is the bulk of the disk usage and the part<br>
+with the most sensitive content, while the transcript is the part that is actually<br>
+useful to search later.</p>
+<h2>The two together</h2>
+<table role="table">
+<thead>
+<tr>
+<th></th>
+<th>Transcript text</th>
+<th>Audio file</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transcript auto-delete</td>
+<td>deleted</td>
+<td>deleted</td>
+</tr>
+<tr>
+<td>Audio auto-delete</td>
+<td>kept</td>
+<td>deleted</td>
+</tr>
+</tbody>
+</table>
+<p>Running both is reasonable: audio at 14 days for the disk space, transcripts at a longer<br>
+period for the searchable record.</p>
+<h2>Usage statistics are separate</h2>
+<p>Your usage statistics — words dictated, time saved, sessions, words read aloud — live in<br>
+their own store, deliberately apart from the transcripts.</p>
+<p><strong>Deleting transcripts does not affect your statistics.</strong> That is deliberate. The<br>
+dashboard used to recompute every number by scanning surviving transcript rows, so<br>
+turning on aggressive retention meant watching your totals evaporate — the privacy<br>
+setting and the dashboard were effectively mutually exclusive. They are now independent:<br>
+totals are accumulated as work completes, never recomputed from history. You can keep no<br>
+transcripts at all and still have an accurate dashboard.</p>
+<p>What is stored is one row per day of counts and durations. No transcript text, no audio,<br>
+nothing that could reconstruct what you said — which is why it stays safe to keep even<br>
+when you are running zero retention.</p>
+<p><strong>Two caveats if you are upgrading.</strong> Durable statistics start from this version.<br>
+Upgrading backfills what it can from the transcripts you still have, so anything an<br>
+earlier retention sweep already deleted cannot be recovered — the all-time totals for<br>
+those installs begin at the upgrade rather than at first launch. Read Aloud totals from<br>
+before this version were only ever kept as a lifetime count, so they are attributed to<br>
+the upgrade date; the all-time figure is right, the daily breakdown for that stretch is<br>
+not.</p>
+<h3>Clearing your statistics</h3>
+<p><strong>Reset Statistics</strong>, in Privacy settings, permanently clears every recorded day along<br>
+with the Read Aloud counters. Nothing survives it and it cannot be undone.</p>
+<p>It does not touch your transcripts or your audio — those have their own controls, above.<br>
+The three are independent in both directions: deleting history leaves your statistics<br>
+alone, and resetting your statistics leaves your history alone.</p>
+<p>Cleared statistics stay cleared. Keeping transcripts does not repopulate them later —<br>
+the one-time backfill described above does not run a second time, because rebuilding<br>
+your totals from surviving history is the opposite of what clearing them means.</p>
+<h2>Deleting things yourself</h2>
+<p>Nothing here replaces doing it by hand. From History you can delete individual<br>
+transcripts or clear the lot, and each deletion takes its audio file with it.</p>
+<h2>What leaves your Mac</h2>
+<p>Only what you configure:</p>
+<ul>
+<li><strong>Local transcription</strong> — Whisper, Parakeet, Apple Speech — never sends audio<br>
+anywhere.</li>
+<li><strong>Cloud transcription</strong> sends the audio to the provider you selected, and only once<br>
+you have added a key and chosen that model.</li>
+<li><strong>Enhancement</strong> sends the transcript, the active prompt, and whichever context sources<br>
+you switched on. The on-device provider sends nothing at all.</li>
+<li><strong>Read Aloud</strong> sends the text to a cloud voice provider if you selected one; the<br>
+bundled local voice does not.</li>
+<li><strong>Announcements and update checks</strong> fetch from this site and from GitHub Releases.<br>
+They send no content and can be switched off in Settings.</li>
+</ul>
+<p>More detail on the context sources is on the<br>
+<a href="contextual-awareness.html">contextual awareness</a> page.</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

@@ -9,6 +9,21 @@ enum EnhancementPrompt {
     case aiAssistant
 }
 
+/// How much surrounding context an enhancement request may gather.
+enum EnhancementContextPolicy {
+    /// Everything the user has enabled, including the selected-text and screen reads.
+    case full
+
+    /// Refine-in-place, which runs *after* the transcript has already been pasted and the
+    /// user may already be typing again. Two things must not happen in that window:
+    /// reading the selection posts a synthetic ⌘C into whatever the user is doing, and a
+    /// screen capture plus OCR is far slower than the refine budget allows.
+    case minimal
+
+    var readsSelectedText: Bool { self == .full }
+    var readsScreenCapture: Bool { self == .full }
+}
+
 @MainActor
 class AIEnhancementService: ObservableObject {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "AIEnhancementService")
@@ -57,8 +72,15 @@ class AIEnhancementService: ObservableObject {
     @Published var lastUserMessageSent: String?
 
     var activePrompt: CustomPrompt? {
-        allPrompts.first { $0.id == selectedPromptId }
+        allPrompts.first { $0.id == pinnedPromptId ?? selectedPromptId }
     }
+
+    /// Pins the prompt for the duration of one request.
+    ///
+    /// A deferred refine outlives the recorder: dismissing it ends the Power Mode session,
+    /// which restores the global prompt selection. Without pinning, a refine started under
+    /// an app-specific Power Mode would quietly finish using the user's default prompt.
+    private var pinnedPromptId: UUID?
 
     var allPrompts: [CustomPrompt] {
         return customPrompts
@@ -68,9 +90,25 @@ class AIEnhancementService: ObservableObject {
     private let screenCaptureService: ScreenCaptureService
     private let customVocabularyService: CustomVocabularyService
     private var baseTimeout: TimeInterval {
-        let stored = UserDefaults.standard.integer(forKey: "EnhancementTimeoutSeconds")
-        return stored > 0 ? TimeInterval(stored) : 7
+        timeout(for: activeContextPolicy)
     }
+
+    /// The refine budget is deliberately not user-configurable and deliberately short: a
+    /// refinement that lands after the user has moved on is worthless, and unlike the
+    /// Enhanced path nobody is sitting waiting for it.
+    private static let refineTimeout: TimeInterval = 4
+
+    private func timeout(for policy: EnhancementContextPolicy) -> TimeInterval {
+        switch policy {
+        case .minimal:
+            return Self.refineTimeout
+        case .full:
+            let stored = UserDefaults.standard.integer(forKey: "EnhancementTimeoutSeconds")
+            return stored > 0 ? TimeInterval(stored) : 15
+        }
+    }
+
+    private var activeContextPolicy: EnhancementContextPolicy = .full
     private let rateLimitInterval: TimeInterval = 1.0
     private var lastRequestTime: Date?
     private let modelContext: ModelContext
@@ -110,10 +148,20 @@ class AIEnhancementService: ObservableObject {
 
         initializePredefinedPrompts()
 
-        if UserDefaults.standard.bool(forKey: "InstantTranscriptionMode") {
+        // Instant mode genuinely never enhances, so reflecting that in the toggle is
+        // honest. The other two modes must not touch it: the previous code cleared the
+        // flag on every launch and persisted the change through `didSet`, which is why
+        // enhancement appeared to switch itself off between sessions.
+        switch DictationOutputMode.current {
+        case .instant:
             isEnhancementEnabled = false
             useClipboardContext = false
             useScreenCaptureContext = false
+        case .instantRefine:
+            // Screen context needs a capture plus OCR, which cannot fit the refine budget.
+            useScreenCaptureContext = false
+        case .enhanced:
+            break
         }
     }
 
@@ -149,8 +197,9 @@ class AIEnhancementService: ObservableObject {
     }
 
     private func getSystemMessage(for mode: EnhancementPrompt) async -> String {
+        let policy = activeContextPolicy
         let selectedTextContext: String
-        if AXIsProcessTrusted() {
+        if policy.readsSelectedText, AXIsProcessTrusted() {
             if let selectedText = await SelectedTextService.fetchSelectedText(), !selectedText.isEmpty {
                 selectedTextContext = "\n\n<CURRENTLY_SELECTED_TEXT>\n\(selectedText)\n</CURRENTLY_SELECTED_TEXT>"
             } else {
@@ -168,7 +217,8 @@ class AIEnhancementService: ObservableObject {
             ""
         }
 
-        let screenCaptureContext = if useScreenCaptureContext,
+        let screenCaptureContext = if policy.readsScreenCapture,
+                                   useScreenCaptureContext,
                                    let capturedText = screenCaptureService.lastCapturedText,
                                    !capturedText.isEmpty {
             "\n\n<CURRENT_WINDOW_CONTEXT>\n\(capturedText)\n</CURRENT_WINDOW_CONTEXT>"
@@ -205,6 +255,13 @@ class AIEnhancementService: ObservableObject {
             let defaultPrompt = allPrompts.first(where: { $0.id == PredefinedPrompts.defaultPromptId }) ?? allPrompts.first!
             return defaultPrompt.finalPromptText + finalContextSection
         }
+    }
+
+    /// A rewrite is roughly the length of its input, so a twenty-word dictation should
+    /// never be allowed to run out to a flat 512 tokens — that alone can overrun the
+    /// refine budget on the on-device model.
+    static func tokenBudget(forInput text: String) -> Int {
+        min(512, max(64, text.utf16.count / 3))
     }
 
     private func makeRequest(text: String, mode: EnhancementPrompt) async throws -> String {
@@ -256,7 +313,7 @@ class AIEnhancementService: ObservableObject {
                 let result = try await LocalLLMModelManager.shared.generate(
                     system: systemMessage,
                     user: formattedText,
-                    maxNewTokens: 512,
+                    maxNewTokens: Self.tokenBudget(forInput: text),
                     isCancelled: { Task.isCancelled || cancelHook() }
                 )
                 if Task.isCancelled || cancelHook() {
@@ -396,13 +453,21 @@ class AIEnhancementService: ObservableObject {
 
     func enhance(
         _ text: String,
-        isCancelled: @escaping () -> Bool = { false }
+        isCancelled: @escaping () -> Bool = { false },
+        contextPolicy: EnhancementContextPolicy = .full,
+        usingPrompt pinnedPrompt: UUID? = nil
     ) async throws -> (String, TimeInterval, String?) {
         let startTime = Date()
         let enhancementPrompt: EnhancementPrompt = .transcriptionEnhancement
-        let promptName = activePrompt?.title
         cancellationCheck = isCancelled
-        defer { cancellationCheck = { false } }
+        activeContextPolicy = contextPolicy
+        pinnedPromptId = pinnedPrompt
+        let promptName = activePrompt?.title
+        defer {
+            cancellationCheck = { false }
+            activeContextPolicy = .full
+            pinnedPromptId = nil
+        }
 
         if isCancelled() { throw CancellationError() }
 

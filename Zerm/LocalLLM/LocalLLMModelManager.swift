@@ -258,7 +258,14 @@ final class LocalLLMModelManager: ObservableObject {
 
     /// Pre-loads the current model in the background so the first natural read is fast.
     func prewarmIfNeeded() async {
-        guard isInstalled, TTSSettings.naturalReadingAI else { return }
+        guard TTSSettings.naturalReadingAI else { return }
+        await prewarm()
+    }
+
+    /// Pre-loads the current model regardless of the Read Aloud setting. Refine-in-place
+    /// needs the model resident before transcription finishes, not after.
+    func prewarm() async {
+        guard isInstalled else { return }
         let engine = ensureEngine()
         try? await engine.warmUp()
     }
