@@ -41,10 +41,17 @@ struct AudioInputSettingsView: View {
     
     private var inputModeSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Input Mode")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
+            HStack(spacing: 4) {
+                Text("Input Mode")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                InfoTip(
+                    "How Zerm picks the microphone to record from. System Default follows whatever macOS is set to, so it changes when you plug in headphones. Custom Device pins one microphone and always uses it. Prioritized keeps an ordered list and takes the first device that is actually plugged in — the right choice if you move between a desk mic and a laptop.",
+                    doc: .audioInput
+                )
+            }
+
             HStack(spacing: 20) {
                 ForEach(AudioInputMode.allCases, id: \.self) { mode in
                     InputModeCard(
@@ -59,9 +66,16 @@ struct AudioInputSettingsView: View {
     
     private var systemDefaultSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Current Device")
-                .font(.title2)
-                .fontWeight(.semibold)
+            HStack(spacing: 4) {
+                Text("Current Device")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                InfoTip(
+                    "The microphone macOS is currently set to use. Zerm follows it, so changing the input in System Settings or plugging in a headset changes what Zerm records from. Switch to Custom Device if you want it pinned instead.",
+                    doc: .audioInput
+                )
+            }
 
             HStack {
                 Image(systemName: "display")
@@ -90,9 +104,16 @@ struct AudioInputSettingsView: View {
     private var customDeviceSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text("Available Devices")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                HStack(spacing: 4) {
+                    Text("Available Devices")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    InfoTip(
+                        "Pick the one microphone Zerm always records from. It stays selected even when macOS switches its own input, which keeps transcripts consistent if you have several devices connected. If the chosen device is unplugged, recording falls back to the system default.",
+                        doc: .audioInput
+                    )
+                }
 
                 Spacer()
 
@@ -100,6 +121,7 @@ struct AudioInputSettingsView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
+                .help("Rescan for microphones connected since this window opened")
             }
 
             VStack(spacing: 12) {
@@ -131,9 +153,16 @@ struct AudioInputSettingsView: View {
     private var prioritizedDevicesContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Prioritized Devices")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                HStack(spacing: 4) {
+                    Text("Prioritized Devices")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    InfoTip(
+                        "Your ranked list of microphones. Number 1 is used whenever it is connected, otherwise Zerm tries number 2, and so on. Use the up and down arrows to reorder, and the red minus to drop a device back to the available list.",
+                        doc: .audioInput
+                    )
+                }
                 Text("Devices will be used in order of priority. If a device is unavailable, the next one will be tried. If no prioritized device is available, the built-in microphone will be used.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -152,10 +181,17 @@ struct AudioInputSettingsView: View {
     
     private var availableDevicesContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Available Devices")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
+            HStack(spacing: 4) {
+                Text("Available Devices")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                InfoTip(
+                    "Microphones Zerm can see that are not yet in your priority list. Use the blue plus to add one — it joins the bottom of the list, and you can move it up from there.",
+                    doc: .audioInput
+                )
+            }
+
             availableDevicesList
         }
     }

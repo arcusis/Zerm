@@ -50,7 +50,10 @@ struct ModelSettingsView: View {
 
             Section {
                 Toggle(isOn: $appendTrailingSpace) {
-                    Text("Add Space After Paste")
+                    HStack(spacing: 4) {
+                        Text("Add Space After Paste")
+                        InfoTip("Puts a single space at the end of every pasted transcript, so you can dictate one sentence after another without the words running together. Turn it off when you dictate into fields where a trailing space matters, such as a search box or a file name.")
+                    }
                 }
                 .toggleStyle(.switch)
 

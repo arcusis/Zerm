@@ -7,6 +7,7 @@ struct EnhancementSettingsView: View {
     @State private var isShowingSettings = false
     @State private var selectedPromptForEdit: CustomPrompt?
     @State private var panelID = UUID()
+    @State private var outputMode: DictationOutputMode = .current
 
     private let panelWidth: CGFloat = 400
 
@@ -46,11 +47,37 @@ struct EnhancementSettingsView: View {
                         Text("Enable Enhancement")
                         InfoTip(
                             "AI enhancement lets you pass the transcribed audio through LLMs to post-process using different prompts suitable for different use cases like e-mails, summary, writing, etc.",
-                            learnMoreURL: "https://tryzerm.com/docs/enhancements-configuring-models"
+                            learnMoreURL: Links.docString(.enhancement)
                         )
                     }
                 }
                 .toggleStyle(.switch)
+
+                Picker(selection: $outputMode) {
+                    ForEach(DictationOutputMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Output")
+                        InfoTip(
+                            "Instant pastes the raw transcript straight away and never uses AI. Instant + Refine pastes straight away and then improves the text in place a moment later. Enhanced waits for the AI and pastes once.",
+                            learnMoreURL: Links.docString(.outputModes)
+                        )
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: outputMode) { _, newValue in
+                    DictationOutputMode.setCurrent(newValue)
+                    // Keep the toggle and the mode telling the same story: picking a mode
+                    // that uses the AI turns enhancement on, picking Instant turns it off.
+                    enhancementService.isEnhancementEnabled = newValue.usesEnhancement
+                }
+
+                Text(outputMode.subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } header: {
                 HStack {
                     Text("General")
@@ -62,12 +89,18 @@ struct EnhancementSettingsView: View {
                             isShowingSettings.toggle()
                         }
                     } label: {
-                        Image(systemName: "gear")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(isShowingSettings ? .accentColor : .secondary)
+                        // A bare gear glyph in a section header is not somewhere macOS
+                        // users look for a control, and nothing said what it opened.
+                        HStack(spacing: 4) {
+                            Image(systemName: "gear")
+                            Text("Settings")
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(isShowingSettings ? .accentColor : .secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Enhancement settings")
+                    .help("Context, timeouts and enhancement shortcuts")
+                    .accessibilityLabel("Enhancement settings")
                 }
             }
 

@@ -37,7 +37,7 @@ struct SettingsView: View {
         Form {
             // MARK: - Shortcuts
             Section {
-                LabeledContent("Shortcut 1") {
+                LabeledContent {
                     HStack(spacing: 8) {
                         Spacer()
                         if hotkeyManager.selectedHotkey1 != .none {
@@ -49,10 +49,15 @@ struct SettingsView: View {
                                 .controlSize(.small)
                         }
                     }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Shortcut 1")
+                        InfoTip(shortcutHelp, doc: .shortcuts)
+                    }
                 }
 
                 if hotkeyManager.selectedHotkey2 != .none {
-                    LabeledContent("Shortcut 2") {
+                    LabeledContent {
                         HStack(spacing: 8) {
                             Spacer()
                             hotkeyModePicker(binding: $hotkeyManager.hotkeyMode2)
@@ -69,12 +74,26 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Shortcut 2")
+                            InfoTip(
+                                "A second, independent key for the same recorder, with its own mode. Handy when you want a hold-to-talk key for quick asides and a toggle key for long dictation. The minus button removes it.",
+                                doc: .shortcuts
+                            )
+                        }
                     }
                 }
 
                 if hotkeyManager.selectedHotkey1 != .none && hotkeyManager.selectedHotkey2 == .none {
-                    Button("Add Second Shortcut") {
-                        withAnimation { hotkeyManager.selectedHotkey2 = .rightOption }
+                    HStack(spacing: 4) {
+                        Button("Add Second Shortcut") {
+                            withAnimation { hotkeyManager.selectedHotkey2 = .rightOption }
+                        }
+                        InfoTip(
+                            "Adds a second key that starts the recorder, with its own Toggle / Push to Talk / Hybrid mode. Both shortcuts stay active.",
+                            doc: .shortcuts
+                        )
                     }
                 }
             } header: {
@@ -83,26 +102,52 @@ struct SettingsView: View {
 
             // MARK: - Additional Shortcuts
             Section("Additional Shortcuts") {
-                LabeledContent("Paste Last Transcription (Original)") {
+                LabeledContent {
                     KeyboardShortcuts.Recorder(for: .pasteLastTranscription)
                         .controlSize(.small)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Paste Last Transcription (Original)")
+                        InfoTip(
+                            "Pastes the raw transcript of your most recent dictation again, exactly as the model heard it, with no AI enhancement. Useful when a paste landed in the wrong window, or when the enhanced version changed something you wanted kept.",
+                            doc: .shortcuts
+                        )
+                    }
                 }
 
-                LabeledContent("Paste Last Transcription (Enhanced)") {
+                LabeledContent {
                     KeyboardShortcuts.Recorder(for: .pasteLastEnhancement)
                         .controlSize(.small)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Paste Last Transcription (Enhanced)")
+                        InfoTip(
+                            "Pastes the AI-enhanced version of your most recent dictation again. Nothing is re-sent to the provider — this replays the result that was already produced.",
+                            doc: .shortcuts
+                        )
+                    }
                 }
 
-                LabeledContent("Retry Last Transcription") {
+                LabeledContent {
                     KeyboardShortcuts.Recorder(for: .retryLastTranscription)
                         .controlSize(.small)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Retry Last Transcription")
+                        InfoTip(
+                            "Runs the last recording through transcription again, using whatever model and language are selected now. Use it after switching to a more accurate model, or when a transcript came back garbled — the original audio is reused, so you don't have to speak again.",
+                            doc: .shortcuts
+                        )
+                    }
                 }
 
                 // Custom Cancel - hierarchical
                 ExpandableSettingsRow(
                     isExpanded: $isCustomCancelExpanded,
                     isEnabled: $isCustomCancelEnabled,
-                    label: "Custom Cancel Shortcut"
+                    label: "Custom Cancel Shortcut",
+                    infoMessage: "Escape always discards the recording while the recorder is showing. Turn this on to add a second key that does the same, for when your hand is nowhere near Escape.",
+                    infoURL: Links.docString(.shortcuts)
                 ) {
                     LabeledContent("Shortcut") {
                         KeyboardShortcuts.Recorder(for: .cancelRecorder)
@@ -120,9 +165,11 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isMiddleClickExpanded,
                     isEnabled: $hotkeyManager.isMiddleClickToggleEnabled,
-                    label: "Middle-Click Recording"
+                    label: "Middle-Click Recording",
+                    infoMessage: "Starts and stops recording with the middle mouse button — the scroll wheel click — so you can dictate without reaching for the keyboard. Leave it off if you use middle-click to open links in tabs.",
+                    infoURL: Links.docString(.shortcuts)
                 ) {
-                    LabeledContent("Activation Delay") {
+                    LabeledContent {
                         HStack {
                             TextField("", value: $hotkeyManager.middleClickActivationDelay, formatter: {
                                 let formatter = NumberFormatter()
@@ -134,6 +181,11 @@ struct SettingsView: View {
                             Text("ms")
                                 .foregroundColor(.secondary)
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Activation Delay")
+                            InfoTip("How long the middle button must be held before recording starts. Raise it if ordinary middle-clicks in your browser keep opening the recorder by accident; set it to 0 for an instant response.")
+                        }
                     }
                 }
             }
@@ -143,9 +195,10 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isRestoreClipboardExpanded,
                     isEnabled: $restoreClipboardAfterPaste,
-                    label: "Restore Clipboard After Paste"
+                    label: "Restore Clipboard After Paste",
+                    infoMessage: "Pasting works by putting the transcript on the clipboard, which overwrites whatever you had copied. Turn this on to put your previous clipboard contents back once the paste has landed."
                 ) {
-                    Picker("Restore Delay", selection: $clipboardRestoreDelay) {
+                    Picker(selection: $clipboardRestoreDelay) {
                         Text("250ms").tag(0.25)
                         Text("500ms").tag(0.5)
                         Text("1s").tag(1.0)
@@ -153,6 +206,11 @@ struct SettingsView: View {
                         Text("3s").tag(3.0)
                         Text("4s").tag(4.0)
                         Text("5s").tag(5.0)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Restore Delay")
+                            InfoTip("How long to wait before putting your old clipboard contents back. Slower apps read the clipboard a moment after the paste; if you end up with the wrong text, increase this.")
+                        }
                     }
                 }
 
@@ -170,7 +228,8 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isSoundFeedbackExpanded,
                     isEnabled: $soundManager.isEnabled,
-                    label: "Sound Feedback"
+                    label: "Sound Feedback",
+                    infoMessage: "Plays a short sound when recording starts and another when it stops, so you know the recorder is listening without looking at it. Expand to choose your own sounds."
                 ) {
                     CustomSoundSettingsView()
                 }
@@ -179,15 +238,21 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isMuteSystemExpanded,
                     isEnabled: $mediaController.isSystemMuteEnabled,
-                    label: "Mute Audio While Recording"
+                    label: "Mute Audio While Recording",
+                    infoMessage: "Silences your Mac's output for the length of the recording, then restores the previous volume. Stops music or a video call leaking into the microphone and being transcribed as speech."
                 ) {
-                    Picker("Resume Delay", selection: $mediaController.audioResumptionDelay) {
+                    Picker(selection: $mediaController.audioResumptionDelay) {
                         Text("0s").tag(0.0)
                         Text("1s").tag(1.0)
                         Text("2s").tag(2.0)
                         Text("3s").tag(3.0)
                         Text("4s").tag(4.0)
                         Text("5s").tag(5.0)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Resume Delay")
+                            InfoTip("How long after recording stops before the volume comes back. A second or two keeps audio from returning over the top of the paste.")
+                        }
                     }
                 }
 
@@ -199,9 +264,14 @@ struct SettingsView: View {
 
             // MARK: - Interface
             Section("Interface") {
-                Picker("Recorder Style", selection: $recorderUIManager.recorderType) {
+                Picker(selection: $recorderUIManager.recorderType) {
                     Text("Notch").tag("notch")
                     Text("Mini").tag("mini")
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Recorder Style")
+                        InfoTip("Where the recorder appears while you dictate. Notch sits in the menu bar area at the top of the screen, around the camera housing on Macs that have one. Mini is a small floating pill you can drag anywhere.")
+                    }
                 }
                 .pickerStyle(.segmented)
 
@@ -212,26 +282,49 @@ struct SettingsView: View {
 
             // MARK: - General
             Section("General") {
-                Toggle("Hide Dock Icon", isOn: $menuBarManager.isMenuBarOnly)
+                Toggle(isOn: $menuBarManager.isMenuBarOnly) {
+                    HStack(spacing: 4) {
+                        Text("Hide Dock Icon")
+                        InfoTip("Removes Zerm from the Dock and the app switcher, leaving only the menu bar icon. Everything keeps working; open this window again from the menu bar.")
+                    }
+                }
 
                 // Not `LaunchAtLogin.Toggle` — it re-reads SMAppService.status (a blocking
                 // XPC call) on every body evaluation. See `LaunchAtLoginStore`.
-                Toggle("Launch at Login", isOn: launchAtLogin.binding)
-                    .onAppear { launchAtLogin.loadIfNeeded() }
-
-                Toggle("Auto-check Updates", isOn: $autoUpdateCheck)
-                    .onChange(of: autoUpdateCheck) { _, newValue in
-                        updaterViewModel.toggleAutoUpdates(newValue)
+                Toggle(isOn: launchAtLogin.binding) {
+                    HStack(spacing: 4) {
+                        Text("Launch at Login")
+                        InfoTip("Starts Zerm automatically when you log in, so your dictation shortcut works without opening the app first.")
                     }
+                }
+                .onAppear { launchAtLogin.loadIfNeeded() }
 
-                Toggle("Show Announcements", isOn: $enableAnnouncements)
-                    .onChange(of: enableAnnouncements) { _, newValue in
-                        if newValue {
-                            AnnouncementsService.shared.start()
-                        } else {
-                            AnnouncementsService.shared.stop()
-                        }
+                Toggle(isOn: $autoUpdateCheck) {
+                    HStack(spacing: 4) {
+                        Text("Auto-check Updates")
+                        InfoTip("Looks for new versions in the background and tells you when one is ready. Nothing installs on its own — you still choose when to update.")
                     }
+                }
+                .onChange(of: autoUpdateCheck) { _, newValue in
+                    updaterViewModel.toggleAutoUpdates(newValue)
+                }
+
+                Toggle(isOn: $enableAnnouncements) {
+                    HStack(spacing: 4) {
+                        Text("Show Announcements")
+                        InfoTip(
+                            "Shows occasional in-app notes about new features and known issues. Turn it off for a completely quiet app.",
+                            doc: .announcements
+                        )
+                    }
+                }
+                .onChange(of: enableAnnouncements) { _, newValue in
+                    if newValue {
+                        AnnouncementsService.shared.start()
+                    } else {
+                        AnnouncementsService.shared.stop()
+                    }
+                }
 
                 HStack {
                     Button(updaterViewModel.updateAvailable ? "Install Update…" : "Check for Updates") {
@@ -254,6 +347,7 @@ struct SettingsView: View {
                     Button("Reset Onboarding") {
                         showResetOnboardingAlert = true
                     }
+                    InfoTip("Shows the welcome and setup screens again the next time you launch Zerm. Your settings, prompts and history are left alone.")
                 }
 
                 if let error = updaterViewModel.lastErrorMessage, !error.isEmpty {
@@ -275,7 +369,7 @@ struct SettingsView: View {
 
             // MARK: - Backup
             Section {
-                LabeledContent("Export Settings") {
+                LabeledContent {
                     Button("Export") {
                         ImportExportService.shared.exportSettings(
                             enhancementService: enhancementService,
@@ -289,9 +383,14 @@ struct SettingsView: View {
                             modelContext: modelContext
                         )
                     }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Export Settings")
+                        InfoTip("Writes a single file containing your settings, prompts, Power Modes, dictionary and custom models. Keep it as a backup or use it to set up Zerm the same way on another Mac. API keys are not included.")
+                    }
                 }
 
-                LabeledContent("Import Settings") {
+                LabeledContent {
                     Button("Import") {
                         ImportExportService.shared.importSettings(
                             enhancementService: enhancementService,
@@ -305,6 +404,11 @@ struct SettingsView: View {
                             modelContext: modelContext,
                             transcriptionModelManager: transcriptionModelManager
                         )
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Import Settings")
+                        InfoTip("Loads a previously exported file. This overwrites your current settings, prompts, Power Modes and dictionary, so export first if you want a way back.")
                     }
                 }
             } header: {
@@ -332,6 +436,14 @@ struct SettingsView: View {
             Text("You'll see the introduction screens again the next time you launch the app.")
         }
     }
+
+    /// Covers both pickers on a shortcut row — the key itself and the mode beside it.
+    private let shortcutHelp = """
+    The key that opens the recorder and starts dictation. Toggle starts on one press and stops \
+    on the next; Push to Talk records only while the key is held; Hybrid does both — a quick tap \
+    toggles, holding for longer than half a second records until you let go. Choose Custom to \
+    record any key combination you like.
+    """
 
     @ViewBuilder
     private func hotkeyPicker(binding: Binding<HotkeyManager.HotkeyOption>) -> some View {
@@ -446,7 +558,7 @@ struct PowerModeSection: View {
                 isEnabled: toggleBinding,
                 label: "Power Mode",
                 infoMessage: "Apply custom settings based on active app or website.",
-                infoURL: "https://tryzerm.com/docs/power-mode"
+                infoURL: Links.docString(.powerMode)
             ) {
                 Toggle(isOn: $powerModePersistSettings) {
                     HStack(spacing: 4) {
@@ -497,13 +609,18 @@ struct ExperimentalSection: View {
                 label: "Pause Media While Recording",
                 infoMessage: "Pauses playing media when recording starts and resumes when done."
             ) {
-                Picker("Resume Delay", selection: $mediaController.audioResumptionDelay) {
+                Picker(selection: $mediaController.audioResumptionDelay) {
                     Text("0s").tag(0.0)
                     Text("1s").tag(1.0)
                     Text("2s").tag(2.0)
                     Text("3s").tag(3.0)
                     Text("4s").tag(4.0)
                     Text("5s").tag(5.0)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Resume Delay")
+                        InfoTip("How long after recording stops before playback picks up again. This is the same delay used by Mute Audio While Recording.")
+                    }
                 }
             }
 

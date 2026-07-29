@@ -12,7 +12,7 @@ struct EnhancementShortcutsView: View {
 
                     InfoTip(
                         "Quickly enable or disable AI enhancement while recording. Available only when Zerm is running and the recorder is visible.",
-                        learnMoreURL: "https://tryzerm.com/docs/enhancement-shortcuts"
+                        learnMoreURL: Links.docString(.enhancementShortcuts)
                     )
                 }
 
@@ -30,7 +30,7 @@ struct EnhancementShortcutsView: View {
 
                     InfoTip(
                         "Switch between your saved prompts using ⌘1 through ⌘0 to activate the corresponding prompt in the order they are saved. Available only when Zerm is running and the recorder is visible.",
-                        learnMoreURL: "https://tryzerm.com/docs/enhancement-shortcuts"
+                        learnMoreURL: Links.docString(.enhancementShortcuts)
                     )
                 }
 

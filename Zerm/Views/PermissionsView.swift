@@ -301,7 +301,9 @@ struct PermissionsView: View {
                                 userInfo: ["destination": "Settings"]
                             )
                         },
-                        checkPermission: { permissionManager.checkKeyboardShortcut() }
+                        checkPermission: { permissionManager.checkKeyboardShortcut() },
+                        infoTipMessage: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it.",
+                        infoTipLink: Links.docString(.shortcuts)
                     )
                     
                     // Audio Permission
@@ -320,7 +322,9 @@ struct PermissionsView: View {
                                 }
                             }
                         },
-                        checkPermission: { permissionManager.checkAudioPermissionStatus() }
+                        checkPermission: { permissionManager.checkAudioPermissionStatus() },
+                        infoTipMessage: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone.",
+                        infoTipLink: Links.docString(.permissions)
                     )
                     
                     // Accessibility Permission
@@ -337,7 +341,8 @@ struct PermissionsView: View {
                             permissionManager.checkAccessibilityPermissions()
                             permissionManager.pollPermissions(forSeconds: 3)
                         },
-                        infoTipMessage: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."
+                        infoTipMessage: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen.",
+                        infoTipLink: Links.docString(.permissions)
                     )
 
                     // Screen Recording Permission
@@ -361,7 +366,7 @@ struct PermissionsView: View {
                             permissionManager.pollPermissions(forSeconds: 3)
                         },
                         infoTipMessage: "Zerm captures on-screen text to understand the context of your voice input, which significantly improves transcription accuracy. Your privacy is important: this data is processed locally and is not stored. After toggling Screen Recording on, macOS often requires a full quit and relaunch before the check turns green.",
-                        infoTipLink: "https://tryzerm.com/docs/contextual-awareness"
+                        infoTipLink: Links.docString(.contextualAwareness)
                     )
                 }
             }

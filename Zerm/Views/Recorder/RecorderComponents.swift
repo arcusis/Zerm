@@ -36,10 +36,27 @@ struct RecorderToggleButton: View {
                     Image(systemName: icon).font(.system(size: 13))
                 }
             }
-            .foregroundColor(disabled ? .white.opacity(0.3) : (isEnabled ? .white : .white.opacity(0.6)))
+            .foregroundColor(foreground)
+            // On and off used to differ only by a 40% opacity step on a black pill, which
+            // is not a state anyone could read at a glance. A filled accent capsule is.
+            .frame(width: 22, height: 22)
+            .background(
+                Capsule()
+                    .fill(isEnabled && !disabled ? Color.accentColor : Color.clear)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(Color.white.opacity(isEnabled || disabled ? 0 : 0.35), lineWidth: 1)
+            )
         }
         .buttonStyle(PlainButtonStyle())
         .disabled(disabled)
+        .animation(.easeInOut(duration: 0.15), value: isEnabled)
+    }
+
+    private var foreground: Color {
+        if disabled { return .white.opacity(0.3) }
+        return isEnabled ? .white : .white.opacity(0.65)
     }
 }
 

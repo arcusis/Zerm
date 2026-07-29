@@ -69,9 +69,16 @@ struct DictionarySettingsView: View {
     private var sectionSelector: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text("Select Section")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                HStack(spacing: 4) {
+                    Text("Select Section")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    InfoTip(
+                        "Two different tools. Word Replacements rewrite text after transcription — always exact, always applied, no AI needed. Vocabulary instead tells the model which unusual names and terms to expect, so it is more likely to hear them correctly in the first place.",
+                        doc: .dictionary
+                    )
+                }
 
                 Spacer()
 
@@ -80,12 +87,17 @@ struct DictionarySettingsView: View {
                         isShowingSettings.toggle()
                     }
                 } label: {
-                    Image(systemName: "gear")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(isShowingSettings ? .accentColor : .secondary)
+                    // A bare gear glyph gave no clue what it opened; the label does.
+                    HStack(spacing: 4) {
+                        Image(systemName: "gear")
+                        Text("Settings")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isShowingSettings ? .accentColor : .secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Dictionary settings")
+                .help("Quick Add shortcut and other dictionary settings")
+                .accessibilityLabel("Dictionary settings")
             }
 
             HStack(spacing: 20) {

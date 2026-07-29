@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A reusable info tip component that displays helpful information in a popover
+/// The small info icon that explains a setting, with an optional link to the full
+/// documentation page for it.
 struct InfoTip: View {
     // Content configuration
     var message: String
@@ -14,42 +15,53 @@ struct InfoTip: View {
 
     // State
     @State private var isShowingTip: Bool = false
+    @State private var isHovering: Bool = false
 
     var body: some View {
-        Image(systemName: iconName)
-            .imageScale(iconSize)
-            .foregroundColor(iconColor)
-            .fontWeight(.semibold)
-            .padding(5)
-            .contentShape(Rectangle())
-            .popover(isPresented: $isShowingTip) {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let url = learnMoreLink {
-                        Text(message + " ")
-                            .font(.callout)
-                            .foregroundColor(.secondary)
-                        +
-                        Text("Learn more")
-                            .font(.callout)
-                            .foregroundColor(.accentColor)
-                    } else {
-                        Text(message)
-                            .font(.callout)
-                            .foregroundColor(.secondary)
+        // A Button rather than a tap gesture on an Image: that is what gives keyboard
+        // activation, VoiceOver and a pointer cursor, none of which a bare gesture has.
+        Button {
+            isShowingTip.toggle()
+        } label: {
+            Image(systemName: iconName)
+                .imageScale(iconSize)
+                .foregroundColor(iconColor)
+                .fontWeight(.semibold)
+                .opacity(isHovering ? 1 : 0.75)
+                .padding(5)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("More information")
+        .accessibilityHint(message)
+        .help(message)
+        .popover(isPresented: $isShowingTip, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(message)
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Its own control, so the rest of the popover is just text. Previously the
+                // tap handler sat on the whole body, and any tap anywhere opened the link.
+                if let learnMoreLink {
+                    Link(destination: learnMoreLink) {
+                        HStack(spacing: 4) {
+                            Text("Learn more")
+                            Image(systemName: "arrow.up.right")
+                                .imageScale(.small)
+                        }
+                        .font(.callout.weight(.medium))
                     }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: width, alignment: .leading)
-                .padding(14)
-                .onTapGesture {
-                    if let url = learnMoreLink {
-                        NSWorkspace.shared.open(url)
-                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        isShowingTip = false
+                    })
                 }
             }
-            .onTapGesture {
-                isShowingTip.toggle()
-            }
+            .frame(width: width, alignment: .leading)
+            .padding(14)
+        }
     }
 }
 
@@ -66,5 +78,11 @@ extension InfoTip {
     init(_ message: String, learnMoreURL: String) {
         self.message = message
         self.learnMoreLink = URL(string: learnMoreURL)
+    }
+
+    /// Creates an InfoTip linking to a documentation page.
+    init(_ message: String, doc: Links.Doc) {
+        self.message = message
+        self.learnMoreLink = Links.doc(doc)
     }
 }

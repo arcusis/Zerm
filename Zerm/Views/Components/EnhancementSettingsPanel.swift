@@ -110,9 +110,14 @@ struct EnhancementSettingsPanel: View {
                         }
 
                         if isSkipShortEnhancementEnabled && isShortEnhancementExpanded {
-                            Picker("Minimum words", selection: $shortEnhancementWordThreshold) {
+                            Picker(selection: $shortEnhancementWordThreshold) {
                                 ForEach(1...15, id: \.self) { count in
                                     Text("\(count) \(count == 1 ? "word" : "words")").tag(count)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("Minimum words")
+                                    InfoTip("Transcripts shorter than this are pasted as-is, with no AI call — so they appear instantly and cost nothing. Raise it if short replies keep getting reworded; lower it if you want even brief phrases enhanced.")
                                 }
                             }
                             .padding(.top, 12)
@@ -124,16 +129,26 @@ struct EnhancementSettingsPanel: View {
                 }
 
                 Section {
-                    Picker("Timeout duration", selection: $enhancementTimeoutSeconds) {
+                    Picker(selection: $enhancementTimeoutSeconds) {
                         ForEach([3, 5, 7, 10, 15, 20, 30, 40, 50, 60], id: \.self) { seconds in
                             Text("\(seconds) seconds").tag(seconds)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Timeout duration")
+                            InfoTip("How long to wait for the AI provider before giving up. Keep it short for quick back-and-forth typing, where waiting is worse than a plain transcript. Allow longer for slow local models or long dictations that take a while to process.")
                         }
                     }
                     .pickerStyle(.menu)
 
-                    Picker("On timeout", selection: $retryOnTimeout) {
+                    Picker(selection: $retryOnTimeout) {
                         Text("Fail immediately").tag(false)
                         Text("Retry").tag(true)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("On timeout")
+                            InfoTip("What happens once the wait runs out. Fail immediately pastes the unenhanced transcript, so you always get your words. Retry tries again, up to three attempts — better on a flaky connection, but you wait longer before anything appears.")
+                        }
                     }
                     .pickerStyle(.menu)
                 } header: {

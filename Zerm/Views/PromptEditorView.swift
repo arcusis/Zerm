@@ -180,7 +180,10 @@ struct PromptEditorView: View {
                 TextField("Brief description", text: $description)
                     .textFieldStyle(.roundedBorder)
             } header: {
-                Text("Details")
+                HStack(spacing: 4) {
+                    Text("Details")
+                    InfoTip("The name and icon you will see on the prompt grid and in the recorder when switching prompts mid-dictation. The description is a reminder for you — it is not sent to the AI.")
+                }
             }
 
             Section {
@@ -207,7 +210,13 @@ struct PromptEditorView: View {
                 }
                 .toggleStyle(.switch)
             } header: {
-                Text("Instructions")
+                HStack(spacing: 4) {
+                    Text("Instructions")
+                    InfoTip(
+                        "What the AI is told to do with each transcript — \"rewrite this as a short, polite email\", \"keep my wording but fix the punctuation\". Write it as directions to a person; the transcript is handed to the model along with this text.",
+                        doc: .enhancement
+                    )
+                }
             }
 
             Section {

@@ -36,9 +36,17 @@ struct DictionarySettingsPanel: View {
             // Content
             Form {
                 Section {
-                    LabeledContent("Quick Add to Dictionary") {
+                    LabeledContent {
                         KeyboardShortcuts.Recorder(for: .quickAddToDictionary)
                             .controlSize(.small)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Quick Add to Dictionary")
+                            InfoTip(
+                                "Opens a small panel from anywhere so you can add a word or a replacement without coming back to this window. Handy the moment a transcript gets a name wrong — fix it once and later dictations get it right.",
+                                doc: .dictionary
+                            )
+                        }
                     }
                 } header: {
                     Text("Shortcuts")

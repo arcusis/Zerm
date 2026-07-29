@@ -93,7 +93,7 @@ struct LanguageSelectionView: View {
                     .disabled(true)
                 } else if isMultilingualModel() {
                     VStack(alignment: .leading, spacing: 8) {
-                        Picker("Select Language", selection: $selectedLanguage) {
+                        Picker(selection: $selectedLanguage) {
                             ForEach(
                                 currentModel.supportedLanguages.sorted(by: {
                                     if $0.key == "auto" { return true }
@@ -102,6 +102,14 @@ struct LanguageSelectionView: View {
                                 }), id: \.key
                             ) { key, value in
                                 Text(value).tag(key)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Select Language")
+                                InfoTip(
+                                    "The language you speak when dictating. Naming it is more accurate than Auto-detect, which can guess wrong on a short phrase or a sentence that mixes languages. Set a different language for particular apps with a Power Mode.",
+                                    doc: .models
+                                )
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
