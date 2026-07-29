@@ -73,7 +73,7 @@ struct AssemblyAIProvider: CloudProvider {
         request.setValue(apiKey, forHTTPHeaderField: "authorization")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await URLSession.shared.upload(for: request, from: audioData)
+        let (data, response) = try await CloudUploadSession.upload(request, body: audioData)
         try Self.validate(response, data: data)
 
         struct UploadResponse: Decodable { let upload_url: String }

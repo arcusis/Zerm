@@ -81,6 +81,7 @@ enum BrowserURLError: Error {
     case browserNotRunning
     case noActiveWindow
     case noActiveTab
+    case timedOut
 }
 
 class BrowserURLService {
@@ -110,40 +111,82 @@ class BrowserURLService {
         let pid = targetApp.processIdentifier
         let inlineScript = inlineURLScript(for: browser, pid: pid)
 
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", inlineScript]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-
         do {
             logger.debug("▶️ Executing AppleScript for \(browser.displayName, privacy: .public) PID=\(pid, privacy: .public)")
-            try task.run()
-            task.waitUntilExit()
+            let output = try await runOSAScript(inlineScript)
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if output.isEmpty {
-                    logger.error("❌ Empty output from AppleScript for \(browser.displayName, privacy: .public)")
-                    throw BrowserURLError.noActiveTab
-                }
-                if output.lowercased().contains("error") {
-                    // The active-tab URL can carry tokens/session IDs — keep it out of logs.
-                    logger.error("❌ AppleScript error for \(browser.displayName, privacy: .public): \(output, privacy: .private)")
-                    throw BrowserURLError.executionFailed
-                }
-                logger.debug("✅ Retrieved URL from \(browser.displayName, privacy: .public): \(output, privacy: .private)")
-                return output
-            } else {
+            if output.isEmpty {
+                logger.error("❌ Empty output from AppleScript for \(browser.displayName, privacy: .public)")
+                throw BrowserURLError.noActiveTab
+            }
+            if output.lowercased().contains("error") {
+                // The active-tab URL can carry tokens/session IDs — keep it out of logs.
+                logger.error("❌ AppleScript error for \(browser.displayName, privacy: .public): \(output, privacy: .private)")
                 throw BrowserURLError.executionFailed
             }
+            logger.debug("✅ Retrieved URL from \(browser.displayName, privacy: .public): \(output, privacy: .private)")
+            return output
         } catch let error as BrowserURLError {
             throw error
         } catch {
             logger.error("❌ AppleScript execution failed for \(browser.displayName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             throw BrowserURLError.executionFailed
+        }
+    }
+
+    /// Runs an AppleScript via `osascript` without ever blocking a thread, and kills it
+    /// if it overruns `timeout`.
+    ///
+    /// The previous implementation called `Process.waitUntilExit()` from an `async`
+    /// function, which parks a Swift concurrency cooperative thread until the script
+    /// returns — unbounded. AppleScript against a beachballed browser, or one showing
+    /// an Automation permission prompt, can hang indefinitely, and this runs on the
+    /// path that starts dictation. Completion is driven by `terminationHandler`
+    /// instead, so no thread waits on the script.
+    private func runOSAScript(_ script: String, timeout: TimeInterval = 2.0) async throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                // terminationHandler and the timeout can both fire; only the first wins.
+                let hasResumed = OSAllocatedUnfairLock(initialState: false)
+                @Sendable func finish(_ result: Result<String, Error>) {
+                    let alreadyResumed = hasResumed.withLock { resumed -> Bool in
+                        defer { resumed = true }
+                        return resumed
+                    }
+                    guard !alreadyResumed else { return }
+                    continuation.resume(with: result)
+                }
+
+                process.terminationHandler = { _ in
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(data: data, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    finish(.success(output))
+                }
+
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) { [logger] in
+                    guard process.isRunning else { return }
+                    logger.error("❌ AppleScript timed out after \(timeout, privacy: .public)s — terminating osascript")
+                    process.terminate()
+                    finish(.failure(BrowserURLError.timedOut))
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    finish(.failure(BrowserURLError.executionFailed))
+                }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
         }
     }
 
