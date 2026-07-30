@@ -384,7 +384,7 @@ class AIEnhancementService: ObservableObject {
         case .timeout:
             return .timeout
         case .invalidURL, .decodingError, .encodingError:
-            return .customError(error.localizedDescription ?? "An unknown error occurred.")
+            return .customError(error.localizedDescription)
         }
     }
 
@@ -487,7 +487,9 @@ class AIEnhancementService: ObservableObject {
             return
         }
 
-        if let capturedText = await screenCaptureService.captureAndExtractText() {
+        // captureAndExtractText stores the OCR result on the service; the consumer
+        // reads it from there. Only the success/failure matters here.
+        if await screenCaptureService.captureAndExtractText() != nil {
             await MainActor.run {
                 self.objectWillChange.send()
             }

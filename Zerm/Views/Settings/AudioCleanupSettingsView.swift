@@ -188,7 +188,7 @@ struct AudioCleanupSettingsView: View {
                         Button("Delete \(cleanupInfo.fileCount) Files", role: .destructive) {
                             Task {
                                 await MainActor.run { isPerformingCleanup = true }
-                                let result = await AudioCleanupManager.shared.runCleanupForTranscriptions(
+                                let result = AudioCleanupManager.shared.runCleanupForTranscriptions(
                                     modelContext: modelContext,
                                     transcriptions: cleanupInfo.transcriptions
                                 )

@@ -186,12 +186,14 @@ class WhisperModelManager: ObservableObject {
 
             Task {
                 await withTaskCancellationHandler {
+                    // Parks until this task is cancelled; the download completes through
+                    // the observation above, not through this continuation.
+                    await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+                } onCancel: {
                     observation.invalidate()
                     if finished.exchange(true, ordering: .acquiring) == false {
                         continuation.resume(throwing: CancellationError())
                     }
-                } operation: {
-                    await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
                 }
             }
         }
@@ -399,7 +401,7 @@ class WhisperModelManager: ObservableObject {
         let destinationURL = modelsDirectory.appendingPathComponent("\(baseName).bin")
 
         if FileManager.default.fileExists(atPath: destinationURL.path) {
-            await NotificationManager.shared.showNotification(
+            NotificationManager.shared.showNotification(
                 title: "A model named \(baseName).bin already exists",
                 type: .warning,
                 duration: 4.0
@@ -416,14 +418,14 @@ class WhisperModelManager: ObservableObject {
 
             onModelsChanged?()
 
-            await NotificationManager.shared.showNotification(
+            NotificationManager.shared.showNotification(
                 title: "Imported \(destinationURL.lastPathComponent)",
                 type: .success,
                 duration: 3.0
             )
         } catch {
             logError("Failed to import local model", error)
-            await NotificationManager.shared.showNotification(
+            NotificationManager.shared.showNotification(
                 title: "Failed to import model: \(error.localizedDescription)",
                 type: .error,
                 duration: 5.0

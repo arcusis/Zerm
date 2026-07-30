@@ -196,9 +196,8 @@ class AudioDeviceManager: ObservableObject {
     }
     
     func getDeviceName(deviceID: AudioDeviceID) -> String? {
-        let name: CFString? = getDeviceProperty(deviceID: deviceID,
-                                              selector: kAudioDevicePropertyDeviceNameCFString)
-        return name as String?
+        getDeviceStringProperty(deviceID: deviceID,
+                                selector: kAudioDevicePropertyDeviceNameCFString)
     }
     
     private func isValidInputDevice(deviceID: AudioDeviceID) -> Bool {
@@ -470,9 +469,8 @@ class AudioDeviceManager: ObservableObject {
     }
     
     private func getDeviceUID(deviceID: AudioDeviceID) -> String? {
-        let uid: CFString? = getDeviceProperty(deviceID: deviceID,
-                                             selector: kAudioDevicePropertyDeviceUID)
-        return uid as String?
+        getDeviceStringProperty(deviceID: deviceID,
+                                selector: kAudioDevicePropertyDeviceUID)
     }
     
     deinit {
@@ -502,30 +500,17 @@ class AudioDeviceManager: ObservableObject {
         )
     }
     
-    private func getDeviceProperty<T>(deviceID: AudioDeviceID,
-                                    selector: AudioObjectPropertySelector,
-                                    scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> T? {
-        guard deviceID != 0 else { return nil }
-        
-        var address = createPropertyAddress(selector: selector, scope: scope)
-        var propertySize = UInt32(MemoryLayout<T>.size)
-        var property: T? = nil
-        
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &propertySize,
-            &property
-        )
-        
-        if status != noErr {
-            logger.error("Failed to get device property \(selector, privacy: .public) for device \(deviceID, privacy: .public): \(status, privacy: .public)")
+    /// Both callers want a CFString-valued property, so this is typed rather than
+    /// generic — the generic version wrote a +1 `CFStringRef` into an ARC-managed
+    /// `T?`, over-releasing the string.
+    private func getDeviceStringProperty(deviceID: AudioDeviceID,
+                                         selector: AudioObjectPropertySelector,
+                                         scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> String? {
+        guard let value = AudioObjectProperty.string(deviceID, selector: selector, scope: scope) else {
+            logger.error("Failed to get device property \(selector, privacy: .public) for device \(deviceID, privacy: .public)")
             return nil
         }
-        
-        return property
+        return value
     }
     
     private func notifyDeviceChange() {

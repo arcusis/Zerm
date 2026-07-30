@@ -689,8 +689,15 @@ class HotkeyManager: ObservableObject {
         if let recorderActiveObserver {
             NotificationCenter.default.removeObserver(recorderActiveObserver)
         }
+        middleClickTask?.cancel()
+
+        // Hand the monitors over by value. Calling removeAllMonitoring() from a Task
+        // spawned in deinit would capture `self` and resurrect an object that is
+        // already being deallocated (a hard error under the Swift 6 language mode).
+        let monitors = ([globalEventMonitor, localEventMonitor, fnKeyDownMonitor] + middleClickMonitors)
+            .compactMap { $0 }
         Task { @MainActor in
-            removeAllMonitoring()
+            monitors.forEach(NSEvent.removeMonitor)
         }
     }
 }

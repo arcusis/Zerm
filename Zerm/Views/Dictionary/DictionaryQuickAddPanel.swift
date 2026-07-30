@@ -47,7 +47,7 @@ final class DictionaryQuickAddManager {
         panel?.orderOut(nil)
         panel = nil
         hostingController = nil
-        previousApp?.activate(options: .activateIgnoringOtherApps)
+        previousApp?.activate()
         previousApp = nil
     }
 }

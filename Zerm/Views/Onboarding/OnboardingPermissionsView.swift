@@ -477,7 +477,7 @@ struct OnboardingPermissionsView: View {
                 .controlSize(.large)
             }
         }
-        .onChange(of: binding.wrappedValue) { newValue in
+        .onChange(of: binding.wrappedValue) { _, newValue in
             onConfigured(newValue != .none)
         }
     }

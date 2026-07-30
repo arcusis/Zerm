@@ -200,7 +200,7 @@ class RecorderUIManager: ObservableObject {
         engine.currentSession = nil
 
         if wasRecording {
-            await recorder.stopRecording()
+            recorder.stopRecording()
         }
 
         hideRecorderPanel()
@@ -234,7 +234,7 @@ class RecorderUIManager: ObservableObject {
     func resetOnLaunch() async {
         guard let engine = engine, let recorder = recorder else { return }
         logger.notice("Resetting recording state on launch")
-        await recorder.stopRecording()
+        recorder.stopRecording()
         hideRecorderPanel()
         await MainActor.run {
             isMiniRecorderVisible = false

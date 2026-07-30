@@ -82,14 +82,70 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/build-site.mjs
 
-      - name: Commit if changed
+      # This step used to `git commit` as github-actions[bot] and push straight to
+      # Production. It failed on every release: the "Require signed commits" ruleset
+      # covers ~ALL branches with no bypass actors, and the bot signs nothing, so the
+      # push was rejected with "Commits must have verified signatures". Production
+      # additionally requires a pull request, so a direct push could never land even
+      # once signing was solved. The result was a site changelog silently stuck at
+      # 2.6.1 while 2.7.0 shipped.
+      #
+      # Commits are now created through the GraphQL createCommitOnBranch mutation,
+      # which GitHub signs server-side, and land via an auto-merging PR. No ruleset
+      # is bypassed or weakened.
+      - name: Open an auto-merging PR if the site changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
           if git diff --quiet -- docs/; then
-            echo "No changelog changes."
+            echo "Site is already up to date with the published releases."
             exit 0
           fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/
-          git commit -m "Regenerate site changelog from releases"
-          git push origin HEAD:Production
+
+          echo "Changed files:"
+          git diff --name-only -- docs/
+
+          BRANCH="chore/site-changelog-${GITHUB_RUN_ID}"
+          HEAD_OID="$(git rev-parse HEAD)"
+
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${BRANCH}" -f sha="$HEAD_OID" >/dev/null
+
+          # createCommitOnBranch replaces whole files, so send the full contents of
+          # everything that changed rather than a diff.
+          ADDITIONS="$(git diff --name-only -- docs/ | while read -r f; do
+            jq -nc --arg path "$f" --arg contents "$(base64 -w0 "$f")" \
+              '{path: $path, contents: $contents}'
+          done | jq -sc .)"
+
+          VARIABLES="$(jq -nc \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "$BRANCH" \
+            --arg oid "$HEAD_OID" \
+            --argjson additions "$ADDITIONS" \
+            '{input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $oid,
+                message: {headline: "Regenerate site changelog from releases"},
+                fileChanges: {additions: $additions}
+             }}')"
+
+          jq -nc --arg query '
+            mutation($input: CreateCommitOnBranchInput!) {
+              createCommitOnBranch(input: $input) { commit { oid } }
+            }' --argjson variables "$VARIABLES" \
+            '{query: $query, variables: $variables}' \
+            | gh api graphql --input - >/dev/null
+
+          gh pr create \
+            --base Production \
+            --head "$BRANCH" \
+            --title "Regenerate site changelog from releases" \
+            --body "Automated: regenerates the derived site pages from the published GitHub Releases. Opened by the Release workflow because Production takes changes by pull request only." \
+            >/dev/null
+
+          # required_approving_review_count is 0, so this merges itself as soon as
+          # CodeQL reports back.
+          gh pr merge "$BRANCH" --squash --auto --delete-branch

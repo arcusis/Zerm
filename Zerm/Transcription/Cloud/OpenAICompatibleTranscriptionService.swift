@@ -13,7 +13,7 @@ class OpenAICompatibleTranscriptionService {
         request.setValue("Bearer \(model.apiKey)", forHTTPHeaderField: "Authorization")
 
         let body = try buildRequestBody(audioURL: audioURL, modelName: model.modelName, boundary: boundary)
-        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        let (data, response) = try await CloudUploadSession.upload(request, body: body)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw CloudTranscriptionError.networkError(URLError(.badServerResponse))

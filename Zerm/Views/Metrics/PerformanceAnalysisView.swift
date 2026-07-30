@@ -37,7 +37,7 @@ struct PerformanceAnalyzer {
             for: transcriptions,
             modelNameKeyPath: \.transcriptionModelName,
             durationKeyPath: \.transcriptionDuration,
-            audioDurationKeyPath: \.duration
+            includesSpeedFactor: true
         )
 
         let enhancementStats = processStats(
@@ -59,7 +59,10 @@ struct PerformanceAnalyzer {
     static func processStats(for transcriptions: [Transcription],
                              modelNameKeyPath: KeyPath<Transcription, String?>,
                              durationKeyPath: KeyPath<Transcription, TimeInterval?>,
-                             audioDurationKeyPath: KeyPath<Transcription, TimeInterval>? = nil) -> [ModelStat] {
+                             // Speed factor is audio-seconds per processing-second, which is
+                             // only meaningful for transcription. Enhancement time has no
+                             // audio duration to divide by, so its stats leave this off.
+                             includesSpeedFactor: Bool = false) -> [ModelStat] {
 
         let relevantTranscriptions = transcriptions.filter {
             $0[keyPath: modelNameKeyPath] != nil && $0[keyPath: durationKeyPath] != nil
@@ -78,7 +81,7 @@ struct PerformanceAnalyzer {
             let avgAudioDuration = totalAudioDuration / Double(fileCount)
 
             var speedFactor = 0.0
-            if let audioDurationKeyPath = audioDurationKeyPath, totalProcessingTime > 0 {
+            if includesSpeedFactor, totalProcessingTime > 0 {
                 speedFactor = totalAudioDuration / totalProcessingTime
             }
 

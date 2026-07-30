@@ -173,7 +173,7 @@ class TranscriptionPipeline {
                allowPromptTriggeredEnhancement,
                let enhancementService,
                enhancementService.isConfigured {
-                let detectionResult = await promptDetectionService.analyzeText(text, with: enhancementService)
+                let detectionResult = promptDetectionService.analyzeText(text, with: enhancementService)
                 promptDetectionResult = detectionResult
                 await promptDetectionService.applyDetectionResult(detectionResult, to: enhancementService)
             }

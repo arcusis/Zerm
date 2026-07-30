@@ -95,7 +95,7 @@ class ZermEngine: NSObject, ObservableObject {
             cancelAutoStopMonitor()
             partialTranscript = ""
             setState(.transcribing)
-            await recorder.stopRecording()
+            recorder.stopRecording()
 
             if let recordedFile {
                 if !shouldCancelRecording {
@@ -223,7 +223,12 @@ class ZermEngine: NSObject, ObservableObject {
                                     return
                                 }
 
-                                await ActiveWindowService.shared.applyConfiguration(powerModeId: powerModeId)
+                                await ActiveWindowService.shared.applyConfiguration(
+                                    powerModeId: powerModeId,
+                                    shouldApplyURLMatch: { [weak self] in
+                                        self?.recordingState == .recording
+                                    }
+                                )
                                 self.startAutoStopMonitor()
 
                                 if self.recordingState == .recording,
@@ -232,7 +237,16 @@ class ZermEngine: NSObject, ObservableObject {
                                         for: model,
                                         onPartialTranscript: { [weak self] partial in
                                             Task { @MainActor in
-                                                self?.partialTranscript = partial
+                                                // A provider can deliver a partial after the
+                                                // recording it belongs to has stopped. Without
+                                                // this guard that late text lands in the UI of
+                                                // whatever session is live now.
+                                                guard let self,
+                                                      self.recordingState == .recording,
+                                                      !self.shouldCancelRecording else {
+                                                    return
+                                                }
+                                                self.partialTranscript = partial
                                             }
                                         }
                                     )
@@ -263,14 +277,14 @@ class ZermEngine: NSObject, ObservableObject {
                                             do {
                                                 try await self.whisperModelManager.loadModel(localWhisperModel)
                                             } catch {
-                                                await self.logger.error("❌ Model loading failed: \(error.localizedDescription, privacy: .public)")
+                                                self.logger.error("❌ Model loading failed: \(error.localizedDescription, privacy: .public)")
                                             }
                                         }
                                     } else if let fluidAudioModel = await self.transcriptionModelManager.currentTranscriptionModel as? FluidAudioModel {
                                         try? await self.serviceRegistry.fluidAudioTranscriptionService.loadModel(for: fluidAudioModel)
                                     }
 
-                                    if let enhancementService = await self.enhancementService {
+                                    if let enhancementService = self.enhancementService {
                                         let captureSettings = await MainActor.run {
                                             (
                                                 mode: DictationOutputMode.current,
@@ -311,7 +325,7 @@ class ZermEngine: NSObject, ObservableObject {
                                 self.logger.error("❌ Failed to start recording: \(error.localizedDescription, privacy: .public)")
                                 self.setState(.idle)
                                 self.recordedFile = nil
-                                await NotificationManager.shared.showNotification(title: "Recording failed to start", type: .error)
+                                NotificationManager.shared.showNotification(title: "Recording failed to start", type: .error)
                                 self.logger.notice("toggleRecord: calling dismissMiniRecorder from error handler")
                                 await self.recorderUIManager?.dismissMiniRecorder()
                             }
@@ -374,7 +388,7 @@ class ZermEngine: NSObject, ObservableObject {
             self.shouldCancelRecording = true
             self.invalidatePipelineRun()
             self.setState(.idle)
-            await NotificationManager.shared.showNotification(
+            NotificationManager.shared.showNotification(
                 title: "Zerm recovered from a stuck state — try again",
                 type: .warning,
                 duration: 4.0
@@ -422,7 +436,7 @@ class ZermEngine: NSObject, ObservableObject {
                    sinceInput >= captureStallSeconds {
                     self.logger.error("Recording dropped: no audio input for \(sinceInput, privacy: .public)s — recovering")
                     DebugLogger.shared.log("ZermEngine", "watchdog: no audio input for \(String(format: "%.1f", sinceInput))s — recording dropped")
-                    await NotificationManager.shared.showNotification(
+                    NotificationManager.shared.showNotification(
                         title: "Recording stopped — microphone dropped",
                         type: .warning,
                         duration: 3.0
@@ -519,7 +533,7 @@ class ZermEngine: NSObject, ObservableObject {
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
             try? modelContext.save()
             setState(.idle)
-            await NotificationManager.shared.showNotification(
+            NotificationManager.shared.showNotification(
                 title: "Transcription failed: No model selected",
                 type: .error,
                 duration: 5.0,
