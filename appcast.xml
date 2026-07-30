@@ -3,22 +3,23 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.7.0</title>
+            <title>2.7.1</title>
             <description><![CDATA[
-                <h3>What's New in v2.7.0</h3>
+                <h3>What's New in v2.7.1</h3>
                 <ul>
-                    <li>Dashboard statistics are now stored separately from your transcripts, so deleting history no longer resets them. Existing history is imported once.</li>
-                    <li>AI enhancement works again. It runs after the paste instead of before it, so dictation stays instant.</li>
-                    <li>New output modes: Instant, Instant + Refine, and Enhanced.</li>
-                    <li>Every setting now explains itself, with a full documentation site behind the info icons.</li>
-                    <li>Fixed: an unset retention period could delete your entire transcript history at launch.</li>
+                    <li>Dictating while wearing headphones no longer mutes your audio. Muting exists to stop speakers bleeding into the microphone, which cannot happen on headphones. Turn it off under Mute Audio While Recording &rarr; Keep Playing on Headphones.</li>
+                    <li>Fixed: transcribing a recorded audio file failed on some MP4 and M4A files, including Teams meeting recordings.</li>
+                    <li>Fixed: large uploads to cloud transcription providers could stall until they timed out when connected to a VPN.</li>
+                    <li>Fixed: dictation could hang at startup if a browser was unresponsive or showing an automation permission prompt.</li>
+                    <li>Fixed: text from a finished recording could briefly appear in the next one.</li>
+                    <li>Fixed a memory bug in audio-device handling, a data race in the recorder, and several errors that were being silently swallowed.</li>
                 </ul>
             ]]></description>
-            <pubDate>Wed, 29 Jul 2026 13:49:26 +0000</pubDate>
-            <sparkle:version>270</sparkle:version>
-            <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
+            <pubDate>Thu, 30 Jul 2026 07:36:01 +0000</pubDate>
+            <sparkle:version>271</sparkle:version>
+            <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.7.0/Zerm-2.7.0-macos.zip" length="23991191" type="application/octet-stream" sparkle:edSignature="c46MCgOCarhzLNVKStjU8zFoZOT/i4vx84G146AQvjjlUHP3Nd9OMv0YDNZHten84J3r97ml90uzv0x9/Be5AA=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.7.1/Zerm-2.7.1-macos.zip" length="24069890" type="application/octet-stream" sparkle:edSignature="UfyEP4qt1Y9tjQlNQqQy3pPwIVGEbm/Rqmvj679UHYjBMexVBi1ex2dxgHIi0uwBwGl3c+yKyalQCKc1QLswCg=="/>
         </item>
     </channel>
 </rss>
