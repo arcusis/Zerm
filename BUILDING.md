@@ -113,6 +113,24 @@ verifies the result with `spctl`. The DMG lands in the repo root as
 
 `SKIP_NOTARIZE=1 scripts/release.sh` does a signing-only dry run.
 
+### After publishing the GitHub Release
+
+The site changelog is generated from the **published** GitHub Releases, so it can
+only be rebuilt once the release exists:
+
+```bash
+node scripts/build-site.mjs
+git add docs/ && git commit -m "Regenerate site changelog from releases"
+```
+
+Open that as a PR — Production takes changes by pull request only.
+
+This is a manual step on purpose. The Release workflow cannot do it for you: it
+can create a properly signed commit, but the organization forbids GitHub Actions
+from opening pull requests, and Production requires one. The workflow therefore
+checks for drift and fails loudly if the site is behind, rather than pretending
+to publish.
+
 ---
 
 ## Manual Build Process (Alternative)

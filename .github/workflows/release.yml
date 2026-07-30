@@ -53,6 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          # Tags are not fetched by the default shallow checkout, so `git rev-parse`
+          # below reported every tag as missing — including ones that plainly exist.
+          fetch-depth: 0
 
       - name: Verify tag exists
         run: |
@@ -97,70 +101,42 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/build-site.mjs
 
-      # This step used to `git commit` as github-actions[bot] and push straight to
-      # Production. It failed on every release: the "Require signed commits" ruleset
-      # covers ~ALL branches with no bypass actors, and the bot signs nothing, so the
-      # push was rejected with "Commits must have verified signatures". Production
-      # additionally requires a pull request, so a direct push could never land even
-      # once signing was solved. The result was a site changelog silently stuck at
-      # 2.6.1 while 2.7.0 shipped.
+      # This job cannot publish the changelog itself, and pretending otherwise is
+      # what made it useless for so long. The history:
       #
-      # Commits are now created through the GraphQL createCommitOnBranch mutation,
-      # which GitHub signs server-side, and land via an auto-merging PR. No ruleset
-      # is bypassed or weakened.
-      - name: Open an auto-merging PR if the site changed
+      #   1. It committed as github-actions[bot] and pushed to Production. The
+      #      "Require signed commits" ruleset covers ~ALL branches with no bypass
+      #      actors, so the push was rejected — every release, silently, which is
+      #      how the site changelog got stuck at 2.6.1 while 2.7.0 shipped.
+      #   2. Creating the commit via GraphQL createCommitOnBranch fixed the signing
+      #      (GitHub signs those server-side) and that part does work.
+      #   3. But Production takes changes by pull request only, and the org forbids
+      #      GitHub Actions from creating pull requests:
+      #        "GitHub Actions is not permitted to create or approve pull requests"
+      #      That is an org-wide security policy. Loosening it for a changelog is a
+      #      bad trade, so this job no longer tries.
+      #
+      # Instead it reports drift and fails loudly. Regenerating is a one-liner a
+      # maintainer runs with their own credentials, and `make release` does it as
+      # part of cutting a release.
+      - name: Check the site is in step with published releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
           if git diff --quiet -- docs/; then
-            echo "Site is already up to date with the published releases."
+            echo "Site is up to date with the published releases."
             exit 0
           fi
 
-          echo "Changed files:"
-          git diff --name-only -- docs/
-
-          BRANCH="chore/site-changelog-${GITHUB_RUN_ID}"
-          HEAD_OID="$(git rev-parse HEAD)"
-
-          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/heads/${BRANCH}" -f sha="$HEAD_OID" >/dev/null
-
-          # createCommitOnBranch replaces whole files, so send the full contents of
-          # everything that changed rather than a diff.
-          ADDITIONS="$(git diff --name-only -- docs/ | while read -r f; do
-            jq -nc --arg path "$f" --arg contents "$(base64 -w0 "$f")" \
-              '{path: $path, contents: $contents}'
-          done | jq -sc .)"
-
-          VARIABLES="$(jq -nc \
-            --arg repo "$GITHUB_REPOSITORY" \
-            --arg branch "$BRANCH" \
-            --arg oid "$HEAD_OID" \
-            --argjson additions "$ADDITIONS" \
-            '{input: {
-                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
-                expectedHeadOid: $oid,
-                message: {headline: "Regenerate site changelog from releases"},
-                fileChanges: {additions: $additions}
-             }}')"
-
-          jq -nc --arg query '
-            mutation($input: CreateCommitOnBranchInput!) {
-              createCommitOnBranch(input: $input) { commit { oid } }
-            }' --argjson variables "$VARIABLES" \
-            '{query: $query, variables: $variables}' \
-            | gh api graphql --input - >/dev/null
-
-          gh pr create \
-            --base Production \
-            --head "$BRANCH" \
-            --title "Regenerate site changelog from releases" \
-            --body "Automated: regenerates the derived site pages from the published GitHub Releases. Opened by the Release workflow because Production takes changes by pull request only." \
-            >/dev/null
-
-          # required_approving_review_count is 0, so this merges itself as soon as
-          # CodeQL reports back.
-          gh pr merge "$BRANCH" --squash --auto --delete-branch
+          echo "::error::The published site is out of date with the GitHub Releases."
+          echo "Stale files:"
+          git diff --name-only -- docs/ | sed 's/^/  /'
+          echo ""
+          echo "Regenerate and open a PR:"
+          echo "  node scripts/build-site.mjs && git add docs/ && git commit -m 'Regenerate site changelog from releases'"
+          echo ""
+          echo "Diff of what would change:"
+          git --no-pager diff --stat -- docs/
+          exit 1
