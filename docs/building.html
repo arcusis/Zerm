@@ -130,6 +130,17 @@ hardened runtime, notarizes app and DMG with Apple, staples the tickets, and<br>
 verifies the result with <code class="notranslate">spctl</code>. The DMG lands in the repo root as<br>
 <code class="notranslate">Zerm_X.Y.Z_aarch64.dmg</code>, ready for <code class="notranslate">gh release upload</code>.</p>
 <p dir="auto"><code class="notranslate">SKIP_NOTARIZE=1 scripts/release.sh</code> does a signing-only dry run.</p>
+<h3 dir="auto">After publishing the GitHub Release</h3>
+<p dir="auto">The site changelog is generated from the <strong>published</strong> GitHub Releases, so it can<br>
+only be rebuilt once the release exists:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">node scripts/build-site.mjs
+git add docs/ <span class="pl-k">&amp;&amp;</span> git commit -m <span class="pl-s"><span class="pl-pds">"</span>Regenerate site changelog from releases<span class="pl-pds">"</span></span></pre></div>
+<p dir="auto">Open that as a PR — Production takes changes by pull request only.</p>
+<p dir="auto">This is a manual step on purpose. The Release workflow cannot do it for you: it<br>
+can create a properly signed commit, but the organization forbids GitHub Actions<br>
+from opening pull requests, and Production requires one. The workflow therefore<br>
+checks for drift and fails loudly if the site is behind, rather than pretending<br>
+to publish.</p>
 <hr>
 <h2 dir="auto">Manual Build Process (Alternative)</h2>
 <p dir="auto">If you prefer to build manually or need more control over the build process, follow these steps:</p>
