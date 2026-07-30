@@ -25,16 +25,31 @@ on:
         required: true
         type: string
 
-  # Keep the published changelog in step with GitHub Releases
+  # Keep the published changelog in step with GitHub Releases.
+  #
+  # Only `released`. Publishing a release fires `published` AND `released`, and
+  # every asset upload fires `edited`, so the old four-type list ran this whole
+  # workflow three times per release and raced three identical changelog branches
+  # against each other. `deleted` was pointless here: the regenerated changelog
+  # reads the releases list, which a deletion also changes, but a deleted release
+  # cannot be validated by the tag job below.
   release:
-    types: [published, edited, released, deleted]
+    types: [released]
 
 permissions:
   contents: write
+  # createCommitOnBranch needs contents; opening the changelog PR needs this.
+  # Without it `gh pr create` fails with "Resource not accessible by integration".
+  pull-requests: write
 
 jobs:
   release-notes:
     name: Validate release tag
+    # Guarded because this job reads `inputs.tag`, which only exists for a manual
+    # run. On a release event it evaluated to "", so the job failed with
+    # "Tag  not found" on every single release — the other half of why this
+    # workflow has never gone green.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
