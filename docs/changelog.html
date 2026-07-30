@@ -40,16 +40,83 @@
 
     <main id="main" class="page">
       <section class="page-hero">
-        <p class="eyebrow">25 releases</p>
+        <p class="eyebrow">27 releases</p>
         <h1>Changelog</h1>
         <p class="lede">Every published release, in full. Newest first.</p>
       </section>
       <section class="rel-list">
+        <article class="rel" id="v2.7.1">
+          <div class="rel-meta">
+            <a class="rel-tag" href="#v2.7.1">v2.7.1</a>
+            <time>30 July 2026</time>
+            <span class="rel-badge now">Latest</span>
+            <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.7.1/Zerm_2.7.1_aarch64.dmg">Download .dmg <span>26.9 MB</span></a>
+          </div>
+          <div class="rel-body">
+            <h2>2.7.1</h2>
+            <div class="prose">
+<h3 dir="auto">Headphones</h3>
+<p dir="auto">Dictating while wearing headphones no longer mutes your audio.</p>
+<p dir="auto">Muting exists for one reason: stopping audio from your speakers bleeding into the microphone and being transcribed as words you never said. On headphones that cannot happen, so the mute was cutting your music every time you dictated, for no benefit.</p>
+<p dir="auto">Bluetooth headsets and the built-in headphone jack are detected as headphones. Speakers, USB audio interfaces, HDMI and AirPlay keep muting, because those really can bleed into the mic. You can turn the behaviour off under <strong>Mute Audio While Recording → Keep Playing on Headphones</strong>.</p>
+<h3 dir="auto">Fixed</h3>
+<ul dir="auto">
+<li>Transcribing a recorded audio file failed on some MP4 and M4A files, including Teams meeting recordings.</li>
+<li>Large uploads to cloud transcription providers could stall until they timed out when connected to a VPN.</li>
+<li>Dictation could hang at startup if a browser was unresponsive or showing an automation permission prompt.</li>
+<li>Text from a finished recording could briefly appear in the next one.</li>
+<li>A memory bug in audio-device handling, a data race in the recorder, and several errors that were being silently swallowed.</li>
+<li>The site changelog was not being published on release.</li>
+</ul>
+<h3 dir="auto">Under the hood</h3>
+<p dir="auto">Ports the relevant fixes from upstream VoiceInk v2.0 and v2.1, and clears every compiler warning in the project (110 to 0).</p>
+<p dir="auto"><strong>Installation:</strong> download <code class="notranslate">Zerm_2.7.1_aarch64.dmg</code>. Apple Silicon, macOS 14.4 or later. Signed and notarized.</p>
+            </div>
+          </div>
+        </article>
+        <article class="rel" id="v2.7.0">
+          <div class="rel-meta">
+            <a class="rel-tag" href="#v2.7.0">v2.7.0</a>
+            <time>29 July 2026</time>
+            
+            <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.7.0/Zerm_2.7.0_aarch64.dmg">Download .dmg <span>26.7 MB</span></a>
+          </div>
+          <div class="rel-body">
+            <h2>2.7.0 — honest metrics, working enhancement, real docs</h2>
+            <div class="prose">
+<h2 dir="auto">Your dashboard no longer resets</h2>
+<p dir="auto">Statistics were recomputed from your surviving transcripts, while the cleanup service deletes those on a retention timer defaulting to one day. So the numbers only ever reflected whatever history had not been swept yet.</p>
+<p dir="auto">They now live in their own store that transcript retention cannot reach, holding counts and durations only — no transcript text. Your existing history is imported once on first launch. There is a new <strong>Reset Statistics</strong> button in Privacy settings, because clearing transcripts used to clear the numbers as a side effect and that was the only way to erase them.</p>
+<p dir="auto"><strong>Also fixed:</strong> if you had auto-delete enabled but had never picked a retention period, the cutoff was computed as <em>now</em> and your entire transcript history was deleted at launch.</p>
+<h2 dir="auto">AI enhancement works again</h2>
+<p dir="auto">Enhancement was switched off product-wide by a hidden setting with no interface, which reset your toggle on every launch and blocked the pipeline even when the toggle read on. The same setting had pinned the response timeout to two seconds, so anything that did run timed out and quietly pasted the raw transcript.</p>
+<p dir="auto">Enhancement was only slow because it ran <em>before</em> the paste. It now runs after, so you can have both:</p>
+<ul dir="auto">
+<li><strong>Instant</strong> — paste immediately, no AI. The fastest path.</li>
+<li><strong>Instant + Refine</strong> — paste immediately, then improve the text in place a moment later.</li>
+<li><strong>Enhanced</strong> — wait for the AI, paste once.</li>
+</ul>
+<p dir="auto">Refine rewrites text in place in native macOS apps such as Mail, Notes and TextEdit. In Electron apps (Slack, VS Code, Cursor, Notion), browser text fields and terminals, macOS does not allow it — there, the refined version is offered to you instead and what you already typed is left untouched. Nothing is ever silently rewritten in an app that cannot support it.</p>
+<p dir="auto">Dictation speed is unchanged: measured at 85 ms from hotkey to recording.</p>
+<h2 dir="auto">Every setting explains itself</h2>
+<p dir="auto">Around a hundred options now carry an info icon, each linking to a real documentation page. Previously every documentation link in the app pointed at a domain that was never registered.</p>
+<h2 dir="auto">Also</h2>
+<ul dir="auto">
+<li>The support button was opening a mail draft addressed to an unrelated person, with your system information attached. It now opens the project issue tracker.</li>
+<li>Power Modes no longer silently override your global enhancement setting; each one can inherit it, force it on, or force it off.</li>
+<li>The recorder's enhancement indicator is now legible at a glance.</li>
+</ul>
+<hr>
+<p dir="auto"><strong>Requires macOS 14.4 or later. Apple Silicon.</strong><br>
+Signed with a Developer ID certificate and notarized by Apple.</p>
+            </div>
+          </div>
+        </article>
         <article class="rel" id="v2.6.1">
           <div class="rel-meta">
             <a class="rel-tag" href="#v2.6.1">v2.6.1</a>
             <time>27 July 2026</time>
-            <span class="rel-badge now">Latest</span>
+            
             <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.6.1/Zerm_2.6.1_aarch64.dmg">Download .dmg <span>26.6 MB</span></a>
           </div>
           <div class="rel-body">
