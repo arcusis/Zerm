@@ -191,7 +191,22 @@ fi
 
 # Per-release notes for the Sparkle feed. Override per release, e.g.
 #   RELEASE_NOTES_HTML='                    <li>Fixed the thing.</li>' scripts/release.sh
-RELEASE_NOTES_HTML="${RELEASE_NOTES_HTML:-                    <li>Maintenance and stability improvements.</li>}"
+# Release notes shown in the in-app update dialog.
+#
+# There is deliberately no useful default. A silent fallback shipped 2.8.0 — a release
+# with a whole new Recording tab — describing itself to every user as "maintenance and
+# stability improvements". Better to stop and make the author write them.
+if [ -z "${RELEASE_NOTES_HTML:-}" ]; then
+    if [ -n "${RELEASE_NOTES_FILE:-}" ] && [ -f "${RELEASE_NOTES_FILE}" ]; then
+        RELEASE_NOTES_HTML="$(cat "${RELEASE_NOTES_FILE}")"
+    else
+        echo "error: no release notes supplied."
+        echo "  RELEASE_NOTES_HTML='<li>...</li>' scripts/release.sh"
+        echo "  RELEASE_NOTES_FILE=notes.html   scripts/release.sh"
+        echo "These are what users read in the update dialog; do not ship without them."
+        exit 1
+    fi
+fi
 
 PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
 APPCAST_OUT="$REPO_ROOT/docs/appcast.xml"

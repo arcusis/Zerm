@@ -7,7 +7,17 @@
             <description><![CDATA[
                 <h3>What's New in v2.8.0</h3>
                 <ul>
-                    <li>Maintenance and stability improvements.</li>
+                    <li><b>New: the Recording tab.</b> Record a whole meeting &mdash; the room through your microphone, the call through your Mac &mdash; and read the transcript as it happens.</li>
+                    <li><b>Both sides, kept apart.</b> Your microphone and the call audio are recorded as separate tracks, so your side and theirs never get mixed together.</li>
+                    <li><b>Speaker identification.</b> Tells apart the people in the room with you, entirely on&nbsp;device.</li>
+                    <li><b>Summaries when the meeting ends,</b> with action items and chapters. Runs through local Ollama by default &mdash; your transcript never leaves the Mac unless you pick a cloud model.</li>
+                    <li><b>Offers to record</b> when Zoom, Teams, Meet, Signal, Slack or FaceTime opens.</li>
+                    <li><b>Import existing recordings</b> &mdash; wav, mp3, m4a, mp4, flac, ogg, aac, caf and aiff.</li>
+                    <li><b>Playback with a synced transcript.</b> Click any line to jump to the moment it was said.</li>
+                    <li><b>Survives a crash.</b> Transcript lines are saved as they arrive, so an interrupted meeting keeps everything up to the last few seconds.</li>
+                    <li><b>The dashboard no longer stutters</b> when you scroll it quickly.</li>
+                    <li><b>Fixed:</b> Apple&rsquo;s built&#8209;in dictation model now downloads missing language assets instead of failing with an error you could not act on.</li>
+                    <li><b>Fixed:</b> Power Mode&rsquo;s app picker no longer walks through symlinked folders, which could make it hang.</li>
                 </ul>
             ]]></description>
             <pubDate>Fri, 31 Jul 2026 19:26:41 +0000</pubDate>
