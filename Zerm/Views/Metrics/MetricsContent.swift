@@ -3,12 +3,13 @@ import SwiftData
 
 struct MetricsContent: View {
     @State private var range: UsageRange = .month
-    @State private var buckets: [UsageBucket] = []
+    @State private var series = UsageChartSeries.empty
     @State private var rangeTotals = UsageTotals()
     @State private var allTimeTotals = UsageTotals()
     @State private var currentStreak: Int = 0
     @State private var longestStreak: Int = 0
     @State private var isLoadingMetrics = true
+    @State private var reloadTask: Task<Void, Never>?
 
     var body: some View {
         Group {
@@ -24,7 +25,7 @@ struct MetricsContent: View {
                             heroSection
                             rangePicker
                             metricsSection
-                            UsageTrendCharts(range: range, buckets: buckets)
+                            UsageTrendCharts(range: range, series: series)
 
                             Spacer(minLength: 20)
 
@@ -48,19 +49,38 @@ struct MetricsContent: View {
             reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: .usageStatsUpdated)) { _ in
-            reload()
+            scheduleReload()
+        }
+        .onDisappear {
+            reloadTask?.cancel()
         }
     }
 
     // MARK: - Loading
+
+    /// A reload re-reads the whole store and rebuilds the series. Dictation posts
+    /// `.usageStatsUpdated` per session, and Instant + Refine posts a second time when the
+    /// rewrite lands, so a burst is coalesced into one rebuild instead of several.
+    private func scheduleReload() {
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            reload()
+        }
+    }
 
     private func reload() {
         let service = UsageStatsService.shared
         let allDays = service.allDays()
 
         allTimeTotals = UsageStatsService.sum(allDays)
-        buckets = UsageSeries.buckets(for: range, days: rangeDays(from: allDays))
+
+        let buckets = UsageSeries.buckets(for: range, days: rangeDays(from: allDays))
         rangeTotals = UsageSeries.totals(buckets)
+        // Derived once, here. The charts must not recompute any of it while the pointer is
+        // moving over them.
+        series = UsageChartSeries(buckets: buckets, unit: range.isMonthly ? .month : .day)
 
         let activeDays = Set(allDays.filter { $0.sessions > 0 }.map(\.day))
         currentStreak = UsageStatsService.currentStreak(activeDays: activeDays, today: Date())
@@ -135,7 +155,9 @@ struct MetricsContent: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.08), radius: 30, x: 0, y: 16)
+        // Kept modest on purpose: a wide shadow is an offscreen pass the compositor repeats
+        // on every scroll frame, and at 30pt it was the most expensive thing on the page.
+        .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 6)
     }
 
     /// One control above everything it scopes — the cards and both charts move together.
@@ -272,7 +294,7 @@ private struct CopySystemInfoButton: View {
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Capsule().fill(.thinMaterial))
+            .metricsCardSurface(Capsule())
         }
         .buttonStyle(.plain)
         .scaleEffect(isCopied ? 1.1 : 1.0)

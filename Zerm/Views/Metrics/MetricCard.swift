@@ -43,9 +43,6 @@ struct MetricCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.thinMaterial)
-        )
+        .metricsCardSurface()
     }
 }

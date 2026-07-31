@@ -6,26 +6,35 @@ import Charts
 /// Two stacked charts rather than one chart with two y-scales: words and words-per-minute
 /// have unrelated ranges, and overlaying them on separate axes invents a correlation that
 /// is not in the data. They share an x-domain instead, so the eye still reads them together.
+///
+/// Everything derived from the buckets arrives precomputed in `UsageChartSeries`. Nothing on
+/// the hover path may allocate or scan: selection follows the pointer, and the pointer moves
+/// across these charts every time the dashboard is scrolled.
 struct UsageTrendCharts: View {
     let range: UsageRange
-    let buckets: [UsageBucket]
+    let series: UsageChartSeries
 
-    @State private var selectedDate: Date?
+    @State private var selectedStart: Date?
     @State private var isTableExpanded = false
 
     private var selectedBucket: UsageBucket? {
-        guard let selectedDate else { return nil }
-        return buckets.min {
-            abs($0.start.timeIntervalSince(selectedDate)) < abs($1.start.timeIntervalSince(selectedDate))
-        }
+        series.bucket(startingAt: selectedStart)
     }
 
-    private var peakBucket: UsageBucket? {
-        buckets.max { $0.totals.words < $1.totals.words }
-    }
-
-    private var lastRateBucket: UsageBucket? {
-        buckets.last { $0.totals.recordedSeconds > 0 }
+    /// Selection is stored snapped to a bucket, and only written when the bucket actually
+    /// changes. Swift Charts hands over a continuous date for every pointer event, so
+    /// binding it straight to state rewrote it dozens of times a second — rebuilding both
+    /// charts each time — while the pointer sat inside a single bar.
+    private var selectionBinding: Binding<Date?> {
+        Binding(
+            get: { selectedStart },
+            set: { proposed in
+                let snapped = proposed.flatMap { series.nearestStart(to: $0) }
+                if snapped != selectedStart {
+                    selectedStart = snapped
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -38,7 +47,7 @@ struct UsageTrendCharts: View {
                 wordsChart
             }
 
-            if lastRateBucket != nil {
+            if series.hasRateSeries {
                 chartCard(
                     title: "Words Per Minute",
                     subtitle: "Dictation speed, \(range.caption.lowercased())",
@@ -53,17 +62,28 @@ struct UsageTrendCharts: View {
             }
 
             DisclosureGroup("Show data table", isExpanded: $isTableExpanded) {
-                UsageDataTable(range: range, buckets: buckets)
+                UsageDataTable(range: range, buckets: series.buckets)
                     .padding(.top, 10)
             }
             .font(.system(size: 12))
+        }
+        .onChange(of: series) { _, updated in
+            // A reload that only moved today's totals should not throw away the hover; a
+            // range switch, which replaces the buckets outright, has to.
+            if let selectedStart, updated.bucket(startingAt: selectedStart) == nil {
+                self.selectedStart = nil
+            }
         }
     }
 
     // MARK: - Charts
 
     private var wordsChart: some View {
-        Chart(buckets) { bucket in
+        // Read once, outside the mark builder: anything referenced inside it is evaluated
+        // per plotted element.
+        let peakID = selectedStart == nil ? series.peakBucketID : nil
+
+        return Chart(series.buckets) { bucket in
             BarMark(
                 x: .value("Date", bucket.start, unit: bucketUnit),
                 y: .value("Words", bucket.totals.words),
@@ -80,7 +100,7 @@ struct UsageTrendCharts: View {
                 )
             )
 
-            if let peakBucket, peakBucket.totals.words > 0, peakBucket.id == bucket.id, selectedBucket == nil {
+            if peakID == bucket.id {
                 PointMark(
                     x: .value("Date", bucket.start, unit: bucketUnit),
                     y: .value("Words", bucket.totals.words)
@@ -93,10 +113,10 @@ struct UsageTrendCharts: View {
                 }
             }
         }
-        .chartXScale(domain: xDomain)
+        .chartXScale(domain: series.xDomain)
         .chartXAxis { xAxis }
         .chartYAxis { yAxis }
-        .chartXSelection(value: $selectedDate)
+        .chartXSelection(value: selectionBinding)
         .chartOverlay { proxy in
             selectionRule(proxy: proxy)
         }
@@ -104,12 +124,12 @@ struct UsageTrendCharts: View {
     }
 
     private var rateChart: some View {
-        Chart(ratePoints) { point in
+        let labelsLastPoint = selectedStart == nil
+
+        return Chart(series.ratePoints) { point in
             LineMark(
                 x: .value("Date", point.start, unit: bucketUnit),
                 y: .value("Words per minute", point.wordsPerMinute),
-                // Each unbroken run is its own series, so the line stops at a gap instead
-                // of drawing straight through days the user never opened Zerm.
                 series: .value("Run", point.run)
             )
             .foregroundStyle(UsageChartPalette.rate)
@@ -124,7 +144,7 @@ struct UsageTrendCharts: View {
                 .symbolSize(64)
                 .foregroundStyle(UsageChartPalette.rate)
                 .annotation(position: .top, spacing: 4) {
-                    if point.isLast && selectedBucket == nil {
+                    if point.isLast && labelsLastPoint {
                         Text(String(format: "%.0f", point.wordsPerMinute))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.secondary)
@@ -132,65 +152,14 @@ struct UsageTrendCharts: View {
                 }
             }
         }
-        .chartXScale(domain: xDomain)
+        .chartXScale(domain: series.xDomain)
         .chartXAxis { xAxis }
         .chartYAxis { yAxis }
-        .chartXSelection(value: $selectedDate)
+        .chartXSelection(value: selectionBinding)
         .chartOverlay { proxy in
             selectionRule(proxy: proxy)
         }
         .frame(height: 120)
-    }
-
-    /// A dictation rate only exists for buckets that actually recorded audio.
-    private struct RatePoint: Identifiable {
-        let start: Date
-        let wordsPerMinute: Double
-        let run: Int
-        let isIsolated: Bool
-        var isLast: Bool = false
-
-        var id: Date { start }
-    }
-
-    private var ratePoints: [RatePoint] {
-        var runs: [[UsageBucket]] = []
-        for bucket in buckets {
-            guard bucket.totals.recordedSeconds > 0 else {
-                if runs.last?.isEmpty == false { runs.append([]) }
-                continue
-            }
-            if runs.isEmpty { runs.append([]) }
-            runs[runs.count - 1].append(bucket)
-        }
-
-        var points: [RatePoint] = []
-        for (index, run) in runs.enumerated() where !run.isEmpty {
-            for bucket in run {
-                points.append(RatePoint(
-                    start: bucket.start,
-                    wordsPerMinute: bucket.totals.wordsPerMinute,
-                    run: index,
-                    isIsolated: run.count == 1
-                ))
-            }
-        }
-        if !points.isEmpty {
-            points[points.count - 1].isLast = true
-        }
-        return points
-    }
-
-    /// Both charts are pinned to the same window so the two plots line up even when the
-    /// rate series has fewer points than the bars.
-    private var xDomain: ClosedRange<Date> {
-        guard let first = buckets.first?.start, let last = buckets.last?.start else {
-            let today = Date()
-            return today...today
-        }
-        let calendar = Calendar.current
-        let end = calendar.date(byAdding: bucketUnit, value: 1, to: last) ?? last
-        return first...end
     }
 
     /// A shared crosshair drawn as an overlay rather than a `RuleMark`, so both charts
@@ -198,9 +167,9 @@ struct UsageTrendCharts: View {
     @ViewBuilder
     private func selectionRule(proxy: ChartProxy) -> some View {
         GeometryReader { geometry in
-            if let selectedBucket,
+            if let selectedStart,
                let plotFrame = proxy.plotFrame,
-               let offset = proxy.position(forX: selectedBucket.start) {
+               let offset = proxy.position(forX: selectedStart) {
                 let frame = geometry[plotFrame]
                 Rectangle()
                     .fill(Color.secondary.opacity(0.35))
@@ -273,10 +242,7 @@ struct UsageTrendCharts: View {
             content()
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.thinMaterial)
-        )
+        .metricsCardSurface()
     }
 
     private func bucketLabel(_ date: Date) -> String {
@@ -290,10 +256,13 @@ struct UsageTrendCharts: View {
 /// reachable only by hovering.
 private struct UsageDataTable: View {
     let range: UsageRange
-    let buckets: [UsageBucket]
+    private let rows: [UsageBucket]
 
-    private var rows: [UsageBucket] {
-        buckets.filter { $0.totals.sessions > 0 }.reversed()
+    init(range: UsageRange, buckets: [UsageBucket]) {
+        self.range = range
+        // Filtered once here rather than per body pass — on All Time this is one row per
+        // active day, and the table lives inside the dashboard's own scroll view.
+        self.rows = Array(buckets.filter { $0.totals.sessions > 0 }.reversed())
     }
 
     var body: some View {
@@ -303,7 +272,7 @@ private struct UsageDataTable: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 header
                 ForEach(rows) { bucket in
                     row(bucket)
