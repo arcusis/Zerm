@@ -616,3 +616,80 @@ struct MeetingPlaybackTests {
         #expect(sidecar([]).line(at: 0) == nil)
     }
 }
+
+/// Two different voices, alternating — the closest an automated test gets to two people in a
+/// room. A single synthesised voice exercises the pipeline but cannot show that speakers are
+/// actually told apart.
+@MainActor
+struct MeetingTwoSpeakerTests {
+
+    private func speech(voice: String, text: String) throws -> Data? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zerm-2sp-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let say = Process()
+        say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        say.arguments = ["-v", voice, "-o", url.path, "--data-format=LEI16@16000", "-r", "175", text]
+        try say.run()
+        say.waitUntilExit()
+        guard say.terminationStatus == 0, let file = try? AVAudioFile(forReading: url) else { return nil }
+
+        let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+                                      frameCapacity: AVAudioFrameCount(file.length))!
+        try file.read(into: buffer)
+        var pcm = Data()
+        if let ch = buffer.floatChannelData {
+            for frame in 0..<Int(buffer.frameLength) {
+                let v = Int16(max(-1, min(1, ch[0][frame])) * 32_767)
+                withUnsafeBytes(of: v.littleEndian) { pcm.append(contentsOf: $0) }
+            }
+        }
+        return pcm
+    }
+
+    @Test func twoVoicesAreToldApart() async throws {
+        let diarizer = MeetingDiarizer()
+        await diarizer.prepare()
+        guard diarizer.isAvailable else {
+            Issue.record("diarizer unavailable; two-speaker separation unverified")
+            return
+        }
+
+        var turns: [MeetingDiarizer.Turn] = []
+        diarizer.onTurns = { turns = $0 }
+
+        let script: [(String, String)] = [
+            ("Daniel", "Right, shall we start with the launch date? I think we are cutting it fine."),
+            ("Flo", "I agree, the pricing page is not ready and the copy still needs review."),
+            ("Daniel", "So we push by a week and use the time to finish the onboarding flow."),
+            ("Flo", "That works for me. I will update the schedule and tell the support team."),
+            ("Daniel", "Good. Let us also decide who owns the release notes before we finish."),
+            ("Flo", "I can take those, and I will send a draft round on Thursday morning.")
+        ]
+
+        var any = false
+        for (voice, line) in script {
+            guard let pcm = try speech(voice: voice, text: line) else { continue }
+            any = true
+            var offset = 0
+            while offset < pcm.count {
+                let end = min(offset + 8_000, pcm.count)
+                diarizer.append(pcm.subdata(in: offset..<end))
+                offset = end
+            }
+        }
+        guard any else {
+            Issue.record("could not synthesise either voice")
+            return
+        }
+
+        try await Task.sleep(for: .seconds(15))
+        let speakers = Set(turns.map(\.speakerIndex))
+
+        #expect(!turns.isEmpty, "no turns from two alternating voices")
+        #expect(speakers.count >= 2,
+                "two distinct voices were heard as \(speakers.count) speaker(s) across \(turns.count) turn(s)")
+        diarizer.finish()
+    }
+}
