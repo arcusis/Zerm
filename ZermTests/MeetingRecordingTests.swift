@@ -693,3 +693,23 @@ struct MeetingTwoSpeakerTests {
         diarizer.finish()
     }
 }
+
+struct DiarizerCapacityDiagnostic {
+    /// Guards the sample-rate contract between Zerm and the diarisation model.
+    ///
+    /// The model runs at 8 kHz while everything else in Zerm is 16 kHz. Feeding it 16 kHz audio
+    /// without declaring the source rate did not fail: turns were still produced, but two
+    /// clearly different voices decoded as a single speaker. If the model's rate ever changes,
+    /// this catches it rather than letting speaker identification quietly degrade again.
+    @Test func modelRateMatchesWhatTheDiarizerDeclares() async throws {
+        let d = LSEENDDiarizer()
+        try await d.initialize(variant: .dihard3)
+
+        let modelRate = try #require(d.targetSampleRate)
+        #expect(modelRate == 8_000, "model rate changed to \(modelRate); MeetingDiarizer declares 16 kHz input and relies on the library resampling")
+
+        // Capacity has to exceed a two-person call for the feature to mean anything.
+        let maxSpeakers = try #require(d.decodeMaxSpeakers)
+        #expect(maxSpeakers >= 2, "model decodes at most \(maxSpeakers) speaker(s)")
+    }
+}

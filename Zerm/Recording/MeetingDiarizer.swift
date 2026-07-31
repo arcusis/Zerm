@@ -27,6 +27,9 @@ final class MeetingDiarizer: @unchecked Sendable {
         var label: String { "Speaker \(speakerIndex + 1)" }
     }
 
+    /// Everything upstream — the tap writer, the transcriber, the mic — is 16 kHz.
+    private static let inputSampleRate: Double = 16_000
+
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "MeetingDiarizer")
     private let queue = DispatchQueue(label: "com.arcusis.zerm.meeting-diarizer", qos: .utility)
 
@@ -115,8 +118,13 @@ final class MeetingDiarizer: @unchecked Sendable {
             let samples = Self.floatSamples(from: data)
             guard !samples.isEmpty else { return }
 
-            diarizer.addAudio(samples)
             do {
+                // The model runs at 8 kHz while everything else in Zerm is 16 kHz. The bare
+                // addAudio(_:) means "already at the model rate", so feeding it 16 kHz audio
+                // silently mis-scaled every sample: turns were still produced, but two clearly
+                // different voices were decoded as one speaker. The rate has to be declared so
+                // the library resamples.
+                try diarizer.addAudio(samples, sourceSampleRate: Self.inputSampleRate)
                 if let update = try diarizer.process() {
                     self.publish(from: diarizer, update: update)
                 }
