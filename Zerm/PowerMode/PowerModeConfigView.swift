@@ -665,41 +665,7 @@ struct ConfigurationView: View {
         let systemAppURLs = FileManager.default.urls(for: .applicationDirectory, in: .systemDomainMask)
         let allAppURLs = userAppURLs + localAppURLs + systemAppURLs
 
-        var allApps: [URL] = []
-
-        func scanDirectory(_ baseURL: URL, depth: Int = 0) {
-            // Prevent infinite recursion from circular symlinks
-            guard depth < 5 else { return }
-            guard let enumerator = FileManager.default.enumerator(
-                at: baseURL,
-                includingPropertiesForKeys: [.isApplicationKey, .isDirectoryKey, .isSymbolicLinkKey],
-                options: [.skipsHiddenFiles]
-            ) else { return }
-
-            for item in enumerator {
-                guard let url = item as? URL else { continue }
-                let resolvedURL = url.resolvingSymlinksInPath()
-
-                if resolvedURL.pathExtension == "app" {
-                    allApps.append(resolvedURL)
-                    enumerator.skipDescendants()
-                    continue
-                }
-
-                // Traverse symlinked directories manually
-                var isDirectory: ObjCBool = false
-                if url != resolvedURL &&
-                   FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory) &&
-                   isDirectory.boolValue {
-                    enumerator.skipDescendants()
-                    scanDirectory(resolvedURL, depth: depth + 1)
-                }
-            }
-        }
-
-        for baseURL in allAppURLs {
-            scanDirectory(baseURL)
-        }
+        let allApps = Self.applicationURLs(in: allAppURLs)
 
         installedApps = allApps.compactMap { url in
             guard let bundle = Bundle(url: url),
@@ -712,6 +678,61 @@ struct ConfigurationView: View {
             return (url: url, name: name, bundleId: bundleId, icon: icon)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Collects every `.app` under the given directories without ever descending through a
+    /// symlink.
+    ///
+    /// The previous version resolved symlinks and recursed into whatever they pointed at,
+    /// guarded only by a depth limit. A link into a large or remote tree — a network mount, or
+    /// anything pointing back up the hierarchy — turned opening the app picker into a long
+    /// filesystem walk, and the same bundle could be collected several times by different
+    /// paths. Ported from upstream VoiceInk.
+    static func applicationURLs(
+        in appDirectories: [URL],
+        fileManager: FileManager = .default
+    ) -> [URL] {
+        var appURLs: [URL] = []
+        var seenPaths = Set<String>()
+
+        for appDirectory in appDirectories {
+            guard let enumerator = fileManager.enumerator(
+                at: appDirectory,
+                includingPropertiesForKeys: [.isApplicationKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+
+            for item in enumerator {
+                guard let url = item as? URL else { continue }
+                let values = try? url.resourceValues(forKeys: [.isApplicationKey, .isSymbolicLinkKey])
+
+                if values?.isSymbolicLink == true {
+                    // A linked app still counts, but nothing behind the link is walked.
+                    enumerator.skipDescendants()
+
+                    let resolvedURL = url.resolvingSymlinksInPath()
+                    guard resolvedURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else {
+                        continue
+                    }
+                    if seenPaths.insert(resolvedURL.standardizedFileURL.path).inserted {
+                        appURLs.append(resolvedURL)
+                    }
+                    continue
+                }
+
+                guard values?.isApplication == true
+                        || url.pathExtension.caseInsensitiveCompare("app") == .orderedSame else {
+                    continue
+                }
+
+                enumerator.skipDescendants()
+                if seenPaths.insert(url.standardizedFileURL.path).inserted {
+                    appURLs.append(url)
+                }
+            }
+        }
+
+        return appURLs
     }
 
     private func saveConfiguration() {
