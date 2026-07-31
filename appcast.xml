@@ -3,23 +3,18 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.7.1</title>
+            <title>2.8.0</title>
             <description><![CDATA[
-                <h3>What's New in v2.7.1</h3>
+                <h3>What's New in v2.8.0</h3>
                 <ul>
-                    <li>Dictating while wearing headphones no longer mutes your audio. Muting exists to stop speakers bleeding into the microphone, which cannot happen on headphones. Turn it off under Mute Audio While Recording &rarr; Keep Playing on Headphones.</li>
-                    <li>Fixed: transcribing a recorded audio file failed on some MP4 and M4A files, including Teams meeting recordings.</li>
-                    <li>Fixed: large uploads to cloud transcription providers could stall until they timed out when connected to a VPN.</li>
-                    <li>Fixed: dictation could hang at startup if a browser was unresponsive or showing an automation permission prompt.</li>
-                    <li>Fixed: text from a finished recording could briefly appear in the next one.</li>
-                    <li>Fixed a memory bug in audio-device handling, a data race in the recorder, and several errors that were being silently swallowed.</li>
+                    <li>Maintenance and stability improvements.</li>
                 </ul>
             ]]></description>
-            <pubDate>Thu, 30 Jul 2026 07:36:01 +0000</pubDate>
-            <sparkle:version>271</sparkle:version>
-            <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
+            <pubDate>Fri, 31 Jul 2026 19:26:41 +0000</pubDate>
+            <sparkle:version>280</sparkle:version>
+            <sparkle:shortVersionString>2.8.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.7.1/Zerm-2.7.1-macos.zip" length="24069890" type="application/octet-stream" sparkle:edSignature="UfyEP4qt1Y9tjQlNQqQy3pPwIVGEbm/Rqmvj679UHYjBMexVBi1ex2dxgHIi0uwBwGl3c+yKyalQCKc1QLswCg=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.0/Zerm-2.8.0-macos.zip" length="24429508" type="application/octet-stream" sparkle:edSignature="k4ZtQW+LGvK9XI5s67I6EFUE5jygfGfY6m4zT7nmIlKlpI8JuRvgbl11e+6MTENDCu25AvXPfwYGNfA0VU04BQ=="/>
         </item>
     </channel>
 </rss>
