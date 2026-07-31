@@ -6,6 +6,7 @@ import OSLog
 // ViewType enum with all cases
 enum ViewType: String, CaseIterable, Identifiable {
     case metrics = "Dashboard"
+    case recording = "Recording"
     case history = "History"
     case models = "Dictation Models"
     case enhancement = "Enhancement"
@@ -21,6 +22,7 @@ enum ViewType: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .metrics: return "gauge.medium"
+        case .recording: return "record.circle"
         case .history: return "doc.text.fill"
         case .models: return "text.bubble.fill"
         case .enhancement: return "wand.and.stars"
@@ -161,6 +163,8 @@ struct ContentView: View {
         switch viewType {
         case .metrics:
             MetricsView()
+        case .recording:
+            MeetingRecordingView(engine: engine)
         case .models:
             ModelManagementView()
         case .enhancement:

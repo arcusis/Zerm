@@ -18,5 +18,7 @@
 	<string>Zerm needs to interact with your browser to detect the current website for applying website-specific configurations.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Zerm needs screen recording access to understand context from your screen for improved transcription accuracy.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Zerm needs to record the audio your Mac is playing so it can capture and transcribe the other participants in a meeting.</string>
 </dict>
 </plist>
