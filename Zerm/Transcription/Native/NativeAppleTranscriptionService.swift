@@ -76,17 +76,33 @@ class NativeAppleTranscriptionService: TranscriptionService {
             throw ServiceError.localeNotSupported
         }
 
-        guard isLocaleInstalled else {
-            logger.error("Transcription failed: Assets for '\(selectedLocaleIdentifier, privacy: .public)' are not downloaded.")
-            throw ServiceError.assetDownloadRequired(languageDisplayName(for: selectedLocaleIdentifier))
-        }
-
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
             reportingOptions: [],
             attributeOptions: []
         )
+
+        // A supported-but-not-yet-downloaded locale used to be a dead end: the error named the
+        // missing language and nothing in the app could ever fetch it, so picking Apple's model
+        // with a fresh locale simply never worked. Ask the system to install it instead, and
+        // only give up if that fails. (Upstream VoiceInk #837.)
+        if !isLocaleInstalled {
+            logger.notice("Assets for '\(selectedLocaleIdentifier, privacy: .public)' are not installed; requesting download.")
+            do {
+                try await downloadAssets(for: transcriber)
+            } catch {
+                logger.error("Asset download for '\(selectedLocaleIdentifier, privacy: .public)' failed: \(error.localizedDescription, privacy: .public)")
+                throw ServiceError.assetDownloadRequired(languageDisplayName(for: selectedLocaleIdentifier))
+            }
+
+            let nowInstalled = await SpeechTranscriber.installedLocales
+                .contains { $0.identifier(.bcp47) == selectedLocaleIdentifier }
+            guard nowInstalled else {
+                throw ServiceError.assetDownloadRequired(languageDisplayName(for: selectedLocaleIdentifier))
+            }
+            logger.notice("Assets for '\(selectedLocaleIdentifier, privacy: .public)' installed.")
+        }
 
         await ensureModelIsReserved(for: locale, transcriber: transcriber)
 
@@ -132,6 +148,18 @@ class NativeAppleTranscriptionService: TranscriptionService {
         #else
         logger.notice("Native Apple transcription is disabled in this build (Speech APIs not enabled).")
         throw ServiceError.unsupportedOS
+        #endif
+    }
+
+    /// Downloads the speech assets a transcriber needs, if the system says any are missing.
+    @available(macOS 26, *)
+    private func downloadAssets(for transcriber: SpeechTranscriber) async throws {
+        #if canImport(Speech) && ENABLE_NATIVE_SPEECH_ANALYZER
+        guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
+            // Nothing to fetch: the system already considers the modules satisfied.
+            return
+        }
+        try await request.downloadAndInstall()
         #endif
     }
 
