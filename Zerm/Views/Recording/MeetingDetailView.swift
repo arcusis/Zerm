@@ -12,7 +12,12 @@ struct MeetingDetailView: View {
     @StateObject private var player = MeetingPlayer()
 
     private var lines: [MeetingRecordingStore.Sidecar.Line] { sidecar?.segments ?? [] }
-    private var activeLine: Int? { sidecar?.line(at: player.currentTime) }
+    /// Nothing is "playing now" before playback has started, so an untouched recording opens
+    /// with a plain transcript rather than its first line lit up as if it were being spoken.
+    private var activeLine: Int? {
+        guard player.isPlaying || player.currentTime > 0 else { return nil }
+        return sidecar?.line(at: player.currentTime)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -231,8 +236,15 @@ struct MeetingTranscriptRow: View {
     }
 
     /// Stable per-speaker colour so one voice reads the same way down the transcript.
+    ///
+    /// Not `hashValue`: Swift seeds string hashing per process, so the same voice came back a
+    /// different colour on every launch, and neighbouring labels could collide — "Speaker 1",
+    /// "Speaker 2" and "Speaker 3" all landed on the same pink. Folding the bytes is stable
+    /// across launches and puts labels that differ only in their last character on
+    /// consecutive palette entries, which is exactly the case that matters here.
     static func tint(_ label: String) -> Color {
         let palette: [Color] = [.blue, .purple, .orange, .green, .pink, .teal]
-        return palette[abs(label.hashValue) % palette.count]
+        let index = label.utf8.reduce(0) { ($0 &* 31 &+ Int($1)) % palette.count }
+        return palette[index]
     }
 }
