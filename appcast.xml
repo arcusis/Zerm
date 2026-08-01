@@ -3,28 +3,22 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.0</title>
+            <title>2.8.1</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.0</h3>
+                <h3>What's New in v2.8.1</h3>
                 <ul>
-                    <li><b>New: the Recording tab.</b> Record a whole meeting &mdash; the room through your microphone, the call through your Mac &mdash; and read the transcript as it happens.</li>
-                    <li><b>Both sides, kept apart.</b> Your microphone and the call audio are recorded as separate tracks, so your side and theirs never get mixed together.</li>
-                    <li><b>Speaker identification.</b> Tells apart the people in the room with you, entirely on&nbsp;device.</li>
-                    <li><b>Summaries when the meeting ends,</b> with action items and chapters. Runs through local Ollama by default &mdash; your transcript never leaves the Mac unless you pick a cloud model.</li>
-                    <li><b>Offers to record</b> when Zoom, Teams, Meet, Signal, Slack or FaceTime opens.</li>
-                    <li><b>Import existing recordings</b> &mdash; wav, mp3, m4a, mp4, flac, ogg, aac, caf and aiff.</li>
-                    <li><b>Playback with a synced transcript.</b> Click any line to jump to the moment it was said.</li>
-                    <li><b>Survives a crash.</b> Transcript lines are saved as they arrive, so an interrupted meeting keeps everything up to the last few seconds.</li>
-                    <li><b>The dashboard no longer stutters</b> when you scroll it quickly.</li>
-                    <li><b>Fixed:</b> Apple&rsquo;s built&#8209;in dictation model now downloads missing language assets instead of failing with an error you could not act on.</li>
-                    <li><b>Fixed:</b> Power Mode&rsquo;s app picker no longer walks through symlinked folders, which could make it hang.</li>
+                    <li>The Recording tab is rebuilt as two dedicated screens — Record for the meeting in progress, Library for everything you have recorded — instead of one crowded pane.</li>
+                    <li>Capture, transcript and automation settings moved into their own panel behind a Settings button, so the recording screen shows only what is happening now.</li>
+                    <li>The Library is searchable, shows each recording's length, speakers, size and summary at a glance, and opens any of them for playback.</li>
+                    <li>Speaker colours in a transcript are stable and distinct — the same voice now keeps its colour between launches instead of every speaker coming out the same shade.</li>
+                    <li>A transcript no longer highlights its first line as if it were playing before you press play.</li>
                 </ul>
             ]]></description>
-            <pubDate>Fri, 31 Jul 2026 19:26:41 +0000</pubDate>
-            <sparkle:version>280</sparkle:version>
-            <sparkle:shortVersionString>2.8.0</sparkle:shortVersionString>
+            <pubDate>Sat, 01 Aug 2026 15:42:31 +0000</pubDate>
+            <sparkle:version>281</sparkle:version>
+            <sparkle:shortVersionString>2.8.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.0/Zerm-2.8.0-macos.zip" length="24429508" type="application/octet-stream" sparkle:edSignature="k4ZtQW+LGvK9XI5s67I6EFUE5jygfGfY6m4zT7nmIlKlpI8JuRvgbl11e+6MTENDCu25AvXPfwYGNfA0VU04BQ=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.1/Zerm-2.8.1-macos.zip" length="24524967" type="application/octet-stream" sparkle:edSignature="HJt20OmlAooU9ZJBIkWH3KbEonALw1/xQXUIKamL5sTgT2Ra7tGzW1ka1tmx5hYJ9tdGciLLZ9gQHFbJuZvgBQ=="/>
         </item>
     </channel>
 </rss>
