@@ -1,7 +1,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Recording tab: start a meeting, watch it come in, read the transcript as it lands.
+/// The Recording tab.
+///
+/// Two dedicated screens behind one segmented control: **Record**, which is only what you look at
+/// while a meeting runs, and **Library**, which is only past recordings. Everything you set once
+/// lives in the settings panel behind the gear, not in the middle of either screen.
 struct MeetingRecordingView: View {
     @EnvironmentObject private var engine: ZermEngine
     @StateObject private var controller: MeetingRecordingController
@@ -16,23 +20,50 @@ struct MeetingRecordingView: View {
     @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
     @AppStorage("meetingAutoDetect") private var autoDetectMeetings = true
 
+    @State private var tab: Tab = .record
+    @State private var isShowingSettings = false
     @State private var importError: String?
-    /// nil = the live pane. Selecting a past recording swaps the detail side, exactly as the
-    /// live one behaves, so neither can drift into being a different kind of screen.
+    /// The recording opened inside the Library tab. nil means the list itself.
     @State private var selected: MeetingRecordingStore.Item?
+
+    enum Tab: String, CaseIterable, Identifiable {
+        case record = "Record"
+        case library = "Library"
+
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .record: return "record.circle"
+            case .library: return "rectangle.stack.fill"
+            }
+        }
+    }
 
     init(engine: ZermEngine? = nil) {
         _controller = StateObject(wrappedValue: MeetingRecordingController(engine: engine))
     }
 
     var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 210, idealWidth: 240, maxWidth: 320)
-            detail
-                .frame(minWidth: 460, maxWidth: .infinity)
+        VStack(spacing: 0) {
+            topBar
+            Divider()
+
+            Group {
+                switch tab {
+                case .record: recordTab
+                case .library: libraryTab
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(.windowBackgroundColor))
+        .background(Color(NSColor.controlBackgroundColor))
+        .slidingPanel(isPresented: $isShowingSettings, width: 400) {
+            MeetingRecordingSettingsPanel(
+                isRecording: controller.isRecording,
+                onImport: importRecording,
+                onDismiss: closeSettings
+            )
+        }
         .task {
             store.reload()
             if autoDetectMeetings { detector.start() }
@@ -41,97 +72,95 @@ struct MeetingRecordingView: View {
         .onChange(of: autoDetectMeetings) { _, enabled in
             enabled ? detector.start() : detector.stop()
         }
+        // A detected call is only actionable on the Record screen, so go there rather than
+        // showing a prompt the user cannot act on.
+        .onChange(of: detector.detected) { _, detection in
+            if detection != nil && !controller.isRecording { tab = .record }
+        }
     }
 
-    // MARK: - Sidebar
+    // MARK: - Top bar
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            if tab == .library, selected != nil {
                 Button {
                     selected = nil
                 } label: {
-                    Label(controller.isRecording ? "Recording…" : "New Recording",
-                          systemImage: controller.isRecording ? "record.circle.fill" : "plus.circle")
+                    Label("Library", systemImage: "chevron.left")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(controller.isRecording ? .red : .accentColor)
                 }
                 .buttonStyle(.plain)
-                Spacer()
-                Button("Import…") { importRecording() }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider()
-
-            if store.items.isEmpty {
-                Text("Recordings appear here.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .padding(14)
-                Spacer()
+                .foregroundColor(.accentColor)
+                .help("Back to all recordings")
             } else {
-                List(selection: $selected) {
-                    ForEach(store.items) { item in
-                        sidebarRow(item)
-                            .tag(item)
-                            .contextMenu {
-                                Button("Show in Finder") {
-                                    NSWorkspace.shared.activateFileViewerSelecting([item.folder])
-                                }
-                                Button("Move to Trash", role: .destructive) {
-                                    if selected == item { selected = nil }
-                                    store.delete(item)
-                                }
-                            }
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 190)
+            }
+
+            Spacer()
+
+            // The one thing that has to stay visible from either screen: whether tape is rolling.
+            if controller.isRecording {
+                Button { tab = .record } label: {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.red).frame(width: 7, height: 7)
+                        Text(Self.clock(controller.session.elapsed))
+                            .font(.system(size: 12, weight: .medium))
+                            .monospacedDigit()
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.red.opacity(0.12)))
                 }
-                .listStyle(.sidebar)
+                .buttonStyle(.plain)
+                .foregroundColor(.red)
+                .help("Recording in progress")
             }
+
+            if tab == .library {
+                Button(action: importRecording) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Import")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Add existing audio files to your library")
+            }
+
+            Button {
+                withAnimation(.smooth(duration: 0.3)) { isShowingSettings.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "gear")
+                    Text("Settings")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isShowingSettings ? .accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Capture sources, transcript and library settings")
+            .accessibilityLabel("Recording settings")
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
-    private func sidebarRow(_ item: MeetingRecordingStore.Item) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(item.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-            HStack(spacing: 6) {
-                Text(Self.clock(item.duration))
-                if item.speakerCount > 0 {
-                    Label("\(item.speakerCount)", systemImage: "person.2.fill")
-                }
-                if item.wasInterrupted {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                }
-                Text(Self.size(item.totalBytes))
-            }
-            .font(.system(size: 9))
-            .foregroundColor(.secondary)
-            .monospacedDigit()
-        }
-        .padding(.vertical, 2)
-    }
+    // MARK: - Record tab
 
-    // MARK: - Detail
-
-    @ViewBuilder
-    private var detail: some View {
-        if let selected {
-            ScrollView {
-                MeetingDetailView(item: selected, sidecar: store.readSidecar(in: selected.folder))
-                    .padding(24)
-            }
-        } else {
-            liveDetail
-        }
-    }
-
-    private var liveDetail: some View {
+    private var recordTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                header
+                transportCard
+
                 if let message = importError {
                     banner(message, icon: "exclamationmark.triangle.fill", tint: .orange)
                 }
@@ -155,95 +184,123 @@ struct MeetingRecordingView: View {
                         secondary: ("Not now", { detector.dismiss() })
                     )
                 }
-                sources
+
                 if controller.isSummarising || controller.summary != nil || controller.summaryError != nil {
-                    summarySection
+                    summaryCard
                 }
-                transcriptSection
+
+                transcriptCard
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    // MARK: - Header
+    private var transportCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        if controller.isRecording {
+                            Circle().fill(Color.red).frame(width: 8, height: 8)
+                        }
+                        Text(controller.isRecording ? "Recording" : "Record a meeting")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(controller.isRecording ? "Recording" : "Record a meeting")
-                    .font(.system(size: 20, weight: .semibold))
-                Text(controller.isRecording
-                     ? Self.clock(controller.session.elapsed)
-                     : "Captures the room through your microphone and the call through your Mac's audio.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                    .monospacedDigit()
-            }
+                    if controller.isRecording {
+                        Text(Self.clock(controller.session.elapsed))
+                            .font(.system(size: 30, weight: .light))
+                            .monospacedDigit()
+                            .foregroundColor(.primary)
+                    } else {
+                        Text("Captures the room through your microphone and the call through your Mac's audio.")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
-            Spacer()
+                Spacer()
 
-            if controller.isRecording {
-                levels
-            }
+                if controller.isRecording {
+                    HStack(spacing: 14) {
+                        if captureMicrophone {
+                            LevelMeter(label: "Mic", db: controller.session.microphoneLevelDb)
+                        }
+                        if captureSystemAudio {
+                            LevelMeter(label: "System", db: controller.session.systemAudioLevelDb)
+                        }
+                    }
+                }
 
-            Button(action: toggle) {
-                Text(controller.isRecording ? "Stop" : "Start")
+                Button(action: toggle) {
+                    HStack(spacing: 6) {
+                        Image(systemName: controller.isRecording ? "stop.fill" : "record.circle")
+                        Text(controller.isRecording ? "Stop" : "Start")
+                    }
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 68)
+                    .frame(width: 76)
                     .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(controller.isRecording ? .red : .accentColor)
+                .disabled(!hasSource)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(controller.isRecording ? .red : .accentColor)
-            .disabled(!captureMicrophone && !captureSystemAudio)
-        }
-        .padding(20)
-        .metricsCardSurface()
-    }
 
-    private var levels: some View {
-        HStack(spacing: 14) {
-            if captureMicrophone {
-                LevelMeter(label: "Mic", db: controller.session.microphoneLevelDb)
+            Divider()
+
+            if hasSource {
+                captureSummary
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("No capture source is on, so there is nothing to record.")
+                        .font(.system(size: 12))
+                    Spacer()
+                    Button("Open Settings") {
+                        withAnimation(.smooth(duration: 0.3)) { isShowingSettings = true }
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12, weight: .semibold))
+                }
             }
-            if captureSystemAudio {
-                LevelMeter(label: "System", db: controller.session.systemAudioLevelDb)
-            }
         }
-    }
-
-    // MARK: - Sources
-
-    private var sources: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Capture")
-                .font(.system(size: 13, weight: .semibold))
-
-            Toggle("Microphone — everyone in the room with you", isOn: $captureMicrophone)
-            Toggle("System audio — everyone joining through the call", isOn: $captureSystemAudio)
-            Toggle("Transcribe while recording", isOn: $liveTranscript)
-            Toggle("Identify speakers in the room", isOn: $identifySpeakers)
-                .disabled(!captureMicrophone)
-            Toggle("Summarise when the meeting ends", isOn: $summariseAfterMeeting)
-                .disabled(!liveTranscript)
-            Toggle("Offer to record when a call app opens", isOn: $autoDetectMeetings)
-
-            Text("Both are recorded as separate tracks, so you can tell your side from theirs.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-        }
-        .toggleStyle(.switch)
-        .disabled(controller.isRecording)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .metricsCardSurface()
     }
 
+    /// What the next recording will do, read-only. Changing any of it is the settings panel's job.
+    private var captureSummary: some View {
+        HStack(spacing: 8) {
+            if captureMicrophone { CaptureChip(icon: "mic.fill", label: "Microphone") }
+            if captureSystemAudio { CaptureChip(icon: "speaker.wave.2.fill", label: "System audio") }
+            if liveTranscript { CaptureChip(icon: "text.alignleft", label: "Live transcript") }
+            if liveTranscript && identifySpeakers && captureMicrophone {
+                CaptureChip(icon: "person.2.fill", label: "Speakers")
+            }
+            if liveTranscript && summariseAfterMeeting { CaptureChip(icon: "sparkles", label: "Summary") }
+
+            Spacer()
+
+            Button("Change") {
+                withAnimation(.smooth(duration: 0.3)) { isShowingSettings = true }
+            }
+            .buttonStyle(.link)
+            .font(.system(size: 11))
+            .disabled(controller.isRecording)
+        }
+    }
+
+    private var hasSource: Bool { captureMicrophone || captureSystemAudio }
+
     // MARK: - Transcript
 
-    private var transcriptSection: some View {
+    private var transcriptCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("Transcript")
                     .font(.system(size: 13, weight: .semibold))
                 if controller.isTranscribing && controller.isRecording {
@@ -266,15 +323,12 @@ struct MeetingRecordingView: View {
                         NSPasteboard.general.setString(controller.transcript, forType: .string)
                     }
                     .buttonStyle(.link)
+                    .font(.system(size: 12))
                 }
             }
 
             if controller.segments.isEmpty {
-                Text(controller.isRecording
-                     ? "Listening — the first lines appear once there is enough audio."
-                     : "Nothing recorded yet.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                emptyTranscript
             } else {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(controller.segments) { segment in
@@ -293,6 +347,13 @@ struct MeetingRecordingView: View {
                     Text("Saved \(Self.clock(recording.duration)) to \(recording.folder.lastPathComponent)")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Open in Library") {
+                        selected = store.items.first { $0.folder == recording.folder }
+                        tab = .library
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
                     Button("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([recording.folder])
                     }
@@ -306,10 +367,29 @@ struct MeetingRecordingView: View {
         .metricsCardSurface()
     }
 
+    @ViewBuilder
+    private var emptyTranscript: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if controller.isRecording && !liveTranscript {
+                Text("Transcribing while recording is off, so the transcript is not being written.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            } else {
+                Text(controller.isRecording
+                     ? "Listening — the first lines appear once there is enough audio."
+                     : "Nothing recorded yet.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+    }
+
     // MARK: - Summary
 
     @ViewBuilder
-    private var summarySection: some View {
+    private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text("Summary")
@@ -379,7 +459,29 @@ struct MeetingRecordingView: View {
         .metricsCardSurface()
     }
 
+    // MARK: - Library tab
+
+    @ViewBuilder
+    private var libraryTab: some View {
+        if let item = selected {
+            ScrollView {
+                MeetingDetailView(item: item, sidecar: store.readSidecar(in: item.folder))
+                    .padding(24)
+            }
+        } else {
+            MeetingLibraryView(
+                store: store,
+                onOpen: { selected = $0 },
+                onImport: importRecording
+            )
+        }
+    }
+
     // MARK: - Actions
+
+    private func closeSettings() {
+        withAnimation(.smooth(duration: 0.3)) { isShowingSettings = false }
+    }
 
     private func toggle() {
         if controller.isRecording {
@@ -396,6 +498,7 @@ struct MeetingRecordingView: View {
                 }
             }
         } else {
+            tab = .record
             var sources: MeetingRecordingSession.Sources = []
             if captureMicrophone { sources.insert(.microphone) }
             if captureSystemAudio { sources.insert(.systemAudio) }
@@ -422,16 +525,6 @@ struct MeetingRecordingView: View {
         )
     }
 
-    private static func size(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-    }
-
-    /// Stable per-speaker colour so the same voice reads the same way down the transcript.
-    private static func speakerTint(_ label: String) -> Color {
-        let palette: [Color] = [.blue, .purple, .orange, .green, .pink, .teal]
-        return palette[abs(label.hashValue) % palette.count]
-    }
-
     /// Adopts an existing audio file as a meeting, converting it to the recorder's own format
     /// so transcription, diarisation and summarising all work on it unchanged.
     private func importRecording() {
@@ -443,12 +536,20 @@ struct MeetingRecordingView: View {
         panel.message = "Choose recordings to add to your library"
 
         guard panel.runModal() == .OK else { return }
+        importError = nil
         for url in panel.urls {
             do {
-                try store.importRecording(from: url)
+                _ = try store.importRecording(from: url)
             } catch {
                 importError = error.localizedDescription
             }
+        }
+        if importError == nil {
+            closeSettings()
+            selected = nil
+            tab = .library
+        } else {
+            tab = .record
         }
     }
 
@@ -490,7 +591,7 @@ struct MeetingRecordingView: View {
         )
     }
 
-    private static func clock(_ interval: TimeInterval) -> String {
+    static func clock(_ interval: TimeInterval) -> String {
         let total = Int(interval.rounded())
         let hours = total / 3600
         let minutes = (total % 3600) / 60
@@ -498,6 +599,23 @@ struct MeetingRecordingView: View {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
             : String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+/// One read-only fact about what the next recording will capture.
+private struct CaptureChip: View {
+    let icon: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9))
+            Text(label).font(.system(size: 10, weight: .medium))
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.secondary.opacity(0.10)))
     }
 }
 
