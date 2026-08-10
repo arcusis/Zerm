@@ -91,6 +91,7 @@ struct VisualEffectView: NSViewRepresentable {
 }
 
 struct ContentView: View {
+    @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var meetingRecordingController: MeetingRecordingController
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
@@ -106,7 +107,8 @@ struct ContentView: View {
                 selectedRoute: $selectedRoute,
                 isDictationExpanded: $isDictationExpanded,
                 showsPowerModes: powerModeUIFlag,
-                updater: updaterViewModel
+                updater: updaterViewModel,
+                openSettings: { openSettings() }
             )
         } detail: {
             DetailDestination(route: selectedRoute ?? .dashboard)
@@ -117,13 +119,6 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 760, minHeight: 560)
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button(action: toggleSidebar) {
-                    Label("Toggle Sidebar", systemImage: "sidebar.left")
-                }
-                .help("Show or hide the sidebar")
-                .accessibilityIdentifier("toggle-sidebar")
-            }
             ToolbarItem(placement: .primaryAction) {
                 MeetingGlobalStatusButton(controller: meetingRecordingController)
             }
@@ -139,7 +134,7 @@ struct ContentView: View {
 
     private func navigate(_ notification: Notification) {
         if let route = notification.userInfo?["route"] as? AppRoute {
-            selectedRoute = route
+            navigate(to: route)
             return
         }
 
@@ -149,11 +144,15 @@ struct ContentView: View {
         }
 
         logger.notice("Legacy navigation destination received: \(destination, privacy: .public)")
-        selectedRoute = route
+        navigate(to: route)
     }
 
-    private func toggleSidebar() {
-        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+    private func navigate(to route: AppRoute) {
+        if route == .settings {
+            openSettings()
+        } else {
+            selectedRoute = route
+        }
     }
 }
 
@@ -163,49 +162,55 @@ private struct SidebarView: View {
 
     let showsPowerModes: Bool
     @ObservedObject var updater: UpdaterViewModel
+    let openSettings: () -> Void
 
     var body: some View {
         List(selection: $selectedRoute) {
             NavigationLink(value: AppRoute.dashboard) {
-                SidebarLabel(route: .dashboard)
+                SidebarLabel(route: .dashboard, prominence: .primary)
             }
             .accessibilityIdentifier("sidebar-dashboard")
 
             Section {
                 DisclosureGroup(isExpanded: $isDictationExpanded) {
-                    SidebarLink(route: .dictationHistory)
-                    SidebarLink(route: .dictationModels)
-                    SidebarLink(route: .dictationEnhancement)
-                    SidebarLink(route: .dictationVocabulary)
+                    SidebarLink(route: .dictationHistory, prominence: .secondary)
+                    SidebarLink(route: .dictationModels, prominence: .secondary)
+                    SidebarLink(route: .dictationEnhancement, prominence: .secondary)
+                    SidebarLink(route: .dictationVocabulary, prominence: .secondary)
                 } label: {
                     Label("Dictation", systemImage: "mic.badge.plus")
-                        .fontWeight(.medium)
+                        .fontWeight(.semibold)
                         .accessibilityIdentifier("dictation-navigation-group")
                 }
 
-                SidebarLink(route: .meetings)
-                SidebarLink(route: .readAloud)
+                SidebarLink(route: .meetings, prominence: .primary)
+                SidebarLink(route: .readAloud, prominence: .primary)
             } header: {
-                Text("Speech")
-                    .accessibilityIdentifier("sidebar-group-speech")
+                SidebarSectionHeader("Speech", identifier: "sidebar-group-speech")
             }
 
             if showsPowerModes {
                 Section {
-                    SidebarLink(route: .powerModes)
+                    SidebarLink(route: .powerModes, prominence: .primary)
                 } header: {
-                    Text("Automation")
-                        .accessibilityIdentifier("sidebar-group-automation")
+                    SidebarSectionHeader("Automation", identifier: "sidebar-group-automation")
                 }
             }
 
             Section {
-                SidebarLink(route: .permissions)
-                SidebarLink(route: .audioInput)
-                SidebarLink(route: .settings)
+                SidebarLink(route: .permissions, prominence: .primary)
+                SidebarLink(route: .audioInput, prominence: .primary)
+
+                Button(action: openSettings) {
+                    SidebarLabel(route: .settings, prominence: .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+                .accessibilityIdentifier("sidebar-settings")
             } header: {
-                Text("System")
-                    .accessibilityIdentifier("sidebar-group-system")
+                SidebarSectionHeader("System", identifier: "sidebar-group-system")
             }
         }
         .listStyle(.sidebar)
@@ -220,21 +225,46 @@ private struct SidebarView: View {
 
 private struct SidebarLink: View {
     let route: AppRoute
+    let prominence: SidebarLabel.Prominence
 
     var body: some View {
         NavigationLink(value: route) {
-            SidebarLabel(route: route)
+            SidebarLabel(route: route, prominence: prominence)
         }
         .accessibilityIdentifier("sidebar-\(route.rawValue)")
     }
 }
 
 private struct SidebarLabel: View {
+    enum Prominence {
+        case primary
+        case secondary
+    }
+
     let route: AppRoute
+    let prominence: Prominence
 
     var body: some View {
         Label(route.title, systemImage: route.icon)
-            .fontWeight(.medium)
+            .fontWeight(prominence == .primary ? .semibold : .regular)
+            .foregroundStyle(.primary)
+    }
+}
+
+private struct SidebarSectionHeader: View {
+    let title: LocalizedStringKey
+    let identifier: String
+
+    init(_ title: LocalizedStringKey, identifier: String) {
+        self.title = title
+        self.identifier = identifier
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color.primary.opacity(0.72))
+            .accessibilityIdentifier(identifier)
     }
 }
 

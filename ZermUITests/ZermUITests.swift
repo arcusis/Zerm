@@ -101,6 +101,36 @@ final class ZermUITests: XCTestCase {
     }
 
     @MainActor
+    func testSidebarSettingsOpensTheDedicatedSettingsWindow() {
+        app = launch()
+
+        let mainWindow = app.windows
+            .matching(identifier: "com.arcusis.zerm.mainWindow")
+            .firstMatch
+        let settingsButton = mainWindow.descendants(matching: .any)
+            .matching(identifier: "sidebar-settings")
+            .firstMatch
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 3))
+        settingsButton.click()
+
+        XCTAssertTrue(element("settings-root").waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            mainWindow.descendants(matching: .any)
+                .matching(identifier: "settings-root")
+                .firstMatch
+                .exists,
+            "Settings must not be embedded beside the primary app sidebar"
+        )
+        XCTAssertTrue(
+            mainWindow.descendants(matching: .any)
+                .matching(identifier: "destination-dashboard")
+                .firstMatch
+                .exists,
+            "Opening Settings should preserve the current workflow in the main window"
+        )
+    }
+
+    @MainActor
     func testPersistentMeetingStatusSurvivesNavigationWithAnimationsDisabledAndCanStop() {
         app = launch(scenario: "activeMeeting", disablesAnimations: true)
 
