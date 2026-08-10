@@ -57,11 +57,17 @@ enum TTSError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey(let p): return "Add an API key for \(p) in Read Aloud settings."
-        case .http(let code, let msg): return "Provider error \(code): \(msg)"
-        case .emptyAudio: return "The provider returned no audio."
+        case .missingAPIKey(let provider):
+            let format = String(localized: "Add an API key for %@ in Read Aloud settings.")
+            return String.localizedStringWithFormat(format, provider)
+        case .http(let code, let message):
+            let format = String(localized: "Provider error %lld: %@")
+            return String.localizedStringWithFormat(format, code, message)
+        case .emptyAudio:
+            return String(localized: "The provider returned no audio.")
         case .notAvailable(let why): return why
-        case .badResponse: return "Unexpected response from the speech provider."
+        case .badResponse:
+            return String(localized: "Unexpected response from the speech provider.")
         }
     }
 }

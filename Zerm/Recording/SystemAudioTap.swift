@@ -4,6 +4,16 @@ import CoreAudio
 import Foundation
 import OSLog
 
+protocol SystemAudioRealtimeSink: AnyObject {
+    /// Called before the IOProc is installed, so every buffer needed by the realtime producer is
+    /// allocated before capture begins.
+    func prepareRealtimeInput(format: AVAudioFormat)
+    func enqueueRealtimeInput(
+        _ input: UnsafePointer<AudioBufferList>,
+        timestamp: AudioTimeStamp
+    )
+}
+
 /// Captures everything the machine is playing back — the far side of a Teams, Meet or Signal
 /// call — as an audio stream.
 ///
@@ -17,25 +27,39 @@ import OSLog
 @available(macOS 14.2, *)
 final class SystemAudioTap: @unchecked Sendable {
 
+    enum CaptureScope: Equatable {
+        case application(processID: Int32, bundleID: String)
+        case allSystemAudio
+    }
+
     enum TapError: LocalizedError {
         case tapCreationFailed(OSStatus)
         case noDefaultOutputDevice
         case aggregateCreationFailed(OSStatus)
         case ioProcFailed(OSStatus)
         case formatUnavailable(OSStatus)
+        case processUnavailable(Int32)
+        case outputDeviceChanged
+        case selectedApplicationAudioChanged
 
         var errorDescription: String? {
             switch self {
             case .tapCreationFailed(let status):
-                return "Could not tap system audio (status \(status)). Zerm may be missing the audio recording permission."
+                return String(localized: "Could not tap system audio (status \(status)). Zerm may be missing the audio recording permission.")
             case .noDefaultOutputDevice:
-                return "No audio output device is available to record from."
+                return String(localized: "No audio output device is available to record from.")
             case .aggregateCreationFailed(let status):
-                return "Could not assemble the system audio device (status \(status))."
+                return String(localized: "Could not assemble the system audio device (status \(status)).")
             case .ioProcFailed(let status):
-                return "Could not start reading system audio (status \(status))."
+                return String(localized: "Could not start reading system audio (status \(status)).")
             case .formatUnavailable(let status):
-                return "Could not read the system audio format (status \(status))."
+                return String(localized: "Could not read the system audio format (status \(status)).")
+            case .processUnavailable(let processID):
+                return String(localized: "The selected meeting application is no longer available (process \(processID)).")
+            case .outputDeviceChanged:
+                return String(localized: "The audio output changed while system audio was being recorded.")
+            case .selectedApplicationAudioChanged:
+                return String(localized: "The selected application's audio processes changed while recording.")
             }
         }
     }
@@ -49,21 +73,44 @@ final class SystemAudioTap: @unchecked Sendable {
     /// The tap's native format, known only once the tap exists.
     private(set) var format: AVAudioFormat?
 
-    /// Delivered on a realtime Core Audio thread. Do no allocation or locking of consequence here.
-    var onBuffer: ((AVAudioPCMBuffer) -> Void)?
+    /// The production path is a preallocated sink rather than a buffer callback: constructing an
+    /// AVAudioPCMBuffer or invoking arbitrary clients in the IOProc is not realtime-safe.
+    weak var realtimeSink: (any SystemAudioRealtimeSink)?
 
-    private(set) var isRunning = false
+    private var isRunning = false
 
-    /// Serialises start/stop against the default-device listener, which fires on its own queue.
+    /// Every lifecycle and Core Audio object mutation is confined to this queue. Public start and
+    /// stop remain synchronous, but use queue-specific reentrancy so a loss callback can stop the
+    /// tap without deadlocking. Listener callbacks are already delivered on this same queue.
     private let controlQueue = DispatchQueue(label: "com.arcusis.zerm.system-tap-control")
+    private let controlQueueKey = DispatchSpecificKey<UInt8>()
     private var deviceListener: AudioObjectPropertyListenerBlock?
+    private var processMonitor: DispatchSourceTimer?
+    private var captureRetryMonitor: DispatchSourceTimer?
+    private var processListListener: AudioObjectPropertyListenerBlock?
+    private var capturedProcessObjects = Set<AudioObjectID>()
+    private var processUnavailableReported = false
+    private var captureRequested = false
+    private var captureGeneration: UInt64 = 0
 
     /// Raised when the aggregate had to be rebuilt and could not be brought back.
     var onCaptureLost: ((Error) -> Void)?
+    /// A recoverable state: the selected process or output aggregate is temporarily absent.
+    var onCaptureWaiting: ((Error) -> Void)?
+    /// Raised after a waiting capture has successfully attached again.
+    var onCaptureRestored: (() -> Void)?
 
     /// Zerm's own output — Read Aloud, UI sounds — is excluded, so a recording never captures
     /// the app talking to itself.
     var excludesOwnProcess = true
+
+    /// Selected applications are the safe default. Global capture is an explicit fallback and
+    /// may include unrelated notifications, music or other applications.
+    var captureScope: CaptureScope = .allSystemAudio
+
+    init() {
+        controlQueue.setSpecific(key: controlQueueKey, value: 1)
+    }
 
     deinit {
         stop()
@@ -72,27 +119,58 @@ final class SystemAudioTap: @unchecked Sendable {
     // MARK: - Lifecycle
 
     func start() throws {
-        guard !isRunning else { return }
+        try onControlQueue {
+            try startOnControlQueue()
+        }
+    }
 
-        try createTap()
+    private func startOnControlQueue() throws {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard !captureRequested else { return }
+        captureGeneration &+= 1
+        captureRequested = true
         do {
-            try createAggregateDevice()
-            try attachIOProc()
+            try activateCaptureResources()
+            installProcessMonitorIfNeeded()
         } catch {
-            // Never leave a live tap behind on a partial failure; it would linger in Core Audio
-            // for the lifetime of the process.
+            if let tapError = error as? TapError,
+               case .processUnavailable = tapError,
+               case .application = captureScope {
+                // The chosen app may not have opened an audio process yet. Keep the writer and
+                // process monitor alive so joining a call later attaches without restarting the
+                // meeting or sacrificing the microphone track.
+                installProcessMonitorIfNeeded()
+                processUnavailableReported = true
+                onCaptureWaiting?(error)
+                return
+            }
+            captureRequested = false
             teardown()
             throw error
         }
+    }
 
-        let status = AudioDeviceStart(aggregateID, ioProcID)
-        guard status == noErr else {
-            teardown()
-            throw TapError.ioProcFailed(status)
+    private func activateCaptureResources() throws {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        let createdTap = tapID == kAudioObjectUnknown
+        if createdTap {
+            try createTap()
+            if let format { realtimeSink?.prepareRealtimeInput(format: format) }
         }
-
+        do {
+            try createAggregateDevice()
+            try attachIOProc()
+            let status = AudioDeviceStart(aggregateID, ioProcID)
+            guard status == noErr else { throw TapError.ioProcFailed(status) }
+        } catch {
+            teardownAggregate()
+            throw error
+        }
         isRunning = true
+        processUnavailableReported = false
+        cancelCaptureRetry()
         installDefaultDeviceListener()
+        onCaptureRestored?()
         logger.notice("System audio tap running (tap \(self.tapID, privacy: .public), aggregate \(self.aggregateID, privacy: .public))")
     }
 
@@ -104,13 +182,17 @@ final class SystemAudioTap: @unchecked Sendable {
     /// samples simply go quiet, which on a long meeting means silently losing the far side for
     /// the rest of the call. So the change is watched for and the aggregate rebuilt underneath.
     private func installDefaultDeviceListener() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard deviceListener == nil else { return }
+        let generation = captureGeneration
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.controlQueue.async { self?.rebuildForNewDefaultDevice() }
+            guard let self, self.captureGeneration == generation else { return }
+            self.rebuildForNewDefaultDevice()
         }
         deviceListener = listener
         let status = AudioObjectAddPropertyListenerBlock(
@@ -123,6 +205,7 @@ final class SystemAudioTap: @unchecked Sendable {
     }
 
     private func removeDefaultDeviceListener() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
         guard let deviceListener else { return }
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
@@ -136,54 +219,55 @@ final class SystemAudioTap: @unchecked Sendable {
     }
 
     private func rebuildForNewDefaultDevice() {
-        guard isRunning else { return }
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard captureRequested, isRunning else { return }
         logger.notice("Default output device changed; rebuilding the system audio aggregate")
-
-        if let ioProcID {
-            AudioDeviceStop(aggregateID, ioProcID)
-            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
-        }
-        ioProcID = nil
-        if aggregateID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
-            aggregateID = AudioObjectID(kAudioObjectUnknown)
-        }
+        onCaptureWaiting?(TapError.outputDeviceChanged)
+        teardownAggregate()
 
         do {
             // The tap itself is global and survives; only the aggregate is bound to a device.
-            try createAggregateDevice()
-            try attachIOProc()
-            let status = AudioDeviceStart(aggregateID, ioProcID)
-            guard status == noErr else { throw TapError.ioProcFailed(status) }
+            try activateCaptureResources()
             logger.notice("System audio aggregate rebuilt on the new default device")
         } catch {
             isRunning = false
             logger.error("Could not follow the default device change: \(error.localizedDescription, privacy: .public)")
-            onCaptureLost?(error)
+            onCaptureWaiting?(error)
+            scheduleCaptureRetry()
         }
     }
 
     func stop() {
-        guard isRunning || tapID != kAudioObjectUnknown else { return }
-        removeDefaultDeviceListener()
-        if isRunning, let ioProcID {
-            AudioDeviceStop(aggregateID, ioProcID)
+        onControlQueue {
+            stopOnControlQueue()
         }
+    }
+
+    private func stopOnControlQueue() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard captureRequested || isRunning || tapID != kAudioObjectUnknown else { return }
+        captureGeneration &+= 1
+        captureRequested = false
+        removeDefaultDeviceListener()
+        processMonitor?.cancel()
+        processMonitor = nil
+        cancelCaptureRetry()
+        removeProcessListListener()
         teardown()
         isRunning = false
         logger.notice("System audio tap stopped")
     }
 
-    private func teardown() {
-        if let ioProcID, aggregateID != kAudioObjectUnknown {
-            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
+    private func onControlQueue<T>(_ operation: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: controlQueueKey) != nil {
+            return try operation()
         }
-        ioProcID = nil
+        return try controlQueue.sync(execute: operation)
+    }
 
-        if aggregateID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
-            aggregateID = AudioObjectID(kAudioObjectUnknown)
-        }
+    private func teardown() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        teardownAggregate()
 
         if tapID != kAudioObjectUnknown {
             AudioHardwareDestroyProcessTap(tapID)
@@ -191,16 +275,44 @@ final class SystemAudioTap: @unchecked Sendable {
         }
 
         format = nil
+        capturedProcessObjects = []
+    }
+
+    private func teardownAggregate() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        if let ioProcID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateID, ioProcID)
+            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
+        }
+        ioProcID = nil
+        if aggregateID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = AudioObjectID(kAudioObjectUnknown)
+        }
+        isRunning = false
     }
 
     // MARK: - Tap
 
     private func createTap() throws {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
         let description: CATapDescription
-        if excludesOwnProcess, let ownObject = Self.processObjectID(for: ProcessInfo.processInfo.processIdentifier) {
-            description = CATapDescription(stereoGlobalTapButExcludeProcesses: [ownObject])
-        } else {
-            description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        switch captureScope {
+        case .application(let processID, let bundleID):
+            let objectIDs = Self.processObjectIDs(for: processID, bundleID: bundleID)
+            guard !objectIDs.isEmpty else {
+                throw TapError.processUnavailable(processID)
+            }
+            capturedProcessObjects = Set(objectIDs)
+            processUnavailableReported = false
+            description = CATapDescription(stereoMixdownOfProcesses: objectIDs)
+        case .allSystemAudio:
+            if excludesOwnProcess,
+               let ownObject = Self.processObjectID(for: ProcessInfo.processInfo.processIdentifier) {
+                description = CATapDescription(stereoGlobalTapButExcludeProcesses: [ownObject])
+            } else {
+                description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+            }
         }
         description.name = "Zerm Meeting Capture"
         // Private keeps the tap out of every other app's device list, and unmuted means the
@@ -228,9 +340,141 @@ final class SystemAudioTap: @unchecked Sendable {
         logger.notice("Tap format \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch")
     }
 
+    private func installProcessMonitorIfNeeded() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard case .application(let processID, let bundleID) = captureScope else { return }
+        guard processMonitor == nil else { return }
+        let generation = captureGeneration
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.captureGeneration == generation else { return }
+            self.evaluateSelectedProcesses(processID: processID, bundleID: bundleID)
+        }
+        let listenerStatus = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, listener
+        )
+        if listenerStatus == noErr {
+            processListListener = listener
+        } else {
+            logger.error("Could not observe Core Audio process changes (status \(listenerStatus, privacy: .public)); using periodic recovery checks")
+        }
+
+        // A periodic check complements the property listener: some browser helper churn updates
+        // bundle membership without a useful notification on older 14.x point releases.
+        let timer = DispatchSource.makeTimerSource(queue: controlQueue)
+        timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.captureGeneration == generation else { return }
+            self.evaluateSelectedProcesses(processID: processID, bundleID: bundleID)
+        }
+        processMonitor = timer
+        timer.resume()
+    }
+
+    private func removeProcessListListener() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard let processListListener else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, processListListener
+        )
+        self.processListListener = nil
+    }
+
+    private func evaluateSelectedProcesses(processID: pid_t, bundleID: String) {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard captureRequested else { return }
+        let current = Set(Self.processObjectIDs(for: processID, bundleID: bundleID))
+        guard !current.isEmpty else {
+            if !processUnavailableReported {
+                processUnavailableReported = true
+                if isRunning {
+                    removeDefaultDeviceListener()
+                    teardown()
+                }
+                onCaptureWaiting?(TapError.processUnavailable(processID))
+            }
+            return
+        }
+        if !isRunning {
+            recoverCaptureIfPossible()
+            return
+        }
+        guard current != capturedProcessObjects else { return }
+        rebuildForSelectedProcesses()
+    }
+
+    private func rebuildForSelectedProcesses() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard isRunning else { return }
+        logger.notice("Selected application audio processes changed; rebuilding process tap")
+        onCaptureWaiting?(TapError.selectedApplicationAudioChanged)
+        removeDefaultDeviceListener()
+        teardown()
+        do {
+            try activateCaptureResources()
+        } catch {
+            logger.error("Could not follow selected application process change: \(error.localizedDescription, privacy: .public)")
+            onCaptureWaiting?(error)
+            scheduleCaptureRetry()
+        }
+    }
+
+    private func scheduleCaptureRetry() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard captureRequested, captureRetryMonitor == nil else { return }
+        let generation = captureGeneration
+        let timer = DispatchSource.makeTimerSource(queue: controlQueue)
+        timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.captureGeneration == generation else { return }
+            self.recoverCaptureIfPossible()
+        }
+        captureRetryMonitor = timer
+        timer.resume()
+    }
+
+    private func cancelCaptureRetry() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        captureRetryMonitor?.cancel()
+        captureRetryMonitor = nil
+    }
+
+    private func recoverCaptureIfPossible() {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard captureRequested, !isRunning else {
+            if isRunning { cancelCaptureRetry() }
+            return
+        }
+        do {
+            try activateCaptureResources()
+        } catch {
+            if let tapError = error as? TapError,
+               case .processUnavailable = tapError {
+                if !processUnavailableReported {
+                    processUnavailableReported = true
+                    onCaptureWaiting?(error)
+                }
+            } else {
+                logger.error("System audio capture is still waiting to recover: \(error.localizedDescription, privacy: .public)")
+                onCaptureWaiting?(error)
+                scheduleCaptureRetry()
+            }
+        }
+    }
+
     // MARK: - Aggregate device
 
     private func createAggregateDevice() throws {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
         guard let outputUID = Self.defaultOutputDeviceUID() else {
             throw TapError.noDefaultOutputDevice
         }
@@ -265,19 +509,15 @@ final class SystemAudioTap: @unchecked Sendable {
     }
 
     private func attachIOProc() throws {
-        guard let format else {
+        dispatchPrecondition(condition: .onQueue(controlQueue))
+        guard format != nil else {
             throw TapError.formatUnavailable(OSStatus(kAudioHardwareUnspecifiedError))
         }
 
+        let realtimeSink = realtimeSink
         let status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
-            [weak self] _, inInputData, _, _, _ in
-            guard let self, let handler = self.onBuffer else { return }
-            guard let buffer = AVAudioPCMBuffer(
-                pcmFormat: format,
-                bufferListNoCopy: inInputData,
-                deallocator: nil
-            ) else { return }
-            handler(buffer)
+            [realtimeSink] _, inInputData, inInputTime, _, _ in
+            realtimeSink?.enqueueRealtimeInput(inInputData, timestamp: inInputTime.pointee)
         }
 
         guard status == noErr, ioProcID != nil else {
@@ -346,5 +586,61 @@ final class SystemAudioTap: @unchecked Sendable {
             &objectID
         )
         return status == noErr && objectID != kAudioObjectUnknown ? objectID : nil
+    }
+
+    /// Includes helper processes that share the selected application's bundle-ID namespace.
+    /// Chromium and several call apps render audio in a helper rather than their UI process;
+    /// tapping only the PID would produce a healthy-looking but silent track.
+    private static func processObjectIDs(for pid: pid_t, bundleID: String) -> [AudioObjectID] {
+        var result = Set<AudioObjectID>()
+        if let direct = processObjectID(for: pid) { result.insert(direct) }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var byteCount: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &byteCount
+        ) == noErr, byteCount > 0 else { return Array(result) }
+
+        var objects = [AudioObjectID](
+            repeating: kAudioObjectUnknown,
+            count: Int(byteCount) / MemoryLayout<AudioObjectID>.size
+        )
+        let listStatus: OSStatus = objects.withUnsafeMutableBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else {
+                return OSStatus(kAudioHardwareUnspecifiedError)
+            }
+            return AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &byteCount,
+                baseAddress
+            )
+        }
+        guard listStatus == noErr else { return Array(result) }
+
+        for object in objects {
+            var bundleAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyBundleID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var value: CFString = "" as CFString
+            var size = UInt32(MemoryLayout<CFString>.size)
+            let status = withUnsafeMutablePointer(to: &value) {
+                AudioObjectGetPropertyData(object, &bundleAddress, 0, nil, &size, $0)
+            }
+            guard status == noErr else { continue }
+            let candidate = value as String
+            if candidate == bundleID || candidate.hasPrefix(bundleID + ".") {
+                result.insert(object)
+            }
+        }
+        return Array(result)
     }
 }

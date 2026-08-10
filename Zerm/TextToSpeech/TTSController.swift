@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import KeyboardShortcuts
 import os
@@ -17,6 +18,7 @@ final class TTSController: ObservableObject {
     private let player = TTSPlayer()
     private let naturalizer = TTSNaturalizer()
     private var task: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TTSController")
 
     weak var engine: ZermEngine?
@@ -25,6 +27,7 @@ final class TTSController: ObservableObject {
     init(engine: ZermEngine? = nil, recorderUIManager: RecorderUIManager? = nil) {
         self.engine = engine
         self.recorderUIManager = recorderUIManager
+        _ = MeetingActivityMonitor.shared
 
         // Feed the TTS output level into the recorder's meter so the widget shows live
         // audio bars while speaking — the same visualizer dictation uses. Capture the
@@ -33,6 +36,14 @@ final class TTSController: ObservableObject {
         player.onLevel = { level in
             recorderRef?.audioMeter = AudioMeter(averagePower: level, peakPower: level)
         }
+
+        AudioOutputRouteMonitor.shared.$route
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] route in
+                Task { @MainActor [weak self] in self?.outputRouteChanged(to: route) }
+            }
+            .store(in: &cancellables)
     }
 
     /// Hotkey action: start reading the selection, or stop if already speaking.
@@ -54,6 +65,7 @@ final class TTSController: ObservableObject {
         player.stop()
         isSpeaking = false
         recorderUIManager?.endSpeaking()
+        AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
     }
 
     /// Synthesizes and plays arbitrary text (e.g. the settings Preview button).
@@ -64,8 +76,18 @@ final class TTSController: ObservableObject {
 
     /// Reserves the recorder widget and shows the "Preparing…" state immediately.
     private func startSession() -> Bool {
+        let routeMonitor = AudioOutputRouteMonitor.shared
+        if MeetingActivityMonitor.shared.isActive,
+           routeMonitor.route != .headphones {
+            let message = routeMonitor.isAmbiguousAnalogOutput
+                ? String(localized: "Confirm wired headphones in Read Aloud settings before speaking during this meeting")
+                : String(localized: "Connect headphones to use Read Aloud during a meeting")
+            notify(message)
+            SoundManager.shared.playEscSound()
+            return false
+        }
         if let rm = recorderUIManager, !rm.canStartSpeaking {
-            notify("Finish or cancel dictation before using Read Aloud")
+            notify(String(localized: "Finish or cancel dictation before using Read Aloud"))
             SoundManager.shared.playEscSound()
             return false
         }
@@ -74,18 +96,37 @@ final class TTSController: ObservableObject {
         return true
     }
 
+    /// Called synchronously by the application-scoped meeting coordinator before it starts
+    /// either capture source. A notification/task hop is too late: speaker audio could already
+    /// have reached the first microphone buffers by the time the MainActor handled it.
+    func prepareForMeetingCapture() {
+        // A new meeting is a new acoustic-safety boundary. The analog jack cannot distinguish
+        // headphones from powered speakers, so any prior confirmation must be made again.
+        AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
+        guard isSpeaking, AudioOutputRouteMonitor.shared.route != .headphones else { return }
+        stop()
+        notify(String(localized: "Read Aloud stopped because the meeting is using speakers"))
+    }
+
+    private func outputRouteChanged(to route: AudioOutputRoute) {
+        guard MeetingActivityMonitor.shared.isActive, isSpeaking, route != .headphones else { return }
+        stop()
+        notify(String(localized: "Read Aloud stopped because headphones disconnected during the meeting"))
+    }
+
     private func endSession(_ message: String? = nil, beep: Bool = false) {
         if let message { notify(message) }
         if beep { SoundManager.shared.playEscSound() }
         isSpeaking = false
         recorderUIManager?.endSpeaking()
+        AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
     }
 
     /// Reads whatever text is currently selected system-wide.
     private func fetchAndSpeak() async {
         guard let raw = await SelectedTextService.fetchSelectedText(),
               !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            endSession("No text selected", beep: true)
+            endSession(String(localized: "No text selected"), beep: true)
             return
         }
         await synthesizeAndPlay(raw)
@@ -94,20 +135,22 @@ final class TTSController: ObservableObject {
     /// Chunked, streaming synthesis + playback. Assumes a session is already started.
     private func synthesizeAndPlay(_ text: String) async {
         guard let provider = TTSProviderRegistry.provider(for: TTSSettings.providerKind) else {
-            endSession("No speech provider selected", beep: true); return
+            endSession(String(localized: "No speech provider selected"), beep: true); return
         }
 
         var apiKey = ""
         if let providerID = provider.apiKeyProviderID {
             apiKey = APIKeyManager.shared.getAPIKey(forProvider: providerID) ?? ""
             if provider.requiresAPIKey && apiKey.isEmpty {
-                endSession("Add an API key for \(provider.displayName) in Read Aloud settings", beep: true)
+                let format = String(localized: "Add an API key for %@ in Read Aloud settings")
+                endSession(String.localizedStringWithFormat(format, provider.displayName), beep: true)
                 return
             }
         }
 
         guard let voice = TTSSettings.resolvedVoice(for: provider) else {
-            endSession("No voice available for \(provider.displayName)", beep: true); return
+            let format = String(localized: "No voice available for %@")
+            endSession(String.localizedStringWithFormat(format, provider.displayName), beep: true); return
         }
 
         let speed = TTSSettings.speed
@@ -121,6 +164,7 @@ final class TTSController: ObservableObject {
         player.startStreaming { [weak self] in
             self?.isSpeaking = false
             self?.recorderUIManager?.endSpeaking()
+            AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
         }
 
         var startedPlaying = false
@@ -158,7 +202,8 @@ final class TTSController: ObservableObject {
         } catch {
             player.stop()
             logger.error("Read Aloud failed: \(error.localizedDescription, privacy: .public)")
-            endSession("Read Aloud failed: \(error.localizedDescription)")
+            let format = String(localized: "Read Aloud failed: %@")
+            endSession(String.localizedStringWithFormat(format, error.localizedDescription))
         }
     }
 

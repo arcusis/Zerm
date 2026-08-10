@@ -5,20 +5,19 @@ import SwiftUI
 /// A full-width list rather than a second sidebar: the Recording tab already sits inside the app's
 /// navigation sidebar, and nesting a split view inside it left both columns too narrow to read.
 struct MeetingLibraryView: View {
+    @EnvironmentObject private var controller: MeetingRecordingController
     @ObservedObject var store: MeetingRecordingStore
     let onOpen: (MeetingRecordingStore.Item) -> Void
     let onImport: () -> Void
 
     @State private var searchText = ""
+    @State private var filteredItems: [MeetingRecordingStore.Item] = []
     @State private var pendingDeletion: MeetingRecordingStore.Item?
+    @State private var processingItemID: String?
+    @State private var processingError: String?
 
-    private var filtered: [MeetingRecordingStore.Item] {
-        let query = searchText.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return store.items }
-        return store.items.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
-                || ($0.transcript?.localizedCaseInsensitiveContains(query) ?? false)
-        }
+    private var searchRequest: SearchRequest {
+        SearchRequest(query: searchText, itemIDs: store.items.map(\.id))
     }
 
     var body: some View {
@@ -30,7 +29,7 @@ struct MeetingLibraryView: View {
 
             if store.items.isEmpty {
                 emptyLibrary
-            } else if filtered.isEmpty {
+            } else if filteredItems.isEmpty {
                 noMatches
             } else {
                 list
@@ -48,6 +47,25 @@ struct MeetingLibraryView: View {
             Button("Cancel", role: .cancel) { pendingDeletion = nil }
         } message: {
             Text("The audio, transcript and summary all go with it.")
+        }
+        .task(id: searchRequest) {
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+            } catch {
+                return
+            }
+            updateSearchResults()
+        }
+        .alert(
+            "Could Not Process Recording",
+            isPresented: Binding(
+                get: { processingError != nil },
+                set: { if !$0 { processingError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { processingError = nil }
+        } message: {
+            Text(processingError ?? String(localized: "Unknown processing error"))
         }
     }
 
@@ -71,6 +89,7 @@ struct MeetingLibraryView: View {
                             .font(.system(size: 12))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear meeting search")
                 }
             }
             .padding(.horizontal, 10)
@@ -78,8 +97,8 @@ struct MeetingLibraryView: View {
             .background(Capsule().fill(Color.secondary.opacity(0.08)))
             .frame(maxWidth: .infinity)
 
-            Text("\(store.items.count) recording\(store.items.count == 1 ? "" : "s")")
-                .font(.system(size: 11))
+            Text("meeting_recording_count \(store.items.count)")
+                .font(.caption)
                 .foregroundColor(.secondary)
                 .monospacedDigit()
         }
@@ -92,7 +111,7 @@ struct MeetingLibraryView: View {
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                ForEach(filtered) { item in
+                ForEach(filteredItems) { item in
                     row(item)
                 }
             }
@@ -102,10 +121,11 @@ struct MeetingLibraryView: View {
     }
 
     private func row(_ item: MeetingRecordingStore.Item) -> some View {
-        Button {
-            onOpen(item)
-        } label: {
-            HStack(spacing: 14) {
+        HStack(spacing: 8) {
+            Button {
+                onOpen(item)
+            } label: {
+                HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color.accentColor.opacity(0.12))
@@ -132,13 +152,13 @@ struct MeetingLibraryView: View {
                                 .foregroundColor(.orange)
                         }
                     }
-                    .font(.system(size: 10))
+                        .font(.caption)
                     .foregroundColor(.secondary)
                     .monospacedDigit()
 
                     if let transcript = item.transcript, !transcript.isEmpty {
                         Text(transcript)
-                            .font(.system(size: 11))
+                            .font(.callout)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
@@ -148,7 +168,7 @@ struct MeetingLibraryView: View {
 
                 if item.summary != nil {
                     Label("Summary", systemImage: "sparkles")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.caption.weight(.medium))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -159,13 +179,36 @@ struct MeetingLibraryView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.secondary)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .metricsCardSurface(cornerRadius: 12)
-            .contentShape(Rectangle())
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .metricsCardSurface(cornerRadius: 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens this meeting for playback and review")
+
+            if requiresProcessing(item) {
+                Button {
+                    process(item)
+                } label: {
+                    if processingItemID == item.id {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(processTitle(item), systemImage: "waveform.badge.magnifyingglass")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canProcess || processingItemID != nil)
+                .accessibilityIdentifier("process-meeting-\(item.id)")
+            }
         }
-        .buttonStyle(.plain)
         .contextMenu {
+            Button(processTitle(item)) {
+                process(item)
+            }
+            .disabled(!canProcess || processingItemID != nil)
+
             Button("Show in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([item.folder])
             }
@@ -182,8 +225,8 @@ struct MeetingLibraryView: View {
             Spacer()
             CompactHeroSection(
                 icon: "rectangle.stack",
-                title: "No recordings yet",
-                description: "Meetings you record show up here with their audio, transcript and summary. You can also bring in audio you already have.",
+                title: String(localized: "No recordings yet"),
+                description: String(localized: "Meetings you record show up here with their audio, transcript and summary. You can also bring in audio you already have."),
                 maxDescriptionWidth: 420
             )
             Button("Import Recordings…", action: onImport)
@@ -201,9 +244,56 @@ struct MeetingLibraryView: View {
                 .foregroundColor(.secondary)
             Button("Clear search") { searchText = "" }
                 .buttonStyle(.link)
-                .font(.system(size: 12))
+                .font(.callout)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private func updateSearchResults() {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            filteredItems = store.items
+            return
+        }
+
+        filteredItems = store.items.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || ($0.transcript?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    private var canProcess: Bool {
+        switch controller.lifecycle.phase {
+        case .idle, .ready, .partial, .failed:
+            return true
+        case .preflighting, .capturing, .stopping, .processing:
+            return false
+        }
+    }
+
+    private func requiresProcessing(_ item: MeetingRecordingStore.Item) -> Bool {
+        item.transcript?.isEmpty != false || item.wasInterrupted || !item.issues.isEmpty
+    }
+
+    private func processTitle(_ item: MeetingRecordingStore.Item) -> LocalizedStringKey {
+        item.transcript?.isEmpty == false ? "Retry Processing" : "Process"
+    }
+
+    private func process(_ item: MeetingRecordingStore.Item) {
+        guard canProcess, processingItemID == nil else { return }
+        processingItemID = item.id
+        Task {
+            await controller.process(item)
+            processingError = controller.errorMessage
+            store.reload()
+            updateSearchResults()
+            processingItemID = nil
+        }
+    }
+}
+
+private struct SearchRequest: Hashable {
+    let query: String
+    let itemIDs: [String]
 }

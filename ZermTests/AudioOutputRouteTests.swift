@@ -7,43 +7,83 @@ struct AudioOutputRouteTests {
     private let headphoneJack: UInt32 = 0x6864_706E // 'hdpn'
     private let internalSpeaker: UInt32 = 0x6973_706B // 'ispk'
 
-    @Test func bluetoothCountsAsHeadphones() {
-        // AirPods and every other BT headset report 'blue'/'blea' with no data source.
-        #expect(AudioOutputRoute.classify(
+    @Test func bluetoothNeedsHeadsetEvidence() {
+        #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeBluetooth,
-            builtInDataSource: nil
-        ) == .headphones)
+            builtInDataSource: nil,
+            outputTerminalTypes: [kAudioStreamTerminalTypeHeadphones],
+            hasRelatedInputDevice: true
+        )) == .headphones)
 
-        #expect(AudioOutputRoute.classify(
+        #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeBluetoothLE,
-            builtInDataSource: nil
-        ) == .headphones)
+            builtInDataSource: nil,
+            outputTerminalTypes: [kAudioStreamTerminalTypeSpeaker],
+            hasRelatedInputDevice: false
+        )) == .speakers)
     }
 
-    @Test func builtInSplitsOnDataSource() {
-        #expect(AudioOutputRoute.classify(
+    @Test func ambiguousBuiltInJackFailsClosedUntilHeadphonesAreConfirmed() {
+        #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeBuiltIn,
-            builtInDataSource: headphoneJack
+            builtInDataSource: headphoneJack,
+            outputTerminalTypes: [],
+            hasRelatedInputDevice: false
+        )) == .speakers)
+
+        #expect(AudioOutputRoute.resolveAmbiguousAnalogRoute(
+            classifiedRoute: .speakers,
+            isAmbiguous: true,
+            userConfirmedHeadphones: false
+        ) == .speakers)
+
+        #expect(AudioOutputRoute.resolveAmbiguousAnalogRoute(
+            classifiedRoute: .speakers,
+            isAmbiguous: true,
+            userConfirmedHeadphones: true
         ) == .headphones)
 
-        #expect(AudioOutputRoute.classify(
+        #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeBuiltIn,
-            builtInDataSource: internalSpeaker
+            builtInDataSource: internalSpeaker,
+            outputTerminalTypes: [kAudioStreamTerminalTypeSpeaker],
+            hasRelatedInputDevice: true
+        )) == .speakers)
+    }
+
+    @Test func headphoneConfirmationCannotOverrideAnUnambiguousSpeakerRoute() {
+        #expect(AudioOutputRoute.resolveAmbiguousAnalogRoute(
+            classifiedRoute: .speakers,
+            isAmbiguous: false,
+            userConfirmedHeadphones: true
         ) == .speakers)
+    }
+
+    @Test func analogHeadphoneConfirmationIsRevocableProcessState() {
+        let syntheticDevice = AudioDeviceID.max - 1
+        AudioOutputRoute.setSessionHeadphoneConfirmation(false, for: syntheticDevice)
+        #expect(!AudioOutputRoute.hasSessionHeadphoneConfirmation(for: syntheticDevice))
+
+        AudioOutputRoute.setSessionHeadphoneConfirmation(true, for: syntheticDevice)
+        #expect(AudioOutputRoute.hasSessionHeadphoneConfirmation(for: syntheticDevice))
+
+        AudioOutputRoute.setSessionHeadphoneConfirmation(false, for: syntheticDevice)
+        #expect(!AudioOutputRoute.hasSessionHeadphoneConfirmation(for: syntheticDevice))
     }
 
     @Test func builtInWithUnreadableDataSourceStaysMuted() {
         // Failing to read the data source must not be mistaken for headphones —
         // that would let the internal speaker bleed into the transcript.
-        #expect(AudioOutputRoute.classify(
+        #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeBuiltIn,
-            builtInDataSource: nil
-        ) == .speakers)
+            builtInDataSource: nil,
+            outputTerminalTypes: [],
+            hasRelatedInputDevice: false
+        )) == .speakers)
     }
 
     @Test func roomPlayingTransportsStayMuted() {
         let roomTransports: [UInt32] = [
-            kAudioDeviceTransportTypeUSB,
             kAudioDeviceTransportTypeHDMI,
             kAudioDeviceTransportTypeDisplayPort,
             kAudioDeviceTransportTypeAirPlay,
@@ -54,19 +94,29 @@ struct AudioOutputRouteTests {
         ]
 
         for transport in roomTransports {
-            #expect(AudioOutputRoute.classify(
+            #expect(AudioOutputRoute.classify(.init(
                 transportType: transport,
-                builtInDataSource: nil
-            ) == .speakers)
+                builtInDataSource: nil,
+                outputTerminalTypes: [],
+                hasRelatedInputDevice: false
+            )) == .speakers)
         }
     }
 
-    @Test func dataSourceIsIgnoredOffBuiltIn() {
-        // A USB DAC that happens to report 'hdpn' must not flip the verdict —
-        // only the built-in device's data source is trusted.
-        #expect(AudioOutputRoute.classify(
+    @Test func usbHeadsetRequiresInputStream() {
+        #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeUSB,
-            builtInDataSource: headphoneJack
-        ) == .speakers)
+            builtInDataSource: nil,
+            outputTerminalTypes: [],
+            hasRelatedInputDevice: true
+        )) == .headphones)
+
+        // Output-only USB DACs and speakers remain unsafe during meetings.
+        #expect(AudioOutputRoute.classify(.init(
+            transportType: kAudioDeviceTransportTypeUSB,
+            builtInDataSource: headphoneJack,
+            outputTerminalTypes: [],
+            hasRelatedInputDevice: false
+        )) == .speakers)
     }
 }

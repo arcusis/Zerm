@@ -32,7 +32,7 @@ actor KokoroEngine {
         var config = sherpaOnnxOfflineTtsConfig(model: modelConfig)
         let wrapper = SherpaOnnxOfflineTtsWrapper(config: &config)
         guard wrapper.tts != nil else {
-            throw TTSError.notAvailable("Failed to initialize the on-device Kokoro engine.")
+            throw TTSError.notAvailable(String(localized: "Failed to initialize the on-device Kokoro engine."))
         }
         tts = wrapper
     }
@@ -56,7 +56,9 @@ actor KokoroEngine {
 
     func generate(text: String, sid: Int, speed: Float) throws -> (samples: [Float], sampleRate: Int) {
         try ensureLoaded()
-        guard let tts else { throw TTSError.notAvailable("Kokoro engine unavailable.") }
+        guard let tts else {
+            throw TTSError.notAvailable(String(localized: "Kokoro engine unavailable."))
+        }
         let audio = tts.generate(text: text, sid: sid, speed: speed)
         return (audio.samples, Int(audio.sampleRate))
     }

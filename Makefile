@@ -4,15 +4,18 @@ DEPS_DIR := $(HOME)/Zerm-Dependencies
 # Bump these deliberately (and re-verify) rather than tracking a moving branch head.
 WHISPER_COMMIT := fc674574ca27cac59a15e5b22a09b9d9ad62aafe
 SHERPA_COMMIT := 6faa8142d49d4d47d2a6c1e06350a976661fe046
+LLAMA_COMMIT := dd69db292465ef698def69499ccb920a67bd613e
 WHISPER_CPP_DIR := $(DEPS_DIR)/whisper.cpp
 FRAMEWORK_PATH := $(WHISPER_CPP_DIR)/build-apple/whisper.xcframework
 SHERPA_DIR := $(DEPS_DIR)/sherpa-onnx
 SHERPA_BUILD := $(SHERPA_DIR)/build-swift-macos
 SHERPA_XCFRAMEWORK := $(SHERPA_BUILD)/sherpa-onnx.xcframework
 ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
+LLAMA_DIR := $(DEPS_DIR)/llama
+LLAMA_XCFRAMEWORK := $(LLAMA_DIR)/build-apple/llama.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 
-.PHONY: all clean whisper sherpa setup build test local check healthcheck help dev run install reset-permissions release site
+.PHONY: all clean whisper sherpa llama setup build test local check healthcheck help dev run install reset-permissions release site
 
 # Default target
 all: check build
@@ -66,9 +69,27 @@ sherpa:
 		echo "onnxruntime.xcframework already built, skipping"; \
 	fi
 
-setup: whisper sherpa
+# Build llama.cpp at the exact revision used by Zerm's Objective-C++ bridge. The upstream
+# packaging script produces the dynamic, module-mapped XCFramework expected by the project.
+llama:
+	@mkdir -p $(DEPS_DIR)
+	@if [ ! -d "$(LLAMA_XCFRAMEWORK)" ]; then \
+		echo "Building llama.xcframework in $(DEPS_DIR)..."; \
+		if [ ! -d "$(LLAMA_DIR)" ]; then \
+			git clone https://github.com/ggerganov/llama.cpp.git $(LLAMA_DIR); \
+		else \
+			(cd $(LLAMA_DIR) && git fetch origin); \
+		fi; \
+		(cd $(LLAMA_DIR) && git checkout --quiet $(LLAMA_COMMIT)); \
+		cd $(LLAMA_DIR) && ./build-xcframework.sh; \
+	else \
+		echo "llama.xcframework already built, skipping"; \
+	fi
+
+setup: whisper sherpa llama
 	@echo "Whisper framework is ready at $(FRAMEWORK_PATH)"
 	@echo "sherpa-onnx framework is ready at $(SHERPA_XCFRAMEWORK)"
+	@echo "llama framework is ready at $(LLAMA_XCFRAMEWORK)"
 	@echo "Please ensure your Xcode project references the frameworks from these locations."
 
 build: setup
@@ -127,7 +148,7 @@ install: local
 	@echo ""
 	@echo "Re-grant Accessibility and Screen Recording in Zerm → Permissions."
 
-# Build the Developer ID signed + notarized release DMG (see scripts/release.sh)
+# Build the Developer ID signed + notarized DMG and Sparkle ZIP (see scripts/release.sh)
 release: check setup
 	@scripts/release.sh
 
@@ -182,7 +203,7 @@ help:
 	@echo "  build              Build the Zerm Xcode project"
 	@echo "  test               Run the ZermTests unit suite"
 	@echo "  local              Build for local use (no Apple Developer certificate needed)"
-	@echo "  release            Build Developer ID signed + notarized release DMG"
+	@echo "  release            Build signed/notarized DMG and Sparkle ZIP"
 	@echo "  install            Build, install to /Applications, and reset Launchpad"
 	@echo "  reset-permissions  Reset Accessibility + Screen Recording TCC grants (run after rebuild)"
 	@echo "  run                Launch the built Zerm app"

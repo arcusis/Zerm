@@ -2,6 +2,25 @@ import Foundation
 import FluidAudio
 import OSLog
 
+/// FluidAudio does not declare its runtime Sendable. Zerm gives it one owner and never accesses
+/// it concurrently after model preparation: every inference/cleanup operation is confined to the
+/// diarizer's serial queue. This wrapper makes that audited confinement explicit to Swift 6.
+private final class MeetingDiarizerRuntime: @unchecked Sendable {
+    let value: LSEENDDiarizer
+
+    init(_ value: LSEENDDiarizer) {
+        self.value = value
+    }
+
+    func initialize() async throws {
+        try await value.initialize(variant: .dihard3)
+    }
+
+    func cleanup() {
+        value.cleanup()
+    }
+}
+
 /// Works out who is speaking, while the meeting is still running.
 ///
 /// Uses FluidAudio's LS-EEND streaming diarizer (Apache 2.0), which is already a Zerm
@@ -16,15 +35,45 @@ import OSLog
 /// model to recover it.
 final class MeetingDiarizer: @unchecked Sendable {
 
+    enum DiarizationError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            String(localized: "Speaker identification is not available on this Mac.")
+        }
+    }
+
     /// A stretch of speech attributed to one voice.
     struct Turn: Identifiable, Equatable {
-        let id = UUID()
+        let id: UUID
+        let source: MeetingAudioSource
         let speakerIndex: Int
         let start: TimeInterval
         let end: TimeInterval
         let isFinal: Bool
 
-        var label: String { "Speaker \(speakerIndex + 1)" }
+        init(
+            id: UUID = UUID(),
+            source: MeetingAudioSource = .microphone,
+            speakerIndex: Int,
+            start: TimeInterval,
+            end: TimeInterval,
+            isFinal: Bool
+        ) {
+            self.id = id
+            self.source = source
+            self.speakerIndex = speakerIndex
+            self.start = start
+            self.end = end
+            self.isFinal = isFinal
+        }
+
+        var label: String {
+            let format = source == .systemAudio
+                ? String(localized: "Remote Speaker %lld")
+                : String(localized: "Speaker %lld")
+            return String.localizedStringWithFormat(format, Int64(speakerIndex + 1))
+        }
     }
 
     /// Everything upstream — the tap writer, the transcriber, the mic — is 16 kHz.
@@ -32,8 +81,9 @@ final class MeetingDiarizer: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "MeetingDiarizer")
     private let queue = DispatchQueue(label: "com.arcusis.zerm.meeting-diarizer", qos: .utility)
+    private let source: MeetingAudioSource
 
-    private var diarizer: LSEENDDiarizer?
+    private var runtime: MeetingDiarizerRuntime?
     /// Guarded by `stateLock`, not by `queue`.
     ///
     /// These flags were originally read and written through `queue.sync`. That is unsafe from
@@ -51,6 +101,11 @@ final class MeetingDiarizer: @unchecked Sendable {
     /// cannot answer "was a model ever loaded" — asking it that gave a confidently wrong answer
     /// after any completed meeting.
     private var everLoaded = false
+    private var finishRequested = false
+    private var pendingBeforeReady = Data()
+    private let maximumPendingBytes = Int(inputSampleRate * 60) * MemoryLayout<Int16>.size
+    private var sourceStartOffset: TimeInterval = 0
+    private var hasSourceStartOffset = false
 
     private func withState<T>(_ body: () -> T) -> T {
         stateLock.lock()
@@ -62,6 +117,10 @@ final class MeetingDiarizer: @unchecked Sendable {
     var onTurns: (([Turn]) -> Void)?
 
     private var finalized: [Turn] = []
+
+    init(source: MeetingAudioSource = .microphone) {
+        self.source = source
+    }
 
     /// Whether the model loaded. False means speaker labels will never appear, which the caller
     /// needs to be able to tell apart from "loaded fine but nobody has spoken yet".
@@ -76,12 +135,23 @@ final class MeetingDiarizer: @unchecked Sendable {
     /// not block recording on it.
     func prepare() async {
         do {
-            let diarizer = LSEENDDiarizer()
-            try await diarizer.initialize(variant: .dihard3)
+            let runtime = MeetingDiarizerRuntime(LSEENDDiarizer())
+            try await runtime.initialize()
+            let shouldFinish = withState { finishRequested }
+            if shouldFinish {
+                runtime.cleanup()
+                withState { failed = true }
+                return
+            }
             withState {
-                self.diarizer = diarizer
-                self.isReady = true
+                self.runtime = runtime
                 self.everLoaded = true
+                let data = self.pendingBeforeReady
+                pendingBeforeReady.removeAll(keepingCapacity: false)
+                if !data.isEmpty {
+                    queue.async { [weak self] in self?.process(data) }
+                }
+                self.isReady = true
             }
             logger.notice("Diarizer ready")
         } catch {
@@ -92,45 +162,207 @@ final class MeetingDiarizer: @unchecked Sendable {
     }
 
     func finish() {
-        queue.sync {
-            guard self.withState({ self.isReady }), let diarizer else { return }
-            do {
-                _ = try diarizer.finalizeSession()
-                publish(from: diarizer, update: nil)
-            } catch {
-                logger.error("Diarizer finalize failed: \(error.localizedDescription, privacy: .public)")
+        if !didAttemptLoad {
+            withState {
+                finishRequested = true
+                failed = true
+                pendingBeforeReady.removeAll(keepingCapacity: false)
             }
-            diarizer.cleanup()
-            self.diarizer = nil
-            self.withState { self.isReady = false }
+            return
         }
+        queue.sync {
+            if let snapshot = self.finalizeOnQueue() {
+                DispatchQueue.main.async { [weak self] in self?.onTurns?(snapshot) }
+            }
+        }
+    }
+
+    @discardableResult
+    func finishAndWait(timeout: TimeInterval = 15) async -> Bool {
+        guard await waitUntilPrepared(timeout: timeout) else { return false }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        let remaining = max(0.1, deadline - ProcessInfo.processInfo.systemUptime)
+        let gate = MeetingDiarizerFinishGate()
+        let snapshot: [Turn]? = await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                gate.resumeOnce(self?.finalizeOnQueue(), continuation: continuation)
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + remaining) { [weak self] in
+                if let self {
+                    self.withState {
+                        self.finishRequested = true
+                        self.failed = true
+                    }
+                }
+                gate.resumeOnce(nil, continuation: continuation)
+            }
+        }
+        if let snapshot {
+            await MainActor.run { [weak self] in self?.onTurns?(snapshot) }
+            return true
+        }
+        return false
+    }
+
+    func waitUntilPrepared(timeout: TimeInterval = 15) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while !didAttemptLoad {
+            if Task.isCancelled {
+                finish()
+                return false
+            }
+            if ProcessInfo.processInfo.systemUptime >= deadline {
+                finish()
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return isAvailable
+    }
+
+    private func finalizeOnQueue() -> [Turn]? {
+        guard withState({ isReady }), let runtime else { return nil }
+        let diarizer = runtime.value
+        var snapshot: [Turn]?
+        do {
+            _ = try diarizer.finalizeSession()
+            let finalTurns = diarizer.timeline.speakers.values.flatMap(\.finalizedSegments).map {
+                Self.turn(from: $0, source: source, offset: sourceStartOffset, isFinal: true)
+            }
+            finalized = finalTurns
+            snapshot = finalTurns
+        } catch {
+            logger.error("Diarizer finalize failed: \(error.localizedDescription, privacy: .public)")
+        }
+        runtime.cleanup()
+        self.runtime = nil
+        withState { isReady = false }
+        return snapshot
     }
 
     // MARK: - Ingest
 
     /// Takes the same 16 kHz mono Int16 chunks the transcriber gets.
     func append(_ data: Data) {
-        queue.async { [weak self] in
-            guard let self,
-                  self.withState({ self.isReady && !self.failed }),
-                  let diarizer = self.diarizer else { return }
-
-            let samples = Self.floatSamples(from: data)
-            guard !samples.isEmpty else { return }
-
-            do {
-                // The model runs at 8 kHz while everything else in Zerm is 16 kHz. The bare
-                // addAudio(_:) means "already at the model rate", so feeding it 16 kHz audio
-                // silently mis-scaled every sample: turns were still produced, but two clearly
-                // different voices were decoded as one speaker. The rate has to be declared so
-                // the library resamples.
-                try diarizer.addAudio(samples, sourceSampleRate: Self.inputSampleRate)
-                if let update = try diarizer.process() {
-                    self.publish(from: diarizer, update: update)
-                }
-            } catch {
-                self.logger.error("Diarization pass failed: \(error.localizedDescription, privacy: .public)")
+        let shouldBuffer = withState { () -> Bool in
+            guard !isReady, !failed else { return false }
+            pendingBeforeReady.append(data)
+            if pendingBeforeReady.count > maximumPendingBytes {
+                let discardedBytes = pendingBeforeReady.count - maximumPendingBytes
+                // Replacing with a suffix avoids Data.removeFirst's repeated large memmove while
+                // a model download is pending. Advance the retained audio's origin by exactly the
+                // discarded duration so delayed model readiness cannot shift every speaker turn.
+                pendingBeforeReady = Data(pendingBeforeReady.suffix(maximumPendingBytes))
+                sourceStartOffset += Double(discardedBytes)
+                    / Double(MemoryLayout<Int16>.size)
+                    / Self.inputSampleRate
             }
+            return true
+        }
+        if shouldBuffer { return }
+        queue.async { [weak self] in
+            self?.process(data)
+        }
+    }
+
+    func append(_ chunk: MeetingAudioChunk) {
+        guard chunk.source == source else { return }
+        withState {
+            if !hasSourceStartOffset {
+                sourceStartOffset = chunk.timestamp
+                hasSourceStartOffset = true
+            }
+        }
+        append(chunk.data)
+    }
+
+    /// Canonical offline pass for imports and recovered sessions. It returns only finalized
+    /// turns and therefore cannot lose the tail to streaming look-ahead.
+    func diarizeFile(
+        _ url: URL,
+        startOffset: TimeInterval = 0,
+        clockAnchors: [MeetingClockAnchor] = []
+    ) async throws -> [Turn] {
+        guard withState({ isReady && !failed }) else {
+            throw DiarizationError.unavailable
+        }
+        let source = self.source
+        let turns: [Turn] = try await withCheckedThrowingContinuation { continuation in
+            queue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(throwing: DiarizationError.unavailable)
+                    return
+                }
+                self.diarizeFileOnQueue(
+                    url,
+                    source: source,
+                    startOffset: startOffset,
+                    clockAnchors: clockAnchors,
+                    continuation: continuation
+                )
+            }
+        }
+        await MainActor.run { [weak self] in self?.onTurns?(turns) }
+        return turns
+    }
+
+    private func diarizeFileOnQueue(
+        _ url: URL,
+        source: MeetingAudioSource,
+        startOffset: TimeInterval,
+        clockAnchors: [MeetingClockAnchor],
+        continuation: CheckedContinuation<[Turn], Error>
+    ) {
+        guard let runtime else {
+            continuation.resume(throwing: DiarizationError.unavailable)
+            return
+        }
+        do {
+            let timeline = try runtime.value.processComplete(
+                audioFileURL: url,
+                keepingEnrolledSpeakers: false,
+                finalizeOnCompletion: true,
+                progressCallback: nil
+            )
+            let result = timeline.speakers.values.flatMap(\.finalizedSegments).map { segment in
+                let rawStart = TimeInterval(segment.startTime)
+                let rawEnd = TimeInterval(segment.endTime)
+                return Turn(
+                    source: source,
+                    speakerIndex: segment.speakerIndex,
+                    start: clockAnchors.isEmpty
+                        ? startOffset + rawStart
+                        : MeetingTrackClock.meetingTime(
+                            forFileTime: rawStart,
+                            anchors: clockAnchors
+                        ),
+                    end: clockAnchors.isEmpty
+                        ? startOffset + rawEnd
+                        : MeetingTrackClock.meetingTime(
+                            forFileTime: rawEnd,
+                            anchors: clockAnchors
+                        ),
+                    isFinal: true
+                )
+            }
+            continuation.resume(returning: result)
+        } catch {
+            continuation.resume(throwing: error)
+        }
+    }
+
+    private func process(_ data: Data) {
+        guard withState({ isReady && !failed }), let runtime else { return }
+        let diarizer = runtime.value
+        let samples = Self.floatSamples(from: data)
+        guard !samples.isEmpty else { return }
+        do {
+            try diarizer.addAudio(samples, sourceSampleRate: Self.inputSampleRate)
+            if let update = try diarizer.process() {
+                publish(from: diarizer, update: update)
+            }
+        } catch {
+            logger.error("Diarization pass failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -141,8 +373,12 @@ final class MeetingDiarizer: @unchecked Sendable {
             // Finalized turns never change again, so they accumulate. Tentative ones are the
             // model's current best guess about the last few seconds and are replaced wholesale
             // on every pass — appending them would make speakers flicker in and out.
-            finalized.append(contentsOf: update.finalizedSegments.map { Self.turn(from: $0, isFinal: true) })
-            let tentative = update.tentativeSegments.map { Self.turn(from: $0, isFinal: false) }
+            finalized.append(contentsOf: update.finalizedSegments.map {
+                Self.turn(from: $0, source: source, offset: sourceStartOffset, isFinal: true)
+            })
+            let tentative = update.tentativeSegments.map {
+                Self.turn(from: $0, source: source, offset: sourceStartOffset, isFinal: false)
+            }
             let snapshot = finalized + tentative
             DispatchQueue.main.async { [weak self] in
                 self?.onTurns?(snapshot)
@@ -155,11 +391,17 @@ final class MeetingDiarizer: @unchecked Sendable {
         }
     }
 
-    private static func turn(from segment: DiarizerSegment, isFinal: Bool) -> Turn {
+    private static func turn(
+        from segment: DiarizerSegment,
+        source: MeetingAudioSource,
+        offset: TimeInterval,
+        isFinal: Bool
+    ) -> Turn {
         Turn(
+            source: source,
             speakerIndex: segment.speakerIndex,
-            start: TimeInterval(segment.startTime),
-            end: TimeInterval(segment.endTime),
+            start: offset + TimeInterval(segment.startTime),
+            end: offset + TimeInterval(segment.endTime),
             isFinal: isFinal
         )
     }
@@ -174,5 +416,24 @@ final class MeetingDiarizer: @unchecked Sendable {
             }
             return out
         }
+    }
+}
+
+private final class MeetingDiarizerFinishGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resumed = false
+
+    func resumeOnce(
+        _ value: [MeetingDiarizer.Turn]?,
+        continuation: CheckedContinuation<[MeetingDiarizer.Turn]?, Never>
+    ) {
+        lock.lock()
+        guard !resumed else {
+            lock.unlock()
+            return
+        }
+        resumed = true
+        lock.unlock()
+        continuation.resume(returning: value)
     }
 }

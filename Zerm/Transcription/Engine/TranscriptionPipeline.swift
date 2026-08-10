@@ -278,16 +278,33 @@ class TranscriptionPipeline {
             DebugLogger.shared.log("TranscriptionPipeline", "transcription failed: \(shortReason)")
         }
 
-        try? modelContext.save()
+        let didPersist: Bool
+        do {
+            try modelContext.save()
+            didPersist = true
+        } catch {
+            didPersist = false
+            logger.error("Transcription finished but could not be persisted: \(error.localizedDescription, privacy: .public)")
+            NotificationManager.shared.showNotification(
+                title: "Transcription history could not be saved",
+                type: .error,
+                duration: 5.0
+            )
+        }
 
         // Recorded to the separate usage store, which transcript retention never touches.
         // Without this the Dashboard is only ever a view of whatever history has not been
         // auto-deleted yet, which is why it appeared to reset itself.
-        if transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
+        if didPersist,
+           transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
             UsageStatsService.shared.record(transcription)
         }
 
-        NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
+        // Completion means durable history, not merely an in-memory model mutation. The paste
+        // below still proceeds so a transient disk failure never discards the user's words.
+        if didPersist {
+            NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
+        }
 
         if shouldCancel() || !isRunStillValid() { await onCleanup(); return }
 

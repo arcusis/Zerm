@@ -4,7 +4,9 @@
 
 `Production` — main and only production branch. All releases tagged here.
 
-## Recent Commits (newest first, 2026-05-22)
+The current published baseline is v2.8.1 (bundle version 2.8.1, build 281). Development worktrees are not production history until their PR is merged, a new version/build is chosen, and signed artifacts are published.
+
+## Historical Commit Snapshot (newest first, 2026-05-22)
 
 | Hash | Summary |
 |------|---------|
@@ -44,11 +46,11 @@
 
 ## Release Process
 
-1. Bump `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in the Xcode project
-2. `make release` — builds, Developer ID signs, notarizes, staples, creates the DMG (see [[Zerm Release Signing]])
-3. Tag git: `git tag vX.Y.Z && git push origin vX.Y.Z`
-4. Upload to GitHub Releases: `gh release create vX.Y.Z Zerm_X.Y.Z_aarch64.dmg`
-5. CI `release.yml` validates the tag and checks for DMG asset
+1. Choose the release identity. `MARKETING_VERSION` is the Apple-facing `Major.Minor.Patch` bundle version and `CURRENT_PROJECT_VERSION` is a strictly increasing integer used by Sparkle. The GitHub release label/tag normally defaults to that bundle version, but `RELEASE_LABEL` / `RELEASE_TAG` may provide a distinct three- or four-component public label. Do not stamp an unpublished identity until it is approved.
+2. In the isolated Office Mac worktree, build Debug and Release, run unit tests, and compile/link the UI-test bundle against the exact intended source. UI-test compilation is not UI-test execution; complete the runtime and hardware matrix in [[Zerm Verification Workflow]].
+3. Copy the Office-built Release app outside `.release-build` on the signing Mac and package it without a local rebuild. For a decoupled public label, use for example `PREBUILT_APP=/path/to/Zerm.app RELEASE_LABEL=A.B.C.D RELEASE_TAG=vA.B.C.D scripts/release.sh`. The script validates the app, Developer ID signs, notarizes and staples it, then emits exact `Zerm_A.B.C.D_aarch64.dmg` and `Zerm-A.B.C.D-macos.zip` assets plus a signed appcast.
+4. Commit the generated `docs/appcast.xml` with the release source, create and push the exact tag, then create a draft GitHub Release and upload both exact assets printed by the script.
+5. Run `.github/workflows/release.yml` manually against the draft tag. It verifies the tag format, both filenames, the tagged Xcode versions, appcast label/build/URL/signature, and the ZIP's embedded bundle identity. Publish only after that gate and the installed/quarantined update test pass. The `released` event reruns validation and checks whether the generated website needs a follow-up PR.
 
 Full process: `BUILDING.md`
 

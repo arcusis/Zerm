@@ -71,6 +71,7 @@ struct MeetingSummarizer {
         You are condensing one section of a meeting transcript. Write a tight paragraph covering \
         what was discussed, anything decided, and anything someone agreed to do. Keep names and \
         concrete details. Do not add anything that is not in the text. Output the paragraph only.
+        Write in the predominant language of the transcript; preserve intentional code-switching.
         """
 
     private static let finalPrompt = """
@@ -88,7 +89,9 @@ struct MeetingSummarizer {
         - <mm:ss> <short title for a distinct topic>
 
         Use only what is in the transcript. Never invent an action, a name or a decision. \
-        Timestamps in the transcript are the source of truth for chapter times.
+        Timestamps in the transcript are the source of truth for chapter times. Keep the three \
+        machine-readable headings exactly as written above, but write all content under them in \
+        the predominant language of the transcript and preserve intentional code-switching.
         """
 
     // MARK: - Rendering and chunking

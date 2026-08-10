@@ -13,6 +13,7 @@ final class MeetingRecordingStore: ObservableObject {
 
     struct Item: Identifiable, Equatable, Hashable {
         let id: String
+        let sessionID: UUID?
         let folder: URL
         let startedAt: Date
         let duration: TimeInterval
@@ -21,6 +22,9 @@ final class MeetingRecordingStore: ObservableObject {
         let transcript: String?
         let speakerCount: Int
         let summary: MeetingSummarizer.Result?
+        let transcriptionSnapshot: MeetingTranscriptionSnapshot?
+        let sourceHealth: [String: MeetingSourceHealth]
+        let issues: [MeetingRecordingIssue]
         /// Recovered from the journal because the recording never stopped cleanly.
         let wasInterrupted: Bool
 
@@ -52,10 +56,153 @@ final class MeetingRecordingStore: ObservableObject {
         var summary: MeetingSummarizer.Result?
 
         struct Line: Codable {
+            var source: MeetingAudioSource? = nil
             var start: TimeInterval
             var end: TimeInterval
             var text: String
             var speaker: String?
+            var speakerConfidence: String? = nil
+        }
+    }
+
+    /// Durable, versioned state for capture and processing. `meeting.json` remains the content
+    /// sidecar so existing libraries stay readable; this manifest records how those contents
+    /// were produced and whether recovery or another processing pass is needed.
+    struct Manifest: Codable, Equatable {
+        static let currentSchemaVersion = 3
+
+        enum Status: String, Codable {
+            case recording
+            case processing
+            case ready
+            case partial
+            case interrupted
+            case failed
+            case imported
+        }
+
+        enum JobStatus: String, Codable {
+            case notRequested, pending, running, complete, failed, unavailable
+        }
+
+        enum TranscriptionCoverageStrategy: String, Codable {
+            /// Every saved local track was processed sequentially after Stop.
+            case canonicalLocalTracks
+            /// Durable live cloud windows were reused and only uncovered ranges were retried.
+            case liveCloudCoverageWithGapRetry
+            /// No live cloud coverage existed, so the saved tracks were processed once after Stop.
+            case canonicalCloudTracks
+        }
+
+        struct Track: Codable, Equatable {
+            var source: MeetingAudioSource
+            var fileName: String
+            var startOffset: TimeInterval
+            var duration: TimeInterval
+            var frames: Int64
+            var clockAnchors: [MeetingClockAnchor] = []
+
+            init(
+                source: MeetingAudioSource,
+                fileName: String,
+                startOffset: TimeInterval,
+                duration: TimeInterval,
+                frames: Int64,
+                clockAnchors: [MeetingClockAnchor] = []
+            ) {
+                self.source = source
+                self.fileName = fileName
+                self.startOffset = startOffset
+                self.duration = duration
+                self.frames = frames
+                self.clockAnchors = clockAnchors
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case source, fileName, startOffset, duration, frames, clockAnchors
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                source = try container.decode(MeetingAudioSource.self, forKey: .source)
+                fileName = try container.decode(String.self, forKey: .fileName)
+                startOffset = try container.decode(TimeInterval.self, forKey: .startOffset)
+                duration = try container.decode(TimeInterval.self, forKey: .duration)
+                frames = try container.decode(Int64.self, forKey: .frames)
+                clockAnchors = try container.decodeIfPresent(
+                    [MeetingClockAnchor].self,
+                    forKey: .clockAnchors
+                ) ?? [
+                    .init(
+                        fileFrame: 0,
+                        meetingTime: startOffset,
+                        hostTimeNanos: nil,
+                        sourceSampleTime: nil
+                    )
+                ]
+            }
+        }
+
+        var schemaVersion: Int
+        var sessionID: UUID
+        var startedAt: Date
+        var endedAt: Date?
+        var status: Status
+        var duration: TimeInterval
+        var captureTarget: MeetingCaptureTarget
+        var requestedSources: [MeetingAudioSource]
+        var tracks: [Track]
+        var transcriptionSnapshot: MeetingTranscriptionSnapshot?
+        var transcriptionStatus: JobStatus
+        var diarizationStatus: JobStatus
+        var sourceHealth: [String: MeetingSourceHealth]
+        var issues: [MeetingRecordingIssue]
+        var importedFileName: String?
+        var transcriptionGaps: [MeetingTranscriber.Gap]?
+        var transcriptionCoverageStrategy: TranscriptionCoverageStrategy?
+        var summarySnapshot: MeetingSummarySnapshot?
+        var summaryStatus: JobStatus?
+
+        init(
+            schemaVersion: Int = currentSchemaVersion,
+            sessionID: UUID,
+            startedAt: Date,
+            endedAt: Date? = nil,
+            status: Status,
+            duration: TimeInterval = 0,
+            captureTarget: MeetingCaptureTarget,
+            requestedSources: [MeetingAudioSource],
+            tracks: [Track] = [],
+            transcriptionSnapshot: MeetingTranscriptionSnapshot? = nil,
+            transcriptionStatus: JobStatus = .notRequested,
+            diarizationStatus: JobStatus = .notRequested,
+            sourceHealth: [String: MeetingSourceHealth] = [:],
+            issues: [MeetingRecordingIssue] = [],
+            importedFileName: String? = nil,
+            transcriptionGaps: [MeetingTranscriber.Gap]? = nil,
+            transcriptionCoverageStrategy: TranscriptionCoverageStrategy? = nil,
+            summarySnapshot: MeetingSummarySnapshot? = nil,
+            summaryStatus: JobStatus? = nil
+        ) {
+            self.schemaVersion = schemaVersion
+            self.sessionID = sessionID
+            self.startedAt = startedAt
+            self.endedAt = endedAt
+            self.status = status
+            self.duration = duration
+            self.captureTarget = captureTarget
+            self.requestedSources = requestedSources
+            self.tracks = tracks
+            self.transcriptionSnapshot = transcriptionSnapshot
+            self.transcriptionStatus = transcriptionStatus
+            self.diarizationStatus = diarizationStatus
+            self.sourceHealth = sourceHealth
+            self.issues = issues
+            self.importedFileName = importedFileName
+            self.transcriptionGaps = transcriptionGaps
+            self.transcriptionCoverageStrategy = transcriptionCoverageStrategy
+            self.summarySnapshot = summarySnapshot
+            self.summaryStatus = summaryStatus
         }
     }
 
@@ -70,6 +217,7 @@ final class MeetingRecordingStore: ObservableObject {
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "MeetingRecordingStore")
     private static let sidecarName = "meeting.json"
+    nonisolated static let manifestName = "manifest.json"
     nonisolated fileprivate static let journalName = "transcript.jsonl"
 
     func reload() {
@@ -97,21 +245,36 @@ final class MeetingRecordingStore: ObservableObject {
         guard hasMic || hasSystem else { return nil }
 
         let sidecar = readSidecar(in: folder)
+        let manifest = readManifest(in: folder)
         // No sidecar means the recording never stopped cleanly. The journal is what is left.
         let recovered = sidecar == nil ? readJournal(in: folder) : []
 
         // A recording interrupted by a crash or a force quit has no sidecar. Rather than hide
         // it, fall back to what the audio files themselves can tell us — the tracks are intact
         // and still worth keeping.
-        let started = sidecar?.startedAt
+        let started = manifest?.startedAt
+            ?? sidecar?.startedAt
             ?? (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
             ?? Date.distantPast
-        let duration = sidecar?.duration
-            ?? Self.duration(of: hasMic ? mic : system)
-            ?? 0
+        let audioDuration = [hasMic ? mic : nil, hasSystem ? system : nil]
+            .compactMap { $0 }
+            .compactMap { Self.duration(of: $0) }
+            .max()
+        let trackDuration = manifest?.tracks.map {
+            max(0, $0.startOffset) + max(0, $0.duration)
+        }.max()
+        let durableEvidence = [audioDuration, trackDuration].compactMap { $0 }.max()
+        let persistedDuration = [manifest?.duration, sidecar?.duration]
+            .compactMap { $0 }
+            .first { $0.isFinite && $0 > 0 }
+        let duration = Self.reconciledDuration(
+            persisted: persistedDuration,
+            trackOrAudioEvidence: durableEvidence
+        )
 
         return Item(
             id: folder.lastPathComponent,
+            sessionID: manifest?.sessionID,
             folder: folder,
             startedAt: started,
             duration: duration,
@@ -122,12 +285,17 @@ final class MeetingRecordingStore: ObservableObject {
             speakerCount: sidecar?.speakerCount
                 ?? Set(recovered.compactMap(\.speaker)).count,
             summary: sidecar?.summary,
-            wasInterrupted: sidecar == nil
+            transcriptionSnapshot: manifest?.transcriptionSnapshot,
+            sourceHealth: manifest?.sourceHealth ?? [:],
+            issues: manifest?.issues ?? [],
+            wasInterrupted: manifest.map { [.recording, .processing, .interrupted].contains($0.status) }
+                ?? (sidecar == nil)
         )
     }
 
     // MARK: - Writing
 
+    @discardableResult
     func writeSidecar(
         into folder: URL,
         startedAt: Date,
@@ -136,14 +304,21 @@ final class MeetingRecordingStore: ObservableObject {
         speakerLabel: (MeetingTranscriber.Segment) -> String?,
         speakerCount: Int,
         summary: MeetingSummarizer.Result? = nil
-    ) {
+    ) -> Bool {
         let sidecar = Sidecar(
             startedAt: startedAt,
             duration: duration,
             transcript: segments.map(\.text).joined(separator: " "),
             speakerCount: speakerCount,
             segments: segments.map {
-                Sidecar.Line(start: $0.start, end: $0.end, text: $0.text, speaker: speakerLabel($0))
+                Sidecar.Line(
+                    source: $0.source,
+                    start: $0.start,
+                    end: $0.end,
+                    text: $0.text,
+                    speaker: speakerLabel($0),
+                    speakerConfidence: $0.speakerConfidence.rawValue
+                )
             },
             summary: summary
         )
@@ -151,9 +326,14 @@ final class MeetingRecordingStore: ObservableObject {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(sidecar).write(to: folder.appendingPathComponent(Self.sidecarName))
+            try encoder.encode(sidecar).write(
+                to: folder.appendingPathComponent(Self.sidecarName),
+                options: .atomic
+            )
+            return true
         } catch {
             logger.error("Could not write meeting sidecar: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -165,18 +345,29 @@ final class MeetingRecordingStore: ObservableObject {
     /// least useful: a crash, a force quit or a power loss at minute 85 of a 90-minute meeting
     /// would leave two audio files and no transcript at all. Journalling each line as it lands
     /// costs one small append and makes the transcript recoverable up to the last window.
-    nonisolated static func appendToJournal(in folder: URL, line: Sidecar.Line) {
+    @discardableResult
+    nonisolated static func appendToJournal(in folder: URL, line: Sidecar.Line) -> Bool {
         let url = folder.appendingPathComponent(journalName)
-        guard let encoded = try? JSONEncoder().encode(line) else { return }
+        guard let encoded = try? JSONEncoder().encode(line) else { return false }
         var payload = encoded
         payload.append(0x0A)
 
         if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: payload)
+            do {
+                _ = try handle.seekToEnd()
+                try handle.write(contentsOf: payload)
+                return true
+            } catch {
+                return false
+            }
         } else {
-            try? payload.write(to: url)
+            do {
+                try payload.write(to: url, options: .atomic)
+                return true
+            } catch {
+                return false
+            }
         }
     }
 
@@ -201,6 +392,32 @@ final class MeetingRecordingStore: ObservableObject {
         return try? decoder.decode(Sidecar.self, from: data)
     }
 
+    nonisolated static func writeManifest(_ manifest: Manifest, into folder: URL) throws {
+        var upgradedManifest = manifest
+        // Every rewrite is also a schema migration. This prevents a recovered v2 manifest from
+        // acquiring v3 fields while continuing to claim the older contract version.
+        upgradedManifest.schemaVersion = Manifest.currentSchemaVersion
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(upgradedManifest).write(
+            to: folder.appendingPathComponent(manifestName),
+            options: .atomic
+        )
+    }
+
+    func readManifest(in folder: URL) -> Manifest? {
+        Self.readManifest(in: folder)
+    }
+
+    nonisolated static func readManifest(in folder: URL) -> Manifest? {
+        let url = folder.appendingPathComponent(manifestName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(Manifest.self, from: data)
+    }
+
     // MARK: - Import
 
     /// File types the recorder can adopt.
@@ -216,8 +433,11 @@ final class MeetingRecordingStore: ObservableObject {
 
         var errorDescription: String? {
             switch self {
-            case .unreadable(let name): return "Could not read audio from \(name)."
-            case .emptyAudio: return "That file contains no audio."
+            case .unreadable(let name):
+                let format = String(localized: "Could not read audio from %@.")
+                return String.localizedStringWithFormat(format, name)
+            case .emptyAudio:
+                return String(localized: "That file contains no audio.")
             }
         }
     }
@@ -233,6 +453,34 @@ final class MeetingRecordingStore: ObservableObject {
         let destination = folder.appendingPathComponent("microphone.wav")
 
         try Self.convertToRecorderFormat(from: asset, to: destination)
+
+        let duration = Double(asset.length) / asset.fileFormat.sampleRate
+        let manifest = Manifest(
+            sessionID: id,
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(duration),
+            status: .imported,
+            duration: duration,
+            captureTarget: .allSystemAudio,
+            requestedSources: [.imported],
+            tracks: [
+                .init(
+                    source: .imported,
+                    fileName: destination.lastPathComponent,
+                    startOffset: 0,
+                    duration: duration,
+                    frames: Int64((duration * SystemAudioTrackWriter.targetFormat.sampleRate).rounded()),
+                    clockAnchors: [
+                        .init(fileFrame: 0, meetingTime: 0, hostTimeNanos: nil, sourceSampleTime: nil)
+                    ]
+                )
+            ],
+            transcriptionStatus: .pending,
+            diarizationStatus: .pending,
+            sourceHealth: [MeetingAudioSource.imported.rawValue: .init(status: .stopped)],
+            importedFileName: source.lastPathComponent
+        )
+        try Self.writeManifest(manifest, into: folder)
 
         guard let item = item(at: folder) else {
             try? FileManager.default.removeItem(at: folder)
@@ -307,5 +555,22 @@ final class MeetingRecordingStore: ObservableObject {
     private static func duration(of url: URL) -> TimeInterval? {
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
         return Double(file.length) / file.fileFormat.sampleRate
+    }
+
+    /// Reconciles legacy wall-clock durations with evidence that survives a clock jump. A normal
+    /// meeting may contain a silent tail, so modest excess is retained. A duration that is more
+    /// than both five minutes and one full evidence-length beyond the tracks is treated as a bad
+    /// wall-clock interval and cannot override the captured files.
+    nonisolated static func reconciledDuration(
+        persisted: TimeInterval?,
+        trackOrAudioEvidence evidence: TimeInterval?
+    ) -> TimeInterval {
+        let validPersisted = persisted.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let validEvidence = evidence.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        guard let evidence = validEvidence else { return validPersisted ?? 0 }
+        guard let persisted = validPersisted else { return evidence }
+        if persisted < evidence { return evidence }
+        let toleratedSilentTail = max(300, evidence)
+        return persisted - evidence > toleratedSilentTail ? evidence : persisted
     }
 }

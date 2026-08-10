@@ -34,8 +34,8 @@ struct AudioInputSettingsView: View {
     private var heroSection: some View {
         CompactHeroSection(
             icon: "waveform",
-            title: "Audio Input",
-            description: "Configure your microphone preferences"
+            title: String(localized: "Audio Input"),
+            description: String(localized: "Configure your microphone preferences")
         )
     }
     
@@ -47,7 +47,7 @@ struct AudioInputSettingsView: View {
                     .fontWeight(.semibold)
 
                 InfoTip(
-                    "How Zerm picks the microphone to record from. System Default follows whatever macOS is set to, so it changes when you plug in headphones. Custom Device pins one microphone and always uses it. Prioritized keeps an ordered list and takes the first device that is actually plugged in — the right choice if you move between a desk mic and a laptop.",
+                    String(localized: "How Zerm picks the microphone to record from. System Default follows whatever macOS is set to, so it changes when you plug in headphones. Custom Device pins one microphone and always uses it. Prioritized keeps an ordered list and takes the first device that is actually plugged in — the right choice if you move between a desk mic and a laptop."),
                     doc: .audioInput
                 )
             }
@@ -72,7 +72,7 @@ struct AudioInputSettingsView: View {
                     .fontWeight(.semibold)
 
                 InfoTip(
-                    "The microphone macOS is currently set to use. Zerm follows it, so changing the input in System Settings or plugging in a headset changes what Zerm records from. Switch to Custom Device if you want it pinned instead.",
+                    String(localized: "The microphone macOS is currently set to use. Zerm follows it, so changing the input in System Settings or plugging in a headset changes what Zerm records from. Switch to Custom Device if you want it pinned instead."),
                     doc: .audioInput
                 )
             }
@@ -81,7 +81,7 @@ struct AudioInputSettingsView: View {
                 Image(systemName: "display")
                     .foregroundStyle(.secondary)
 
-                Text(audioDeviceManager.getSystemDefaultDeviceName() ?? "No device available")
+                Text(audioDeviceManager.getSystemDefaultDeviceName() ?? String(localized: "No device available"))
                     .foregroundStyle(.primary)
 
                 Spacer()
@@ -110,7 +110,7 @@ struct AudioInputSettingsView: View {
                         .fontWeight(.semibold)
 
                     InfoTip(
-                        "Pick the one microphone Zerm always records from. It stays selected even when macOS switches its own input, which keeps transcripts consistent if you have several devices connected. If the chosen device is unplugged, recording falls back to the system default.",
+                        String(localized: "Pick the one microphone Zerm always records from. It stays selected even when macOS switches its own input, which keeps transcripts consistent if you have several devices connected. If the chosen device is unplugged, recording falls back to the system default."),
                         doc: .audioInput
                     )
                 }
@@ -159,7 +159,7 @@ struct AudioInputSettingsView: View {
                         .fontWeight(.semibold)
 
                     InfoTip(
-                        "Your ranked list of microphones. Number 1 is used whenever it is connected, otherwise Zerm tries number 2, and so on. Use the up and down arrows to reorder, and the red minus to drop a device back to the available list.",
+                        String(localized: "Your ranked list of microphones. Number 1 is used whenever it is connected, otherwise Zerm tries number 2, and so on. Use the up and down arrows to reorder, and the red minus to drop a device back to the available list."),
                         doc: .audioInput
                     )
                 }
@@ -187,7 +187,7 @@ struct AudioInputSettingsView: View {
                     .fontWeight(.semibold)
 
                 InfoTip(
-                    "Microphones Zerm can see that are not yet in your priority list. Use the blue plus to add one — it joins the bottom of the list, and you can move it up from there.",
+                    String(localized: "Microphones Zerm can see that are not yet in your priority list. Use the blue plus to add one — it joins the bottom of the list, and you can move it up from there."),
                     doc: .audioInput
                 )
             }
@@ -312,9 +312,9 @@ struct InputModeCard: View {
 
     private var description: String {
         switch mode {
-        case .systemDefault: return "Use your Mac's default input"
-        case .custom: return "Select a specific input device"
-        case .prioritized: return "Set up device priority order"
+        case .systemDefault: return String(localized: "Use your Mac's default input")
+        case .custom: return String(localized: "Select a specific input device")
+        case .prioritized: return String(localized: "Set up device priority order")
         }
     }
     
@@ -327,7 +327,7 @@ struct InputModeCard: View {
                     .foregroundStyle(isSelected ? .blue : .secondary)
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(mode.rawValue)
+                    Text(LocalizedStringKey(mode.rawValue))
                         .font(.headline)
                     
                     Text(description)
@@ -448,12 +448,14 @@ struct DevicePriorityCard: View {
                                 .foregroundStyle(canMoveUp ? .blue : .secondary.opacity(0.5))
                         }
                         .disabled(!canMoveUp)
+                        .accessibilityLabel(Text(moveUpAccessibilityLabel))
                         
                         Button(action: onMoveDown) {
                             Image(systemName: "chevron.down")
                                 .foregroundStyle(canMoveDown ? .blue : .secondary.opacity(0.5))
                         }
                         .disabled(!canMoveDown)
+                        .accessibilityLabel(Text(moveDownAccessibilityLabel))
                     }
                 }
                 
@@ -463,10 +465,32 @@ struct DevicePriorityCard: View {
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(isPrioritized ? .red : .blue)
                 }
+                .accessibilityLabel(Text(togglePriorityAccessibilityLabel))
             }
             .buttonStyle(.plain)
         }
         .padding()
         .background(CardBackground(isSelected: false))
     }
-} 
+
+    private var moveUpAccessibilityLabel: String {
+        String.localizedStringWithFormat(
+            String(localized: "Move %@ up in microphone priority"),
+            name
+        )
+    }
+
+    private var moveDownAccessibilityLabel: String {
+        String.localizedStringWithFormat(
+            String(localized: "Move %@ down in microphone priority"),
+            name
+        )
+    }
+
+    private var togglePriorityAccessibilityLabel: String {
+        let format = isPrioritized
+            ? String(localized: "Remove %@ from microphone priority")
+            : String(localized: "Add %@ to microphone priority")
+        return String.localizedStringWithFormat(format, name)
+    }
+}

@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Two flows share one engine, one state machine, and one recorder widget — and are mutually exclusive.
+Dictation and Read Aloud share one short-form engine and recorder widget. Meeting recording is a separate application-scoped coordinator so it can remain active while the user navigates the app and uses Dictation. Read Aloud may coexist with a meeting only on a confirmed safe headphone/headset route.
 
 ```mermaid
 flowchart TB
@@ -19,9 +19,13 @@ flowchart TB
     ENH -.optional.-> LLM
     ENG --> UI[RecorderUIManager widget]
     TC --> UI
+    MC[MeetingRecordingController] --> CAP[Room + selected-app capture]
+    CAP --> MSTT[Snapshotted Dictation STT]
+    MC --> LIB[Durable meeting library]
+    MON[MeetingActivityMonitor + AudioOutputRouteMonitor] --> TC
 ```
 
-See [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]].
+See [[Zerm Meeting Recording]], [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]].
 
 ## Tech Stack
 
@@ -32,7 +36,7 @@ See [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], 
 - **On-device AI (three models):** `whisper.cpp` (STT), `sherpa-onnx` + Kokoro (TTS), `llama.cpp` + Gemma (LLM) — all prebuilt XCFrameworks under `$(HOME)/Zerm-Dependencies/`
 - **Packaging:** Xcode + xcodebuild, ad-hoc signed for local dev
 - **Updates:** Sparkle 2.x (`UpdaterViewModel`)
-- **Dependencies (Swift packages):** KeyboardShortcuts 2.4.x, LaunchAtLogin-Modern, Sparkle, FluidAudio, LLMkit, swift-atomics, Zip, AXSwift, SelectedTextKit, KeySender, MediaRemoteAdapter
+- **Dependencies (Swift packages):** KeyboardShortcuts 2.4.x, LaunchAtLogin-Modern, Sparkle, FluidAudio, LLMkit, swift-atomics, Zip, AXSwift, SelectedTextKit, KeySender
 
 ## Key Singletons / Shared State
 
@@ -50,10 +54,13 @@ See [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], 
 | `WordReplacementService` | Post-transcription text substitution |
 | `AIEnhancementService` | LLM enhancement pipeline |
 | `ModelPrewarmService` | Pre-run model on app launch + wake |
+| `MeetingRecordingController` | Application-scoped meeting capture, processing and recovery |
+| `MeetingActivityMonitor` | Thread-safe meeting-active policy signal |
+| `AudioOutputRouteMonitor` | Headphone/headset safety and disconnect observation |
 
 ## Recording State Machine
 
-`RecordingState` (on `ZermEngine`) is the single source of truth; the hotkey is ignored unless the state allows it (`canProcessHotkeyAction`). Dictation and Read Aloud both start only from `.idle`, so they are mutually exclusive.
+`RecordingState` (on `ZermEngine`) is the source of truth for short-form Dictation and Read Aloud. Meeting capture has its own `MeetingRecordingLifecycle`; Dictation remains available during meetings. Read Aloud start and route changes consult the process-wide meeting activity and output-route monitors.
 
 ```mermaid
 stateDiagram-v2
@@ -74,6 +81,8 @@ stateDiagram-v2
 ```
 
 The widget label is driven directly by the state: **Transcribing / Enhancing** (dictation), **Thinking… / Preparing… / live bars** (Read Aloud).
+
+Meeting lifecycle and timing invariants are documented in [[Zerm Meeting Recording]].
 
 ## Whisper Model Loading
 

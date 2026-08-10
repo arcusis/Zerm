@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// Describes a downloadable on-device LLM (a single GGUF file).
-struct LocalLLMPackage: Identifiable, Hashable {
+struct LocalLLMPackage: Identifiable, Hashable, Sendable {
     let fileName: String
     let displayName: String
     let approxSize: String
@@ -27,7 +27,7 @@ final class LocalLLMModelManager: ObservableObject {
 
     /// The downloadable catalogue — all Google Gemma (GGUF, 4-bit Q4_K_M), spanning tiny→medium.
     /// Users pick one as the active on-device model. Add new entries here to offer more.
-    static let packages: [LocalLLMPackage] = [
+    nonisolated static let packages: [LocalLLMPackage] = [
         LocalLLMPackage(
             fileName: "gemma-3-1b-it-Q4_K_M.gguf",
             displayName: "Gemma 3 1B (on-device)",
@@ -71,9 +71,9 @@ final class LocalLLMModelManager: ObservableObject {
     ]
 
     /// The shipped default (out-of-box) model.
-    static let defaultPackage = packages.first { $0.fileName == "gemma-4-E2B-it-Q4_K_M.gguf" } ?? packages[1]
+    nonisolated static let defaultPackage = packages.first { $0.fileName == "gemma-4-E2B-it-Q4_K_M.gguf" } ?? packages[1]
 
-    private static let currentModelKey = "CurrentLocalLLMModel"
+    nonisolated private static let currentModelKey = "CurrentLocalLLMModel"
 
     /// The currently-selected on-device model (shared by Enhancement + Read Aloud).
     nonisolated static var current: LocalLLMPackage {

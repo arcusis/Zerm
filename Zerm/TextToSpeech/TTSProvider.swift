@@ -25,14 +25,20 @@ extension TTSProvider {
     var apiKeyProviderID: String? { kind.apiKeyProvider }
 
     func verifyAPIKey(_ key: String) async -> (isValid: Bool, errorMessage: String?) {
-        guard let first = voices.first else { return (false, "No voices available") }
+        guard let first = voices.first else {
+            return (false, String(localized: "No voices are available for this provider."))
+        }
         do {
             let audio = try await synthesize(text: "Test.", voice: first, speed: 1.0, apiKey: key)
-            return audio.pcm.isEmpty ? (false, "No audio returned") : (true, nil)
+            return audio.pcm.isEmpty
+                ? (false, String(localized: "The provider returned no audio."))
+                : (true, nil)
         } catch let TTSError.http(code, msg) {
-            return (false, "HTTP \(code): \(msg)")
+            let format = String(localized: "Provider verification failed (HTTP %lld): %@")
+            return (false, String.localizedStringWithFormat(format, code, msg))
         } catch {
-            return (false, error.localizedDescription)
+            let format = String(localized: "Provider verification failed: %@")
+            return (false, String.localizedStringWithFormat(format, error.localizedDescription))
         }
     }
 }

@@ -1,37 +1,73 @@
-import SwiftUI
-import SwiftData
-import KeyboardShortcuts
 import OSLog
+import SwiftUI
 
-// ViewType enum with all cases
-enum ViewType: String, CaseIterable, Identifiable {
-    case metrics = "Dashboard"
-    case recording = "Recording"
-    case history = "History"
-    case models = "Dictation Models"
-    case enhancement = "Enhancement"
-    case powerMode = "Power Mode"
-    case permissions = "Permissions"
-    case audioInput = "Audio Input"
-    case dictionary = "Dictionary"
-    case readAloud = "Read Aloud"
-    case settings = "Settings"
+/// A task-oriented destination in Zerm's primary navigation.
+///
+/// Routes are values rather than display strings so navigation, notifications and future deep
+/// links can share one compiler-checked vocabulary. `title` remains presentation-only.
+enum AppRoute: String, Hashable, Identifiable {
+    case dashboard
+    case dictationHistory
+    case dictationModels
+    case dictationEnhancement
+    case dictationVocabulary
+    case meetings
+    case readAloud
+    case powerModes
+    case permissions
+    case audioInput
+    case settings
 
-    var id: String { rawValue }
+    var id: Self { self }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .dashboard: "Dashboard"
+        case .dictationHistory: "History"
+        case .dictationModels: "Models"
+        case .dictationEnhancement: "Enhancement"
+        case .dictationVocabulary: "Vocabulary"
+        case .meetings: "Meetings"
+        case .readAloud: "Read Aloud"
+        case .powerModes: "Power Modes"
+        case .permissions: "Permissions"
+        case .audioInput: "Audio Input"
+        case .settings: "Settings"
+        }
+    }
 
     var icon: String {
         switch self {
-        case .metrics: return "gauge.medium"
-        case .recording: return "record.circle"
-        case .history: return "doc.text.fill"
-        case .models: return "text.bubble.fill"
-        case .enhancement: return "wand.and.stars"
-        case .powerMode: return "sparkles.square.fill.on.square"
-        case .permissions: return "shield.fill"
-        case .audioInput: return "mic.fill"
-        case .dictionary: return "character.book.closed.fill"
-        case .readAloud: return "speaker.wave.2.fill"
-        case .settings: return "gearshape.fill"
+        case .dashboard: "gauge.medium"
+        case .dictationHistory: "clock.arrow.circlepath"
+        case .dictationModels: "waveform.badge.magnifyingglass"
+        case .dictationEnhancement: "wand.and.stars"
+        case .dictationVocabulary: "character.book.closed"
+        case .meetings: "person.2.wave.2"
+        case .readAloud: "speaker.wave.2"
+        case .powerModes: "slider.horizontal.3"
+        case .permissions: "hand.raised"
+        case .audioInput: "mic"
+        case .settings: "gearshape"
+        }
+    }
+
+    /// Compatibility at the boundary for existing notification senders. New callers should send
+    /// `AppRoute` in `userInfo["route"]` rather than introducing another destination string.
+    init?(legacyDestination: String) {
+        switch legacyDestination {
+        case "Dashboard": self = .dashboard
+        case "Recording", "Meetings": self = .meetings
+        case "History": self = .dictationHistory
+        case "Dictation Models", "Models": self = .dictationModels
+        case "Enhancement": self = .dictationEnhancement
+        case "Dictionary", "Vocabulary": self = .dictationVocabulary
+        case "Read Aloud": self = .readAloud
+        case "Power Mode", "Power Modes": self = .powerModes
+        case "Permissions": self = .permissions
+        case "Audio Input": self = .audioInput
+        case "Settings", "Zerm Pro": self = .settings
+        default: return nil
         }
     }
 }
@@ -55,155 +91,229 @@ struct VisualEffectView: NSViewRepresentable {
 }
 
 struct ContentView: View {
-    private let logger = Logger(subsystem: "com.arcusis.zerm", category: "ContentView")
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject private var engine: ZermEngine
+    @EnvironmentObject private var meetingRecordingController: MeetingRecordingController
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
-    @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
-    @EnvironmentObject private var hotkeyManager: HotkeyManager
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @AppStorage("powerModeUIFlag") private var powerModeUIFlag = false
-    @State private var selectedView: ViewType? = .metrics
-    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    @AppStorage("sidebarDictationExpanded") private var isDictationExpanded = true
+    @State private var selectedRoute: AppRoute? = .dashboard
 
-    private var visibleViewTypes: [ViewType] {
-        ViewType.allCases.filter { viewType in
-            if viewType == .powerMode {
-                return powerModeUIFlag
-            }
-            return true
-        }
-    }
+    private let logger = Logger(subsystem: "com.arcusis.zerm", category: "ContentView")
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedView) {
-                Section {
-                    // App Header
-                    HStack(spacing: 6) {
-                        if let appIcon = NSImage(named: "AppIcon") {
-                            Image(nsImage: appIcon)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 28, height: 28)
-                                .cornerRadius(8)
-                        }
-
-                        Text("Zerm")
-                            .font(.system(size: 14, weight: .semibold))
-
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                ForEach(visibleViewTypes) { viewType in
-                    Section {
-                        NavigationLink(value: viewType) {
-                            SidebarItemView(viewType: viewType)
-                        }
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                        .listRowSeparator(.hidden)
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationTitle("Zerm")
-            .navigationSplitViewColumnWidth(210)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                SidebarUpdateBanner(updater: updaterViewModel)
-            }
+            SidebarView(
+                selectedRoute: $selectedRoute,
+                isDictationExpanded: $isDictationExpanded,
+                showsPowerModes: powerModeUIFlag,
+                updater: updaterViewModel
+            )
         } detail: {
-            if let selectedView = selectedView {
-                detailView(for: selectedView)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .navigationTitle(selectedView.rawValue)
-            } else {
-                Text("Select a view")
-                    .foregroundColor(.secondary)
-            }
+            DetailDestination(route: selectedRoute ?? .dashboard)
+                .navigationTitle((selectedRoute ?? .dashboard).title)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("destination-\((selectedRoute ?? .dashboard).rawValue)")
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(width: 950)
-        .frame(minHeight: 730)
+        .frame(minWidth: 760, minHeight: 560)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: toggleSidebar) {
+                    Label("Toggle Sidebar", systemImage: "sidebar.left")
+                }
+                .help("Show or hide the sidebar")
+                .accessibilityIdentifier("toggle-sidebar")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                MeetingGlobalStatusButton(controller: meetingRecordingController)
+            }
+        }
         .onAppear {
             logger.notice("ContentView appeared")
         }
         .onDisappear {
             logger.notice("ContentView disappeared")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination)) { notification in
-            if let destination = notification.userInfo?["destination"] as? String {
-                logger.notice("navigateToDestination received: \(destination, privacy: .public)")
-                switch destination {
-                case "Settings":
-                    selectedView = .settings
-                case "Dictation Models":
-                    selectedView = .models
-                case "Zerm Pro":
-                    selectedView = .settings
-                case "History":
-                    selectedView = .history
-                case "Permissions":
-                    selectedView = .permissions
-                case "Enhancement":
-                    selectedView = .enhancement
-                case "Power Mode":
-                    selectedView = .powerMode
-                default:
-                    break
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination), perform: navigate)
+    }
+
+    private func navigate(_ notification: Notification) {
+        if let route = notification.userInfo?["route"] as? AppRoute {
+            selectedRoute = route
+            return
+        }
+
+        guard let destination = notification.userInfo?["destination"] as? String,
+              let route = AppRoute(legacyDestination: destination) else {
+            return
+        }
+
+        logger.notice("Legacy navigation destination received: \(destination, privacy: .public)")
+        selectedRoute = route
+    }
+
+    private func toggleSidebar() {
+        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+    }
+}
+
+private struct SidebarView: View {
+    @Binding var selectedRoute: AppRoute?
+    @Binding var isDictationExpanded: Bool
+
+    let showsPowerModes: Bool
+    @ObservedObject var updater: UpdaterViewModel
+
+    var body: some View {
+        List(selection: $selectedRoute) {
+            NavigationLink(value: AppRoute.dashboard) {
+                SidebarLabel(route: .dashboard)
+            }
+            .accessibilityIdentifier("sidebar-dashboard")
+
+            Section {
+                DisclosureGroup(isExpanded: $isDictationExpanded) {
+                    SidebarLink(route: .dictationHistory)
+                    SidebarLink(route: .dictationModels)
+                    SidebarLink(route: .dictationEnhancement)
+                    SidebarLink(route: .dictationVocabulary)
+                } label: {
+                    Label("Dictation", systemImage: "mic.badge.plus")
+                        .fontWeight(.medium)
+                        .accessibilityIdentifier("dictation-navigation-group")
+                }
+
+                SidebarLink(route: .meetings)
+                SidebarLink(route: .readAloud)
+            } header: {
+                Text("Speech")
+                    .accessibilityIdentifier("sidebar-group-speech")
+            }
+
+            if showsPowerModes {
+                Section {
+                    SidebarLink(route: .powerModes)
+                } header: {
+                    Text("Automation")
+                        .accessibilityIdentifier("sidebar-group-automation")
                 }
             }
+
+            Section {
+                SidebarLink(route: .permissions)
+                SidebarLink(route: .audioInput)
+                SidebarLink(route: .settings)
+            } header: {
+                Text("System")
+                    .accessibilityIdentifier("sidebar-group-system")
+            }
         }
+        .listStyle(.sidebar)
+        .navigationTitle("Zerm")
+        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            SidebarUpdateBanner(updater: updater)
+        }
+        .accessibilityIdentifier("primary-sidebar")
     }
-    
+}
+
+private struct SidebarLink: View {
+    let route: AppRoute
+
+    var body: some View {
+        NavigationLink(value: route) {
+            SidebarLabel(route: route)
+        }
+        .accessibilityIdentifier("sidebar-\(route.rawValue)")
+    }
+}
+
+private struct SidebarLabel: View {
+    let route: AppRoute
+
+    var body: some View {
+        Label(route.title, systemImage: route.icon)
+            .fontWeight(.medium)
+    }
+}
+
+private struct DetailDestination: View {
+    @EnvironmentObject private var whisperModelManager: WhisperModelManager
+
+    let route: AppRoute
+
     @ViewBuilder
-    private func detailView(for viewType: ViewType) -> some View {
-        switch viewType {
-        case .metrics:
+    var body: some View {
+        switch route {
+        case .dashboard:
             MetricsView()
-        case .recording:
-            MeetingRecordingView(engine: engine)
-        case .models:
-            ModelManagementView()
-        case .enhancement:
-            EnhancementSettingsView()
-        case .history:
+        case .dictationHistory:
             InlineHistoryView()
-        case .audioInput:
-            AudioInputSettingsView()
-        case .dictionary:
+        case .dictationModels:
+            ModelManagementView()
+        case .dictationEnhancement:
+            EnhancementSettingsView()
+        case .dictationVocabulary:
             DictionarySettingsView(whisperPrompt: whisperModelManager.whisperPrompt)
-        case .powerMode:
-            PowerModeView()
+        case .meetings:
+            MeetingRecordingView()
         case .readAloud:
             TextToSpeechSettingsView()
-        case .settings:
-            SettingsView()
+        case .powerModes:
+            PowerModeView()
         case .permissions:
             PermissionsView()
+        case .audioInput:
+            AudioInputSettingsView()
+        case .settings:
+            SettingsRootView()
         }
     }
 }
 
-private struct SidebarItemView: View {
-    let viewType: ViewType
+private struct MeetingGlobalStatusButton: View {
+    @ObservedObject var controller: MeetingRecordingController
+    @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
+    @State private var didStopSimulatedMeeting = false
+
+    private var simulatesActiveMeeting: Bool {
+        UITestLaunchConfiguration.current.isEnabled
+            && UITestLaunchConfiguration.current.scenario == .activeMeeting
+            && !didStopSimulatedMeeting
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: viewType.icon)
-                .font(.system(size: 18, weight: .medium))
-                .frame(width: 24, height: 24)
-
-            Text(viewType.rawValue)
-                .font(.system(size: 14, weight: .medium))
-
-            Spacer()
+        Group {
+            switch simulatesActiveMeeting ? .capturing : controller.lifecycle.phase {
+            case .capturing:
+                Button(action: stopMeeting) {
+                    Label("Stop Meeting", systemImage: "stop.circle.fill")
+                        .foregroundStyle(.red)
+                }
+                .help("Stop the active meeting recording")
+                .accessibilityIdentifier("global-stop-meeting")
+            case .stopping, .processing:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Processing Meeting")
+                }
+                .accessibilityElement(children: .combine)
+            default:
+                EmptyView()
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .padding(.vertical, 8)
-        .padding(.horizontal, 2)
+    }
+
+    private func stopMeeting() {
+        if simulatesActiveMeeting {
+            didStopSimulatedMeeting = true
+            return
+        }
+        Task {
+            await controller.stopAndSummarise(
+                ifRequested: summariseAfterMeeting && controller.isLocalSummaryAvailable == true
+            )
+        }
     }
 }

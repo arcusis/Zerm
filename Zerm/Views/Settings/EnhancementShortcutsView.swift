@@ -11,7 +11,7 @@ struct EnhancementShortcutsView: View {
                         .font(.system(size: 13))
 
                     InfoTip(
-                        "Quickly enable or disable AI enhancement while recording. Available only when Zerm is running and the recorder is visible.",
+                        String(localized: "Quickly enable or disable AI enhancement while recording. Available only when Zerm is running and the recorder is visible."),
                         learnMoreURL: Links.docString(.enhancementShortcuts)
                     )
                 }
@@ -29,7 +29,7 @@ struct EnhancementShortcutsView: View {
                         .font(.system(size: 13))
 
                     InfoTip(
-                        "Switch between your saved prompts using ⌘1 through ⌘0 to activate the corresponding prompt in the order they are saved. Available only when Zerm is running and the recorder is visible.",
+                        String(localized: "Switch between your saved prompts using ⌘1 through ⌘0 to activate the corresponding prompt in the order they are saved. Available only when Zerm is running and the recorder is visible."),
                         learnMoreURL: Links.docString(.enhancementShortcuts)
                     )
                 }

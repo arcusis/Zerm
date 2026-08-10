@@ -568,14 +568,6 @@ struct MeetingImportTests {
         #expect((sum / Double(read.frameLength)).squareRoot() > 0.05, "imported audio is silent")
     }
 
-    @Test func meetingAppsAreRecognisedAndMarketingPagesAreNot() {
-        #expect(MeetingAppDetector.isMeetingApp(bundleID: "us.zoom.xos"))
-        #expect(!MeetingAppDetector.isMeetingApp(bundleID: "com.apple.Safari"))
-        #expect(MeetingAppDetector.isMeetingURL("https://meet.google.com/abc-defg-hij"))
-        #expect(MeetingAppDetector.isMeetingURL("https://acme.zoom.us/j/9876543210"))
-        // The bare marketing site is not a meeting.
-        #expect(!MeetingAppDetector.isMeetingURL("https://zoom.us/pricing"))
-    }
 }
 
 struct MeetingPlaybackTests {

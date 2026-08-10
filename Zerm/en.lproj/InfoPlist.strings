@@ -1,0 +1,4 @@
+"NSMicrophoneUsageDescription" = "Zerm needs access to your microphone to record audio for transcription.";
+"NSAudioCaptureUsageDescription" = "Zerm needs to record the audio your Mac is playing so it can capture and transcribe the other participants in a meeting.";
+"NSScreenCaptureUsageDescription" = "Zerm needs screen recording access to understand context from your screen for improved transcription accuracy.";
+"NSAppleEventsUsageDescription" = "Zerm needs to interact with your browser to detect the current website for applying website-specific configurations.";

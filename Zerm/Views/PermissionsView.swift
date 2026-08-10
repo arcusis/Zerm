@@ -162,10 +162,10 @@ class PermissionManager: ObservableObject {
 
 struct PermissionCard: View {
     let icon: String
-    let title: String
-    let description: String
+    let title: LocalizedStringKey
+    let description: LocalizedStringKey
     let isGranted: Bool
-    let buttonTitle: String
+    let buttonTitle: LocalizedStringKey
     let buttonAction: () -> Void
     let checkPermission: () -> Void
     var infoTipMessage: String?
@@ -281,8 +281,8 @@ struct PermissionsView: View {
                 // Header
                 CompactHeroSection(
                     icon: "shield.lefthalf.filled",
-                    title: "App Permissions",
-                    description: "Zerm requires the following permissions to function properly"
+                    title: String(localized: "App Permissions"),
+                    description: String(localized: "Zerm requires the following permissions to function properly")
                 )
                 
                 // Permission Cards
@@ -302,7 +302,7 @@ struct PermissionsView: View {
                             )
                         },
                         checkPermission: { permissionManager.checkKeyboardShortcut() },
-                        infoTipMessage: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it.",
+                        infoTipMessage: String(localized: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it."),
                         infoTipLink: Links.docString(.shortcuts)
                     )
                     
@@ -323,9 +323,11 @@ struct PermissionsView: View {
                             }
                         },
                         checkPermission: { permissionManager.checkAudioPermissionStatus() },
-                        infoTipMessage: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone.",
+                        infoTipMessage: String(localized: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone."),
                         infoTipLink: Links.docString(.permissions)
                     )
+
+                    SystemAudioCapturePermissionCard()
                     
                     // Accessibility Permission
                     PermissionCard(
@@ -341,7 +343,7 @@ struct PermissionsView: View {
                             permissionManager.checkAccessibilityPermissions()
                             permissionManager.pollPermissions(forSeconds: 3)
                         },
-                        infoTipMessage: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen.",
+                        infoTipMessage: String(localized: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."),
                         infoTipLink: Links.docString(.permissions)
                     )
 
@@ -365,7 +367,7 @@ struct PermissionsView: View {
                             permissionManager.checkScreenRecordingPermission()
                             permissionManager.pollPermissions(forSeconds: 3)
                         },
-                        infoTipMessage: "Zerm captures on-screen text to understand the context of your voice input, which significantly improves transcription accuracy. Your privacy is important: this data is processed locally and is not stored. After toggling Screen Recording on, macOS often requires a full quit and relaunch before the check turns green.",
+                        infoTipMessage: String(localized: "Zerm can read on-screen text when Screen Context is enabled. Zerm does not save that captured text to disk, but enhancement requests can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac. After enabling Screen Recording, fully quit and reopen Zerm if this check stays red."),
                         infoTipLink: Links.docString(.contextualAwareness)
                     )
                 }
@@ -377,6 +379,54 @@ struct PermissionsView: View {
             permissionManager.checkAllPermissions()
             permissionManager.pollPermissions(forSeconds: 2)
         }
+    }
+}
+
+private struct SystemAudioCapturePermissionCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "waveform.badge.mic")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("System Audio Capture")
+                        .font(.headline)
+                    Text("Allow Zerm to record participants from a selected meeting application.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("macOS does not provide a reliable preflight status for this permission. Review Zerm under Privacy & Security › Screen & System Audio Recording.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+            }
+
+            Button {
+                guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
+                NSWorkspace.shared.open(url)
+            } label: {
+                HStack {
+                    Text("Open System Settings")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.headline)
+                .padding()
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .background(CardBackground(isSelected: false))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

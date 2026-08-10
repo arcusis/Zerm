@@ -194,6 +194,11 @@ class AIEnhancementService: ObservableObject {
         try await aiService.enhanceWithOllama(text: text, systemPrompt: systemPrompt)
     }
 
+    func isMeetingSummaryAvailable(snapshot: MeetingSummarySnapshot) async -> Bool {
+        guard snapshot.route == .local, snapshot.provider == "Ollama" else { return false }
+        return await aiService.isLocalMeetingSummaryAvailable(model: snapshot.model)
+    }
+
     var isConfigured: Bool {
         aiService.isAPIKeyValid
     }

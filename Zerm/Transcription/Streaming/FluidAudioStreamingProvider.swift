@@ -27,6 +27,12 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     private var lastTranscribedSampleCount = 0
     private let minNewSamples = 8000 // ~0.5s
 
+    private func withBufferLock<T>(_ body: () throws -> T) rethrows -> T {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        return try body()
+    }
+
     init(fluidAudioService: FluidAudioTranscriptionService, config: AgreementConfig = AgreementConfig()) {
         self.fluidAudioService = fluidAudioService
         self.config = config
@@ -44,7 +50,12 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
 
     func connect(model: any TranscriptionModel, language: String?) async throws {
         let version: AsrModelVersion = FluidAudioModelManager.asrVersion(for: model.name)
-        let models = try await fluidAudioService.getOrLoadModels(for: version)
+        let models = try await TranscriptionInferenceScheduler.shared.run(
+            provider: .fluidAudio,
+            priority: .dictation
+        ) {
+            try await self.fluidAudioService.getOrLoadModels(for: version)
+        }
 
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)
@@ -64,9 +75,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
 
     func sendAudioChunk(_ data: Data) async throws {
         let samples = Self.convertToFloat32(data)
-        bufferLock.lock()
-        audioBuffer.append(contentsOf: samples)
-        bufferLock.unlock()
+        withBufferLock { audioBuffer.append(contentsOf: samples) }
     }
 
     func commit() async throws {
@@ -88,10 +97,10 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         asrManager = nil
         decoderLayerCount = 0
 
-        bufferLock.lock()
-        audioBuffer = []
-        trimmedSampleCount = 0
-        bufferLock.unlock()
+        withBufferLock {
+            audioBuffer = []
+            trimmedSampleCount = 0
+        }
         agreementEngine.reset()
 
         eventsContinuation?.finish()
@@ -120,9 +129,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         guard !isTranscribing else { return }
         guard let asrManager else { return }
 
-        bufferLock.lock()
-        let absoluteSampleCount = trimmedSampleCount + audioBuffer.count
-        bufferLock.unlock()
+        let absoluteSampleCount = withBufferLock { trimmedSampleCount + audioBuffer.count }
 
         guard absoluteSampleCount - lastTranscribedSampleCount >= minNewSamples else { return }
         guard absoluteSampleCount >= Int(sampleRate) else { return }
@@ -136,15 +143,12 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             : agreementEngine.confirmedEndTime
         let seekSample = max(0, Int(seekTime * sampleRate))
 
-        bufferLock.lock()
-        let bufferRelativeSeek = max(0, seekSample - trimmedSampleCount)
-        let sliceEnd = audioBuffer.count
-        guard bufferRelativeSeek < sliceEnd else {
-            bufferLock.unlock()
-            return
-        }
-        var audioSlice = Array(audioBuffer[bufferRelativeSeek..<sliceEnd])
-        bufferLock.unlock()
+        guard var audioSlice = withBufferLock({ () -> [Float]? in
+            let bufferRelativeSeek = max(0, seekSample - trimmedSampleCount)
+            let sliceEnd = audioBuffer.count
+            guard bufferRelativeSeek < sliceEnd else { return nil }
+            return Array(audioBuffer[bufferRelativeSeek..<sliceEnd])
+        }) else { return }
 
         // Pad with 1s trailing silence for punctuation capture
         let maxSingleChunkSamples = 240_000
@@ -187,11 +191,11 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
                 let safeTrimPoint = max(0, Int(newHypothesisStartTime * sampleRate))
                 let samplesToTrim = safeTrimPoint - trimmedSampleCount
                 if samplesToTrim > 0 {
-                    bufferLock.lock()
-                    let actualTrim = min(samplesToTrim, audioBuffer.count)
-                    audioBuffer.removeFirst(actualTrim)
-                    trimmedSampleCount += actualTrim
-                    bufferLock.unlock()
+                    withBufferLock {
+                        let actualTrim = min(samplesToTrim, audioBuffer.count)
+                        audioBuffer.removeFirst(actualTrim)
+                        trimmedSampleCount += actualTrim
+                    }
                 }
             }
 
@@ -210,14 +214,11 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             : agreementEngine.confirmedEndTime
         let seekSample = max(0, Int(seekTime * sampleRate))
 
-        bufferLock.lock()
-        let bufferRelativeSeek = max(0, seekSample - trimmedSampleCount)
-        guard bufferRelativeSeek < audioBuffer.count else {
-            bufferLock.unlock()
-            return nil
-        }
-        var samples = Array(audioBuffer[bufferRelativeSeek...])
-        bufferLock.unlock()
+        guard var samples = withBufferLock({ () -> [Float]? in
+            let bufferRelativeSeek = max(0, seekSample - trimmedSampleCount)
+            guard bufferRelativeSeek < audioBuffer.count else { return nil }
+            return Array(audioBuffer[bufferRelativeSeek...])
+        }) else { return nil }
 
         guard samples.count >= Int(sampleRate) else { return nil }
 

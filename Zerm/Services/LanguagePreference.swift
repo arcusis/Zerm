@@ -2,6 +2,10 @@ import Foundation
 
 /// Single source of truth for SelectedLanguage normalization across engines.
 enum LanguagePreference {
+    /// Per-operation override used by long-running jobs that snapshot settings at creation.
+    /// Task-local scope avoids mutating global defaults while another dictation is running.
+    @TaskLocal static var operationOverrideCode: String?
+
     static let defaultsKey = "SelectedLanguage"
 
     /// The stored value meaning "let the engine detect the language".
@@ -9,6 +13,9 @@ enum LanguagePreference {
 
     /// Raw stored value (`"auto"`, `"en"`, …).
     static func selectedCode(defaults: UserDefaults = .standard) -> String {
+        if let operationOverrideCode, !operationOverrideCode.isEmpty {
+            return operationOverrideCode
+        }
         let raw = defaults.string(forKey: defaultsKey) ?? "auto"
         return raw.isEmpty ? "auto" : raw
     }

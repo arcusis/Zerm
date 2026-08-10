@@ -45,13 +45,25 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
     /// Gentle reminders: we show our own sidebar UI for background finds.
     nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
 
-    override init() {
+    override convenience init() {
+        self.init(startsUpdater: true)
+    }
+
+    /// UI tests construct the real app graph but must not start Sparkle's scheduler or network
+    /// machinery. The controller remains available so existing environment-object wiring stays
+    /// identical; its published state simply remains idle for the deterministic test process.
+    init(startsUpdater: Bool) {
         super.init()
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: startsUpdater,
             updaterDelegate: self,
             userDriverDelegate: self
         )
+
+        guard startsUpdater else {
+            logger.notice("Sparkle updater intentionally disabled for deterministic UI testing")
+            return
+        }
 
         let updater = updaterController.updater
         updater.automaticallyChecksForUpdates = autoUpdateCheck

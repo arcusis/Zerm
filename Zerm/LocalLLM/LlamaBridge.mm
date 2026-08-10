@@ -1,5 +1,9 @@
 #import "LlamaBridge.h"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wquoted-include-in-framework-header"
+#pragma clang diagnostic ignored "-Wdocumentation"
 #import <llama/llama.h>
+#pragma clang diagnostic pop
 #import <os/log.h>
 
 #include <algorithm>

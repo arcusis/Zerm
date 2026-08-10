@@ -46,7 +46,7 @@ struct EnhancementSettingsPanel: View {
                     Toggle(isOn: $enhancementService.useClipboardContext) {
                         HStack(spacing: 4) {
                             Text("Clipboard Context")
-                            InfoTip("Use clipboard text to understand context for better enhancement.")
+                            InfoTip(String(localized: "Including clipboard text adds it to enhancement requests. Zerm does not save that captured text to disk, but the request can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac."))
                         }
                     }
                     .toggleStyle(.switch)
@@ -54,7 +54,7 @@ struct EnhancementSettingsPanel: View {
                     Toggle(isOn: $enhancementService.useScreenCaptureContext) {
                         HStack(spacing: 4) {
                             Text("Screen Context")
-                            InfoTip("Capture on-screen text to understand context for better enhancement.")
+                            InfoTip(String(localized: "Including on-screen text adds it to enhancement requests. Zerm does not save that captured text to disk, but the request can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac."))
                         }
                     }
                     .toggleStyle(.switch)
