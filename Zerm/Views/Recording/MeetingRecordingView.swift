@@ -41,6 +41,10 @@ struct MeetingRecordingView: View {
         }
     }
 
+    init(initialDestination: Destination = .meeting) {
+        _destination = State(initialValue: initialDestination)
+    }
+
     private enum WorkspacePhase {
         case preflight
         case live

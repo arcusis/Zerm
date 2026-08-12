@@ -7,7 +7,7 @@ struct TextToSpeechSettingsView: View {
     @AppStorage(TTSSettings.Keys.provider) private var providerRaw = TTSProviderKind.deepgram.rawValue
     @AppStorage(TTSSettings.Keys.speed) private var speed = 1.0
     @AppStorage(TTSSettings.Keys.smartCleanup) private var smartCleanup = true
-    @AppStorage(TTSSettings.Keys.naturalReadingAI) private var naturalReadingAI = false
+    @AppStorage(TTSSettings.Keys.readingMode) private var readingModeRaw = ReadAloudMode.retell.rawValue
 
     @State private var voiceID: String = ""
     @State private var apiKey: String = ""
@@ -28,6 +28,10 @@ struct TextToSpeechSettingsView: View {
 
     private var providerKind: TTSProviderKind {
         TTSProviderKind(rawValue: providerRaw) ?? .deepgram
+    }
+
+    private var readingMode: ReadAloudMode {
+        ReadAloudMode(rawValue: readingModeRaw) ?? .retell
     }
 
     private var provider: any TTSProvider {
@@ -73,7 +77,7 @@ struct TextToSpeechSettingsView: View {
                     apiKeySection
                 }
 
-                if providerKind.isLocal {
+                if providerKind == .kokoro {
                     kokoroDownloadCard
                 }
 
@@ -220,27 +224,44 @@ struct TextToSpeechSettingsView: View {
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle(isOn: $naturalReadingAI) {
-                        HStack(spacing: 4) {
-                            Text("Natural reading (AI)")
-                            InfoTip(
-                                String(localized: "Goes further than cleanup: the on-device model rewrites the passage into something a person would actually say aloud, smoothing lists, tables and dense punctuation. It needs Zerm's local language model downloaded — the toggle stays dimmed until it is — and it adds a pause before the first word."),
-                                doc: .readAloud
-                            )
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 4) {
+                        Text("Reading mode")
+                        InfoTip(
+                            String(localized: "Retell, Summarize, Explain, and Simplify analyze the complete selection with your currently selected on-device language model before speech begins. Read exactly bypasses the language model."),
+                            doc: .readAloud
+                        )
+                        Spacer()
+                        Picker("Reading mode", selection: $readingModeRaw) {
+                            ForEach(ReadAloudMode.allCases) { mode in
+                                Text(mode.title).tag(mode.rawValue)
+                            }
                         }
+                        .labelsHidden()
+                        .frame(width: 220)
                     }
-                    .disabled(!localLLM.isInstalled)
-                    Text("Rewrites text into natural spoken language using Zerm's on-device model before reading. Fully offline; adds a moment before the first word.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(readingMode.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if readingMode.usesLocalAI, !localLLM.isInstalled {
+                        Label(
+                            "Download the selected on-device language model below before using this mode.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
                 }
 
                 LocalLLMModelListView()
             }
             .padding(8)
         }
-        .onChange(of: naturalReadingAI) { _, on in
-            if on { Task { await localLLM.prewarmIfNeeded() } }
+        .onChange(of: readingModeRaw) { _, raw in
+            let mode = ReadAloudMode(rawValue: raw) ?? .retell
+            TTSSettings.readingMode = mode
+            if mode.usesLocalAI { Task { await localLLM.prewarmIfNeeded() } }
         }
     }
 
@@ -291,7 +312,7 @@ struct TextToSpeechSettingsView: View {
                     systemImage: "play.circle.fill"
                 )
             }
-            .disabled(isPreviewing || (providerKind.isLocal && !kokoro.isInstalled))
+            .disabled(isPreviewing || (providerKind == .kokoro && !kokoro.isInstalled))
             InfoTip(String(localized: "Speaks a sample sentence with the current provider, voice and speed, using the same recorder widget a real trigger uses. A quick way to check your key and settings work before relying on them."))
             Spacer()
         }

@@ -30,17 +30,19 @@ actor WhisperContext {
 
     /// - Parameter forceDisableVAD: When true, skip Whisper VAD even if the user setting is on.
     ///   Used to retry short/empty results that VAD may have discarded as non-speech.
-    func fullTranscribe(samples: [Float], forceDisableVAD: Bool = false) -> Bool {
+    func fullTranscribe(
+        samples: [Float],
+        forceDisableVAD: Bool = false,
+        languageCode: String
+    ) -> Bool {
         guard let context = context else { return false }
         
         // P-core-bound and thermal/Low-Power-aware — see HardwareCapability.
         let maxThreads = HardwareCapability.inferenceThreadCount
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         
-        // Read language directly from UserDefaults
-        let selectedLanguage = LanguagePreference.selectedCode()
-        if selectedLanguage != "auto" {
-            languageCString = Array(selectedLanguage.utf8CString)
+        if languageCode != LanguagePreference.autoCode {
+            languageCString = Array(languageCode.utf8CString)
             params.language = languageCString?.withUnsafeBufferPointer { ptr in
                 ptr.baseAddress
             }
@@ -105,6 +107,40 @@ actor WhisperContext {
         promptCString = nil
         
         return success
+    }
+
+    func transcriptionCandidate() -> WhisperLanguageCandidateSelector.Candidate {
+        guard let context else {
+            return .init(text: "", languageCode: nil, averageTokenProbability: 0)
+        }
+
+        var text = ""
+        var probabilityTotal: Float = 0
+        var probabilityCount: Float = 0
+        let segmentCount = whisper_full_n_segments(context)
+        for segment in 0..<segmentCount {
+            text += String(cString: whisper_full_get_segment_text(context, segment))
+            let tokenCount = whisper_full_n_tokens(context, segment)
+            for token in 0..<tokenCount {
+                let tokenText = String(cString: whisper_full_get_token_text(context, segment, token))
+                guard !tokenText.isEmpty, !tokenText.hasPrefix("<|") else { continue }
+                probabilityTotal += whisper_full_get_token_p(context, segment, token)
+                probabilityCount += 1
+            }
+        }
+
+        let languageID = whisper_full_lang_id(context)
+        let languageCode: String?
+        if languageID >= 0, let languagePointer = whisper_lang_str(languageID) {
+            languageCode = String(cString: languagePointer)
+        } else {
+            languageCode = nil
+        }
+        return .init(
+            text: text,
+            languageCode: languageCode,
+            averageTokenProbability: probabilityCount > 0 ? probabilityTotal / probabilityCount : 0
+        )
     }
 
     func getTranscription() -> String {

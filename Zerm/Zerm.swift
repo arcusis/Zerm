@@ -229,12 +229,17 @@ struct ZermApp: App {
 
         // Pre-warm Kokoro (~330 MB) so the first Read Aloud is instant.
         //
-        // Gemma is deliberately NOT pre-warmed here: the GGUF is 3.1 GB and it is only needed
-        // for the optional "natural reading" rewrite of the *second and later* chunks, by which
-        // point audio is already playing. Loading it at launch pinned gigabytes on every user,
-        // including those who never trigger Read Aloud at all. It now loads on first use.
+        // The selected local language model is the first stage of Retell/Summarize/Explain, so a
+        // cold multi-gigabyte load on the hotkey path makes Read Aloud appear frozen. Warm it after
+        // launch only when the confirmed AI reading mode is active and the model is installed.
+        // The model actor performs the work off MainActor and the memory-pressure handler remains
+        // authoritative about releasing it when the system needs RAM.
         if !uiTestConfiguration.isEnabled {
             Task { await KokoroModelManager.shared.prewarmIfNeeded() }
+            Task(priority: .utility) {
+                try? await Task.sleep(for: .seconds(2))
+                await LocalLLMModelManager.shared.prewarmIfNeeded()
+            }
             AppShortcuts.updateAppShortcutParameters()
         }
 

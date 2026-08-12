@@ -54,12 +54,29 @@ actor KokoroEngine {
         _ = tts?.generate(text: "ok", sid: 0, speed: 1.0)
     }
 
-    func generate(text: String, sid: Int, speed: Float) throws -> (samples: [Float], sampleRate: Int) {
+    func generateAudio(text: String, sid: Int, speed: Float) throws -> TTSAudio {
         try ensureLoaded()
         guard let tts else {
             throw TTSError.notAvailable(String(localized: "Kokoro engine unavailable."))
         }
         let audio = tts.generate(text: text, sid: sid, speed: speed)
-        return (audio.samples, Int(audio.sampleRate))
+        guard !audio.samples.isEmpty else { throw TTSError.emptyAudio }
+        return TTSAudio(
+            pcm: Self.floatToInt16PCM(audio.samples),
+            sampleRate: Double(audio.sampleRate),
+            channels: 1
+        )
+    }
+
+    /// Runs on the Kokoro actor, not MainActor. A normal sentence contains hundreds of thousands
+    /// of samples; converting them on MainActor was the visible UI freeze users described.
+    private static func floatToInt16PCM(_ samples: [Float]) -> Data {
+        var data = Data(capacity: samples.count * 2)
+        for sample in samples {
+            let clamped = max(-1, min(1, sample))
+            var value = Int16(clamped * Float(Int16.max)).littleEndian
+            withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+        }
+        return data
     }
 }

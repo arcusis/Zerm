@@ -173,9 +173,7 @@ final class KokoroModelManager: ObservableObject {
             throw TTSError.notAvailable(String(localized: "The on-device Kokoro model isn't downloaded yet. Download it in Read Aloud settings."))
         }
         let engine = ensureEngine()
-        let (samples, sampleRate) = try await engine.generate(text: text, sid: sid, speed: Float(speed))
-        guard !samples.isEmpty else { throw TTSError.emptyAudio }
-        return TTSAudio(pcm: Self.floatToInt16PCM(samples), sampleRate: Double(sampleRate), channels: 1)
+        return try await engine.generateAudio(text: text, sid: sid, speed: Float(speed))
     }
 
     /// Pre-loads the model in the background when Kokoro is the selected provider, so the
@@ -194,14 +192,4 @@ final class KokoroModelManager: ObservableObject {
         return engine
     }
 
-    /// Converts sherpa-onnx Float samples ([-1, 1]) to signed 16-bit little-endian PCM.
-    private static func floatToInt16PCM(_ samples: [Float]) -> Data {
-        var data = Data(capacity: samples.count * 2)
-        for s in samples {
-            let clamped = max(-1.0, min(1.0, s))
-            var v = Int16(clamped * 32767.0).littleEndian
-            withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
-        }
-        return data
-    }
 }

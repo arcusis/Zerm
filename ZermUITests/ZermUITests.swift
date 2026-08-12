@@ -20,7 +20,10 @@ final class ZermUITests: XCTestCase {
         assertExists("sidebar-group-automation")
         assertExists("sidebar-group-system")
 
-        for route in ["dashboard", "dictationHistory", "meetings", "readAloud", "powerModes", "permissions"] {
+        for route in [
+            "dashboard", "dictationHistory", "meetingsRecord", "meetingsHistory",
+            "readAloudSpeak", "readAloudHistory", "enhancement", "powerModes", "permissions"
+        ] {
             let link = element("sidebar-\(route)")
             XCTAssertTrue(link.waitForExistence(timeout: 3), "Missing sidebar route \(route)")
             link.click()
@@ -29,12 +32,12 @@ final class ZermUITests: XCTestCase {
 
         app.typeKey("s", modifierFlags: [.command, .control])
         XCTAssertTrue(
-            waitFor(element("sidebar-meetings"), predicate: "hittable == false"),
+            waitFor(element("sidebar-meetingsRecord"), predicate: "hittable == false"),
             "Sidebar shortcut did not hide the sidebar"
         )
         app.typeKey("s", modifierFlags: [.command, .control])
         XCTAssertTrue(
-            waitFor(element("sidebar-meetings"), predicate: "hittable == true"),
+            waitFor(element("sidebar-meetingsRecord"), predicate: "hittable == true"),
             "Sidebar shortcut did not restore the sidebar"
         )
     }
@@ -42,7 +45,7 @@ final class ZermUITests: XCTestCase {
     @MainActor
     func testMeetingPreflightUsesExplicitSelectedApplicationAndFixedNativeLanguage() {
         app = launch(scenario: "nativeApple")
-        openSidebarRoute("meetings")
+        openSidebarRoute("meetingsRecord")
 
         assertExists("meeting-prepare-title")
         let applicationPicker = element("meeting-application-picker")
@@ -59,7 +62,7 @@ final class ZermUITests: XCTestCase {
     @MainActor
     func testMeetingPreflightRequiresExplicitAllSystemFallbackWarning() {
         app = launch(scenario: "nativeApple")
-        openSidebarRoute("meetings")
+        openSidebarRoute("meetingsRecord")
 
         choosePicker(identifier: "meeting-call-audio-source", option: "All system audio")
         assertExists("meeting-all-system-warning")
@@ -136,7 +139,7 @@ final class ZermUITests: XCTestCase {
 
         let stop = element("global-stop-meeting")
         XCTAssertTrue(stop.waitForExistence(timeout: 3))
-        openSidebarRoute("readAloud")
+        openSidebarRoute("readAloudSpeak")
         XCTAssertTrue(stop.exists && stop.isHittable)
         stop.click()
         XCTAssertTrue(waitFor(stop, predicate: "exists == false"))
@@ -149,7 +152,7 @@ final class ZermUITests: XCTestCase {
 
         let sidebar = element("primary-sidebar")
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
-        openSidebarRoute("meetings")
+        openSidebarRoute("meetingsRecord")
         assertExists("meeting-prepare-title")
         XCTAssertTrue(app.descendants(matching: .any)["הכנת הפגישה"].exists)
 

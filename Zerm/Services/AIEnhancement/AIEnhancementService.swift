@@ -200,7 +200,16 @@ class AIEnhancementService: ObservableObject {
     }
 
     var isConfigured: Bool {
-        aiService.isAPIKeyValid
+        switch aiService.selectedProvider {
+        case .localLLM:
+            return LocalLLMModelManager.isModelDownloaded
+        case .localCLI:
+            return aiService.isAPIKeyValid
+        case .ollama:
+            return aiService.isAPIKeyValid && !aiService.currentModel.isEmpty
+        default:
+            return aiService.isAPIKeyValid
+        }
     }
 
     private func waitForRateLimit() async throws {

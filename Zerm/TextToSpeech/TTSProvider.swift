@@ -46,6 +46,7 @@ extension TTSProvider {
 /// Central registry of available synthesis engines.
 enum TTSProviderRegistry {
     static let allProviders: [any TTSProvider] = [
+        AppleSystemTTSProvider(),
         KokoroTTSProvider(),
         DeepgramTTSProvider(),
         InworldTTSProvider(),

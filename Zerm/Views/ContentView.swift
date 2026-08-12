@@ -9,10 +9,14 @@ enum AppRoute: String, Hashable, Identifiable {
     case dashboard
     case dictationHistory
     case dictationModels
-    case dictationEnhancement
     case dictationVocabulary
-    case meetings
-    case readAloud
+    case meetingsRecord
+    case meetingsHistory
+    case meetingsModels
+    case readAloudSpeak
+    case readAloudHistory
+    case readAloudModels
+    case enhancement
     case powerModes
     case permissions
     case audioInput
@@ -25,10 +29,14 @@ enum AppRoute: String, Hashable, Identifiable {
         case .dashboard: "Dashboard"
         case .dictationHistory: "History"
         case .dictationModels: "Models"
-        case .dictationEnhancement: "Enhancement"
         case .dictationVocabulary: "Vocabulary"
-        case .meetings: "Meetings"
-        case .readAloud: "Read Aloud"
+        case .meetingsRecord: "Record"
+        case .meetingsHistory: "History"
+        case .meetingsModels: "Models"
+        case .readAloudSpeak: "Speak"
+        case .readAloudHistory: "History"
+        case .readAloudModels: "Models & Voices"
+        case .enhancement: "Enhancement"
         case .powerModes: "Power Modes"
         case .permissions: "Permissions"
         case .audioInput: "Audio Input"
@@ -41,10 +49,14 @@ enum AppRoute: String, Hashable, Identifiable {
         case .dashboard: "gauge.medium"
         case .dictationHistory: "clock.arrow.circlepath"
         case .dictationModels: "waveform.badge.magnifyingglass"
-        case .dictationEnhancement: "wand.and.stars"
         case .dictationVocabulary: "character.book.closed"
-        case .meetings: "person.2.wave.2"
-        case .readAloud: "speaker.wave.2"
+        case .meetingsRecord: "record.circle"
+        case .meetingsHistory: "clock.arrow.circlepath"
+        case .meetingsModels: "waveform.badge.magnifyingglass"
+        case .readAloudSpeak: "speaker.wave.2"
+        case .readAloudHistory: "clock.arrow.circlepath"
+        case .readAloudModels: "person.wave.2"
+        case .enhancement: "wand.and.stars"
         case .powerModes: "slider.horizontal.3"
         case .permissions: "hand.raised"
         case .audioInput: "mic"
@@ -57,12 +69,16 @@ enum AppRoute: String, Hashable, Identifiable {
     init?(legacyDestination: String) {
         switch legacyDestination {
         case "Dashboard": self = .dashboard
-        case "Recording", "Meetings": self = .meetings
+        case "Recording", "Meetings", "Meeting Record": self = .meetingsRecord
+        case "Meeting History": self = .meetingsHistory
+        case "Meeting Models": self = .meetingsModels
         case "History": self = .dictationHistory
         case "Dictation Models", "Models": self = .dictationModels
-        case "Enhancement": self = .dictationEnhancement
+        case "Enhancement": self = .enhancement
         case "Dictionary", "Vocabulary": self = .dictationVocabulary
-        case "Read Aloud": self = .readAloud
+        case "Read Aloud", "Read Aloud Speak": self = .readAloudSpeak
+        case "Read Aloud History": self = .readAloudHistory
+        case "Read Aloud Models": self = .readAloudModels
         case "Power Mode", "Power Modes": self = .powerModes
         case "Permissions": self = .permissions
         case "Audio Input": self = .audioInput
@@ -97,6 +113,8 @@ struct ContentView: View {
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @AppStorage("powerModeUIFlag") private var powerModeUIFlag = false
     @AppStorage("sidebarDictationExpanded") private var isDictationExpanded = true
+    @AppStorage("sidebarMeetingsExpanded") private var isMeetingsExpanded = true
+    @AppStorage("sidebarReadAloudExpanded") private var isReadAloudExpanded = true
     @State private var selectedRoute: AppRoute? = .dashboard
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "ContentView")
@@ -106,6 +124,8 @@ struct ContentView: View {
             SidebarView(
                 selectedRoute: $selectedRoute,
                 isDictationExpanded: $isDictationExpanded,
+                isMeetingsExpanded: $isMeetingsExpanded,
+                isReadAloudExpanded: $isReadAloudExpanded,
                 showsPowerModes: powerModeUIFlag,
                 updater: updaterViewModel,
                 openSettings: { openSettings() }
@@ -159,6 +179,8 @@ struct ContentView: View {
 private struct SidebarView: View {
     @Binding var selectedRoute: AppRoute?
     @Binding var isDictationExpanded: Bool
+    @Binding var isMeetingsExpanded: Bool
+    @Binding var isReadAloudExpanded: Bool
 
     let showsPowerModes: Bool
     @ObservedObject var updater: UpdaterViewModel
@@ -175,7 +197,6 @@ private struct SidebarView: View {
                 DisclosureGroup(isExpanded: $isDictationExpanded) {
                     SidebarLink(route: .dictationHistory, prominence: .secondary)
                     SidebarLink(route: .dictationModels, prominence: .secondary)
-                    SidebarLink(route: .dictationEnhancement, prominence: .secondary)
                     SidebarLink(route: .dictationVocabulary, prominence: .secondary)
                 } label: {
                     Label("Dictation", systemImage: "mic.badge.plus")
@@ -183,8 +204,27 @@ private struct SidebarView: View {
                         .accessibilityIdentifier("dictation-navigation-group")
                 }
 
-                SidebarLink(route: .meetings, prominence: .primary)
-                SidebarLink(route: .readAloud, prominence: .primary)
+                DisclosureGroup(isExpanded: $isMeetingsExpanded) {
+                    SidebarLink(route: .meetingsRecord, prominence: .secondary)
+                    SidebarLink(route: .meetingsHistory, prominence: .secondary)
+                    SidebarLink(route: .meetingsModels, prominence: .secondary)
+                } label: {
+                    Label("Meetings", systemImage: "person.2.wave.2")
+                        .fontWeight(.semibold)
+                        .accessibilityIdentifier("meetings-navigation-group")
+                }
+
+                DisclosureGroup(isExpanded: $isReadAloudExpanded) {
+                    SidebarLink(route: .readAloudSpeak, prominence: .secondary)
+                    SidebarLink(route: .readAloudHistory, prominence: .secondary)
+                    SidebarLink(route: .readAloudModels, prominence: .secondary)
+                } label: {
+                    Label("Read Aloud", systemImage: "speaker.wave.2")
+                        .fontWeight(.semibold)
+                        .accessibilityIdentifier("read-aloud-navigation-group")
+                }
+
+                SidebarLink(route: .enhancement, prominence: .primary)
             } header: {
                 SidebarSectionHeader("Speech", identifier: "sidebar-group-speech")
             }
@@ -282,14 +322,22 @@ private struct DetailDestination: View {
             InlineHistoryView()
         case .dictationModels:
             ModelManagementView()
-        case .dictationEnhancement:
-            EnhancementSettingsView()
         case .dictationVocabulary:
             DictionarySettingsView(whisperPrompt: whisperModelManager.whisperPrompt)
-        case .meetings:
-            MeetingRecordingView()
-        case .readAloud:
+        case .meetingsRecord:
+            MeetingRecordingView(initialDestination: .meeting)
+        case .meetingsHistory:
+            MeetingRecordingView(initialDestination: .library)
+        case .meetingsModels:
+            MeetingModelsView()
+        case .readAloudSpeak:
+            ReadAloudSpeakView()
+        case .readAloudHistory:
+            ReadAloudHistoryView()
+        case .readAloudModels:
             TextToSpeechSettingsView()
+        case .enhancement:
+            EnhancementSettingsView()
         case .powerModes:
             PowerModeView()
         case .permissions:

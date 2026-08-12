@@ -44,11 +44,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let application = NSApplication.shared
         _ = application.setActivationPolicy(.regular)
+        // XCUIApplication.launch() waits for the process itself to become foreground before
+        // the test can send Cmd-N. Activate immediately, even if SwiftUI has not attached the
+        // WindowGroup yet; the bounded retry below will front the real window once it exists.
+        application.unhide(nil)
+        application.activate(ignoringOtherApps: true)
 
         if let window = WindowManager.shared.currentMainWindow() {
-            application.unhide(nil)
             window.makeKeyAndOrderFront(nil)
-            application.activate(ignoringOtherApps: true)
             return
         }
 

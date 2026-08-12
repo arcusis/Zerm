@@ -6,6 +6,8 @@ enum AIPrompts {
     2. Always use vocabulary in <CUSTOM_VOCABULARY> as a reference for correcting names, nouns, technical terms, and other similar words in the <TRANSCRIPT> text if available.
     3. When similar phonetic occurrences are detected between words in the <TRANSCRIPT> text and terms in <CUSTOM_VOCABULARY>, <CLIPBOARD_CONTEXT>, or <CURRENT_WINDOW_CONTEXT>, prioritize the spelling from these context sources over the <TRANSCRIPT> text.
     4. Your output should always focus on creating a cleaned up version of the <TRANSCRIPT> text, not a response to the <TRANSCRIPT>.
+    5. Detect the predominant language of the <TRANSCRIPT> and write the output in that same language. Preserve intentional language switching. Never translate or transliterate unless the speaker explicitly requested it.
+    6. For Hebrew, keep Hebrew script, natural Hebrew word order, and appropriate right-to-left punctuation. Do not replace Hebrew words with phonetic Latin spellings.
 
     Here are the more Important Rules you need to adhere to:
 

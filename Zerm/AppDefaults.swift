@@ -52,10 +52,10 @@ enum AppDefaults {
             "middleClickActivationDelay": 200,
 
             // Enhancement
-            DictationOutputMode.storageKey: DictationOutputMode.instant.rawValue,
+            DictationOutputMode.storageKey: DictationOutputMode.instantRefine.rawValue,
             "InstantTranscriptionMode": true,
             "AllowPromptTriggeredEnhancement": false,
-            "isAIEnhancementEnabled": false,
+            "isAIEnhancementEnabled": true,
             "useClipboardContext": false,
             "useScreenCaptureContext": false,
             "SkipShortEnhancement": true,
@@ -65,6 +65,11 @@ enum AppDefaults {
             // AIEnhancementService.timeout(for:).
             "EnhancementTimeoutSeconds": 15,
             "EnhancementRetryOnTimeout": true,
+
+            // Read Aloud understands and retells the complete selection by default. Voice/model
+            // setup remains explicit; registering a mode never downloads or enables a provider.
+            TTSSettings.Keys.readingMode: ReadAloudMode.retell.rawValue,
+            TTSSettings.Keys.naturalReadingAI: true,
 
             // Model
             "PrewarmModelOnWake": true,
@@ -131,6 +136,28 @@ enum AppDefaults {
                 defaults.set(true, forKey: "EnhancementRetryOnTimeout")
             }
             defaults.set(4, forKey: "ZermFastDefaultsVersion")
+        }
+
+        if defaults.integer(forKey: "ZermFastDefaultsVersion") < 5 {
+            // The old default made Enhancement appear broken: Instant explicitly bypassed it and
+            // the independent toggle was off. Instant + Refine preserves immediate paste while
+            // allowing the configured AI to replace it afterwards. Only migrate that exact
+            // legacy-default combination; never overwrite a deliberate Enhanced/Refine choice.
+            let legacyMode = DictationOutputMode.current
+            let legacyEnhancementWasEnabled = defaults.bool(forKey: "isAIEnhancementEnabled")
+            if legacyMode == .instant, !legacyEnhancementWasEnabled {
+                DictationOutputMode.setCurrent(.instantRefine)
+                defaults.set(true, forKey: "isAIEnhancementEnabled")
+            }
+
+            // Preserve an explicit new-mode choice if a newer build already wrote it. Legacy
+            // installs otherwise move to the confirmed Retell behavior.
+            let bundleID = Bundle.main.bundleIdentifier ?? "com.arcusis.zerm"
+            let persisted = defaults.persistentDomain(forName: bundleID) ?? [:]
+            if persisted[TTSSettings.Keys.readingMode] == nil {
+                TTSSettings.readingMode = .retell
+            }
+            defaults.set(5, forKey: "ZermFastDefaultsVersion")
         }
 
         PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()

@@ -14,10 +14,12 @@ extension KeyboardShortcuts.Name {
 final class TTSController: ObservableObject {
     @Published private(set) var isSpeaking = false
     @Published var statusMessage: String?
+    @Published private(set) var lastPreparedText: String?
 
     private let player = TTSPlayer()
     private let naturalizer = TTSNaturalizer()
     private var task: Task<Void, Never>?
+    private var sessionGeneration = 0
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TTSController")
 
@@ -55,11 +57,12 @@ final class TTSController: ObservableObject {
         }
         // Show the widget INSTANTLY (before fetching text / synthesizing) so Read Aloud feels
         // as immediate as dictation; the fetch + synthesis happen asynchronously after.
-        guard startSession() else { return }
-        task = Task { await self.fetchAndSpeak() }
+        guard let generation = startSession() else { return }
+        task = Task { await self.fetchAndSpeak(generation: generation) }
     }
 
     func stop() {
+        sessionGeneration += 1
         task?.cancel()
         task = nil
         player.stop()
@@ -70,12 +73,12 @@ final class TTSController: ObservableObject {
 
     /// Synthesizes and plays arbitrary text (e.g. the settings Preview button).
     func speak(_ text: String) async {
-        guard startSession() else { return }
-        await synthesizeAndPlay(text)
+        guard let generation = startSession() else { return }
+        await synthesizeAndPlay(text, mode: .exact, generation: generation)
     }
 
     /// Reserves the recorder widget and shows the "Preparing…" state immediately.
-    private func startSession() -> Bool {
+    private func startSession() -> Int? {
         let routeMonitor = AudioOutputRouteMonitor.shared
         if MeetingActivityMonitor.shared.isActive,
            routeMonitor.route != .headphones {
@@ -84,16 +87,18 @@ final class TTSController: ObservableObject {
                 : String(localized: "Connect headphones to use Read Aloud during a meeting")
             notify(message)
             SoundManager.shared.playEscSound()
-            return false
+            return nil
         }
         if let rm = recorderUIManager, !rm.canStartSpeaking {
             notify(String(localized: "Finish or cancel dictation before using Read Aloud"))
             SoundManager.shared.playEscSound()
-            return false
+            return nil
         }
+        sessionGeneration += 1
+        let generation = sessionGeneration
         isSpeaking = true
         recorderUIManager?.beginSpeaking()
-        return true
+        return generation
     }
 
     /// Called synchronously by the application-scoped meeting coordinator before it starts
@@ -115,6 +120,7 @@ final class TTSController: ObservableObject {
     }
 
     private func endSession(_ message: String? = nil, beep: Bool = false) {
+        sessionGeneration += 1
         if let message { notify(message) }
         if beep { SoundManager.shared.playEscSound() }
         isSpeaking = false
@@ -123,17 +129,21 @@ final class TTSController: ObservableObject {
     }
 
     /// Reads whatever text is currently selected system-wide.
-    private func fetchAndSpeak() async {
+    private func fetchAndSpeak(generation: Int) async {
         guard let raw = await SelectedTextService.fetchSelectedText(),
+              generation == sessionGeneration,
               !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            endSession(String(localized: "No text selected"), beep: true)
+            if generation == sessionGeneration {
+                endSession(String(localized: "No text selected"), beep: true)
+            }
             return
         }
-        await synthesizeAndPlay(raw)
+        await synthesizeAndPlay(raw, mode: TTSSettings.readingMode, generation: generation)
     }
 
     /// Chunked, streaming synthesis + playback. Assumes a session is already started.
-    private func synthesizeAndPlay(_ text: String) async {
+    private func synthesizeAndPlay(_ text: String, mode: ReadAloudMode, generation: Int) async {
+        guard generation == sessionGeneration else { return }
         guard let provider = TTSProviderRegistry.provider(for: TTSSettings.providerKind) else {
             endSession(String(localized: "No speech provider selected"), beep: true); return
         }
@@ -153,53 +163,88 @@ final class TTSController: ObservableObject {
             endSession(String.localizedStringWithFormat(format, provider.displayName), beep: true); return
         }
 
+        if provider.kind == .kokoro, Self.containsHebrew(text) {
+            endSession(
+                String(localized: "Kokoro currently supports English only. Choose an installed Hebrew Apple System Voice in Models & Voices."),
+                beep: true
+            )
+            MenuBarManager.shared?.openMainWindowAndNavigate(to: "Read Aloud Models")
+            return
+        }
+
         let speed = TTSSettings.speed
-        // Instant cleanup first so first audio can start without waiting on the full
-        // on-device naturalize. Remaining chunks may be refined per-sentence.
-        let cleaned = prepareInstantText(from: text)
-        guard !Task.isCancelled else { return }
-        let chunks = Self.splitIntoChunks(cleaned)
-        let useAI = TTSSettings.naturalReadingAI && naturalizer.isModelInstalled
+        let spokenText: String
+        do {
+            if mode.usesLocalAI {
+                guard naturalizer.isModelInstalled else {
+                    endSession(String(localized: "Download an on-device language model before using AI Read Aloud modes."), beep: true)
+                    MenuBarManager.shared?.openMainWindowAndNavigate(to: "Read Aloud Models")
+                    return
+                }
+                recorderUIManager?.beginGenerating()
+                spokenText = try await naturalizer.transform(
+                    // Let the model analyze the original complete selection. Pre-normalizing here
+                    // destroys structure (lists, URLs, code and tables) that Retell/Explain need
+                    // in order to understand the content before producing spoken prose.
+                    text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    mode: mode,
+                    isCancelled: { Task.isCancelled }
+                )
+                guard generation == sessionGeneration else { return }
+                recorderUIManager?.endGenerating()
+            } else {
+                // Exact mode skips semantic rewriting but retains the user's deterministic
+                // Smart Cleanup preference for pronounceable URLs, code and symbols.
+                spokenText = prepareInstantText(from: text)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == sessionGeneration else { return }
+            let format = String(localized: "Read Aloud failed: %@")
+            endSession(String.localizedStringWithFormat(format, error.localizedDescription), beep: true)
+            return
+        }
+        guard !Task.isCancelled, generation == sessionGeneration, !spokenText.isEmpty else { return }
+        lastPreparedText = spokenText
+        let chunks = Self.splitIntoChunks(spokenText)
 
         player.startStreaming { [weak self] in
-            self?.isSpeaking = false
-            self?.recorderUIManager?.endSpeaking()
-            AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
+            Task { @MainActor [weak self] in
+                guard let self, self.sessionGeneration == generation else { return }
+                TTSSettings.recordReadAloud(of: spokenText)
+                ReadAloudHistoryStore.shared.record(
+                    sourceText: text,
+                    spokenText: spokenText,
+                    mode: mode,
+                    providerName: provider.displayName,
+                    voiceName: voice.displayName,
+                    localModelName: mode.usesLocalAI ? LocalLLMModelManager.current.displayName : nil
+                )
+                self.isSpeaking = false
+                self.recorderUIManager?.endSpeaking()
+                AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
+            }
         }
 
         var startedPlaying = false
         do {
-            for (index, chunk) in chunks.enumerated() {
+            for chunk in chunks {
                 try Task.checkCancellation()
-                // The first chunk is the audio the user is waiting on, so it is never sent
-                // through the on-device LLM — that rewrite costs ~2 s and, when the model
-                // declines to rewrite, the result is discarded anyway. Later chunks are
-                // rewritten while the earlier ones are already playing, so their cost is free.
-                let spokenChunk: String
-                // Chunks 0 AND 1 skip the LLM. Chunk 0 is what the user is waiting for; chunk 1
-                // has to be ready before chunk 0 finishes playing, and a first sentence is often
-                // under a second of audio while a rewrite takes 3–5 s — which produced an audible
-                // stall right after the opening sentence. From chunk 2 on, ~220 chars is ~15 s of
-                // buffered audio, comfortably more than a rewrite costs.
-                if useAI, index > 1 {
-                    spokenChunk = await naturalizer.naturalize(chunk, isCancelled: { Task.isCancelled }) ?? chunk
-                } else {
-                    spokenChunk = chunk
-                }
+                let audio = try await provider.synthesize(text: chunk, voice: voice, speed: speed, apiKey: apiKey)
                 try Task.checkCancellation()
-                let audio = try await provider.synthesize(text: spokenChunk, voice: voice, speed: speed, apiKey: apiKey)
-                try Task.checkCancellation()
-                try player.enqueue(audio)
+                guard generation == sessionGeneration else { return }
+                try await player.enqueue(audio)
                 if !startedPlaying {
                     startedPlaying = true
                     recorderUIManager?.markSpeechPlaying()   // first chunk → live audio bars
                 }
             }
             player.finishEnqueueing()
-            TTSSettings.recordReadAloud(of: text)
         } catch is CancellationError {
             // stop() already cleaned up the widget + player.
         } catch {
+            guard generation == sessionGeneration else { return }
             player.stop()
             logger.error("Read Aloud failed: \(error.localizedDescription, privacy: .public)")
             let format = String(localized: "Read Aloud failed: %@")
@@ -211,22 +256,6 @@ final class TTSController: ObservableObject {
     private func prepareInstantText(from raw: String) -> String {
         let base = TTSSettings.smartCleanup ? TTSTextNormalizer.normalize(raw) : raw
         return base.isEmpty ? raw : base
-    }
-
-    /// Makes the selection sound human before synthesis. The instant offline normalizer ALWAYS
-    /// runs first (so emoji/symbols/markup are stripped no matter what); the on-device LLM then
-    /// refines that clean text into natural prose. If the model misbehaves (e.g. answers instead
-    /// of rewriting) the naturalizer returns nil and we speak the cleaned text — never junk.
-    private func prepareSpokenText(from raw: String) async -> String {
-        let cleaned = prepareInstantText(from: raw)
-
-        if TTSSettings.naturalReadingAI, naturalizer.isModelInstalled {
-            recorderUIManager?.beginGenerating()          // widget shows "Thinking…"
-            let rewritten = await naturalizer.naturalize(cleaned, isCancelled: { Task.isCancelled })
-            recorderUIManager?.endGenerating()            // back to "Preparing…" for synthesis
-            if let rewritten { return rewritten }
-        }
-        return cleaned
     }
 
     /// Splits text into sentence-based chunks. The first chunk is a single sentence (so audio
@@ -247,6 +276,10 @@ final class TTSController: ObservableObject {
             chunks.append(current)
         }
         return chunks.isEmpty ? [text] : chunks
+    }
+
+    private static func containsHebrew(_ text: String) -> Bool {
+        text.unicodeScalars.contains { (0x0590...0x05FF).contains($0.value) }
     }
 
     private func notify(_ message: String) {
