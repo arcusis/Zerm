@@ -127,9 +127,37 @@ rejects the app on other Macs ("Zerm is damaged and can't be opened" /<br>
 <div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">make release            <span class="pl-c"><span class="pl-c">#</span> or: scripts/release.sh</span></pre></div>
 <p dir="auto">This builds the Release configuration, signs the app with Developer ID and the<br>
 hardened runtime, notarizes app and DMG with Apple, staples the tickets, and<br>
-verifies the result with <code class="notranslate">spctl</code>. The DMG lands in the repo root as<br>
-<code class="notranslate">Zerm_X.Y.Z_aarch64.dmg</code>, ready for <code class="notranslate">gh release upload</code>.</p>
+verifies the result with <code class="notranslate">spctl</code>. It exports both exact GitHub Release assets in<br>
+the repo root: <code class="notranslate">Zerm_&lt;release-label&gt;_aarch64.dmg</code> and the Sparkle enclosure<br>
+<code class="notranslate">Zerm-&lt;release-label&gt;-macos.zip</code>. Upload both with the command printed by the<br>
+script.</p>
+<p dir="auto">By default the release label is the Xcode project's <code class="notranslate">MARKETING_VERSION</code> and the<br>
+tag is <code class="notranslate">v&lt;MARKETING_VERSION&gt;</code>. If the approved GitHub release needs a distinct<br>
+three- or four-component label, set both explicitly:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">RELEASE_LABEL=A.B.C.D RELEASE_TAG=vA.B.C.D scripts/release.sh</pre></div>
+<p dir="auto">This changes the GitHub tag, filenames, appcast title and enclosure URL only.<br>
+The app and <code class="notranslate">sparkle:shortVersionString</code> still use Apple's three-component<br>
+<code class="notranslate">MARKETING_VERSION</code>; <code class="notranslate">sparkle:version</code> uses the strictly increasing<br>
+<code class="notranslate">CURRENT_PROJECT_VERSION</code>, which controls update ordering. The script rejects a<br>
+noncanonical tag/label pair or a build number that is not newer than the current<br>
+published appcast.</p>
+<p dir="auto">To sign and notarize a Release app built on the Office Mac without rebuilding<br>
+on the signing Mac, copy the app outside <code class="notranslate">.release-build</code> and run the script<br>
+directly (not through <code class="notranslate">make release</code>, whose <code class="notranslate">setup</code> prerequisite builds native<br>
+dependencies):</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">PREBUILT_APP=/path/to/Zerm.app \
+  RELEASE_LABEL=A.B.C.D RELEASE_TAG=vA.B.C.D \
+  scripts/release.sh</pre></div>
+<p dir="auto">The script fails before signing if the bundle identifier, project version,<br>
+build number or arm64 executable does not match, and validates the staged copy<br>
+again. Sparkle signing material and release notes are mandatory for a real run.</p>
 <p dir="auto"><code class="notranslate">SKIP_NOTARIZE=1 scripts/release.sh</code> does a signing-only dry run.</p>
+<p dir="auto">After packaging, commit the generated <code class="notranslate">docs/appcast.xml</code> with the release source,<br>
+push the tag, create a draft GitHub Release, and upload both exact assets. Run<br>
+the Release workflow manually against that draft tag before publishing. The<br>
+workflow cross-checks the tag and filenames against the tagged appcast, Xcode<br>
+project and ZIP bundle identity; its <code class="notranslate">released</code> run is a post-publication<br>
+verification, not a substitute for the draft gate.</p>
 <h3 dir="auto">After publishing the GitHub Release</h3>
 <p dir="auto">The site changelog is generated from the <strong>published</strong> GitHub Releases, so it can<br>
 only be rebuilt once the release exists:</p>
