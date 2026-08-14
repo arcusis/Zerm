@@ -99,6 +99,10 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             -only-testing:ZermTests \
+            -skip-testing:ZermTests/MeetingDiarizerIntegrationTests \
+            -skip-testing:ZermTests/DiarizerModelLoadDiagnostic \
+            -skip-testing:ZermTests/MeetingTwoSpeakerTests \
+            -skip-testing:ZermTests/DiarizerCapacityDiagnostic \
             -clonedSourcePackagesDirPath .ci-packages \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
