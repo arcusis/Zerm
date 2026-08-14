@@ -1,7 +1,40 @@
 import Foundation
 
+enum ReadAloudMode: String, Codable, CaseIterable, Identifiable {
+    case exact
+    case retell
+    case summarize
+    case explain
+    case simplify
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .exact: return String(localized: "Read exactly")
+        case .retell: return String(localized: "Retell")
+        case .summarize: return String(localized: "Summarize")
+        case .explain: return String(localized: "Explain")
+        case .simplify: return String(localized: "Simplify")
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .exact: return String(localized: "Speak the selection without AI rewriting.")
+        case .retell: return String(localized: "Analyze the selection and retell it naturally without losing its meaning.")
+        case .summarize: return String(localized: "Speak a shorter version containing the important points.")
+        case .explain: return String(localized: "Explain the selection clearly with enough context to understand it.")
+        case .simplify: return String(localized: "Rewrite difficult language in simpler terms before speaking.")
+        }
+    }
+
+    var usesLocalAI: Bool { self != .exact }
+}
+
 /// Identifies a text-to-speech engine. Mirrors `ModelProvider` on the dictation side.
 enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
+    case appleSystem = "Apple System"
     case kokoro = "Kokoro"          // local, on-device (sherpa-onnx)
     case deepgram = "Deepgram"      // default cloud provider
     case inworld = "Inworld"
@@ -13,6 +46,7 @@ enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
     /// `APIKeyManager` provider identifier, or `nil` for the local engine.
     var apiKeyProvider: String? {
         switch self {
+        case .appleSystem: return nil
         case .kokoro: return nil
         case .deepgram: return "deepgram"
         case .inworld: return "inworld"
@@ -23,7 +57,7 @@ enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
         }
     }
 
-    var isLocal: Bool { self == .kokoro }
+    var isLocal: Bool { self == .kokoro || self == .appleSystem }
 }
 
 /// A selectable voice for a given provider.
@@ -36,7 +70,7 @@ struct TTSVoice: Identifiable, Hashable, Codable {
 }
 
 /// Decoded synthesis result: raw signed 16-bit little-endian PCM, mono unless stated.
-struct TTSAudio {
+struct TTSAudio: Sendable {
     let pcm: Data
     let sampleRate: Double
     let channels: Int
@@ -57,11 +91,17 @@ enum TTSError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey(let p): return "Add an API key for \(p) in Read Aloud settings."
-        case .http(let code, let msg): return "Provider error \(code): \(msg)"
-        case .emptyAudio: return "The provider returned no audio."
+        case .missingAPIKey(let provider):
+            let format = String(localized: "Add an API key for %@ in Read Aloud settings.")
+            return String.localizedStringWithFormat(format, provider)
+        case .http(let code, let message):
+            let format = String(localized: "Provider error %lld: %@")
+            return String.localizedStringWithFormat(format, code, message)
+        case .emptyAudio:
+            return String(localized: "The provider returned no audio.")
         case .notAvailable(let why): return why
-        case .badResponse: return "Unexpected response from the speech provider."
+        case .badResponse:
+            return String(localized: "Unexpected response from the speech provider.")
         }
     }
 }
@@ -79,6 +119,7 @@ enum TTSSettings {
         static let sessionsReadAloud = "ttsSessionsReadAloud"
         static let smartCleanup = "ttsSmartCleanup"
         static let naturalReadingAI = "ttsNaturalReadingAI"
+        static let readingMode = "ttsReadingMode"
         static func voice(for kind: TTSProviderKind) -> String { "ttsVoice_\(kind.rawValue)" }
     }
 
@@ -106,8 +147,28 @@ enum TTSSettings {
 
     /// On-device LLM rewrite into natural spoken language. Off by default (needs the model).
     static var naturalReadingAI: Bool {
-        get { defaults.object(forKey: Keys.naturalReadingAI) as? Bool ?? false }
-        set { defaults.set(newValue, forKey: Keys.naturalReadingAI) }
+        get { readingMode.usesLocalAI }
+        set { readingMode = newValue ? .retell : .exact }
+    }
+
+    /// The transformation applied before synthesis. Retell is the product default: selecting
+    /// content asks Zerm to understand it and speak a natural rendition, not merely pronounce
+    /// every glyph. Existing installs that explicitly disabled the legacy AI toggle retain Exact.
+    static var readingMode: ReadAloudMode {
+        get {
+            if let raw = defaults.string(forKey: Keys.readingMode),
+               let mode = ReadAloudMode(rawValue: raw) {
+                return mode
+            }
+            if defaults.object(forKey: Keys.naturalReadingAI) != nil {
+                return defaults.bool(forKey: Keys.naturalReadingAI) ? .retell : .exact
+            }
+            return .retell
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.readingMode)
+            defaults.set(newValue.usesLocalAI, forKey: Keys.naturalReadingAI)
+        }
     }
 
     static func voiceID(for kind: TTSProviderKind) -> String? {

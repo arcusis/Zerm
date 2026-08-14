@@ -272,12 +272,13 @@ struct ModelManagementView: View {
 
                         AddCustomModelCardView(
                             customModelManager: customModelManager,
+                            onModelAdded: {
+                                // Refresh the models when a new custom model is added
+                                transcriptionModelManager.refreshAllAvailableModels()
+                                customModelToEdit = nil // Clear editing state
+                            },
                             editingModel: customModelToEdit
-                        ) {
-                            // Refresh the models when a new custom model is added
-                            transcriptionModelManager.refreshAllAvailableModels()
-                            customModelToEdit = nil // Clear editing state
-                        }
+                        )
                     }
                 }
             }

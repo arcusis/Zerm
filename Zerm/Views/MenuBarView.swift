@@ -56,10 +56,32 @@ struct MenuBarView: View {
     @EnvironmentObject var menuBarManager: MenuBarManager
     @EnvironmentObject var updaterViewModel: UpdaterViewModel
     @EnvironmentObject var enhancementService: AIEnhancementService
+    @EnvironmentObject var meetingRecordingController: MeetingRecordingController
+    @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
     @ObservedObject private var launchAtLogin = LaunchAtLoginStore.shared
     
     var body: some View {
         VStack {
+            if meetingRecordingController.lifecycle.phase == .capturing {
+                Button(action: stopMeetingRecording) {
+                    Label(
+                        "Stop Meeting — \(MeetingRecordingView.clock(meetingRecordingController.session.elapsed))",
+                        systemImage: "stop.circle.fill"
+                    )
+                }
+                .accessibilityIdentifier("menu-stop-meeting")
+
+                Button("Open Meetings") {
+                    menuBarManager.openMainWindowAndNavigate(to: "Meetings")
+                }
+
+                Divider()
+            } else if meetingRecordingController.lifecycle.phase == .stopping
+                        || meetingRecordingController.lifecycle.phase == .processing {
+                Label("Processing Meeting", systemImage: "hourglass")
+                Divider()
+            }
+
             Button("Toggle Recorder") {
                 recorderUIManager.handleToggleMiniRecorder()
             }
@@ -94,7 +116,9 @@ struct MenuBarView: View {
             }
             .keyboardShortcut(",", modifiers: .command)
             
-            Button(menuBarManager.isMenuBarOnly ? "Show Dock Icon" : "Hide Dock Icon") {
+            Button(menuBarManager.isMenuBarOnly
+                   ? String(localized: "Show Dock Icon")
+                   : String(localized: "Hide Dock Icon")) {
                 menuBarManager.toggleMenuBarOnly()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
@@ -104,9 +128,7 @@ struct MenuBarView: View {
 
             Divider()
             
-            Button(updaterViewModel.updateAvailable
-                   ? "Install Update\(updaterViewModel.availableVersion.map { " v\($0)" } ?? "")…"
-                   : "Check for Updates") {
+            Button(updateButtonTitle) {
                 if updaterViewModel.updateAvailable {
                     updaterViewModel.installPendingUpdate()
                 } else {
@@ -125,5 +147,27 @@ struct MenuBarView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
+    }
+
+    private func stopMeetingRecording() {
+        Task {
+            await meetingRecordingController.stopAndSummarise(
+                ifRequested: summariseAfterMeeting
+                    && meetingRecordingController.isLocalSummaryAvailable == true
+            )
+        }
+    }
+
+    private var updateButtonTitle: String {
+        guard updaterViewModel.updateAvailable else {
+            return String(localized: "Check for Updates")
+        }
+        guard let version = updaterViewModel.availableVersion else {
+            return String(localized: "Install Update…")
+        }
+        return String.localizedStringWithFormat(
+            String(localized: "Install Update %@…"),
+            "v\(version)"
+        )
     }
 }

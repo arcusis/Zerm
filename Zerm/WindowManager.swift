@@ -40,6 +40,17 @@ class WindowManager: NSObject {
         window.isOpaque = true
         window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 0, height: 0)
+
+        if UITestLaunchConfiguration.current.isEnabled {
+            window.setContentSize(NSSize(width: 950, height: 730))
+            window.center()
+            registerMainWindowIfNeeded(window)
+            _ = NSApplication.shared.setActivationPolicy(.regular)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
         window.setFrameAutosaveName(Self.mainWindowAutosaveName)
         applyInitialPlacementIfNeeded(to: window)
         registerMainWindowIfNeeded(window)

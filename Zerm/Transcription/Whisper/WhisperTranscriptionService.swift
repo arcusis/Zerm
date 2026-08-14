@@ -78,6 +78,10 @@ class WhisperTranscriptionService: TranscriptionService {
         let data = try await AudioProcessor().processAudioToSamples(audioURL)
         let durationSeconds = Double(data.count) / 16_000.0
         let peak = data.map { abs($0) }.max() ?? 0
+        let selectedLanguage = LanguagePreference.selectedCode()
+        let shouldConsiderHebrew = selectedLanguage == LanguagePreference.autoCode
+            ? await MainActor.run { LanguagePreference.prefersHebrewForAutomaticDetection() }
+            : false
         DebugLogger.shared.log(
             "Whisper",
             "samples=\(data.count) dur=\(String(format: "%.2f", durationSeconds))s peak=\(String(format: "%.3f", peak)) model=\(model.name)"
@@ -101,13 +105,17 @@ class WhisperTranscriptionService: TranscriptionService {
         await whisperContext.setPrompt(currentPrompt)
 
         // Transcribe (with VAD if enabled)
-        var success = await whisperContext.fullTranscribe(samples: data)
+        var success = await whisperContext.fullTranscribe(
+            samples: data,
+            languageCode: selectedLanguage
+        )
         guard success else {
             logger.error("❌ Core transcription engine failed (whisper_full).")
             throw ZermEngineError.whisperCoreFailed
         }
 
-        var text = await whisperContext.getTranscription()
+        var candidate = await whisperContext.transcriptionCandidate()
+        var text = candidate.text
 
         // VAD often drops short dictations that still have measurable energy — retry once
         // without VAD when the first pass is empty but the file is long enough to matter.
@@ -118,9 +126,41 @@ class WhisperTranscriptionService: TranscriptionService {
            peak > 0.01 {
             logger.notice("Empty result with VAD — retrying without VAD (dur=\(durationSeconds, privacy: .public)s peak=\(peak, privacy: .public))")
             DebugLogger.shared.log("Whisper", "empty with VAD — retry without VAD")
-            success = await whisperContext.fullTranscribe(samples: data, forceDisableVAD: true)
+            success = await whisperContext.fullTranscribe(
+                samples: data,
+                forceDisableVAD: true,
+                languageCode: selectedLanguage
+            )
             if success {
-                text = await whisperContext.getTranscription()
+                candidate = await whisperContext.transcriptionCandidate()
+                text = candidate.text
+            }
+        }
+
+        // Short Hebrew phrases are Whisper's most common auto-detection failure in this app:
+        // an English keyboard-independent auto pass can return confident-looking Latin text.
+        // When the active input source is Hebrew, compare one forced-Hebrew pass and keep it only
+        // when the result is both Hebrew-script and comparably probable. Auto remains the primary
+        // path, and long recordings never pay for a second inference.
+        if WhisperLanguageCandidateSelector.shouldEvaluateFallback(
+            selectedLanguage: selectedLanguage,
+            shouldConsiderHebrew: shouldConsiderHebrew,
+            detectedLanguage: candidate.languageCode,
+            durationSeconds: durationSeconds
+        ) {
+            let hebrewSucceeded = await whisperContext.fullTranscribe(
+                samples: data,
+                forceDisableVAD: true,
+                languageCode: "he"
+            )
+            if hebrewSucceeded {
+                let hebrewCandidate = await whisperContext.transcriptionCandidate()
+                let chosen = WhisperLanguageCandidateSelector.choose(primary: candidate, hebrew: hebrewCandidate)
+                if chosen == hebrewCandidate {
+                    logger.notice("Auto language recovery selected Hebrew for a short dictation")
+                }
+                candidate = chosen
+                text = chosen.text
             }
         }
 

@@ -12,6 +12,7 @@ struct ZermApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     let container: ModelContainer
     let containerInitializationFailed: Bool
+    private let uiTestConfiguration: UITestLaunchConfiguration
 
     @StateObject private var engine: ZermEngine
     @StateObject private var whisperModelManager: WhisperModelManager
@@ -22,6 +23,7 @@ struct ZermApp: App {
     @StateObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var menuBarManager: MenuBarManager
     @StateObject private var ttsController: TTSController
+    @StateObject private var meetingRecordingController: MeetingRecordingController
     @StateObject private var aiService = AIService()
     @StateObject private var enhancementService: AIEnhancementService
     @StateObject private var activeWindowService = ActiveWindowService.shared
@@ -36,15 +38,22 @@ struct ZermApp: App {
     private let transcriptionAutoCleanupService = TranscriptionAutoCleanupService.shared
 
     // Model prewarm service for optimizing model on wake from sleep
-    @StateObject private var prewarmService: ModelPrewarmService
+    private let prewarmService: ModelPrewarmService?
 
     init() {
+        let uiTestConfiguration = UITestLaunchConfiguration.current
+        self.uiTestConfiguration = uiTestConfiguration
+        _showMenuBarIcon = State(initialValue: !uiTestConfiguration.isEnabled)
+
         // Disable HTTP response caching — prevents API responses from being stored in Cache.db
         URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)
 
-        AppDefaults.registerDefaults()
+        if !uiTestConfiguration.isEnabled {
+            AppDefaults.registerDefaults()
+        }
 
-        if UserDefaults.standard.object(forKey: "powerModeUIFlag") == nil {
+        if !uiTestConfiguration.isEnabled,
+           UserDefaults.standard.object(forKey: "powerModeUIFlag") == nil {
             let hasEnabledPowerModes = PowerModeManager.shared.configurations.contains { $0.isEnabled }
             UserDefaults.standard.set(hasEnabledPowerModes, forKey: "powerModeUIFlag")
         }
@@ -58,8 +67,12 @@ struct ZermApp: App {
         ])
         var initializationFailed = false
 
+        if uiTestConfiguration.isEnabled,
+           let memoryContainer = Self.createInMemoryContainer(schema: schema, logger: logger) {
+            container = memoryContainer
+        }
         // Attempt 1: Try persistent storage
-        if let persistentContainer = Self.createPersistentContainer(schema: schema, logger: logger) {
+        else if let persistentContainer = Self.createPersistentContainer(schema: schema, logger: logger) {
             container = persistentContainer
         }
         // Attempt 2: Try in-memory storage
@@ -96,15 +109,16 @@ struct ZermApp: App {
         let aiService = AIService()
         _aiService = StateObject(wrappedValue: aiService)
 
-        let updaterViewModel = UpdaterViewModel()
+        let updaterViewModel = UpdaterViewModel(startsUpdater: !uiTestConfiguration.isEnabled)
         _updaterViewModel = StateObject(wrappedValue: updaterViewModel)
 
         let enhancementService = AIEnhancementService(aiService: aiService, modelContext: container.mainContext)
         _enhancementService = StateObject(wrappedValue: enhancementService)
 
         // 1. Create modelsDirectory URL
-        let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let appSupportDirectory = uiTestConfiguration.storageRoot
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("com.arcusis.zerm")
         let modelsDirectory = appSupportDirectory.appendingPathComponent("WhisperModels")
 
         // 2. Create model managers
@@ -132,11 +146,18 @@ struct ZermApp: App {
 
         // 6. Initialize model state
         // Migration and refreshAllAvailableModels must run before loadCurrentTranscriptionModel so renamed keys are remapped and imported models are present when restoring the saved selection.
-        StreamingKeysMigration.run()
+        if !uiTestConfiguration.isEnabled {
+            StreamingKeysMigration.run()
+        }
         whisperModelManager.createModelsDirectoryIfNeeded()
         whisperModelManager.loadAvailableModels()
         transcriptionModelManager.refreshAllAvailableModels()
-        transcriptionModelManager.loadCurrentTranscriptionModel()
+        if uiTestConfiguration.scenario == .nativeApple,
+           let nativeModel = transcriptionModelManager.allAvailableModels.first(where: { $0.provider == .nativeApple }) {
+            transcriptionModelManager.currentTranscriptionModel = nativeModel
+        } else if !uiTestConfiguration.isEnabled {
+            transcriptionModelManager.loadCurrentTranscriptionModel()
+        }
 
         _whisperModelManager = StateObject(wrappedValue: whisperModelManager)
         _fluidAudioModelManager = StateObject(wrappedValue: fluidAudioModelManager)
@@ -144,11 +165,19 @@ struct ZermApp: App {
         _recorderUIManager = StateObject(wrappedValue: recorderUIManager)
         _engine = StateObject(wrappedValue: engine)
 
+        // Meeting capture is application-scoped. Views only observe this coordinator so
+        // navigation, window closure, and menu-bar-only operation can never orphan an active
+        // recording or remove its only Stop action.
+        let meetingRecordingController = MeetingRecordingController(engine: engine)
+        _meetingRecordingController = StateObject(wrappedValue: meetingRecordingController)
+
         // 7. Create other services that depend on engine
         let hotkeyManager = HotkeyManager(engine: engine, recorderUIManager: recorderUIManager)
         _hotkeyManager = StateObject(wrappedValue: hotkeyManager)
 
-        let menuBarManager = MenuBarManager()
+        let menuBarManager = MenuBarManager(
+            initialMenuBarOnly: uiTestConfiguration.isEnabled ? false : nil
+        )
         _menuBarManager = StateObject(wrappedValue: menuBarManager)
         menuBarManager.configure(modelContainer: container, engine: engine)
 
@@ -158,53 +187,65 @@ struct ZermApp: App {
         let ttsController = TTSController(engine: engine, recorderUIManager: recorderUIManager)
         hotkeyManager.onReadAloudTriggered = { [weak ttsController] in ttsController?.toggle() }
         recorderUIManager.onCancelSpeaking = { [weak ttsController] in ttsController?.stop() }
+        meetingRecordingController.onWillStartCapture = { [weak ttsController] in
+            ttsController?.prepareForMeetingCapture()
+        }
         _ttsController = StateObject(wrappedValue: ttsController)
 
         let activeWindowService = ActiveWindowService.shared
         activeWindowService.configure(with: enhancementService)
         _activeWindowService = StateObject(wrappedValue: activeWindowService)
 
-        let prewarmService = ModelPrewarmService(
-            transcriptionModelManager: transcriptionModelManager,
-            whisperModelManager: whisperModelManager,
-            modelContext: container.mainContext
-        )
-        _prewarmService = StateObject(wrappedValue: prewarmService)
+        prewarmService = uiTestConfiguration.isEnabled
+            ? nil
+            : ModelPrewarmService(
+                transcriptionModelManager: transcriptionModelManager,
+                whisperModelManager: whisperModelManager,
+                modelContext: container.mainContext
+            )
 
         appDelegate.menuBarManager = menuBarManager
+        appDelegate.onWillTerminate = { [weak meetingRecordingController] in
+            meetingRecordingController?.prepareForTermination()
+        }
 
         // Ensure no lingering recording state from previous runs
-        Task {
-            await recorderUIManager.resetOnLaunch()
+        if !uiTestConfiguration.isEnabled {
+            Task {
+                await recorderUIManager.resetOnLaunch()
+            }
         }
 
         // Warm the launch-at-login cache off the main thread — reading it lazily from a
         // view would block the main thread on XPC. See `LaunchAtLoginStore`.
-        LaunchAtLoginStore.shared.loadIfNeeded()
+        if !uiTestConfiguration.isEnabled {
+            LaunchAtLoginStore.shared.loadIfNeeded()
+        }
 
         // Never load native ML runtimes in the XCTest host. It launches the whole app and then
         // immediately calls exit(), which races C++ static destruction against an in-flight
         // onnxruntime session construction and segfaults on the way out.
-        ProcessLifecycle.isTerminating = NSClassFromString("XCTestCase") != nil
+        ProcessLifecycle.isTerminating = uiTestConfiguration.isEnabled || NSClassFromString("XCTestCase") != nil
 
-        // Pre-warm Kokoro (~330 MB) so the first Read Aloud is instant.
-        //
-        // Gemma is deliberately NOT pre-warmed here: the GGUF is 3.1 GB and it is only needed
-        // for the optional "natural reading" rewrite of the *second and later* chunks, by which
-        // point audio is already playing. Loading it at launch pinned gigabytes on every user,
-        // including those who never trigger Read Aloud at all. It now loads on first use.
-        Task { await KokoroModelManager.shared.prewarmIfNeeded() }
-
-        AppShortcuts.updateAppShortcutParameters()
+        // Pre-warm only Kokoro (~330 MB) so speech can start promptly. Do not load the
+        // multi-gigabyte local LLM at launch: many users run Zerm alongside memory-intensive
+        // development work. Dictation pre-warms it while audio is being captured when needed;
+        // Read Aloud loads it on demand and the manager releases it after a short idle window.
+        if !uiTestConfiguration.isEnabled {
+            Task { await KokoroModelManager.shared.prewarmIfNeeded() }
+            AppShortcuts.updateAppShortcutParameters()
+        }
 
         // Durable usage metrics. The backfill must land before the first recording of the
         // run, otherwise that session would be counted once live and once by the sweep.
-        UsageStatsService.shared.configure(container: container)
-        let transcriptContext = container.mainContext
-        Task { await UsageStatsService.shared.backfillIfNeeded(from: transcriptContext) }
+        if !uiTestConfiguration.isEnabled {
+            UsageStatsService.shared.configure(container: container)
+            let transcriptContext = container.mainContext
+            Task { await UsageStatsService.shared.backfillIfNeeded(from: transcriptContext) }
 
-        // Start cleanup service for the app's lifetime, not tied to window lifecycle
-        TranscriptionAutoCleanupService.shared.startMonitoring(modelContext: container.mainContext)
+            // Start cleanup service for the app's lifetime, not tied to window lifecycle
+            TranscriptionAutoCleanupService.shared.startMonitoring(modelContext: container.mainContext)
+        }
     }
 
     // MARK: - Container Creation Helpers
@@ -328,8 +369,8 @@ struct ZermApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
-            if hasCompletedOnboarding {
+        WindowGroup(id: UITestLaunchConfiguration.mainWindowSceneID) {
+            if hasCompletedOnboarding || uiTestConfiguration.isEnabled {
                 ContentView()
                     .environmentObject(engine)
                     .environmentObject(whisperModelManager)
@@ -340,9 +381,11 @@ struct ZermApp: App {
                     .environmentObject(updaterViewModel)
                     .environmentObject(menuBarManager)
                     .environmentObject(ttsController)
+                    .environmentObject(meetingRecordingController)
                     .environmentObject(aiService)
                     .environmentObject(enhancementService)
                     .modelContainer(container)
+                    .uiTestEnvironment(uiTestConfiguration)
                     .onAppear {
                         // Check if container initialization failed
                         if containerInitializationFailed {
@@ -357,14 +400,16 @@ struct ZermApp: App {
                             return
                         }
 
-                        updaterViewModel.silentlyCheckForUpdates()
-                        if enableAnnouncements {
-                            AnnouncementsService.shared.start()
-                        }
+                        if !uiTestConfiguration.isEnabled {
+                            updaterViewModel.silentlyCheckForUpdates()
+                            if enableAnnouncements {
+                                AnnouncementsService.shared.start()
+                            }
 
-                        // Start the automatic audio cleanup process only if transcript cleanup is not enabled
-                        if !UserDefaults.standard.bool(forKey: "IsTranscriptionCleanupEnabled") {
-                            audioCleanupManager.startAutomaticCleanup(modelContext: container.mainContext)
+                            // Start automatic audio cleanup only outside deterministic UI tests.
+                            if !UserDefaults.standard.bool(forKey: "IsTranscriptionCleanupEnabled") {
+                                audioCleanupManager.startAutomaticCleanup(modelContext: container.mainContext)
+                            }
                         }
                     }
                     .background(WindowAccessor { window in
@@ -401,13 +446,34 @@ struct ZermApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 950, height: 730)
-        .windowResizability(.contentSize)
         .commands {
+            #if DEBUG
+            UITestOpenMainWindowCommands(configuration: uiTestConfiguration)
+            #else
             CommandGroup(replacing: .newItem) { }
+            #endif
+
+            SidebarCommands()
 
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updaterViewModel: updaterViewModel)
             }
+        }
+
+        Settings {
+            SettingsRootView()
+                .environmentObject(whisperModelManager)
+                .environmentObject(fluidAudioModelManager)
+                .environmentObject(transcriptionModelManager)
+                .environmentObject(recorderUIManager)
+                .environmentObject(hotkeyManager)
+                .environmentObject(updaterViewModel)
+                .environmentObject(menuBarManager)
+                .environmentObject(ttsController)
+                .environmentObject(meetingRecordingController)
+                .environmentObject(enhancementService)
+                .modelContainer(container)
+                .uiTestEnvironment(uiTestConfiguration)
         }
 
         MenuBarExtra(isInserted: $showMenuBarIcon) {
@@ -420,8 +486,10 @@ struct ZermApp: App {
                 .environmentObject(hotkeyManager)
                 .environmentObject(menuBarManager)
                 .environmentObject(updaterViewModel)
+                .environmentObject(meetingRecordingController)
                 .environmentObject(aiService)
                 .environmentObject(enhancementService)
+                .uiTestEnvironment(uiTestConfiguration)
         } label: {
             let image: NSImage = {
                 let ratio = $0.size.height / $0.size.width
@@ -434,13 +502,6 @@ struct ZermApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        #if DEBUG
-        WindowGroup("Debug") {
-            Button("Toggle Menu Bar Only") {
-                menuBarManager.isMenuBarOnly.toggle()
-            }
-        }
-        #endif
     }
 }
 

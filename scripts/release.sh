@@ -12,6 +12,10 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/release.sh                   # build + sign + notarize + staple
+#   PREBUILT_APP=/path/to/Zerm.app scripts/release.sh
+#                                        # validate + sign an existing Release app
+#   RELEASE_LABEL=1.2.8.2 RELEASE_TAG=v1.2.8.2 scripts/release.sh
+#                                        # GitHub label/tag independent of bundle version
 #   SKIP_NOTARIZE=1 scripts/release.sh   # dry run: build + sign only
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,11 +26,131 @@ DERIVED_DATA="$REPO_ROOT/.release-build"
 WORK_DIR="$DERIVED_DATA/package"
 APP_PATH="$DERIVED_DATA/Build/Products/Release/Zerm.app"
 
-VERSION=$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\);.*/\1/p' "$REPO_ROOT/Zerm.xcodeproj/project.pbxproj" | head -1)
-DMG_NAME="Zerm_${VERSION}_aarch64.dmg"
-DMG_PATH="$REPO_ROOT/$DMG_NAME"
+APP_BUILD_SETTINGS=$(awk '
+    /buildSettings = \{/ { in_settings = 1; settings = $0 ORS; next }
+    in_settings { settings = settings $0 ORS }
+    in_settings && /^[[:space:]]*};/ {
+        if (settings ~ /PRODUCT_BUNDLE_IDENTIFIER = com\.arcusis\.zerm;/) {
+            printf "%s", settings
+        }
+        in_settings = 0
+        settings = ""
+    }
+' "$REPO_ROOT/Zerm.xcodeproj/project.pbxproj")
+BUNDLE_VERSION=$(printf '%s\n' "$APP_BUILD_SETTINGS" \
+    | sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\);.*/\1/p' | sort -u)
+BUILD_VERSION=$(printf '%s\n' "$APP_BUILD_SETTINGS" \
+    | sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);.*/\1/p' | sort -u)
+EXPECTED_BUNDLE_ID="com.arcusis.zerm"
 
-echo "==> Releasing Zerm $VERSION"
+# GitHub release labels may have four components even though Apple's user-visible bundle
+# version must have exactly three. If only a tag is supplied, derive the label from it; if only
+# a label is supplied, derive its canonical `v` tag. Supplying both must describe the same release
+# so filenames, appcast URLs and workflow validation cannot drift apart.
+if [ -n "${RELEASE_TAG:-}" ] && [ -z "${RELEASE_LABEL:-}" ]; then
+    RELEASE_LABEL="${RELEASE_TAG#v}"
+else
+    RELEASE_LABEL="${RELEASE_LABEL:-$BUNDLE_VERSION}"
+fi
+RELEASE_TAG="${RELEASE_TAG:-v$RELEASE_LABEL}"
+
+DMG_NAME="Zerm_${RELEASE_LABEL}_aarch64.dmg"
+DMG_PATH="$REPO_ROOT/$DMG_NAME"
+UPDATE_NAME="Zerm-${RELEASE_LABEL}-macos.zip"
+EXPORTED_UPDATE_ZIP="$REPO_ROOT/$UPDATE_NAME"
+
+validate_release_app() {
+    local candidate="$1"
+    local info_plist="$candidate/Contents/Info.plist"
+    local executable_name
+    local executable
+    local actual_bundle_id
+    local actual_version
+    local actual_build
+    local actual_archs
+
+    [ -d "$candidate" ] || { echo "error: prebuilt app not found: $candidate"; exit 1; }
+    [ -f "$info_plist" ] || { echo "error: missing Info.plist in $candidate"; exit 1; }
+
+    executable_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info_plist" 2>/dev/null || true)
+    [ -n "$executable_name" ] || { echo "error: CFBundleExecutable is missing in $info_plist"; exit 1; }
+    executable="$candidate/Contents/MacOS/$executable_name"
+    [ -f "$executable" ] || { echo "error: app executable not found: $executable"; exit 1; }
+
+    actual_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist" 2>/dev/null || true)
+    actual_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist" 2>/dev/null || true)
+    actual_build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info_plist" 2>/dev/null || true)
+    actual_archs=$(lipo -archs "$executable" 2>/dev/null || true)
+
+    [ "$actual_bundle_id" = "$EXPECTED_BUNDLE_ID" ] || {
+        echo "error: prebuilt bundle id '$actual_bundle_id' does not match '$EXPECTED_BUNDLE_ID'."
+        exit 1
+    }
+    [ "$actual_version" = "$BUNDLE_VERSION" ] || {
+        echo "error: prebuilt version '$actual_version' does not match project bundle version '$BUNDLE_VERSION'."
+        exit 1
+    }
+    [ "$actual_build" = "$BUILD_VERSION" ] || {
+        echo "error: prebuilt build '$actual_build' does not match project build '$BUILD_VERSION'."
+        exit 1
+    }
+    [ "$actual_archs" = "arm64" ] || {
+        echo "error: prebuilt executable architectures '$actual_archs' are not the required arm64 release architecture."
+        exit 1
+    }
+}
+
+[ -n "$BUNDLE_VERSION" ] || { echo "error: MARKETING_VERSION is missing from the Xcode project."; exit 1; }
+[ -n "$BUILD_VERSION" ] || { echo "error: CURRENT_PROJECT_VERSION is missing from the Xcode project."; exit 1; }
+[[ "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "error: project bundle version '$BUNDLE_VERSION' must use Apple's Major.Minor.Patch format."
+    exit 1
+}
+[[ "$BUILD_VERSION" =~ ^[1-9][0-9]*$ ]] || {
+    echo "error: project build version '$BUILD_VERSION' must be a positive integer."
+    exit 1
+}
+[[ "$RELEASE_LABEL" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]] || {
+    echo "error: RELEASE_LABEL '$RELEASE_LABEL' must contain three or four numeric components."
+    exit 1
+}
+[ "$RELEASE_TAG" = "v$RELEASE_LABEL" ] || {
+    echo "error: RELEASE_TAG '$RELEASE_TAG' must equal v$RELEASE_LABEL so tag, assets and appcast stay aligned."
+    exit 1
+}
+
+# Sparkle orders updates by CFBundleVersion/sparkle:version, not by the human-readable
+# GitHub label. Refuse to create another release at or below the feed's current build. An
+# intentional retry of already-generated output requires an explicit dry-run override.
+PUBLISHED_BUILD=""
+if [ -f "$REPO_ROOT/docs/appcast.xml" ]; then
+    PUBLISHED_BUILD=$(sed -n 's|.*<sparkle:version>\([0-9][0-9]*\)</sparkle:version>.*|\1|p' \
+        "$REPO_ROOT/docs/appcast.xml" | head -1)
+fi
+if [ -n "$PUBLISHED_BUILD" ] && [ "$BUILD_VERSION" -le "$PUBLISHED_BUILD" ] \
+    && [ "${ALLOW_REBUILD_CURRENT_RELEASE:-0}" != "1" ]; then
+    echo "error: project build $BUILD_VERSION is not newer than published Sparkle build $PUBLISHED_BUILD."
+    echo "Increment CURRENT_PROJECT_VERSION before packaging a new release."
+    echo "Set ALLOW_REBUILD_CURRENT_RELEASE=1 only to reproduce already-generated release output."
+    exit 1
+fi
+
+echo "==> Releasing Zerm label $RELEASE_LABEL ($RELEASE_TAG), bundle $BUNDLE_VERSION ($BUILD_VERSION)"
+
+PREBUILT_SOURCE=""
+if [ -n "${PREBUILT_APP:-}" ]; then
+    PREBUILT_SOURCE=$(cd "$PREBUILT_APP" 2>/dev/null && pwd -P) || {
+        echo "error: cannot resolve PREBUILT_APP bundle: $PREBUILT_APP"
+        exit 1
+    }
+    case "$PREBUILT_SOURCE/" in
+        "$DERIVED_DATA/"*)
+            echo "error: PREBUILT_APP must be outside $DERIVED_DATA because that directory is recreated during packaging."
+            exit 1
+            ;;
+    esac
+    validate_release_app "$PREBUILT_SOURCE"
+fi
 
 if [ "${SKIP_NOTARIZE:-0}" != "1" ]; then
     if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
@@ -36,25 +160,32 @@ if [ "${SKIP_NOTARIZE:-0}" != "1" ]; then
     fi
 fi
 
-echo "==> Building Release configuration"
 rm -rf "$DERIVED_DATA"
-# LOCAL_BUILD keeps runtime behavior identical to previously shipped builds
-# (CloudKit off, UserDefaults key store) — the entitlements it requires need no
-# provisioning profile, which Developer ID signing alone cannot provide.
-xcodebuild -project "$REPO_ROOT/Zerm.xcodeproj" -scheme Zerm -configuration Release \
-    -derivedDataPath "$DERIVED_DATA" \
-    ARCHS=arm64 \
-    CODE_SIGN_STYLE=Manual \
-    CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    PROVISIONING_PROFILE_SPECIFIER= \
-    CODE_SIGN_ENTITLEMENTS="$REPO_ROOT/Zerm/Zerm.local.entitlements" \
-    CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-    OTHER_CODE_SIGN_FLAGS=--timestamp \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) LOCAL_BUILD' \
-    build
+if [ -n "$PREBUILT_SOURCE" ]; then
+    echo "==> Staging validated prebuilt Release app"
+    mkdir -p "$(dirname "$APP_PATH")"
+    ditto "$PREBUILT_SOURCE" "$APP_PATH"
+else
+    echo "==> Building Release configuration"
+    # LOCAL_BUILD disables CloudKit because Developer ID signing alone cannot grant its
+    # restricted entitlement. Release credentials still use the system Keychain.
+    # shellcheck disable=SC2016 # Xcode, not this shell, expands $(inherited).
+    xcodebuild -project "$REPO_ROOT/Zerm.xcodeproj" -scheme Zerm -configuration Release \
+        -derivedDataPath "$DERIVED_DATA" \
+        ARCHS=arm64 \
+        CODE_SIGN_STYLE=Manual \
+        CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+        DEVELOPMENT_TEAM="$TEAM_ID" \
+        PROVISIONING_PROFILE_SPECIFIER= \
+        CODE_SIGN_ENTITLEMENTS="$REPO_ROOT/Zerm/Zerm.local.entitlements" \
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+        OTHER_CODE_SIGN_FLAGS=--timestamp \
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) LOCAL_BUILD' \
+        build
+fi
 
 [ -d "$APP_PATH" ] || { echo "error: $APP_PATH not found after build"; exit 1; }
+validate_release_app "$APP_PATH"
 
 # Xcode's CodeSignOnCopy re-signs each embedded framework's *main* binary with our
 # Developer ID, but NOT the executables nested inside them. Sparkle in particular
@@ -97,7 +228,7 @@ SIGN_BAD=0
 while IFS= read -r -d '' ITEM; do
     TEAM=$(codesign -dvv "$ITEM" 2>&1 | sed -n 's/^TeamIdentifier=//p')
     if [ "$TEAM" != "$TEAM_ID" ]; then
-        echo "  !! ${ITEM#$APP_PATH/}: TeamIdentifier='${TEAM:-not set}' (expected $TEAM_ID)"
+        echo "  !! ${ITEM#"$APP_PATH"/}: TeamIdentifier='${TEAM:-not set}' (expected $TEAM_ID)"
         SIGN_BAD=1
     fi
 done < <(
@@ -127,7 +258,7 @@ rm -rf "$STAGING" "$DMG_PATH"
 mkdir -p "$STAGING"
 ditto "$APP_PATH" "$STAGING/Zerm.app"
 ln -s /Applications "$STAGING/Applications"
-hdiutil create -volname "Zerm $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
+hdiutil create -volname "Zerm $RELEASE_LABEL" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
 codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
 
 if [ "${SKIP_NOTARIZE:-0}" != "1" ]; then
@@ -139,10 +270,6 @@ fi
 echo "==> Gatekeeper assessment"
 spctl -a -vv -t exec "$APP_PATH" || [ "${SKIP_NOTARIZE:-0}" = "1" ]
 spctl -a -vv -t open --context context:primary-signature "$DMG_PATH" || [ "${SKIP_NOTARIZE:-0}" = "1" ]
-
-echo ""
-echo "Done: $DMG_PATH"
-echo "Upload with: gh release upload v$VERSION $DMG_NAME"
 
 # --- Sparkle appcast ----------------------------------------------------------
 # Requires a Sparkle EdDSA private key at SPARKLE_PRIVATE_KEY_FILE (or
@@ -159,11 +286,11 @@ elif [ -x "/usr/local/bin/sign_update" ]; then
     SIGN_UPDATE="/usr/local/bin/sign_update"
 fi
 
-UPDATE_ZIP="$WORK_DIR/Zerm-$VERSION-macos.zip"
+UPDATE_ZIP="$WORK_DIR/$UPDATE_NAME"
 mkdir -p "$WORK_DIR"
 ditto -c -k --keepParent "$APP_PATH" "$UPDATE_ZIP"
 UPDATE_LEN=$(stat -f%z "$UPDATE_ZIP" 2>/dev/null || stat -c%s "$UPDATE_ZIP")
-UPDATE_URL="https://github.com/arcusis/Zerm/releases/download/v${VERSION}/Zerm-${VERSION}-macos.zip"
+UPDATE_URL="https://github.com/arcusis/Zerm/releases/download/${RELEASE_TAG}/${UPDATE_NAME}"
 ED_SIG=""
 if [ -n "$SIGN_UPDATE" ] && [ -f "$SPARKLE_PRIVATE_KEY_FILE" ]; then
     SIGN_OUT=$("$SIGN_UPDATE" "$UPDATE_ZIP" -f "$SPARKLE_PRIVATE_KEY_FILE" 2>/dev/null | tr -d '\n' || true)
@@ -218,16 +345,16 @@ cat > "$APPCAST_OUT" <<APPCAST
     <channel>
         <title>Zerm</title>
         <item>
-            <title>${VERSION}</title>
+            <title>${RELEASE_LABEL}</title>
             <description><![CDATA[
-                <h3>What's New in v${VERSION}</h3>
+                <h3>What's New in ${RELEASE_TAG}</h3>
                 <ul>
 ${RELEASE_NOTES_HTML}
                 </ul>
             ]]></description>
             <pubDate>${PUB_DATE}</pubDate>
-            <sparkle:version>$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);.*/\1/p' "$REPO_ROOT/Zerm.xcodeproj/project.pbxproj" | head -1)</sparkle:version>
-            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:version>${BUILD_VERSION}</sparkle:version>
+            <sparkle:shortVersionString>${BUNDLE_VERSION}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <enclosure url="${UPDATE_URL}" length="${UPDATE_LEN}" type="application/octet-stream" ${ED_SIG}/>
         </item>
@@ -235,6 +362,10 @@ ${RELEASE_NOTES_HTML}
 </rss>
 APPCAST
 cp "$APPCAST_OUT" "$REPO_ROOT/appcast.xml"
-cp "$UPDATE_ZIP" "$REPO_ROOT/Zerm_${VERSION}_macos.zip" 2>/dev/null || true
+cp "$UPDATE_ZIP" "$EXPORTED_UPDATE_ZIP"
 echo "Appcast written to docs/appcast.xml (publish via GitHub Pages)."
-echo "Update zip: $UPDATE_ZIP"
+echo "Update zip: $EXPORTED_UPDATE_ZIP"
+echo ""
+echo "Done: $DMG_PATH"
+echo "Upload both required assets with:"
+echo "  gh release upload $RELEASE_TAG \"$DMG_PATH\" \"$EXPORTED_UPDATE_ZIP\""

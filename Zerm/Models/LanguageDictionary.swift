@@ -22,14 +22,10 @@ enum LanguageDictionary {
             return all.filter { codes.contains($0.key) }
 
         case .fluidAudio:
-            let codes = [
-                "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
-                "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro",
-                "ru", "sk", "sl", "sv", "uk"
-            ]
-            var filtered = all.filter { codes.contains($0.key) }
-            filtered["auto"] = "Auto-detect"
-            return filtered
+            // Parakeet V3 detects among its supported languages internally. FluidAudio exposes no
+            // inference option that constrains ASR to one selected language, so presenting those
+            // languages as enforceable choices would make the meeting snapshot and UI misleading.
+            return ["auto": "Auto-detect"]
 
         default:
             return all

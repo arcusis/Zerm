@@ -3,6 +3,18 @@ import Cocoa
 import KeyboardShortcuts
 import AVFoundation
 
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case general
+    case shortcutsAutomation
+    case audio
+    case modelsProviders
+    case permissionsPrivacy
+    case storageBackup
+    case advancedDiagnostics
+
+    var id: Self { self }
+}
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
@@ -16,6 +28,7 @@ struct SettingsView: View {
     @ObservedObject private var mediaController = MediaController.shared
     @ObservedObject private var playbackController = PlaybackController.shared
     @ObservedObject private var launchAtLogin = LaunchAtLoginStore.shared
+    @ObservedObject private var audioOutputRouteMonitor = AudioOutputRouteMonitor.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
     @AppStorage("autoUpdateCheck") private var autoUpdateCheck = true
     @AppStorage("enableAnnouncements") private var enableAnnouncements = true
@@ -33,17 +46,32 @@ struct SettingsView: View {
     @State private var isMuteSystemExpanded = false
     @State private var isRestoreClipboardExpanded = false
 
+    private let pane: SettingsPane?
+
+    init(pane: SettingsPane? = nil) {
+        self.pane = pane
+    }
+
     var body: some View {
         Form {
+            if pane == nil || pane == .shortcutsAutomation {
             // MARK: - Shortcuts
             Section {
                 LabeledContent {
                     HStack(spacing: 8) {
                         Spacer()
                         if hotkeyManager.selectedHotkey1 != .none {
-                            hotkeyModePicker(binding: $hotkeyManager.hotkeyMode1)
+                            hotkeyModePicker(
+                                binding: $hotkeyManager.hotkeyMode1,
+                                accessibilityLabel: "Shortcut 1 mode",
+                                accessibilityIdentifier: "settings-shortcut-1-mode"
+                            )
                         }
-                        hotkeyPicker(binding: $hotkeyManager.selectedHotkey1)
+                        hotkeyPicker(
+                            binding: $hotkeyManager.selectedHotkey1,
+                            accessibilityLabel: "Shortcut 1 key",
+                            accessibilityIdentifier: "settings-shortcut-1-key"
+                        )
                         if hotkeyManager.selectedHotkey1 == .custom {
                             KeyboardShortcuts.Recorder(for: .toggleMiniRecorder)
                                 .controlSize(.small)
@@ -60,8 +88,16 @@ struct SettingsView: View {
                     LabeledContent {
                         HStack(spacing: 8) {
                             Spacer()
-                            hotkeyModePicker(binding: $hotkeyManager.hotkeyMode2)
-                            hotkeyPicker(binding: $hotkeyManager.selectedHotkey2)
+                            hotkeyModePicker(
+                                binding: $hotkeyManager.hotkeyMode2,
+                                accessibilityLabel: "Shortcut 2 mode",
+                                accessibilityIdentifier: "settings-shortcut-2-mode"
+                            )
+                            hotkeyPicker(
+                                binding: $hotkeyManager.selectedHotkey2,
+                                accessibilityLabel: "Shortcut 2 key",
+                                accessibilityIdentifier: "settings-shortcut-2-key"
+                            )
                             if hotkeyManager.selectedHotkey2 == .custom {
                                 KeyboardShortcuts.Recorder(for: .toggleMiniRecorder2)
                                     .controlSize(.small)
@@ -73,12 +109,14 @@ struct SettingsView: View {
                                     .foregroundColor(.secondary)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Remove second shortcut")
+                            .accessibilityIdentifier("settings-remove-shortcut-2")
                         }
                     } label: {
                         HStack(spacing: 4) {
                             Text("Shortcut 2")
                             InfoTip(
-                                "A second, independent key for the same recorder, with its own mode. Handy when you want a hold-to-talk key for quick asides and a toggle key for long dictation. The minus button removes it.",
+                                String(localized: "A second, independent key for the same recorder, with its own mode. Handy when you want a hold-to-talk key for quick asides and a toggle key for long dictation. The minus button removes it."),
                                 doc: .shortcuts
                             )
                         }
@@ -91,7 +129,7 @@ struct SettingsView: View {
                             withAnimation { hotkeyManager.selectedHotkey2 = .rightOption }
                         }
                         InfoTip(
-                            "Adds a second key that starts the recorder, with its own Toggle / Push to Talk / Hybrid mode. Both shortcuts stay active.",
+                            String(localized: "Adds a second key that starts the recorder, with its own Toggle / Push to Talk / Hybrid mode. Both shortcuts stay active."),
                             doc: .shortcuts
                         )
                     }
@@ -109,7 +147,7 @@ struct SettingsView: View {
                     HStack(spacing: 4) {
                         Text("Paste Last Transcription (Original)")
                         InfoTip(
-                            "Pastes the raw transcript of your most recent dictation again, exactly as the model heard it, with no AI enhancement. Useful when a paste landed in the wrong window, or when the enhanced version changed something you wanted kept.",
+                            String(localized: "Pastes the raw transcript of your most recent dictation again, exactly as the model heard it, with no AI enhancement. Useful when a paste landed in the wrong window, or when the enhanced version changed something you wanted kept."),
                             doc: .shortcuts
                         )
                     }
@@ -122,7 +160,7 @@ struct SettingsView: View {
                     HStack(spacing: 4) {
                         Text("Paste Last Transcription (Enhanced)")
                         InfoTip(
-                            "Pastes the AI-enhanced version of your most recent dictation again. Nothing is re-sent to the provider — this replays the result that was already produced.",
+                            String(localized: "Pastes the AI-enhanced version of your most recent dictation again. Nothing is re-sent to the provider — this replays the result that was already produced."),
                             doc: .shortcuts
                         )
                     }
@@ -135,7 +173,7 @@ struct SettingsView: View {
                     HStack(spacing: 4) {
                         Text("Retry Last Transcription")
                         InfoTip(
-                            "Runs the last recording through transcription again, using whatever model and language are selected now. Use it after switching to a more accurate model, or when a transcript came back garbled — the original audio is reused, so you don't have to speak again.",
+                            String(localized: "Runs the last recording through transcription again, using whatever model and language are selected now. Use it after switching to a more accurate model, or when a transcript came back garbled — the original audio is reused, so you don't have to speak again."),
                             doc: .shortcuts
                         )
                     }
@@ -145,8 +183,8 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isCustomCancelExpanded,
                     isEnabled: $isCustomCancelEnabled,
-                    label: "Custom Cancel Shortcut",
-                    infoMessage: "Escape always discards the recording while the recorder is showing. Turn this on to add a second key that does the same, for when your hand is nowhere near Escape.",
+                    label: String(localized: "Custom Cancel Shortcut"),
+                    infoMessage: String(localized: "Escape always discards the recording while the recorder is showing. Turn this on to add a second key that does the same, for when your hand is nowhere near Escape."),
                     infoURL: Links.docString(.shortcuts)
                 ) {
                     LabeledContent("Shortcut") {
@@ -165,8 +203,8 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isMiddleClickExpanded,
                     isEnabled: $hotkeyManager.isMiddleClickToggleEnabled,
-                    label: "Middle-Click Recording",
-                    infoMessage: "Starts and stops recording with the middle mouse button — the scroll wheel click — so you can dictate without reaching for the keyboard. Leave it off if you use middle-click to open links in tabs.",
+                    label: String(localized: "Middle-Click Recording"),
+                    infoMessage: String(localized: "Starts and stops recording with the middle mouse button — the scroll wheel click — so you can dictate without reaching for the keyboard. Leave it off if you use middle-click to open links in tabs."),
                     infoURL: Links.docString(.shortcuts)
                 ) {
                     LabeledContent {
@@ -184,7 +222,7 @@ struct SettingsView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("Activation Delay")
-                            InfoTip("How long the middle button must be held before recording starts. Raise it if ordinary middle-clicks in your browser keep opening the recorder by accident; set it to 0 for an instant response.")
+                            InfoTip(String(localized: "How long the middle button must be held before recording starts. Raise it if ordinary middle-clicks in your browser keep opening the recorder by accident; set it to 0 for an instant response."))
                         }
                     }
                 }
@@ -195,8 +233,8 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isRestoreClipboardExpanded,
                     isEnabled: $restoreClipboardAfterPaste,
-                    label: "Restore Clipboard After Paste",
-                    infoMessage: "Pasting works by putting the transcript on the clipboard, which overwrites whatever you had copied. Turn this on to put your previous clipboard contents back once the paste has landed."
+                    label: String(localized: "Restore Clipboard After Paste"),
+                    infoMessage: String(localized: "Pasting works by putting the transcript on the clipboard, which overwrites whatever you had copied. Turn this on to put your previous clipboard contents back once the paste has landed.")
                 ) {
                     Picker(selection: $clipboardRestoreDelay) {
                         Text("250ms").tag(0.25)
@@ -209,7 +247,7 @@ struct SettingsView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("Restore Delay")
-                            InfoTip("How long to wait before putting your old clipboard contents back. Slower apps read the clipboard a moment after the paste; if you end up with the wrong text, increase this.")
+                            InfoTip(String(localized: "How long to wait before putting your old clipboard contents back. Slower apps read the clipboard a moment after the paste; if you end up with the wrong text, increase this."))
                         }
                     }
                 }
@@ -217,19 +255,21 @@ struct SettingsView: View {
                 Toggle(isOn: $useAppleScriptPaste) {
                     HStack(spacing: 4) {
                         Text("Use AppleScript Paste")
-                        InfoTip("Enable this if pasting doesn't work with your keyboard layout (e.g. Neo2). Uses AppleScript instead of simulated key events.")
+                        InfoTip(String(localized: "Enable this if pasting doesn't work with your keyboard layout (e.g. Neo2). Uses AppleScript instead of simulated key events."))
                     }
                 }
             }
+            }
 
             // MARK: - Recording Feedback
+            if pane == nil || pane == .audio {
             Section("Recording Feedback") {
                 // Sound Feedback
                 ExpandableSettingsRow(
                     isExpanded: $isSoundFeedbackExpanded,
                     isEnabled: $soundManager.isEnabled,
-                    label: "Sound Feedback",
-                    infoMessage: "Plays a short sound when recording starts and another when it stops, so you know the recorder is listening without looking at it. Expand to choose your own sounds."
+                    label: String(localized: "Sound Feedback"),
+                    infoMessage: String(localized: "Plays a short sound when recording starts and another when it stops, so you know the recorder is listening without looking at it. Expand to choose your own sounds.")
                 ) {
                     CustomSoundSettingsView()
                 }
@@ -238,14 +278,18 @@ struct SettingsView: View {
                 ExpandableSettingsRow(
                     isExpanded: $isMuteSystemExpanded,
                     isEnabled: $mediaController.isSystemMuteEnabled,
-                    label: "Mute Audio While Recording",
-                    infoMessage: "Silences your Mac's output for the length of the recording, then restores the previous volume. Stops music or a video call leaking into the microphone and being transcribed as speech."
+                    label: String(localized: "Mute Audio While Recording"),
+                    infoMessage: String(localized: "Silences your Mac's output for the length of the recording, then restores the previous volume. Stops music or a video call leaking into the microphone and being transcribed as speech.")
                 ) {
                     Toggle(isOn: $mediaController.skipMuteWithHeadphones) {
                         HStack(spacing: 4) {
                             Text("Keep Playing on Headphones")
-                            InfoTip("Skips the mute when you're on Bluetooth headphones or the headphone jack. Nothing reaches the microphone from headphones, so there's nothing to silence. Speakers, USB and HDMI outputs still mute.")
+                            InfoTip(String(localized: "Skips the mute for wired headphones, Bluetooth headsets and USB headsets that include an input. USB speakers or DACs, HDMI, AirPlay, and built-in or external speakers are treated as unsafe and still mute."))
                         }
+                    }
+
+                    if audioOutputRouteMonitor.isAmbiguousAnalogOutput {
+                        AnalogHeadphoneConfirmationControl()
                     }
 
                     Picker(selection: $mediaController.audioResumptionDelay) {
@@ -258,18 +302,22 @@ struct SettingsView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("Resume Delay")
-                            InfoTip("How long after recording stops before the volume comes back. A second or two keeps audio from returning over the top of the paste.")
+                            InfoTip(String(localized: "How long after recording stops before the volume comes back. A second or two keeps audio from returning over the top of the paste."))
                         }
                     }
                 }
 
                 MicTestView()
             }
+            }
 
             // MARK: - Power Mode
-            PowerModeSection()
+            if pane == nil || pane == .shortcutsAutomation {
+                PowerModeSection()
+            }
 
             // MARK: - Interface
+            if pane == nil || pane == .general {
             Section("Interface") {
                 Picker(selection: $recorderUIManager.recorderType) {
                     Text("Notch").tag("notch")
@@ -277,22 +325,26 @@ struct SettingsView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text("Recorder Style")
-                        InfoTip("Where the recorder appears while you dictate. Notch sits in the menu bar area at the top of the screen, around the camera housing on Macs that have one. Mini is a small floating pill you can drag anywhere.")
+                        InfoTip(String(localized: "Where the recorder appears while you dictate. Notch sits in the menu bar area at the top of the screen, around the camera housing on Macs that have one. Mini is a small floating pill you can drag anywhere."))
                     }
                 }
                 .pickerStyle(.segmented)
 
             }
+            }
 
             // MARK: - Experimental
-            ExperimentalSection()
+            if pane == nil || pane == .advancedDiagnostics {
+                ExperimentalSection()
+            }
 
             // MARK: - General
+            if pane == nil || pane == .general {
             Section("General") {
                 Toggle(isOn: $menuBarManager.isMenuBarOnly) {
                     HStack(spacing: 4) {
                         Text("Hide Dock Icon")
-                        InfoTip("Removes Zerm from the Dock and the app switcher, leaving only the menu bar icon. Everything keeps working; open this window again from the menu bar.")
+                        InfoTip(String(localized: "Removes Zerm from the Dock and the app switcher, leaving only the menu bar icon. Everything keeps working; open this window again from the menu bar."))
                     }
                 }
 
@@ -301,7 +353,7 @@ struct SettingsView: View {
                 Toggle(isOn: launchAtLogin.binding) {
                     HStack(spacing: 4) {
                         Text("Launch at Login")
-                        InfoTip("Starts Zerm automatically when you log in, so your dictation shortcut works without opening the app first.")
+                        InfoTip(String(localized: "Starts Zerm automatically when you log in, so your dictation shortcut works without opening the app first."))
                     }
                 }
                 .onAppear { launchAtLogin.loadIfNeeded() }
@@ -309,7 +361,7 @@ struct SettingsView: View {
                 Toggle(isOn: $autoUpdateCheck) {
                     HStack(spacing: 4) {
                         Text("Auto-check Updates")
-                        InfoTip("Looks for new versions in the background and tells you when one is ready. Nothing installs on its own — you still choose when to update.")
+                        InfoTip(String(localized: "Looks for new versions in the background and tells you when one is ready. Nothing installs on its own — you still choose when to update."))
                     }
                 }
                 .onChange(of: autoUpdateCheck) { _, newValue in
@@ -320,7 +372,7 @@ struct SettingsView: View {
                     HStack(spacing: 4) {
                         Text("Show Announcements")
                         InfoTip(
-                            "Shows occasional in-app notes about new features and known issues. Turn it off for a completely quiet app.",
+                            String(localized: "Shows occasional in-app notes about new features and known issues. Turn it off for a completely quiet app."),
                             doc: .announcements
                         )
                     }
@@ -334,12 +386,16 @@ struct SettingsView: View {
                 }
 
                 HStack {
-                    Button(updaterViewModel.updateAvailable ? "Install Update…" : "Check for Updates") {
+                    Button {
                         if updaterViewModel.updateAvailable {
                             updaterViewModel.installPendingUpdate()
                         } else {
                             updaterViewModel.checkForUpdates()
                         }
+                    } label: {
+                        Text(updaterViewModel.updateAvailable
+                             ? LocalizedStringKey("Install Update…")
+                             : LocalizedStringKey("Check for Updates"))
                     }
                     .disabled(!updaterViewModel.canCheckForUpdates && !updaterViewModel.updateAvailable)
 
@@ -354,7 +410,7 @@ struct SettingsView: View {
                     Button("Reset Onboarding") {
                         showResetOnboardingAlert = true
                     }
-                    InfoTip("Shows the welcome and setup screens again the next time you launch Zerm. Your settings, prompts and history are left alone.")
+                    InfoTip(String(localized: "Shows the welcome and setup screens again the next time you launch Zerm. Your settings, prompts and history are left alone."))
                 }
 
                 if let error = updaterViewModel.lastErrorMessage, !error.isEmpty {
@@ -364,8 +420,10 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            }
 
             // MARK: - Privacy
+            if pane == nil || pane == .storageBackup {
             Section {
                 AudioCleanupSettingsView()
             } header: {
@@ -373,8 +431,10 @@ struct SettingsView: View {
             } footer: {
                 Text("Control how Zerm handles your transcription data and audio recordings.")
             }
+            }
 
             // MARK: - Backup
+            if pane == nil || pane == .storageBackup {
             Section {
                 LabeledContent {
                     Button("Export") {
@@ -393,7 +453,7 @@ struct SettingsView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text("Export Settings")
-                        InfoTip("Writes a single file containing your settings, prompts, Power Modes, dictionary and custom models. Keep it as a backup or use it to set up Zerm the same way on another Mac. API keys are not included.")
+                        InfoTip(String(localized: "Writes a single file containing your settings, prompts, Power Modes, dictionary and custom models. Keep it as a backup or use it to set up Zerm the same way on another Mac. API keys are not included."))
                     }
                 }
 
@@ -415,7 +475,7 @@ struct SettingsView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text("Import Settings")
-                        InfoTip("Loads a previously exported file. This overwrites your current settings, prompts, Power Modes and dictionary, so export first if you want a way back.")
+                        InfoTip(String(localized: "Loads a previously exported file. This overwrites your current settings, prompts, Power Modes and dictionary, so export first if you want a way back."))
                     }
                 }
             } header: {
@@ -423,10 +483,13 @@ struct SettingsView: View {
             } footer: {
                 Text("Export or import all your settings, prompts, power modes, dictionary, and custom models.")
             }
+            }
 
             // MARK: - Diagnostics
+            if pane == nil || pane == .advancedDiagnostics {
             Section("Diagnostics") {
                 DiagnosticsSettingsView()
+            }
             }
         }
         .formStyle(.grouped)
@@ -445,32 +508,43 @@ struct SettingsView: View {
     }
 
     /// Covers both pickers on a shortcut row — the key itself and the mode beside it.
-    private let shortcutHelp = """
-    The key that opens the recorder and starts dictation. Toggle starts on one press and stops \
-    on the next; Push to Talk records only while the key is held; Hybrid does both — a quick tap \
-    toggles, holding for longer than half a second records until you let go. Choose Custom to \
-    record any key combination you like.
-    """
+    private var shortcutHelp: String {
+        String(localized: "The key that opens the recorder and starts dictation. Toggle starts on one press and stops on the next; Push to Talk records only while the key is held; Hybrid does both — a quick tap toggles, holding for longer than half a second records until you let go. Choose Custom to record any key combination you like.")
+    }
 
     @ViewBuilder
-    private func hotkeyPicker(binding: Binding<HotkeyManager.HotkeyOption>) -> some View {
+    private func hotkeyPicker(
+        binding: Binding<HotkeyManager.HotkeyOption>,
+        accessibilityLabel: LocalizedStringKey,
+        accessibilityIdentifier: String
+    ) -> some View {
         Picker("", selection: binding) {
             ForEach(HotkeyManager.HotkeyOption.allCases, id: \.self) { option in
-                Text(option.displayName).tag(option)
+                Text(LocalizedStringKey(option.displayName)).tag(option)
             }
         }
         .labelsHidden()
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(LocalizedStringKey(binding.wrappedValue.displayName)))
+        .accessibilityIdentifier(accessibilityIdentifier)
         .fixedSize()
     }
 
     @ViewBuilder
-    private func hotkeyModePicker(binding: Binding<HotkeyManager.HotkeyMode>) -> some View {
+    private func hotkeyModePicker(
+        binding: Binding<HotkeyManager.HotkeyMode>,
+        accessibilityLabel: LocalizedStringKey,
+        accessibilityIdentifier: String
+    ) -> some View {
         Picker("", selection: binding) {
             ForEach(HotkeyManager.HotkeyMode.allCases, id: \.self) { mode in
-                Text(mode.displayName).tag(mode)
+                Text(LocalizedStringKey(mode.displayName)).tag(mode)
             }
         }
         .labelsHidden()
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(LocalizedStringKey(binding.wrappedValue.displayName)))
+        .accessibilityIdentifier(accessibilityIdentifier)
         .fixedSize()
     }
 }
@@ -478,6 +552,7 @@ struct SettingsView: View {
 // MARK: - Expandable Settings Row (entire row clickable)
 
 struct ExpandableSettingsRow<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var isExpanded: Bool
     @Binding var isEnabled: Bool
     let label: String
@@ -485,11 +560,8 @@ struct ExpandableSettingsRow<Content: View>: View {
     var infoURL: String? = nil
     @ViewBuilder let content: () -> Content
 
-    @State private var isHandlingToggleChange = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Main row - entire area is tappable
             HStack {
                 Toggle(isOn: $isEnabled) {
                     HStack(spacing: 4) {
@@ -506,45 +578,44 @@ struct ExpandableSettingsRow<Content: View>: View {
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .rotationEffect(.degrees(isEnabled && isExpanded ? 90 : 0))
-                    .opacity(isEnabled ? 1 : 0.4)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard !isHandlingToggleChange else { return }
-                if isEnabled {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isExpanded.toggle()
-                    }
+                Button(action: toggleExpanded) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(isEnabled && isExpanded ? 90 : 0))
                 }
+                .buttonStyle(.plain)
+                .disabled(!isEnabled)
+                .help(isExpanded ? "Collapse" : "Expand")
+                .accessibilityLabel(isExpanded ? "Collapse options" : "Expand options")
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
             }
 
-            // Expanded content with proper spacing
             if isEnabled && isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
                     content()
                 }
                 .padding(.top, 12)
                 .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isExpanded)
         .onChange(of: isEnabled) { _, newValue in
-            isHandlingToggleChange = true
             if newValue {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                     isExpanded = true
                 }
             } else {
                 isExpanded = false
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                isHandlingToggleChange = false
-            }
+        }
+    }
+
+    private func toggleExpanded() {
+        guard isEnabled else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+            isExpanded.toggle()
         }
     }
 }
@@ -563,14 +634,14 @@ struct PowerModeSection: View {
             ExpandableSettingsRow(
                 isExpanded: $isExpanded,
                 isEnabled: toggleBinding,
-                label: "Power Mode",
-                infoMessage: "Apply custom settings based on active app or website.",
+                label: String(localized: "Power Mode"),
+                infoMessage: String(localized: "Apply custom settings based on active app or website."),
                 infoURL: Links.docString(.powerMode)
             ) {
                 Toggle(isOn: $powerModePersistSettings) {
                     HStack(spacing: 4) {
                         Text("Persist Configured Preferences")
-                        InfoTip("When enabled, Power Mode preferences stay active after you stop recording instead of reverting to your original preferences. They will only change when a different Power Mode activates.")
+                        InfoTip(String(localized: "When enabled, Power Mode preferences stay active after you stop recording instead of reverting to your original preferences. They will only change when a different Power Mode activates."))
                     }
                 }
             }
@@ -603,38 +674,14 @@ struct PowerModeSection: View {
 // MARK: - Experimental Section
 
 struct ExperimentalSection: View {
-    @ObservedObject private var playbackController = PlaybackController.shared
-    @ObservedObject private var mediaController = MediaController.shared
     @AppStorage("UseVoiceProcessingIO") private var useVoiceProcessingIO = false
-    @State private var isPauseMediaExpanded = false
 
     var body: some View {
         Section {
-            ExpandableSettingsRow(
-                isExpanded: $isPauseMediaExpanded,
-                isEnabled: $playbackController.isPauseMediaEnabled,
-                label: "Pause Media While Recording",
-                infoMessage: "Pauses playing media when recording starts and resumes when done."
-            ) {
-                Picker(selection: $mediaController.audioResumptionDelay) {
-                    Text("0s").tag(0.0)
-                    Text("1s").tag(1.0)
-                    Text("2s").tag(2.0)
-                    Text("3s").tag(3.0)
-                    Text("4s").tag(4.0)
-                    Text("5s").tag(5.0)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Resume Delay")
-                        InfoTip("How long after recording stops before playback picks up again. This is the same delay used by Mute Audio While Recording.")
-                    }
-                }
-            }
-
             Toggle(isOn: $useVoiceProcessingIO) {
                 HStack(spacing: 4) {
                     Text("Echo Cancel / AGC")
-                    InfoTip("Uses VoiceProcessingIO for acoustic echo cancellation and automatic gain control. Helpful in noisy rooms or when speakers are on. Restart recording after changing.")
+                    InfoTip(String(localized: "Uses VoiceProcessingIO for acoustic echo cancellation and automatic gain control. Helpful in noisy rooms or when speakers are on. Restart recording after changing."))
                 }
             }
         } header: {

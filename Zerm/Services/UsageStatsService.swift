@@ -154,69 +154,70 @@ final class UsageStatsService {
     /// One-time pass over the transcripts that are still on disk, bucketed by the day
     /// they were recorded. History deleted by an earlier retention sweep is gone for
     /// good — this only rescues what survives at the moment of upgrade.
-    nonisolated func backfillIfNeeded(from transcriptContext: ModelContext) async {
+    func backfillIfNeeded(from transcriptContext: ModelContext) async {
         let defaults = UserDefaults.standard
         guard defaults.integer(forKey: Self.backfillVersionKey) < Self.backfillVersion else { return }
 
-        let container = await MainActor.run { transcriptContext.container }
+        let container = transcriptContext.container
         let calendar = Calendar.current
+        let legacyReadAloudWords = defaults.integer(forKey: TTSSettings.Keys.wordsReadAloud)
+        let legacyReadAloudSessions = defaults.integer(forKey: TTSSettings.Keys.sessionsReadAloud)
 
         do {
-            // Both stores live in one container, so a single background context can read
-            // transcripts and write the aggregates.
-            let context = ModelContext(container)
+            let bucketCount = try await Task.detached(priority: .utility) {
+                // Both stores live in one container, so a single background context can read
+                // transcripts and write the aggregates.
+                let context = ModelContext(container)
 
-            var descriptor = FetchDescriptor<Transcription>(
-                predicate: #Predicate<Transcription> { $0.transcriptionStatus == "completed" }
-            )
-            descriptor.propertiesToFetch = [
-                \.text, \.timestamp, \.duration, \.transcriptionDuration, \.enhancementDuration
-            ]
-
-            var buckets: [Date: UsageTotals] = [:]
-            try context.enumerate(descriptor) { transcription in
-                let day = calendar.startOfDay(for: transcription.timestamp)
-                let delta = UsageTotals.session(
-                    words: WordCounter.count(in: transcription.text),
-                    recordedSeconds: transcription.duration,
-                    transcribeSeconds: transcription.transcriptionDuration ?? 0,
-                    enhanceSeconds: transcription.enhancementDuration ?? 0,
-                    wasEnhanced: transcription.enhancementDuration != nil
+                var descriptor = FetchDescriptor<Transcription>(
+                    predicate: #Predicate<Transcription> { $0.transcriptionStatus == "completed" }
                 )
-                buckets[day] = (buckets[day] ?? UsageTotals()).adding(delta)
-            }
+                descriptor.propertiesToFetch = [
+                    \.text, \.timestamp, \.duration, \.transcriptionDuration, \.enhancementDuration
+                ]
 
-            // Read Aloud only ever kept running `UserDefaults` totals with no per-day
-            // history, so its lifetime numbers land on the day of the upgrade. They are
-            // not part of any chart, only the all-time card.
-            let legacyReadAloudWords = defaults.integer(forKey: TTSSettings.Keys.wordsReadAloud)
-            let legacyReadAloudSessions = defaults.integer(forKey: TTSSettings.Keys.sessionsReadAloud)
-            if legacyReadAloudWords > 0 || legacyReadAloudSessions > 0 {
-                let today = calendar.startOfDay(for: Date())
-                var totals = buckets[today] ?? UsageTotals()
-                totals.readAloudWords += legacyReadAloudWords
-                totals.readAloudSessions += legacyReadAloudSessions
-                buckets[today] = totals
-            }
-
-            for (day, totals) in buckets {
-                let existing = try context.fetch(
-                    FetchDescriptor<UsageDay>(predicate: #Predicate { $0.day == day })
-                ).first
-                if let existing {
-                    existing.add(totals)
-                } else {
-                    context.insert(UsageDay(day: day, totals: totals))
+                var buckets: [Date: UsageTotals] = [:]
+                try context.enumerate(descriptor) { transcription in
+                    let day = calendar.startOfDay(for: transcription.timestamp)
+                    let delta = UsageTotals.session(
+                        words: WordCounter.count(in: transcription.text),
+                        recordedSeconds: transcription.duration,
+                        transcribeSeconds: transcription.transcriptionDuration ?? 0,
+                        enhanceSeconds: transcription.enhancementDuration ?? 0,
+                        wasEnhanced: transcription.enhancementDuration != nil
+                    )
+                    buckets[day] = (buckets[day] ?? UsageTotals()).adding(delta)
                 }
-            }
 
-            try context.save()
+                // Read Aloud only ever kept running `UserDefaults` totals with no per-day
+                // history, so its lifetime numbers land on the day of the upgrade. They are
+                // not part of any chart, only the all-time card.
+                if legacyReadAloudWords > 0 || legacyReadAloudSessions > 0 {
+                    let today = calendar.startOfDay(for: Date())
+                    var totals = buckets[today] ?? UsageTotals()
+                    totals.readAloudWords += legacyReadAloudWords
+                    totals.readAloudSessions += legacyReadAloudSessions
+                    buckets[today] = totals
+                }
+
+                for (day, totals) in buckets {
+                    let existing = try context.fetch(
+                        FetchDescriptor<UsageDay>(predicate: #Predicate { $0.day == day })
+                    ).first
+                    if let existing {
+                        existing.add(totals)
+                    } else {
+                        context.insert(UsageDay(day: day, totals: totals))
+                    }
+                }
+
+                try context.save()
+                return buckets.count
+            }.value
             defaults.set(Self.backfillVersion, forKey: Self.backfillVersionKey)
-            logger.notice("Backfilled usage stats for \(buckets.count, privacy: .public) day(s)")
+            logger.notice("Backfilled usage stats for \(bucketCount, privacy: .public) day(s)")
 
-            await MainActor.run {
-                NotificationCenter.default.post(name: .usageStatsUpdated, object: nil)
-            }
+            NotificationCenter.default.post(name: .usageStatsUpdated, object: nil)
         } catch {
             logger.error("Usage stats backfill failed: \(error.localizedDescription, privacy: .public)")
         }

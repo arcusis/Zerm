@@ -162,14 +162,15 @@ class PermissionManager: ObservableObject {
 
 struct PermissionCard: View {
     let icon: String
-    let title: String
-    let description: String
+    let title: LocalizedStringKey
+    let description: LocalizedStringKey
     let isGranted: Bool
-    let buttonTitle: String
+    let buttonTitle: LocalizedStringKey
     let buttonAction: () -> Void
     let checkPermission: () -> Void
     var infoTipMessage: String?
     var infoTipLink: String?
+    var statusDetail: String?
     @State private var isRefreshing = false
 
     var body: some View {
@@ -226,6 +227,7 @@ struct PermissionCard: View {
                     }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
+                    .accessibilityLabel("Refresh permission status")
                     
                     if isGranted {
                         Image(systemName: "checkmark.seal.fill")
@@ -239,6 +241,13 @@ struct PermissionCard: View {
                             .symbolRenderingMode(.hierarchical)
                     }
                 }
+            }
+
+            if let statusDetail, !statusDetail.isEmpty {
+                Text(statusDetail)
+                    .font(.callout)
+                    .foregroundStyle(isGranted ? .green : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             
             if !isGranted {
@@ -274,6 +283,7 @@ struct PermissionCard: View {
 struct PermissionsView: View {
     @EnvironmentObject private var hotkeyManager: HotkeyManager
     @StateObject private var permissionManager = PermissionManager()
+    @StateObject private var systemAudioReadiness = SystemAudioCaptureReadiness.shared
     
     var body: some View {
         ScrollView {
@@ -281,8 +291,8 @@ struct PermissionsView: View {
                 // Header
                 CompactHeroSection(
                     icon: "shield.lefthalf.filled",
-                    title: "App Permissions",
-                    description: "Zerm requires the following permissions to function properly"
+                    title: String(localized: "App Permissions"),
+                    description: String(localized: "Zerm requires the following permissions to function properly")
                 )
                 
                 // Permission Cards
@@ -302,7 +312,7 @@ struct PermissionsView: View {
                             )
                         },
                         checkPermission: { permissionManager.checkKeyboardShortcut() },
-                        infoTipMessage: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it.",
+                        infoTipMessage: String(localized: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it."),
                         infoTipLink: Links.docString(.shortcuts)
                     )
                     
@@ -323,8 +333,21 @@ struct PermissionsView: View {
                             }
                         },
                         checkPermission: { permissionManager.checkAudioPermissionStatus() },
-                        infoTipMessage: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone.",
+                        infoTipMessage: String(localized: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone."),
                         infoTipLink: Links.docString(.permissions)
+                    )
+
+                    PermissionCard(
+                        icon: "waveform.badge.mic",
+                        title: "System Audio Capture",
+                        description: systemAudioDescription,
+                        isGranted: isSystemAudioVerified,
+                        buttonTitle: systemAudioButtonTitle,
+                        buttonAction: systemAudioButtonAction,
+                        checkPermission: systemAudioReadiness.test,
+                        infoTipMessage: String(localized: "macOS does not publish a reliable authorization status for app-audio capture. Zerm verifies it by exercising the same Core Audio process-tap path used by Meetings. The brief test sound stays on this Mac."),
+                        infoTipLink: Links.docString(.permissions),
+                        statusDetail: systemAudioStatusDetail
                     )
                     
                     // Accessibility Permission
@@ -341,7 +364,7 @@ struct PermissionsView: View {
                             permissionManager.checkAccessibilityPermissions()
                             permissionManager.pollPermissions(forSeconds: 3)
                         },
-                        infoTipMessage: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen.",
+                        infoTipMessage: String(localized: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."),
                         infoTipLink: Links.docString(.permissions)
                     )
 
@@ -365,7 +388,7 @@ struct PermissionsView: View {
                             permissionManager.checkScreenRecordingPermission()
                             permissionManager.pollPermissions(forSeconds: 3)
                         },
-                        infoTipMessage: "Zerm captures on-screen text to understand the context of your voice input, which significantly improves transcription accuracy. Your privacy is important: this data is processed locally and is not stored. After toggling Screen Recording on, macOS often requires a full quit and relaunch before the check turns green.",
+                        infoTipMessage: String(localized: "Zerm can read on-screen text when Screen Context is enabled. Zerm does not save that captured text to disk, but enhancement requests can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac. After enabling Screen Recording, fully quit and reopen Zerm if this check stays red."),
                         infoTipLink: Links.docString(.contextualAwareness)
                     )
                 }
@@ -376,6 +399,57 @@ struct PermissionsView: View {
         .onAppear {
             permissionManager.checkAllPermissions()
             permissionManager.pollPermissions(forSeconds: 2)
+        }
+    }
+
+    private var isSystemAudioVerified: Bool {
+        if case .verified = systemAudioReadiness.status { return true }
+        return false
+    }
+
+    private var systemAudioDescription: LocalizedStringKey {
+        switch systemAudioReadiness.status {
+        case .verified:
+            "System audio capture is working for Meetings on this Mac"
+        case .testing:
+            "Testing the same system-audio path used by Meetings"
+        case .notTested, .failed:
+            "Allow Zerm to record participants from a selected meeting application"
+        }
+    }
+
+    private var systemAudioButtonTitle: LocalizedStringKey {
+        switch systemAudioReadiness.status {
+        case .notTested:
+            "Test System Audio"
+        case .testing:
+            "Testing System Audio…"
+        case .failed:
+            "Open System Settings"
+        case .verified:
+            "Test Again"
+        }
+    }
+
+    private var systemAudioButtonAction: () -> Void {
+        switch systemAudioReadiness.status {
+        case .failed:
+            systemAudioReadiness.openSystemSettings
+        case .notTested, .testing, .verified:
+            systemAudioReadiness.test
+        }
+    }
+
+    private var systemAudioStatusDetail: String? {
+        switch systemAudioReadiness.status {
+        case .notTested:
+            return String(localized: "Use the refresh control after granting access to verify the complete capture path.")
+        case .testing:
+            return String(localized: "Zerm is playing and recapturing a brief test sound.")
+        case .verified:
+            return String(localized: "Verified for this Zerm build and macOS version.")
+        case .failed(let message):
+            return message
         }
     }
 }

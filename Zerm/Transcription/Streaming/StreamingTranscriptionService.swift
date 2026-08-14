@@ -187,16 +187,15 @@ class StreamingTranscriptionService {
     private func startSendLoop() {
         let source = chunkSource
         let provider = provider
+        let logger = logger
 
-        sendTask = Task.detached { [weak self] in
+        sendTask = Task.detached {
             for await chunk in source.stream {
                 do {
                     try await provider?.sendAudioChunk(chunk)
                 } catch {
                     let desc = error.localizedDescription
-                    await MainActor.run {
-                        self?.logger.error("Failed to send audio chunk: \(desc, privacy: .public)")
-                    }
+                    logger.error("Failed to send audio chunk: \(desc, privacy: .public)")
                 }
             }
         }
@@ -214,51 +213,48 @@ class StreamingTranscriptionService {
         guard let provider = provider else { return }
         let events = provider.transcriptionEvents
 
-        eventConsumerTask = Task.detached { [weak self] in
+        // This task inherits MainActor isolation. AsyncStream suspension does not block the UI,
+        // while all mutable service state stays actor-confined instead of capturing `self` in a
+        // detached task and repeatedly hopping back through MainActor.run.
+        eventConsumerTask = Task { [weak self] in
             for await event in events {
-                guard let self = self else { break }
+                guard let self else { break }
                 switch event {
                 case .committed(let text):
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    await MainActor.run {
-                        if !trimmed.isEmpty {
-                            self.committedSegments.append(trimmed)
-                        }
-                        // Refresh the live preview so it keeps showing the full running transcript
-                        // after a commit (instead of resetting to empty until the next partial).
-                        if self.state == .streaming {
-                            self.onPartialTranscript?(self.committedSegments.joined(separator: " "))
-                        }
-                        if self.state == .committing {
-                            self.commitSignal?.yield()
-                        }
+                    if !trimmed.isEmpty {
+                        self.committedSegments.append(trimmed)
+                    }
+                    // Refresh the live preview so it keeps showing the full running transcript
+                    // after a commit (instead of resetting to empty until the next partial).
+                    if self.state == .streaming {
+                        self.onPartialTranscript?(self.committedSegments.joined(separator: " "))
+                    }
+                    if self.state == .committing {
+                        self.commitSignal?.yield()
                     }
                 case .partial(let text):
-                    await MainActor.run {
-                        if self.state == .streaming {
-                            let prefix = self.committedSegments.joined(separator: " ")
-                            let display: String
-                            if prefix.isEmpty {
-                                display = text
-                            } else if text.hasPrefix(prefix) || text.hasPrefix(prefix + " ") {
-                                // Provider already sends cumulative partials (e.g. FluidAudio fullText).
-                                display = text
-                            } else {
-                                display = prefix + " " + text
-                            }
-                            self.onPartialTranscript?(display)
+                    if self.state == .streaming {
+                        let prefix = self.committedSegments.joined(separator: " ")
+                        let display: String
+                        if prefix.isEmpty {
+                            display = text
+                        } else if text.hasPrefix(prefix) || text.hasPrefix(prefix + " ") {
+                            // Provider already sends cumulative partials (e.g. FluidAudio fullText).
+                            display = text
+                        } else {
+                            display = prefix + " " + text
                         }
+                        self.onPartialTranscript?(display)
                     }
                 case .sessionStarted:
                     break
                 case .error(let error):
-                    await MainActor.run {
-                        self.sawStreamingError = true
-                        self.state = .failed
-                        self.logger.error("Streaming event error: \(error.localizedDescription, privacy: .public)")
-                    }
+                    self.sawStreamingError = true
+                    self.state = .failed
+                    self.logger.error("Streaming event error: \(error.localizedDescription, privacy: .public)")
                 }
-            }  
+            }
         }
     }
 

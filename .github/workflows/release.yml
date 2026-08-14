@@ -3,9 +3,9 @@ name: Release
 # Native macOS release workflow.
 #
 # Current status: MANUAL
-#   DMG artifacts are built locally on the release Mac with `make release`
-#   (scripts/release.sh: Developer ID signing + notarization + stapling) and
-#   uploaded to GitHub Releases with `gh release upload`. See BUILDING.md
+#   The exact DMG and Sparkle ZIP assets are produced on the release Mac by
+#   scripts/release.sh (Developer ID signing + notarization + stapling) and
+#   uploaded together to GitHub Releases. See BUILDING.md.
 #   "Building a Release".
 #
 # Future: automate with a self-hosted macOS runner or GitHub's macos-latest
@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.0.4)"
+        description: "Release tag (for example v2.8.2 or v1.2.8.2)"
         required: true
         type: string
 
@@ -43,14 +43,11 @@ permissions:
   pull-requests: write
 
 jobs:
-  release-notes:
-    name: Validate release tag
-    # Guarded because this job reads `inputs.tag`, which only exists for a manual
-    # run. On a release event it evaluated to "", so the job failed with
-    # "Tag  not found" on every single release — the other half of why this
-    # workflow has never gone green.
-    if: github.event_name == 'workflow_dispatch'
+  validate-release:
+    name: Validate release tag and assets
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -60,8 +57,14 @@ jobs:
 
       - name: Verify tag exists
         run: |
-          TAG="${{ inputs.tag }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
+          test -n "$TAG" || { echo "::error::Release tag is empty."; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+(\.[0-9]+){2,3}$ ]] || {
+            echo "::error::Release tag must be v followed by three or four numeric components: $TAG"
+            exit 1
+          }
+          if git rev-parse --verify "refs/tags/${TAG}^{commit}" >/dev/null 2>&1; then
             echo "Tag $TAG exists — release is valid"
           else
             echo "Tag $TAG not found. Create the tag first:"
@@ -69,23 +72,156 @@ jobs:
             exit 1
           fi
 
-      - name: Check release assets
+      - name: Require exact release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ inputs.tag }}"
-          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
-          if echo "$ASSETS" | grep -qi "\.dmg"; then
-            echo "Release $TAG has DMG assets:"
-            echo "$ASSETS"
-          else
-            echo "WARNING: Release $TAG has no .dmg assets yet."
-            echo "Upload a DMG with:"
-            echo "  gh release upload $TAG path/to/Zerm_VERSION_aarch64.dmg"
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
+          RELEASE_LABEL="${TAG#v}"
+          test "$RELEASE_LABEL" != "$TAG" || { echo "::error::Release tag must start with v: $TAG"; exit 1; }
+          [[ "$RELEASE_LABEL" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]] || {
+            echo "::error::Release tag must contain three or four numeric components: $TAG"
+            exit 1
+          }
+
+          EXPECTED_DMG="Zerm_${RELEASE_LABEL}_aarch64.dmg"
+          EXPECTED_ZIP="Zerm-${RELEASE_LABEL}-macos.zip"
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          MISSING=0
+
+          for asset in "$EXPECTED_DMG" "$EXPECTED_ZIP"; do
+            if printf '%s\n' "$ASSETS" | grep -Fxq "$asset"; then
+              echo "Found required asset: $asset"
+            else
+              echo "::error::Release $TAG is missing exact asset $asset"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" -ne 0 ]; then
+            echo "Upload both exact assets before publishing or validating the release:"
+            echo "  gh release upload $TAG $EXPECTED_DMG $EXPECTED_ZIP"
+            exit 1
           fi
+
+          {
+            echo "RELEASE_LABEL=$RELEASE_LABEL"
+            echo "EXPECTED_DMG=$EXPECTED_DMG"
+            echo "EXPECTED_ZIP=$EXPECTED_ZIP"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate tagged appcast contract
+        run: |
+          set -euo pipefail
+          git show "${RELEASE_TAG}:docs/appcast.xml" > "$RUNNER_TEMP/zerm-appcast.xml"
+          git show "${RELEASE_TAG}:Zerm.xcodeproj/project.pbxproj" > "$RUNNER_TEMP/zerm-project.pbxproj"
+
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import xml.etree.ElementTree as ET
+
+          label = os.environ["RELEASE_LABEL"]
+          tag = os.environ["RELEASE_TAG"]
+          expected_zip = os.environ["EXPECTED_ZIP"]
+          appcast_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "zerm-appcast.xml"
+          project_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "zerm-project.pbxproj"
+          sparkle = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+
+          root = ET.parse(appcast_path).getroot()
+          items = root.findall("./channel/item")
+          if len(items) != 1:
+              raise SystemExit(f"expected exactly one appcast item, found {len(items)}")
+          item = items[0]
+          title = (item.findtext("title") or "").strip()
+          bundle_version = (item.findtext(f"{{{sparkle}}}shortVersionString") or "").strip()
+          build_version = (item.findtext(f"{{{sparkle}}}version") or "").strip()
+          enclosure = item.find("enclosure")
+          if title != label:
+              raise SystemExit(f"appcast title {title!r} does not match release label {label!r}")
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", bundle_version):
+              raise SystemExit(f"appcast bundle version is not Apple Major.Minor.Patch: {bundle_version!r}")
+          if not re.fullmatch(r"[1-9][0-9]*", build_version):
+              raise SystemExit(f"appcast build version is not a positive integer: {build_version!r}")
+          if enclosure is None:
+              raise SystemExit("appcast item has no enclosure")
+          expected_url = f"https://github.com/arcusis/Zerm/releases/download/{tag}/{expected_zip}"
+          if enclosure.get("url") != expected_url:
+              raise SystemExit(f"appcast enclosure URL {enclosure.get('url')!r} does not match {expected_url!r}")
+          if not enclosure.get(f"{{{sparkle}}}edSignature"):
+              raise SystemExit("appcast enclosure has no Sparkle EdDSA signature")
+
+          project = project_path.read_text()
+          app_settings = [
+              block for block in re.findall(r"buildSettings = \{(.*?)\n\s*\};", project, re.DOTALL)
+              if re.search(r"^\s*PRODUCT_BUNDLE_IDENTIFIER = com\.arcusis\.zerm;$", block, re.MULTILINE)
+          ]
+          if len(app_settings) != 2:
+              raise SystemExit(f"expected Debug and Release settings for the Zerm app target, found {len(app_settings)}")
+          marketing_versions = {
+              match.group(1)
+              for block in app_settings
+              if (match := re.search(r"^\s*MARKETING_VERSION = ([0-9.]+);$", block, re.MULTILINE))
+          }
+          build_versions = {
+              match.group(1)
+              for block in app_settings
+              if (match := re.search(r"^\s*CURRENT_PROJECT_VERSION = ([0-9]+);$", block, re.MULTILINE))
+          }
+          if marketing_versions != {bundle_version}:
+              raise SystemExit(f"tagged project marketing versions {marketing_versions} do not match appcast {bundle_version}")
+          if build_versions != {build_version}:
+              raise SystemExit(f"tagged project build versions {build_versions} do not match appcast {build_version}")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"APPCAST_BUNDLE_VERSION={bundle_version}\n")
+              env.write(f"APPCAST_BUILD_VERSION={build_version}\n")
+          print(f"Validated {tag}: release label {label}, bundle {bundle_version}, build {build_version}")
+          PY
+
+      - name: Validate Sparkle ZIP identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/zerm-release"
+          gh release download "$RELEASE_TAG" \
+            --pattern "$EXPECTED_ZIP" \
+            --dir "$RUNNER_TEMP/zerm-release"
+
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import plistlib
+          import zipfile
+
+          archive = pathlib.Path(os.environ["RUNNER_TEMP"]) / "zerm-release" / os.environ["EXPECTED_ZIP"]
+          with zipfile.ZipFile(archive) as release_zip:
+              plist_entries = [
+                  name for name in release_zip.namelist()
+                  if name.endswith("Zerm.app/Contents/Info.plist")
+              ]
+              if len(plist_entries) != 1:
+                  raise SystemExit(f"expected one Zerm.app Info.plist, found {len(plist_entries)}")
+              info = plistlib.loads(release_zip.read(plist_entries[0]))
+
+          expected = {
+              "CFBundleIdentifier": "com.arcusis.zerm",
+              "CFBundleShortVersionString": os.environ["APPCAST_BUNDLE_VERSION"],
+              "CFBundleVersion": os.environ["APPCAST_BUILD_VERSION"],
+          }
+          for key, value in expected.items():
+              actual = str(info.get(key, ""))
+              if actual != value:
+                  raise SystemExit(f"ZIP {key} {actual!r} does not match {value!r}")
+          print("Sparkle ZIP bundle identity matches the tagged project and appcast")
+          PY
 
   publish-changelog:
     name: Regenerate site changelog
+    needs: validate-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5

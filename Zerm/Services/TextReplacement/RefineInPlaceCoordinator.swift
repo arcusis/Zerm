@@ -147,9 +147,16 @@ final class RefineInPlaceCoordinator {
             return offerWithoutReplacing(enhanced)
         }
 
-        guard await TargetAppCapabilities.shared.verdict(for: anchor) == .replaceable else {
+        let strategy = await TargetAppCapabilities.shared.verdict(for: anchor)
+
+        if strategy == .clipboardPaste {
+            let result = await CursorPaster.replaceVerifiedSelectionByPasting(enhanced, anchor: anchor)
+            if result.didPostPasteCommand { return }
+            logger.notice("Refine declined: clipboardPasteFailed")
             return offerWithoutReplacing(enhanced)
         }
+
+        guard strategy == .directAccessibility else { return offerWithoutReplacing(enhanced) }
 
         // Gate checks and the write are both synchronous IPC into the target process.
         // Bounded by the 150 ms messaging timeout, but that is still far too long to spend
@@ -168,16 +175,17 @@ final class RefineInPlaceCoordinator {
 
     private typealias Refusal = AXTextReplacer.Refusal
 
-    /// The fallback, and in Electron apps, browsers and terminals the *usual* path. The
+    /// The fallback for terminals, secure fields, changed targets, and editors that expose no
+    /// exact settable text range. The
     /// refined text is never put on the clipboard without being asked for — silently
     /// replacing the user's clipboard is exactly the surprise `restoreClipboardAfterPaste`
     /// exists to avoid.
     private func offerWithoutReplacing(_ enhanced: String) {
         NotificationManager.shared.showNotification(
-            title: "Refined version ready",
-            type: .success,
+            title: String(localized: "Zerm kept the original text to avoid editing the wrong content."),
+            type: .warning,
             duration: 6.0,
-            actionButton: (label: "Copy", action: {
+            actionButton: (label: String(localized: "Copy Refined Text"), action: {
                 _ = ClipboardManager.copyToClipboard(enhanced)
             })
         )

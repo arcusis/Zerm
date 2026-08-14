@@ -1,5 +1,9 @@
 #import "LlamaBridge.h"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wquoted-include-in-framework-header"
+#pragma clang diagnostic ignored "-Wdocumentation"
 #import <llama/llama.h>
+#pragma clang diagnostic pop
 #import <os/log.h>
 
 #include <algorithm>
@@ -12,15 +16,21 @@
     llama_context * _ctx;
     const llama_vocab * _vocab;
     llama_sampler * _sampler;
+    int _contextSize;
+    int _threadCount;
 }
 
-- (instancetype)initWithModelPath:(NSString *)modelPath {
+- (instancetype)initWithModelPath:(NSString *)modelPath
+                       contextSize:(int)contextSize
+                       threadCount:(int)threadCount {
     if ((self = [super init])) {
         _modelPath = std::string(modelPath.UTF8String);
         _model = nullptr;
         _ctx = nullptr;
         _vocab = nullptr;
         _sampler = nullptr;
+        _contextSize = std::max(2048, contextSize);
+        _threadCount = std::max(1, threadCount);
     }
     return self;
 }
@@ -52,12 +62,12 @@
     _vocab = llama_model_get_vocab(_model);
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx = 4096;
-    int threads = (int)NSProcessInfo.processInfo.activeProcessorCount - 2;
-    if (threads < 2) threads = 2;
-    if (threads > 8) threads = 8;
-    cparams.n_threads = threads;
-    cparams.n_threads_batch = threads;
+    const int modelContext = llama_model_n_ctx_train(_model);
+    cparams.n_ctx = (uint32_t)(modelContext > 0
+        ? std::min(_contextSize, modelContext)
+        : _contextSize);
+    cparams.n_threads = _threadCount;
+    cparams.n_threads_batch = _threadCount;
 
     _ctx = llama_init_from_model(_model, cparams);
     if (!_ctx) {
@@ -78,6 +88,11 @@
     return YES;
 }
 
+- (void)setThreadCount:(int)threadCount {
+    _threadCount = std::max(1, threadCount);
+    if (_ctx) llama_set_n_threads(_ctx, _threadCount, _threadCount);
+}
+
 - (nullable NSString *)generateWithSystem:(NSString *)system
                                      user:(NSString *)user
                              maxNewTokens:(int)maxNewTokens
@@ -95,53 +110,97 @@
     std::vector<llama_token> tokens = [self tokenize:prompt addSpecial:true];
     if (tokens.empty()) return nil;
 
-    // On overflow, keep the system/instructions prefix and drop the oldest
-    // middle of the user transcript — never evict instructions while keeping
-    // only the transcript tail (that makes the model continue the text).
-    const int nCtx = (int)llama_n_ctx(_ctx);
-    const int budget = nCtx - 128;
-    if ((int)tokens.size() > budget) {
+    // Reserve the requested response inside the actual per-sequence context. The previous
+    // implementation retained nCtx - 128 prompt tokens regardless of maxNewTokens, so a long
+    // transcript plus a 512-token rewrite eventually exceeded the KV cache. llama.cpp treats
+    // that contract violation as a process-level abort rather than a recoverable error.
+    const int nCtx = std::min((int)llama_n_ctx(_ctx), (int)llama_n_ctx_seq(_ctx));
+    if (nCtx < 256) return nil;
+
+    const int safetyTokens = 64;
+    const int minimumPromptTokens = 128;
+    const int outputBudget = std::max(
+        1,
+        std::min(maxNewTokens, nCtx - safetyTokens - minimumPromptTokens)
+    );
+    const int promptBudget = nCtx - safetyTokens - outputBudget;
+
+    // On overflow, keep the system/instructions prefix and the newest user text. Never evict
+    // the instructions while keeping only the transcript tail (that makes the model continue
+    // the source text instead of rewriting it).
+    if ((int)tokens.size() > promptBudget) {
         std::vector<llama_token> systemTokens = [self tokenize:systemStr addSpecial:false];
-        int keepPrefix = std::min((int)systemTokens.size() + 32, budget / 3);
+        int keepPrefix = std::min((int)systemTokens.size() + 32, promptBudget / 3);
         keepPrefix = std::max(keepPrefix, 64);
-        int keepSuffix = budget - keepPrefix;
+        int keepSuffix = promptBudget - keepPrefix;
         if (keepSuffix < 64) {
-            keepPrefix = budget / 4;
-            keepSuffix = budget - keepPrefix;
+            keepPrefix = promptBudget / 4;
+            keepSuffix = promptBudget - keepPrefix;
         }
         std::vector<llama_token> trimmed;
-        trimmed.reserve(budget);
+        trimmed.reserve(promptBudget);
         trimmed.insert(trimmed.end(), tokens.begin(), tokens.begin() + keepPrefix);
         trimmed.insert(trimmed.end(), tokens.end() - keepSuffix, tokens.end());
         tokens.swap(trimmed);
     }
 
+    // llama_decode also has an independent logical batch limit (commonly 2K even for a 4K
+    // context). Passing the whole retained prompt in one call was the direct cause of the
+    // reported ggml_abort. Prefill sequentially in legal batches, and fail closed on any
+    // decoder error so Swift can fall back to the original transcript.
+    const int nBatch = (int)llama_n_batch(_ctx);
+    if (nBatch <= 0) return nil;
+    for (int offset = 0; offset < (int)tokens.size(); offset += nBatch) {
+        if (isCancelled && isCancelled()) return @"";
+        const int chunkCount = std::min(nBatch, (int)tokens.size() - offset);
+        llama_batch batch = llama_batch_get_one(tokens.data() + offset, (int32_t)chunkCount);
+        const int32_t decodeResult = llama_decode(_ctx, batch);
+        if (decodeResult != 0) {
+            os_log_error(OS_LOG_DEFAULT,
+                         "Zerm local model rejected prompt batch (result=%{public}d, tokens=%{public}d)",
+                         decodeResult, chunkCount);
+            return nil;
+        }
+    }
+
     std::string out;
     int generated = 0;
-    std::vector<llama_token> current = tokens;
 
-    while (generated < maxNewTokens) {
+    while (generated < outputBudget) {
         if (isCancelled && isCancelled()) break;
-
-        llama_batch batch = llama_batch_get_one(current.data(), (int32_t)current.size());
-        if (llama_decode(_ctx, batch) != 0) break;
 
         llama_token id = llama_sampler_sample(_sampler, _ctx, -1);
         if (llama_vocab_is_eog(_vocab, id)) break;
 
         out += [self pieceFor:id];
 
-        // Some small/quantized models emit the turn delimiter as literal text instead of the
-        // special token — stop there so "<end_of_turn>" is never spoken.
-        bool hitStop = false;
-        for (const char *stop : {"<end_of_turn>", "<start_of_turn>", "<eos>"}) {
+        // Some small/quantized models emit chat-template delimiters as literal text instead of
+        // special token IDs. Stop at the earliest one. Gemma 4 can emit the closing
+        // `</start_of_turn>` spelling, which previously leaked into the user's pasted text.
+        size_t firstStop = std::string::npos;
+        for (const char *stop : {
+                 "<end_of_turn>", "</end_of_turn>",
+                 "<start_of_turn>", "</start_of_turn>",
+                 "<eos>", "</eos>", "<|im_end|>", "<|endoftext|>"}) {
             size_t pos = out.find(stop);
-            if (pos != std::string::npos) { out.erase(pos); hitStop = true; break; }
+            if (pos != std::string::npos) firstStop = std::min(firstStop, pos);
         }
-        if (hitStop) break;
+        if (firstStop != std::string::npos) {
+            out.erase(firstStop);
+            break;
+        }
 
         generated++;
-        current.assign(1, id);
+        if (generated >= outputBudget) break;
+
+        llama_batch batch = llama_batch_get_one(&id, 1);
+        const int32_t decodeResult = llama_decode(_ctx, batch);
+        if (decodeResult != 0) {
+            os_log_error(OS_LOG_DEFAULT,
+                         "Zerm local model rejected generated token (result=%{public}d)",
+                         decodeResult);
+            return nil;
+        }
     }
 
     NSString *result = [NSString stringWithUTF8String:out.c_str()];

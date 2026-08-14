@@ -1,0 +1,4 @@
+"NSMicrophoneUsageDescription" = "Zerm זקוק לגישה למיקרופון כדי להקליט שמע לצורך תמלול.";
+"NSAudioCaptureUsageDescription" = "Zerm זקוק לגישה לשמע המתנגן ב-Mac כדי להקליט ולתמלל את שאר המשתתפים בפגישה.";
+"NSScreenCaptureUsageDescription" = "Zerm זקוק לגישה להקלטת המסך כדי להבין את ההקשר המוצג ולשפר את דיוק התמלול.";
+"NSAppleEventsUsageDescription" = "Zerm זקוק להרשאה לתקשר עם הדפדפן כדי לזהות את האתר הנוכחי ולהחיל הגדרות ייעודיות לאתר.";

@@ -29,20 +29,20 @@ enum DictationOutputMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .instant: return "Instant"
-        case .instantRefine: return "Instant + Refine"
-        case .enhanced: return "Enhanced"
+        case .instant: return String(localized: "Instant")
+        case .instantRefine: return String(localized: "Instant + Refine")
+        case .enhanced: return String(localized: "Enhanced")
         }
     }
 
     var subtitle: String {
         switch self {
         case .instant:
-            return "Paste immediately. No AI."
+            return String(localized: "Paste immediately. No AI.")
         case .instantRefine:
-            return "Paste immediately, then improve the text in place. Works in apps that support macOS text accessibility; elsewhere the refined version is offered without changing what you typed."
+            return String(localized: "Paste immediately, then improve the text in place. In apps that do not expose an exact editable text range to macOS, Zerm waits and pastes the refined text once.")
         case .enhanced:
-            return "Wait for the AI, then paste once."
+            return String(localized: "Wait for the AI, then paste once.")
         }
     }
 
@@ -51,6 +51,19 @@ enum DictationOutputMode: String, CaseIterable, Identifiable {
 
     /// Whether the enhancement runs at all.
     var usesEnhancement: Bool { self != .instant }
+
+    /// Resolves features that cannot coexist safely before the pipeline commits to a paste mode.
+    /// Auto-send removes the text before a later rewrite can land, while an opaque editor gives
+    /// Zerm no exact range to rewrite. Both cases keep enhancement enabled and paste the final
+    /// result once instead of failing after raw text has already been inserted.
+    static func effective(
+        configured: DictationOutputMode,
+        autoSendEnabled: Bool,
+        canReplaceAfterPaste: Bool
+    ) -> DictationOutputMode {
+        guard configured == .instantRefine else { return configured }
+        return autoSendEnabled || !canReplaceAfterPaste ? .enhanced : .instantRefine
+    }
 
     static var current: DictationOutputMode {
         let raw = UserDefaults.standard.string(forKey: storageKey) ?? ""

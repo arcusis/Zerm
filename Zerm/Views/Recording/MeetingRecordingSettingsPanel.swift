@@ -1,19 +1,7 @@
 import SwiftUI
 
-/// Everything that configures a meeting recording, in one place.
-///
-/// These switches used to sit in the middle of the Recording tab, between the transport and the
-/// transcript, so the screen you use while a meeting runs was mostly controls you set once. They
-/// live here now, behind the same sliding settings panel Enhancement, Dictionary and Models use.
+/// Feature-local presentation of the same meeting defaults used by native Settings.
 struct MeetingRecordingSettingsPanel: View {
-    @AppStorage("meetingCaptureMicrophone") private var captureMicrophone = true
-    @AppStorage("meetingCaptureSystemAudio") private var captureSystemAudio = true
-    @AppStorage("meetingLiveTranscript") private var liveTranscript = true
-    @AppStorage("meetingIdentifySpeakers") private var identifySpeakers = true
-    @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
-    @AppStorage("meetingAutoDetect") private var autoDetectMeetings = true
-
-    /// Capture settings cannot change mid-meeting — the tracks are already open.
     let isRecording: Bool
     let onImport: () -> Void
     let onDismiss: () -> Void
@@ -21,91 +9,132 @@ struct MeetingRecordingSettingsPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            MeetingSettingsForm(isRecording: isRecording, onImport: onImport)
+        }
+    }
 
-            Form {
-                if isRecording {
-                    Section {
-                        Label(
-                            "A recording is in progress. Capture settings apply to the next one.",
-                            systemImage: "record.circle.fill"
-                        )
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text("Meeting Settings")
+                .font(.headline.weight(.semibold))
+
+            Spacer()
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+                    .background(Color.secondary.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Close meeting settings")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(Divider().opacity(0.5), alignment: .bottom)
+    }
+}
+
+/// Shared meeting defaults. Using one view keeps native Settings and the Meetings sheet bound to
+/// the same keys without duplicating behavior or allowing capture settings to change mid-session.
+struct MeetingSettingsForm: View {
+    @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
+    @AppStorage("meetingCaptureMicrophone") private var captureMicrophone = true
+    @AppStorage("meetingCaptureSystemAudio") private var captureSystemAudio = true
+    @AppStorage("meetingLiveTranscript") private var liveTranscript = true
+    @AppStorage("meetingIdentifySpeakers") private var identifySpeakers = true
+    @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
+    @AppStorage("SelectedLanguage") private var selectedLanguage = "auto"
+
+    let isRecording: Bool
+    var onImport: (() -> Void)? = nil
+
+    var body: some View {
+        Form {
+            if isRecording {
+                Section {
+                    Label(
+                        "A meeting is being recorded. Capture settings apply to the next meeting.",
+                        systemImage: "record.circle.fill"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Toggle(isOn: $captureMicrophone) {
+                    HStack(spacing: 4) {
+                        Text("Microphone")
+                        InfoTip(String(localized: "Records everyone in the room with you, through your input device."))
                     }
                 }
+                .disabled(isRecording)
 
-                Section {
-                    Toggle(isOn: $captureMicrophone) {
-                        HStack(spacing: 4) {
-                            Text("Microphone")
-                            InfoTip("Records everyone in the room with you, through your input device.")
-                        }
+                Toggle(isOn: $captureSystemAudio) {
+                    HStack(spacing: 4) {
+                        Text("Call Audio")
+                        InfoTip(String(localized: "Records people joining through the selected meeting application. All system audio is available as an explicit fallback in meeting preflight."))
                     }
-                    .disabled(isRecording)
-
-                    Toggle(isOn: $captureSystemAudio) {
-                        HStack(spacing: 4) {
-                            Text("System Audio")
-                            InfoTip("Records everyone joining through the call, straight from your Mac's audio output.")
-                        }
-                    }
-                    .disabled(isRecording)
-
-                    if !captureMicrophone && !captureSystemAudio {
-                        Label("Pick at least one source, or there is nothing to record.",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.orange)
-                    }
-                } header: {
-                    Text("Capture")
-                } footer: {
-                    Text("Both are written as separate tracks, so you can tell your side from theirs.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
                 }
+                .disabled(isRecording)
 
-                Section {
-                    Toggle(isOn: $liveTranscript) {
-                        HStack(spacing: 4) {
-                            Text("Transcribe While Recording")
-                            InfoTip("Lines appear as the meeting runs instead of only after it ends.")
-                        }
-                    }
-                    .disabled(isRecording)
-
-                    Toggle(isOn: $identifySpeakers) {
-                        HStack(spacing: 4) {
-                            Text("Identify Speakers")
-                            InfoTip("Separates the voices in the room and labels each transcript line. Needs the microphone.")
-                        }
-                    }
-                    .disabled(isRecording || !captureMicrophone)
-
-                    Toggle(isOn: $summariseAfterMeeting) {
-                        HStack(spacing: 4) {
-                            Text("Summarise When The Meeting Ends")
-                            InfoTip("Writes a summary, action items and chapters once the transcript is complete. Needs a transcript.")
-                        }
-                    }
-                    .disabled(!liveTranscript)
-                } header: {
-                    Text("Transcript")
+                if !captureMicrophone && !captureSystemAudio {
+                    Label(
+                        "Pick at least one source, or there is nothing to record.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.orange)
                 }
+            } header: {
+                Text("Capture")
+            } footer: {
+                Text("Room and call audio are saved as separate, synchronized tracks.")
+            }
 
-                Section {
-                    Toggle(isOn: $autoDetectMeetings) {
-                        HStack(spacing: 4) {
-                            Text("Offer To Record When A Call App Opens")
-                            InfoTip("Watches for Zoom, Meet, Teams and the like, and offers to start recording. Nothing starts on its own.")
-                        }
+            Section {
+                Toggle(isOn: $liveTranscript) {
+                    HStack(spacing: 4) {
+                        Text("Show Transcript While Recording")
+                        InfoTip(String(localized: "Shows transcript lines during the meeting. Zerm still completes processing after recording ends."))
                     }
-                } header: {
-                    Text("Automatic")
                 }
+                .disabled(isRecording)
 
+                Toggle(isOn: $identifySpeakers) {
+                    HStack(spacing: 4) {
+                        Text("Identify Speakers")
+                        InfoTip(String(localized: "Labels speakers in the room and in the call as their audio tracks are processed."))
+                    }
+                }
+                .disabled(isRecording || (!captureMicrophone && !captureSystemAudio))
+
+                Toggle(isOn: $summariseAfterMeeting) {
+                    HStack(spacing: 4) {
+                        Text("Create Summary After Recording")
+                        InfoTip(String(localized: "Uses the selected local Ollama model to create a summary, action items and chapters after transcription completes. Availability is checked before recording starts."))
+                    }
+                }
+                .disabled(isRecording)
+
+                if let nativeAppleLanguageDisclosure {
+                    Label(nativeAppleLanguageDisclosure, systemImage: "character.book.closed")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Transcript")
+            }
+
+            if let onImport {
                 Section {
-                    Button("Import Recordings…") { onImport() }
+                    Button("Import Recordings…", action: onImport)
 
                     Button("Show Recordings Folder") {
                         guard let root = try? MeetingRecordingSession.recordingsRoot() else { return }
@@ -113,41 +142,28 @@ struct MeetingRecordingSettingsPanel: View {
                     }
                 } header: {
                     Text("Library")
-                } footer: {
-                    Text("Recordings stay on this Mac. Nothing is uploaded.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
                 }
             }
-            .toggleStyle(.switch)
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+
+            Section {
+                Text("Recording files stay on this Mac. If the selected Dictation model is cloud-based, meeting audio is sent to that provider for transcription.")
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Privacy")
+            }
         }
+        .toggleStyle(.switch)
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Text("Recording Settings")
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
-
-            Spacer()
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(6)
-                    .background(Color.secondary.opacity(0.1))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Close")
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(Color(NSColor.windowBackgroundColor))
-        .overlay(Divider().opacity(0.5), alignment: .bottom)
+    private var nativeAppleLanguageDisclosure: String? {
+        guard let model = transcriptionModelManager.currentTranscriptionModel,
+              model.provider == .nativeApple else { return nil }
+        return MeetingLanguagePresentation.resolve(
+            provider: model.provider,
+            requestedCode: selectedLanguage,
+            supportedLanguages: LanguageDictionary.appleNative
+        ).disclosure
     }
 }

@@ -56,15 +56,6 @@
       }
     },
     {
-      "identity" : "mediaremote-adapter",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Beingpax/mediaremote-adapter",
-      "state" : {
-        "branch" : "master",
-        "revision" : "b97fa53f0654c8e33519e8a601b0bead3abd310a"
-      }
-    },
-    {
       "identity" : "selectedtextkit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tisfeng/SelectedTextKit",

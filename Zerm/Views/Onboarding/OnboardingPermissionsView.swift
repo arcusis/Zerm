@@ -125,7 +125,7 @@ struct OnboardingPermissionsView: View {
                                     
                                     if permissions[currentPermissionIndex].type == .screenRecording {
                                         InfoTip(
-                                            "Zerm captures on-screen text to understand the context of your voice input, which significantly improves transcription accuracy. Your privacy is important: this data is processed locally and is not stored.",
+                                            String(localized: "Screen Context reads on-screen text for enhancement. Zerm does not save that captured text to disk, but enhancement requests can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac."),
                                             learnMoreURL: Links.docString(.contextualAwareness)
                                         )
                                     }

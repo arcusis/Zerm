@@ -629,11 +629,10 @@ class ZermEngine: NSObject, ObservableObject {
             // A refine runs after the recorder has gone back to idle, so the state check
             // above does not cover it.
             guard !RefineInPlaceCoordinator.shared.isRefining else { return }
-            // Gemma is only needed for opt-in enhancement / Read Aloud rewrites, so dropping
-            // it after an idle spell is cheap. Whisper is the hot path — it stays resident and
-            // is released only under real memory pressure (see startMemoryPressureMonitor).
-            self.logger.notice("Idle after \(self.whisperIdleUnloadSeconds, privacy: .public)s — unloading on-device LLM, keeping Whisper warm")
-            LocalLLMModelManager.shared.unloadIfIdle()
+            // Keep Whisper warm for low-latency dictation. The much larger local LLM manages its
+            // own short burst window and unloads independently so it does not reserve unified
+            // memory between enhancement or Read Aloud jobs.
+            self.logger.notice("Idle after \(self.whisperIdleUnloadSeconds, privacy: .public)s — keeping Whisper warm")
         }
     }
 

@@ -24,7 +24,7 @@ final class KokoroModelManager: ObservableObject {
     /// English Kokoro v0.19 (11 speakers) — Apache-2.0 weights, hosted on the sherpa-onnx release.
     static let package = KokoroModelPackage(
         name: "kokoro-en-v0_19",
-        displayName: "Kokoro 82M (English, on-device)",
+        displayName: String(localized: "Kokoro 82M (English, on-device)"),
         approxSize: "~330 MB",
         downloadURL: URL(string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2")!
     )
@@ -80,23 +80,24 @@ final class KokoroModelManager: ObservableObject {
         guard !isDownloading else { return }
         isDownloading = true
         downloadProgress = 0
-        statusText = "Downloading Kokoro model…"
+        statusText = String(localized: "Downloading Kokoro model…")
         defer { isDownloading = false; downloadProgress = nil }
 
         do {
             let archiveURL = try await downloadArchive(from: Self.package.downloadURL)
-            statusText = "Extracting…"
+            statusText = String(localized: "Extracting…")
             downloadProgress = nil
             try extractTarBz2(at: archiveURL, into: modelsDirectory)
             try? FileManager.default.removeItem(at: archiveURL)
             refreshInstalled()
-            statusText = isInstalled ? nil : "Extraction incomplete"
+            statusText = isInstalled ? nil : String(localized: "Extraction incomplete")
             if !isInstalled { logger.error("Kokoro extraction finished but required files are missing") }
         } catch is CancellationError {
-            statusText = "Download cancelled"
+            statusText = String(localized: "Download cancelled")
         } catch {
             logger.error("Kokoro download failed: \(error.localizedDescription, privacy: .public)")
-            statusText = "Download failed: \(error.localizedDescription)"
+            let format = String(localized: "Download failed: %@")
+            statusText = String.localizedStringWithFormat(format, error.localizedDescription)
         }
     }
 
@@ -113,10 +114,14 @@ final class KokoroModelManager: ObservableObject {
 
     /// Downloads to a temp file, reporting fractional progress via KVO (mirrors WhisperModelManager).
     private func downloadArchive(from url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
-                self?.progressObservation?.invalidate()
-                self?.progressObservation = nil
+        let archiveDestination = modelsDirectory.appendingPathComponent("kokoro-download.tar.bz2")
+        defer {
+            progressObservation?.invalidate()
+            progressObservation = nil
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
                 if let error { continuation.resume(throwing: error); return }
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     continuation.resume(throwing: TTSError.http((response as? HTTPURLResponse)?.statusCode ?? -1, "download failed"))
@@ -124,11 +129,9 @@ final class KokoroModelManager: ObservableObject {
                 }
                 guard let tempURL else { continuation.resume(throwing: TTSError.badResponse); return }
                 do {
-                    let dest = self?.modelsDirectory.appendingPathComponent("kokoro-download.tar.bz2")
-                        ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kokoro.tar.bz2")
-                    try? FileManager.default.removeItem(at: dest)
-                    try FileManager.default.moveItem(at: tempURL, to: dest)
-                    continuation.resume(returning: dest)
+                    try? FileManager.default.removeItem(at: archiveDestination)
+                    try FileManager.default.moveItem(at: tempURL, to: archiveDestination)
+                    continuation.resume(returning: archiveDestination)
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -154,7 +157,10 @@ final class KokoroModelManager: ObservableObject {
         let errData = errPipe.fileHandleForReading.readDataToEndOfFile()  // drain before wait
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            throw TTSError.notAvailable("Failed to extract model: \(String(data: errData, encoding: .utf8) ?? "tar error")")
+            let format = String(localized: "Failed to extract model: %@")
+            let detail = String(data: errData, encoding: .utf8)
+                ?? String(localized: "Archive extraction error")
+            throw TTSError.notAvailable(String.localizedStringWithFormat(format, detail))
         }
     }
 
@@ -164,12 +170,10 @@ final class KokoroModelManager: ObservableObject {
     /// Loads the engine on first use; runs inference off the main thread.
     func synthesize(text: String, sid: Int, speed: Double) async throws -> TTSAudio {
         guard isInstalled else {
-            throw TTSError.notAvailable("The on-device Kokoro model isn't downloaded yet. Download it in Read Aloud settings.")
+            throw TTSError.notAvailable(String(localized: "The on-device Kokoro model isn't downloaded yet. Download it in Read Aloud settings."))
         }
         let engine = ensureEngine()
-        let (samples, sampleRate) = try await engine.generate(text: text, sid: sid, speed: Float(speed))
-        guard !samples.isEmpty else { throw TTSError.emptyAudio }
-        return TTSAudio(pcm: Self.floatToInt16PCM(samples), sampleRate: Double(sampleRate), channels: 1)
+        return try await engine.generateAudio(text: text, sid: sid, speed: Float(speed))
     }
 
     /// Pre-loads the model in the background when Kokoro is the selected provider, so the
@@ -188,14 +192,4 @@ final class KokoroModelManager: ObservableObject {
         return engine
     }
 
-    /// Converts sherpa-onnx Float samples ([-1, 1]) to signed 16-bit little-endian PCM.
-    private static func floatToInt16PCM(_ samples: [Float]) -> Data {
-        var data = Data(capacity: samples.count * 2)
-        for s in samples {
-            let clamped = max(-1.0, min(1.0, s))
-            var v = Int16(clamped * 32767.0).littleEndian
-            withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
-        }
-        return data
-    }
 }

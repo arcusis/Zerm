@@ -194,8 +194,22 @@ class AIEnhancementService: ObservableObject {
         try await aiService.enhanceWithOllama(text: text, systemPrompt: systemPrompt)
     }
 
+    func isMeetingSummaryAvailable(snapshot: MeetingSummarySnapshot) async -> Bool {
+        guard snapshot.route == .local, snapshot.provider == "Ollama" else { return false }
+        return await aiService.isLocalMeetingSummaryAvailable(model: snapshot.model)
+    }
+
     var isConfigured: Bool {
-        aiService.isAPIKeyValid
+        switch aiService.selectedProvider {
+        case .localLLM:
+            return LocalLLMModelManager.isModelDownloaded
+        case .localCLI:
+            return aiService.isAPIKeyValid
+        case .ollama:
+            return aiService.isAPIKeyValid && !aiService.currentModel.isEmpty
+        default:
+            return aiService.isAPIKeyValid
+        }
     }
 
     private func waitForRateLimit() async throws {
@@ -239,6 +253,7 @@ class AIEnhancementService: ObservableObject {
         }
 
         let customVocabulary = customVocabularyService.getCustomVocabulary(from: modelContext)
+        let usesTechnicalProfile = TechnicalTerminology.isCodingPrompt(activePrompt?.id)
 
         let allContextSections = selectedTextContext + clipboardContext + screenCaptureContext
 
@@ -255,7 +270,24 @@ class AIEnhancementService: ObservableObject {
             ""
         }
 
-        let finalContextSection = allContextSections + customVocabularySection
+        let technicalVocabularySection = if usesTechnicalProfile {
+            """
+
+
+            The Coding profile includes the following canonical terminology. Apply it only when
+            pronunciation and surrounding context support the correction; ordinary words with a
+            different meaning must remain ordinary words.
+            <BUILT_IN_TECHNICAL_VOCABULARY>
+            \(TechnicalTerminology.canonicalTerms.joined(separator: ", "))
+            </BUILT_IN_TECHNICAL_VOCABULARY>
+
+            \(TechnicalTerminology.phoneticGuidance)
+            """
+        } else {
+            ""
+        }
+
+        let finalContextSection = allContextSections + customVocabularySection + technicalVocabularySection
 
         if let activePrompt = activePrompt {
             if activePrompt.id == PredefinedPrompts.assistantPromptId {

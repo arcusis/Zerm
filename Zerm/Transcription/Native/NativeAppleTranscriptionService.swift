@@ -43,6 +43,29 @@ class NativeAppleTranscriptionService: TranscriptionService {
             ?? localeIdentifier
     }
 
+    static func meetingSupportedLocaleIdentifiers() async -> [String] {
+        guard #available(macOS 26, *) else { return [] }
+        #if canImport(Speech) && ENABLE_NATIVE_SPEECH_ANALYZER
+        let supportedLocales = await SpeechTranscriber.supportedLocales
+        return supportedLocales.map { $0.identifier(.bcp47) }
+        #else
+        return []
+        #endif
+    }
+
+    static func persistedMeetingLocale(
+        _ localeIdentifier: String,
+        supportedIdentifiers: [String]
+    ) throws -> String {
+        guard let exact = MeetingLanguageResolver.exactNativeAppleLocaleCode(
+            requestedCode: localeIdentifier,
+            supportedIdentifiers: supportedIdentifiers
+        ) else {
+            throw ServiceError.localeNotSupported
+        }
+        return exact
+    }
+
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
         guard model is NativeAppleModel else {
             throw ServiceError.invalidModel
@@ -59,15 +82,32 @@ class NativeAppleTranscriptionService: TranscriptionService {
         let audioFile = try AVAudioFile(forReading: audioURL)
         let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
-        // Apple Speech uses BCP-47 locale identifiers directly.
-        let selectedLanguage = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "en-US"
-        let locale = Locale(identifier: selectedLanguage)
-
         let supportedLocales = await SpeechTranscriber.supportedLocales
         let installedLocales = await SpeechTranscriber.installedLocales
         let supportedIdentifiers = Set(supportedLocales.map { $0.identifier(.bcp47) })
         let installedIdentifiers = Set(installedLocales.map { $0.identifier(.bcp47) })
-        let selectedLocaleIdentifier = locale.identifier(.bcp47)
+
+        // `auto` is Zerm's provider-neutral sentinel, not a locale identifier. Meeting jobs have
+        // already persisted one concrete locale; ordinary Dictation resolves the sentinel once
+        // for this operation using the same deterministic policy.
+        let selectedLanguage = LanguagePreference.selectedCode()
+        let selectedLocaleIdentifier: String
+        if LanguagePreference.operationOverrideCode != nil {
+            // A meeting override is already a persisted, runtime-validated locale. Never
+            // reinterpret it using the current machine locale during review/reprocessing.
+            selectedLocaleIdentifier = try Self.persistedMeetingLocale(
+                selectedLanguage,
+                supportedIdentifiers: supportedLocales.map { $0.identifier(.bcp47) }
+            )
+        } else {
+            selectedLocaleIdentifier = MeetingLanguageResolver.nativeAppleLocaleCode(
+                requestedCode: selectedLanguage,
+                supportedIdentifiers: supportedLocales.map { $0.identifier(.bcp47) }
+            )
+        }
+        let locale = supportedLocales.first {
+            $0.identifier(.bcp47).caseInsensitiveCompare(selectedLocaleIdentifier) == .orderedSame
+        } ?? Locale(identifier: selectedLocaleIdentifier)
         let isLocaleSupported = supportedIdentifiers.contains(selectedLocaleIdentifier)
         let isLocaleInstalled = installedIdentifiers.contains(selectedLocaleIdentifier)
 
@@ -135,7 +175,10 @@ class NativeAppleTranscriptionService: TranscriptionService {
         let resultTimeout = max(20.0, audioDuration * 4.0 + 10.0)
         let finalTranscription: String
         do {
-            finalTranscription = try await waitForResultStream(resultTask, timeout: resultTimeout)
+            finalTranscription = try await Self.awaitResult(
+                resultTask,
+                timeoutNanoseconds: UInt64(resultTimeout * 1_000_000_000)
+            )
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             resultTask.cancel()
@@ -189,29 +232,73 @@ class NativeAppleTranscriptionService: TranscriptionService {
         #endif
     }
 
-    private func waitForResultStream(
+    static func awaitResult(
         _ resultTask: Task<String, Error>,
-        timeout: TimeInterval
+        timeoutNanoseconds: UInt64
     ) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                try await resultTask.value
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                throw ServiceError.resultStreamTimedOut
-            }
-            do {
-                guard let result = try await group.next() else {
-                    throw ServiceError.transcriptionFailed
+        let gate = NativeResultGate()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let resultWaiter = Task {
+                    do {
+                        gate.resolve(.success(try await resultTask.value), continuation: continuation)
+                    } catch {
+                        gate.resolve(.failure(error), continuation: continuation)
+                    }
                 }
-                group.cancelAll()
-                return result
-            } catch {
-                group.cancelAll()
-                logger.error("Apple Speech result wait failed: \(error.localizedDescription, privacy: .public).")
-                throw error
+                gate.register(resultWaiter)
+                let timeoutWaiter = Task {
+                    if timeoutNanoseconds > 0 {
+                        try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    }
+                    guard !Task.isCancelled else { return }
+                    if gate.resolve(
+                        .failure(ServiceError.resultStreamTimedOut),
+                        continuation: continuation
+                    ) {
+                        resultTask.cancel()
+                    }
+                }
+                gate.register(timeoutWaiter)
             }
+        } onCancel: {
+            resultTask.cancel()
         }
+    }
+}
+
+private final class NativeResultGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+    private var waiters: [Task<Void, Never>] = []
+
+    func register(_ waiter: Task<Void, Never>) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            waiter.cancel()
+            return
+        }
+        waiters.append(waiter)
+        lock.unlock()
+    }
+
+    @discardableResult
+    func resolve(
+        _ result: Result<String, Error>,
+        continuation: CheckedContinuation<String, Error>
+    ) -> Bool {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return false
+        }
+        completed = true
+        let waiters = waiters
+        self.waiters.removeAll()
+        lock.unlock()
+        waiters.forEach { $0.cancel() }
+        continuation.resume(with: result)
+        return true
     }
 }

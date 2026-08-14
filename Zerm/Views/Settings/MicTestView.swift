@@ -15,12 +15,14 @@ struct MicTestView: View {
             HStack {
                 Text("Test Microphone")
                 Spacer()
-                Button(isTesting ? "Stop" : "Test my mic") {
+                Button {
                     if isTesting {
                         stopTest()
                     } else {
                         startTest()
                     }
+                } label: {
+                    Text(isTesting ? LocalizedStringKey("Stop") : LocalizedStringKey("Test my mic"))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -38,7 +40,11 @@ struct MicTestView: View {
             .frame(height: 10)
 
             if isTesting {
-                Text(String(format: "Level %.0f dB  ·  Peak %.0f dB", levelDb, peakDb))
+                Text(String.localizedStringWithFormat(
+                    String(localized: "Level %.0f dB  ·  Peak %.0f dB"),
+                    levelDb,
+                    peakDb
+                ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -64,7 +70,10 @@ struct MicTestView: View {
         isTesting = true
         let deviceID = deviceManager.getCurrentDevice()
         guard deviceID != 0 else {
-            NotificationManager.shared.showNotification(title: "No microphone selected", type: .error)
+            NotificationManager.shared.showNotification(
+                title: String(localized: "No microphone selected"),
+                type: .error
+            )
             isTesting = false
             return
         }
@@ -87,7 +96,10 @@ struct MicTestView: View {
         } catch {
             isTesting = false
             NotificationManager.shared.showNotification(
-                title: "Mic test failed: \(error.localizedDescription)",
+                title: String.localizedStringWithFormat(
+                    String(localized: "Mic test failed: %@"),
+                    error.localizedDescription
+                ),
                 type: .error
             )
         }

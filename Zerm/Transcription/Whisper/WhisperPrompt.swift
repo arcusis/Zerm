@@ -109,14 +109,11 @@ class WhisperPrompt: ObservableObject {
             return customPrompt
         }
 
-        // "auto" is the shipped default for SelectedLanguage, but there is no "auto" key in
-        // either table — so this used to fall all the way through to languagePrompts["default"],
-        // which is the empty string. That silently discarded the initial prompt for every
-        // default-config user, including the English number-word hint. The prompt is a style
-        // hint, not a language lock (Whisper still auto-detects because params.language stays
-        // nil), so borrowing the English entry is safe and restores the intended behaviour.
+        // Auto detection must remain language-neutral. An English initial prompt materially
+        // biases short meeting windows and made Hebrew and mixed-language meetings appear
+        // English-only even though the model itself supports them.
         if language == LanguagePreference.autoCode {
-            return languagePrompts["en"] ?? languagePrompts["default"] ?? ""
+            return languagePrompts["default"] ?? ""
         }
 
         // Otherwise return the default prompt, with safe fallback

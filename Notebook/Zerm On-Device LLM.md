@@ -2,7 +2,9 @@
 
 The third local model — Gemma via `llama.cpp` — powers smart reading and AI enhancement. Code in `Zerm/LocalLLM/`.
 
-**Default:** Gemma 4 E2B Instruct Q4_K_M GGUF (~3.1 GB) from `unsloth/gemma-4-E2B-it-GGUF`. E2B is the smallest Gemma 4 (PLE, effective ~2B). Model-agnostic — uses each GGUF's built-in chat template (Gemma fallback), so other instruct models can be swapped in.
+**Default:** Google's official Gemma 4 E2B Instruct QAT Q4_0 GGUF (~3.35 GB), pinned to Hugging Face revision `675cff42` and verified with SHA-256 before installation. E2B is the smallest Gemma 4 (PLE, effective ~2B) and is deliberately the default on every Apple-silicon memory tier. E4B, 12B, and 27B remain manual opt-ins; installed RAM never silently selects a larger model. The previous Unsloth E2B Q4_K_M remains catalogued for compatibility with existing downloads.
+
+The runtime uses a 4K context on sub-12 GB systems and an 8K context elsewhere. It does not allocate 16K/32K caches for Zerm's focused rewriting and narration jobs. A warm model is released after two idle minutes, while memory-pressure handling can reclaim it immediately. This keeps burst performance without permanently reserving several gigabytes of unified memory.
 
 ## Components
 
@@ -24,7 +26,7 @@ flowchart LR
     LWS[LibWhisper.swift] -->|import whisper| WF[whisper.framework + ggml]
 ```
 
-## Inference (llama.cpp b9699)
+## Inference (llama.cpp commit `dd69db2`)
 
 `llama_model_load_from_file` → `llama_init_from_model` (`n_gpu_layers=999`, Metal). Prompt via `llama_chat_apply_template`. Decode loop: `llama_batch_get_one` → `llama_decode` → `llama_sampler_sample(-1)`, stop on `llama_vocab_is_eog`. Sampler: top-k 40 / top-p 0.95 / **temp 0.3** / dist. KV reset: `llama_memory_clear(llama_get_memory(ctx), true)`.
 
@@ -35,7 +37,7 @@ flowchart LR
 
 ## Packaging
 
-`llama.xcframework` (b9699) — dynamic, module map, **embedded + signed** (mirrors whisper). No bridging header for the framework; `.mm` includes it directly.
+`llama.xcframework` (source pinned by `LLAMA_COMMIT` in the Makefile) — dynamic, module map, **embedded + signed** (mirrors whisper). Metal and Accelerate are enabled by the upstream Apple build; the bridge requests full Metal offload and falls back only when the runtime cannot provide it. No bridging header for the framework; `.mm` includes it directly.
 
 ## Consumers
 

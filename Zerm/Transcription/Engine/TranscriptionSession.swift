@@ -20,10 +20,12 @@ protocol TranscriptionSession: AnyObject {
 @MainActor
 final class FileTranscriptionSession: TranscriptionSession {
     private let service: TranscriptionService
+    private let provider: ModelProvider
     private var model: (any TranscriptionModel)?
 
-    init(service: TranscriptionService) {
+    init(service: TranscriptionService, provider: ModelProvider) {
         self.service = service
+        self.provider = provider
     }
 
     func prepare(model: any TranscriptionModel) async throws -> ((Data) -> Void)? {
@@ -35,7 +37,12 @@ final class FileTranscriptionSession: TranscriptionSession {
         guard let model = model else {
             throw ZermEngineError.transcriptionFailed
         }
-        return try await service.transcribe(audioURL: audioURL, model: model)
+        return try await TranscriptionInferenceScheduler.shared.run(
+            provider: provider,
+            priority: .dictation
+        ) {
+            try await self.service.transcribe(audioURL: audioURL, model: model)
+        }
     }
 
     func cancel() {
@@ -50,13 +57,19 @@ final class FileTranscriptionSession: TranscriptionSession {
 final class StreamingTranscriptionSession: TranscriptionSession {
     private let streamingService: StreamingTranscriptionService
     private let fallbackService: TranscriptionService
+    private let provider: ModelProvider
     private var model: (any TranscriptionModel)?
     private var streamingFailed = false
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "StreamingTranscriptionSession")
 
-    init(streamingService: StreamingTranscriptionService, fallbackService: TranscriptionService) {
+    init(
+        streamingService: StreamingTranscriptionService,
+        fallbackService: TranscriptionService,
+        provider: ModelProvider
+    ) {
         self.streamingService = streamingService
         self.fallbackService = fallbackService
+        self.provider = provider
     }
 
     func prepare(model: any TranscriptionModel) async throws -> ((Data) -> Void)? {
@@ -106,7 +119,12 @@ final class StreamingTranscriptionSession: TranscriptionSession {
         }
 
         logger.notice("Using batch fallback for \(model.displayName, privacy: .public)")
-        return try await fallbackService.transcribe(audioURL: audioURL, model: model)
+        return try await TranscriptionInferenceScheduler.shared.run(
+            provider: provider,
+            priority: .dictation
+        ) {
+            try await self.fallbackService.transcribe(audioURL: audioURL, model: model)
+        }
     }
 
     func cancel() {

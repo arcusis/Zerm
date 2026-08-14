@@ -108,10 +108,49 @@ make release            # or: scripts/release.sh
 
 This builds the Release configuration, signs the app with Developer ID and the
 hardened runtime, notarizes app and DMG with Apple, staples the tickets, and
-verifies the result with `spctl`. The DMG lands in the repo root as
-`Zerm_X.Y.Z_aarch64.dmg`, ready for `gh release upload`.
+verifies the result with `spctl`. It exports both exact GitHub Release assets in
+the repo root: `Zerm_<release-label>_aarch64.dmg` and the Sparkle enclosure
+`Zerm-<release-label>-macos.zip`. Upload both with the command printed by the
+script.
+
+By default the release label is the Xcode project's `MARKETING_VERSION` and the
+tag is `v<MARKETING_VERSION>`. If the approved GitHub release needs a distinct
+three- or four-component label, set both explicitly:
+
+```bash
+RELEASE_LABEL=A.B.C.D RELEASE_TAG=vA.B.C.D scripts/release.sh
+```
+
+This changes the GitHub tag, filenames, appcast title and enclosure URL only.
+The app and `sparkle:shortVersionString` still use Apple's three-component
+`MARKETING_VERSION`; `sparkle:version` uses the strictly increasing
+`CURRENT_PROJECT_VERSION`, which controls update ordering. The script rejects a
+noncanonical tag/label pair or a build number that is not newer than the current
+published appcast.
+
+To sign and notarize a Release app built on the Office Mac without rebuilding
+on the signing Mac, copy the app outside `.release-build` and run the script
+directly (not through `make release`, whose `setup` prerequisite builds native
+dependencies):
+
+```bash
+PREBUILT_APP=/path/to/Zerm.app \
+  RELEASE_LABEL=A.B.C.D RELEASE_TAG=vA.B.C.D \
+  scripts/release.sh
+```
+
+The script fails before signing if the bundle identifier, project version,
+build number or arm64 executable does not match, and validates the staged copy
+again. Sparkle signing material and release notes are mandatory for a real run.
 
 `SKIP_NOTARIZE=1 scripts/release.sh` does a signing-only dry run.
+
+After packaging, commit the generated `docs/appcast.xml` with the release source,
+push the tag, create a draft GitHub Release, and upload both exact assets. Run
+the Release workflow manually against that draft tag before publishing. The
+workflow cross-checks the tag and filenames against the tagged appcast, Xcode
+project and ZIP bundle identity; its `released` run is a post-publication
+verification, not a substitute for the draft gate.
 
 ### After publishing the GitHub Release
 
@@ -191,4 +230,4 @@ If you encounter any build issues:
 4. Verify all dependencies are properly installed
 5. Make sure whisper.xcframework is properly built and linked
 
-For more help, please check the [issues](https://github.com/Arcusis/Zerm/issues) section or create a new issue. 
+For more help, please check the [issues](https://github.com/Arcusis/Zerm/issues) section or create a new issue.

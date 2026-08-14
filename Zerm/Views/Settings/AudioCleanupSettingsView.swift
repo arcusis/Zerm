@@ -31,7 +31,7 @@ struct AudioCleanupSettingsView: View {
                     Toggle(isOn: $isTranscriptionCleanupEnabled) {
                         HStack(spacing: 4) {
                             Text("Auto-delete Transcripts")
-                            InfoTip("Automatically delete transcript history based on the retention period you set. This removes the transcripts themselves — your usage statistics on the Dashboard are stored separately and are never affected.")
+                            InfoTip(String(localized: "Automatically delete transcript history based on the retention period you set. This removes the transcripts themselves — your usage statistics on the Dashboard are stored separately and are never affected."))
                         }
                     }
 
@@ -65,7 +65,7 @@ struct AudioCleanupSettingsView: View {
                             HStack(spacing: 4) {
                                 Text("Delete After")
                                 InfoTip(
-                                    "How long a transcript stays in your history before it is removed, along with its audio. Immediately means nothing is kept at all — the text is pasted and then dropped, so there is no history to search or copy from later.",
+                                    String(localized: "How long a transcript stays in your history before it is removed, along with its audio. Immediately means nothing is kept at all — the text is pasted and then dropped, so there is no history to search or copy from later."),
                                     doc: .privacyRetention
                                 )
                             }
@@ -80,7 +80,7 @@ struct AudioCleanupSettingsView: View {
                                     }
                                 }
                             }
-                            InfoTip("Applies the retention period above right now instead of waiting for the next scheduled sweep. Anything older than the period is deleted and cannot be recovered.")
+                            InfoTip(String(localized: "Applies the retention period above right now instead of waiting for the next scheduled sweep. Anything older than the period is deleted and cannot be recovered."))
                         }
                     }
                     .padding(.top, 12)
@@ -119,7 +119,7 @@ struct AudioCleanupSettingsView: View {
                         Toggle(isOn: $isAudioCleanupEnabled) {
                             HStack(spacing: 4) {
                                 Text("Auto-delete Audio Files")
-                                InfoTip("Automatically delete audio recordings while keeping text transcripts intact. Usage statistics on the Dashboard are not affected.")
+                                InfoTip(String(localized: "Automatically delete audio recordings while keeping text transcripts intact. Usage statistics on the Dashboard are not affected."))
                             }
                         }
 
@@ -153,14 +153,14 @@ struct AudioCleanupSettingsView: View {
                                 HStack(spacing: 4) {
                                     Text("Keep Audio For")
                                     InfoTip(
-                                        "How long recordings stay on disk before being deleted. The transcripts are kept either way — only the audio goes, which is what takes up the space. Keep a week or two if you use Retry Last Transcription, since that needs the original audio.",
+                                        String(localized: "How long recordings stay on disk before being deleted. The transcripts are kept either way — only the audio goes, which is what takes up the space. Keep a week or two if you use Retry Last Transcription, since that needs the original audio."),
                                         doc: .privacyRetention
                                     )
                                 }
                             }
 
                             HStack(spacing: 4) {
-                                Button(isPerformingCleanup ? "Analyzing..." : "Run Cleanup Now") {
+                                Button {
                                     Task {
                                         await MainActor.run { isPerformingCleanup = true }
                                         let info = await AudioCleanupManager.shared.getCleanupInfo(modelContext: modelContext)
@@ -170,9 +170,13 @@ struct AudioCleanupSettingsView: View {
                                             isShowingConfirmation = true
                                         }
                                     }
+                                } label: {
+                                    Text(isPerformingCleanup
+                                         ? LocalizedStringKey("Analyzing...")
+                                         : LocalizedStringKey("Run Cleanup Now"))
                                 }
                                 .disabled(isPerformingCleanup)
-                                InfoTip("Finds audio files older than the period above and shows how many there are, and how much space they use, before you confirm the deletion.")
+                                InfoTip(String(localized: "Finds audio files older than the period above and shows how many there are, and how much space they use, before you confirm the deletion."))
                             }
                         }
                         .padding(.top, 12)
@@ -185,7 +189,7 @@ struct AudioCleanupSettingsView: View {
                     Button("Cancel", role: .cancel) { }
 
                     if cleanupInfo.fileCount > 0 {
-                        Button("Delete \(cleanupInfo.fileCount) Files", role: .destructive) {
+                        Button(deleteFilesTitle, role: .destructive) {
                             Task {
                                 await MainActor.run { isPerformingCleanup = true }
                                 let result = AudioCleanupManager.shared.runCleanupForTranscriptions(
@@ -202,18 +206,18 @@ struct AudioCleanupSettingsView: View {
                     }
                 } message: {
                     if cleanupInfo.fileCount > 0 {
-                        Text("This will delete \(cleanupInfo.fileCount) audio files (\(AudioCleanupManager.shared.formatFileSize(cleanupInfo.totalSize))).")
+                        Text(deleteConfirmationMessage)
                     } else {
-                        Text("No audio files found older than \(audioRetentionPeriod) day\(audioRetentionPeriod > 1 ? "s" : "").")
+                        Text("No audio files were found beyond the retention period.")
                     }
                 }
                 .alert("Cleanup Complete", isPresented: $showResultAlert) {
                     Button("OK", role: .cancel) { }
                 } message: {
                     if cleanupResult.errorCount > 0 {
-                        Text("Deleted \(cleanupResult.deletedCount) files. Failed: \(cleanupResult.errorCount).")
+                        Text(cleanupPartialResultMessage)
                     } else {
-                        Text("Deleted \(cleanupResult.deletedCount) audio files.")
+                        Text(cleanupSuccessMessage)
                     }
                 }
                 .onChange(of: isAudioCleanupEnabled) { _, newValue in
@@ -238,7 +242,7 @@ struct AudioCleanupSettingsView: View {
                     isShowingStatsResetConfirmation = true
                 }
                 InfoTip(
-                    "Permanently clears every recorded day on the Dashboard, along with the Read Aloud totals. Your transcripts and audio recordings are left alone — those have their own controls above. This cannot be undone, and the numbers do not come back: they are not rebuilt from your transcripts afterwards, even if you have kept every one of them.",
+                    String(localized: "Permanently clears every recorded day on the Dashboard, along with the Read Aloud totals. Your transcripts and audio recordings are left alone — those have their own controls above. This cannot be undone, and the numbers do not come back: they are not rebuilt from your transcripts afterwards, even if you have kept every one of them."),
                     doc: .privacyRetention
                 )
             }
@@ -255,5 +259,22 @@ struct AudioCleanupSettingsView: View {
                 Text("Every recorded day and the Read Aloud totals will be deleted. Transcripts and audio are not affected. This cannot be undone.")
             }
         }
+    }
+
+    private var deleteFilesTitle: String {
+        String(localized: "audio_cleanup_delete_files \(cleanupInfo.fileCount)")
+    }
+
+    private var deleteConfirmationMessage: String {
+        let size = AudioCleanupManager.shared.formatFileSize(cleanupInfo.totalSize)
+        return String(localized: "audio_cleanup_delete_confirmation \(cleanupInfo.fileCount) \(size)")
+    }
+
+    private var cleanupPartialResultMessage: String {
+        String(localized: "audio_cleanup_result_counts \(cleanupResult.deletedCount) \(cleanupResult.errorCount)")
+    }
+
+    private var cleanupSuccessMessage: String {
+        String(localized: "audio_cleanup_deleted_files \(cleanupResult.deletedCount)")
     }
 }

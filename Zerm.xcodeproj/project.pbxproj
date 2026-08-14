@@ -14,8 +14,6 @@
 		E1A261122CC143AC00B233D1 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = E1A261112CC143AC00B233D1 /* KeyboardShortcuts */; };
 		E1ADD45A2CC5352A00303ECB /* LaunchAtLogin in Frameworks */ = {isa = PBXBuildFile; productRef = E1ADD4592CC5352A00303ECB /* LaunchAtLogin */; };
 		E1ADD45F2CC544F100303ECB /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E1ADD45E2CC544F100303ECB /* Sparkle */; };
-		E1D7EF992E35E16C00640029 /* MediaRemoteAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = E1D7EF982E35E16C00640029 /* MediaRemoteAdapter */; };
-		E1D7EF9A2E35E19B00640029 /* MediaRemoteAdapter in Embed Frameworks */ = {isa = PBXBuildFile; productRef = E1D7EF982E35E16C00640029 /* MediaRemoteAdapter */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		E1ECEC162E44591300DFFBA8 /* Zip in Frameworks */ = {isa = PBXBuildFile; productRef = E1ECEC152E44591300DFFBA8 /* Zip */; };
 		E1F1037B2EF85FC700A4FF94 /* SelectedTextKit in Frameworks */ = {isa = PBXBuildFile; productRef = E1F1037A2EF85FC700A4FF94 /* SelectedTextKit */; };
 		E1F350112F1D10D600790A2C /* whisper.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A0BD052EB1E7B800266859 /* whisper.xcframework */; };
@@ -24,6 +22,9 @@
 		D7A1C0DE0000000000000003 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000004 /* onnxruntime.xcframework */; };
 		D7A1C0DE0000000000000005 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000007 /* llama.xcframework */; };
 		D7A1C0DE0000000000000006 /* llama.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000007 /* llama.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D7A1C0DE0000000000000011 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000012 /* AppIntents.framework */; };
+		D7A1C0DE0000000000000013 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000012 /* AppIntents.framework */; };
+		D7A1C0DE0000000000000014 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7A1C0DE0000000000000012 /* AppIntents.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -52,7 +53,6 @@
 			files = (
 				E1F350122F1D10D600790A2C /* whisper.xcframework in Embed Frameworks */,
 				D7A1C0DE0000000000000006 /* llama.xcframework in Embed Frameworks */,
-				E1D7EF9A2E35E19B00640029 /* MediaRemoteAdapter in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -68,13 +68,27 @@
 		D7A1C0DE0000000000000002 /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "$(HOME)/Zerm-Dependencies/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"; sourceTree = "<group>"; };
 		D7A1C0DE0000000000000004 /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "onnxruntime.xcframework"; path = "$(HOME)/Zerm-Dependencies/sherpa-onnx/build-swift-macos/onnxruntime.xcframework"; sourceTree = "<group>"; };
 		D7A1C0DE0000000000000007 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = "$(HOME)/Zerm-Dependencies/llama/build-apple/llama.xcframework"; sourceTree = "<group>"; };
+		D7A1C0DE0000000000000012 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		E1B2DCAA2E3DE70A008DFD68 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "../whisper.cpp/build-apple/whisper.xcframework"; sourceTree = "<group>"; };
 		E1CE28772E4336150082B758 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "../build-apple/whisper.xcframework"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D7A1C0DE0000000000000010 /* Exceptions for "Zerm" folder in "Zerm" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E11473AF2CBE0F0A00318EE4 /* Zerm */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		E11473B22CBE0F0A00318EE4 /* Zerm */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D7A1C0DE0000000000000010 /* Exceptions for "Zerm" folder in "Zerm" target */,
+			);
 			path = Zerm;
 			sourceTree = "<group>";
 		};
@@ -100,10 +114,10 @@
 				D7A1C0DE0000000000000001 /* sherpa-onnx.xcframework in Frameworks */,
 				D7A1C0DE0000000000000003 /* onnxruntime.xcframework in Frameworks */,
 				D7A1C0DE0000000000000005 /* llama.xcframework in Frameworks */,
+				D7A1C0DE0000000000000011 /* AppIntents.framework in Frameworks */,
 				E1ECEC162E44591300DFFBA8 /* Zip in Frameworks */,
 				E1ADD45A2CC5352A00303ECB /* LaunchAtLogin in Frameworks */,
 				E11BBA4E2E5DC555000AB839 /* FluidAudio in Frameworks */,
-				E1D7EF992E35E16C00640029 /* MediaRemoteAdapter in Frameworks */,
 				E161D4A12F41ECB90086F83D /* CloudKit.framework in Frameworks */,
 				E1ADD45F2CC544F100303ECB /* Sparkle in Frameworks */,
 				E15433AB2F86A73C0083437A /* LLMkit in Frameworks */,
@@ -116,6 +130,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7A1C0DE0000000000000013 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -123,6 +138,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7A1C0DE0000000000000014 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -153,6 +169,7 @@
 		E114741C2CBE1DE200318EE4 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				D7A1C0DE0000000000000012 /* AppIntents.framework */,
 				E161D4A02F41ECB90086F83D /* CloudKit.framework */,
 				E1A0BD052EB1E7B800266859 /* whisper.xcframework */,
 				E1CE28772E4336150082B758 /* whisper.xcframework */,
@@ -186,7 +203,6 @@
 				E1A261112CC143AC00B233D1 /* KeyboardShortcuts */,
 				E1ADD4592CC5352A00303ECB /* LaunchAtLogin */,
 				E1ADD45E2CC544F100303ECB /* Sparkle */,
-				E1D7EF982E35E16C00640029 /* MediaRemoteAdapter */,
 				E1ECEC152E44591300DFFBA8 /* Zip */,
 				E11BBA4D2E5DC555000AB839 /* FluidAudio */,
 				E1342C1E2EB4844800CED8A2 /* Atomics */,
@@ -271,6 +287,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				he,
 				Base,
 			);
 			mainGroup = E11473A72CBE0F0A00318EE4;
@@ -279,7 +296,6 @@
 				E1A261102CC143AC00B233D1 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 				E1ADD4582CC5352A00303ECB /* XCRemoteSwiftPackageReference "LaunchAtLogin-Modern" */,
 				E1ADD45D2CC544F100303ECB /* XCRemoteSwiftPackageReference "Sparkle" */,
-				E1D7EF972E35E16C00640029 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */,
 				E1ECEC142E44590200DFFBA8 /* XCRemoteSwiftPackageReference "Zip" */,
 				E11BBA4C2E5DC555000AB839 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				E1342C1D2EB4844800CED8A2 /* XCRemoteSwiftPackageReference "swift-atomics" */,
@@ -483,6 +499,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				SWIFT_OBJC_BRIDGING_HEADER = "Zerm/Zerm-Bridging-Header.h";
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(inherited)",
+					"-Wno-quoted-include-in-framework-header",
+					"-Wno-documentation",
+				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
@@ -496,7 +517,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 281;
+				CURRENT_PROJECT_VERSION = 282;
 				DEVELOPMENT_ASSET_PATHS = "\"Zerm/Preview Content\"";
 				DEVELOPMENT_TEAM = V6J6A3VWY2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -511,7 +532,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.4;
-				MARKETING_VERSION = 2.8.1;
+				MARKETING_VERSION = 2.8.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.arcusis.zerm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ENABLE_NATIVE_SPEECH_ANALYZER $(inherited)";
@@ -524,6 +545,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				SWIFT_OBJC_BRIDGING_HEADER = "Zerm/Zerm-Bridging-Header.h";
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(inherited)",
+					"-Wno-quoted-include-in-framework-header",
+					"-Wno-documentation",
+				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
@@ -537,7 +563,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 281;
+				CURRENT_PROJECT_VERSION = 282;
 				DEVELOPMENT_ASSET_PATHS = "\"Zerm/Preview Content\"";
 				DEVELOPMENT_TEAM = V6J6A3VWY2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -552,7 +578,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.4;
-				MARKETING_VERSION = 2.8.1;
+				MARKETING_VERSION = 2.8.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.arcusis.zerm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "ENABLE_NATIVE_SPEECH_ANALYZER $(inherited)";
@@ -719,14 +745,6 @@
 				minimumVersion = 2.6.4;
 			};
 		};
-		E1D7EF972E35E16C00640029 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Beingpax/mediaremote-adapter";
-			requirement = {
-				branch = master;
-				kind = branch;
-			};
-		};
 		E1ECEC142E44590200DFFBA8 /* XCRemoteSwiftPackageReference "Zip" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/marmelroy/Zip";
@@ -775,11 +793,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E1ADD45D2CC544F100303ECB /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
-		};
-		E1D7EF982E35E16C00640029 /* MediaRemoteAdapter */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E1D7EF972E35E16C00640029 /* XCRemoteSwiftPackageReference "mediaremote-adapter" */;
-			productName = MediaRemoteAdapter;
 		};
 		E1ECEC152E44591300DFFBA8 /* Zip */ = {
 			isa = XCSwiftPackageProductDependency;

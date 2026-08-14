@@ -31,7 +31,7 @@ final class WhisperModelWarmupCoordinator: ObservableObject {
             }
 
             await MainActor.run {
-                self.warmingModels.remove(model.name)
+                _ = self.warmingModels.remove(model.name)
             }
         }
     }

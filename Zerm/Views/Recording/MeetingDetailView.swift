@@ -6,10 +6,15 @@ import SwiftUI
 /// a recording in progress and a recording being replayed cannot drift into looking like two
 /// different features.
 struct MeetingDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var controller: MeetingRecordingController
     let item: MeetingRecordingStore.Item
     let sidecar: MeetingRecordingStore.Sidecar?
+    var onProcessed: () -> Void = {}
 
     @StateObject private var player = MeetingPlayer()
+    @State private var isProcessing = false
+    @State private var processingError: String?
 
     private var lines: [MeetingRecordingStore.Sidecar.Line] { sidecar?.segments ?? [] }
     /// Nothing is "playing now" before playback has started, so an untouched recording opens
@@ -22,6 +27,7 @@ struct MeetingDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             transport
+            processingStatus
             if let summary = sidecar?.summary, !summary.isEmpty {
                 summaryCard(summary)
             }
@@ -30,6 +36,17 @@ struct MeetingDetailView: View {
         .onAppear { player.load(item) }
         .onDisappear { player.stop() }
         .onChange(of: item.id) { _, _ in player.load(item) }
+        .alert(
+            "Could Not Process Recording",
+            isPresented: Binding(
+                get: { processingError != nil },
+                set: { if !$0 { processingError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { processingError = nil }
+        } message: {
+            Text(processingError ?? String(localized: "Unknown processing error"))
+        }
     }
 
     // MARK: - Transport
@@ -56,9 +73,21 @@ struct MeetingDetailView: View {
 
                 Spacer()
 
+                Button(action: processRecording) {
+                    if isProcessing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(processTitle, systemImage: "waveform.badge.magnifyingglass")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canProcess || isProcessing)
+                .accessibilityIdentifier("process-meeting-detail")
+
                 // Only offered when both sides were actually captured.
                 if item.microphoneTrack != nil && item.systemAudioTrack != nil {
-                    Picker("", selection: Binding(
+                    Picker("Playback track", selection: Binding(
                         get: { player.track },
                         set: { player.select(track: $0) }
                     )) {
@@ -66,7 +95,7 @@ struct MeetingDetailView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 130)
+                    .frame(minWidth: 220, idealWidth: 260)
                 }
             }
 
@@ -82,6 +111,8 @@ struct MeetingDetailView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(player.duration == 0)
+                .accessibilityLabel(Text(playbackActionLabel))
+                .accessibilityHint("Starts or pauses playback of this meeting recording.")
 
                 Text(Self.clock(player.currentTime))
                     .font(.system(size: 11)).monospacedDigit().foregroundColor(.secondary)
@@ -94,13 +125,132 @@ struct MeetingDetailView: View {
                     in: 0...max(player.duration, 0.1)
                 )
                 .disabled(player.duration == 0)
+                .accessibilityLabel("Playback position")
+                .accessibilityValue(Text(playbackPositionValue))
 
                 Text(Self.clock(player.duration))
                     .font(.system(size: 11)).monospacedDigit().foregroundColor(.secondary)
             }
+
+            if item.microphoneTrack != nil && item.systemAudioTrack != nil {
+                HStack(spacing: 8) {
+                    Text("Track controls")
+                        .font(.callout.weight(.medium))
+                    Spacer()
+
+                    Toggle(isOn: Binding(
+                        get: { player.roomMuted },
+                        set: { player.setMuted($0, for: .microphone) }
+                    )) {
+                        Label("Mute Room", systemImage: player.roomMuted ? "speaker.slash.fill" : "speaker.wave.2")
+                    }
+                    .toggleStyle(.button)
+
+                    Button {
+                        player.toggleSolo(.microphone)
+                    } label: {
+                        Label(
+                            "Solo Room",
+                            systemImage: player.track == .microphone ? "checkmark.circle.fill" : "person.fill"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityValue(selectionValue(player.track == .microphone))
+
+                    Toggle(isOn: Binding(
+                        get: { player.callMuted },
+                        set: { player.setMuted($0, for: .systemAudio) }
+                    )) {
+                        Label("Mute Call", systemImage: player.callMuted ? "speaker.slash.fill" : "speaker.wave.2")
+                    }
+                    .toggleStyle(.button)
+
+                    Button {
+                        player.toggleSolo(.systemAudio)
+                    } label: {
+                        Label(
+                            "Solo Call",
+                            systemImage: player.track == .systemAudio ? "checkmark.circle.fill" : "person.2.fill"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityValue(selectionValue(player.track == .systemAudio))
+                }
+                .controlSize(.small)
+            }
         }
         .padding(20)
         .metricsCardSurface()
+    }
+
+    private var playbackActionLabel: LocalizedStringKey {
+        player.isPlaying ? "Pause recording playback" : "Play recording"
+    }
+
+    private var playbackPositionValue: String {
+        let format = String(localized: "Playback position: %@ of %@")
+        return String.localizedStringWithFormat(
+            format,
+            Self.clock(player.currentTime),
+            Self.clock(player.duration)
+        )
+    }
+
+    private func selectionValue(_ isSelected: Bool) -> Text {
+        let key: LocalizedStringKey = isSelected ? "Selected" : "Not selected"
+        return Text(key)
+    }
+
+    @ViewBuilder
+    private var processingStatus: some View {
+        if isProcessing {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView(value: controller.processingProgress)
+                    Text("Processing this recording with the selected Dictation model…")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else if item.wasInterrupted || !item.issues.isEmpty || item.transcript?.isEmpty != false {
+            GroupBox {
+                Label(processStatusMessage, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var canProcess: Bool {
+        switch controller.lifecycle.phase {
+        case .idle, .ready, .partial, .failed:
+            return true
+        case .preflighting, .capturing, .stopping, .processing:
+            return isProcessing
+        }
+    }
+
+    private var processTitle: LocalizedStringKey {
+        if item.transcript?.isEmpty != false { return "Process Recording" }
+        if item.wasInterrupted || !item.issues.isEmpty { return "Retry Processing" }
+        return "Re-transcribe"
+    }
+
+    private var processStatusMessage: LocalizedStringKey {
+        if item.wasInterrupted { return "This recording was recovered and should be processed again." }
+        if !item.issues.isEmpty { return "Processing finished with issues. You can retry with the selected model." }
+        return "This recording has not been transcribed yet."
+    }
+
+    private func processRecording() {
+        guard canProcess, !isProcessing else { return }
+        isProcessing = true
+        Task {
+            await controller.process(item)
+            processingError = controller.errorMessage
+            isProcessing = false
+            onProcessed()
+        }
     }
 
     // MARK: - Summary
@@ -158,29 +308,35 @@ struct MeetingDetailView: View {
             }
 
             if lines.isEmpty {
-                Text(item.transcript ?? "No transcript for this recording.")
+                Text(item.transcript ?? String(localized: "No transcript for this recording."))
                     .font(.system(size: 12)).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ScrollViewReader { proxy in
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                            MeetingTranscriptRow(
-                                start: line.start,
-                                speaker: line.speaker,
-                                text: line.text,
-                                isActive: index == activeLine
-                            )
+                            Button {
+                                player.seek(to: line.start)
+                            } label: {
+                                MeetingTranscriptRow(
+                                    start: line.start,
+                                    speaker: line.speaker,
+                                    text: line.text,
+                                    isActive: index == activeLine,
+                                    isSpeakerEstimated: line.speakerConfidence
+                                        == MeetingTranscriber.Segment.SpeakerConfidence.estimatedFromWindow.rawValue
+                                )
+                            }
+                            .buttonStyle(.plain)
                             .id(index)
-                            .contentShape(Rectangle())
-                            .onTapGesture { player.seek(to: line.start) }
+                            .accessibilityLabel(transcriptAccessibilityLabel(for: line))
                         }
                     }
                     // Follow the audio, but only while it is actually playing — otherwise
                     // reading ahead would keep yanking the view back.
                     .onChange(of: activeLine) { _, line in
                         guard player.isPlaying, let line else { return }
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                             proxy.scrollTo(line, anchor: .center)
                         }
                     }
@@ -199,6 +355,16 @@ struct MeetingDetailView: View {
             ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
             : String(format: "%d:%02d", minutes, seconds)
     }
+
+    private func transcriptAccessibilityLabel(for line: MeetingRecordingStore.Sidecar.Line) -> Text {
+        let speaker = line.speaker ?? String(localized: "Unknown speaker")
+        let isEstimated = line.speakerConfidence
+            == MeetingTranscriber.Segment.SpeakerConfidence.estimatedFromWindow.rawValue
+        let format = isEstimated
+            ? String(localized: "Play from %@. %@. Estimated speaker attribution. %@")
+            : String(localized: "Play from %@. %@. %@")
+        return Text(String.localizedStringWithFormat(format, Self.clock(line.start), speaker, line.text))
+    }
 }
 
 /// One transcript line, used by both the live view and playback.
@@ -207,6 +373,7 @@ struct MeetingTranscriptRow: View {
     let speaker: String?
     let text: String
     var isActive: Bool = false
+    var isSpeakerEstimated: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -219,6 +386,13 @@ struct MeetingTranscriptRow: View {
                     Text(speaker)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(Self.tint(speaker))
+                    if isSpeakerEstimated {
+                        Label("Estimated", systemImage: "questionmark.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .help("Speaker attribution is estimated because exact word timing was unavailable.")
+                            .accessibilityLabel("Estimated speaker attribution")
+                    }
                 }
             }
             Text(text)
@@ -233,6 +407,7 @@ struct MeetingTranscriptRow: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isActive ? Color.accentColor.opacity(0.14) : .clear)
         )
+        .accessibilityElement(children: .combine)
     }
 
     /// Stable per-speaker colour so one voice reads the same way down the transcript.

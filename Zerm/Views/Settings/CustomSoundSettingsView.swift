@@ -30,7 +30,7 @@ struct CustomSoundSettingsView: View {
         let fileName = customSoundManager.getSoundDisplayName(for: type)
 
         HStack(spacing: 8) {
-            Text(isCustom ? (fileName ?? "Custom") : "Default")
+            Text(isCustom ? (fileName ?? String(localized: "Custom")) : String(localized: "Default"))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: 100, alignment: .leading)
                 .lineLimit(1)
@@ -47,6 +47,7 @@ struct CustomSoundSettingsView: View {
             }
             .buttonStyle(.borderless)
             .help("Test")
+            .accessibilityLabel("Test sound")
 
             Button {
                 selectSound(for: type)
@@ -55,6 +56,7 @@ struct CustomSoundSettingsView: View {
             }
             .buttonStyle(.borderless)
             .help("Choose")
+            .accessibilityLabel("Choose sound file")
 
             if isCustom {
                 Button {
@@ -64,14 +66,19 @@ struct CustomSoundSettingsView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Reset")
+                .accessibilityLabel("Reset to default sound")
             }
         }
     }
 
     private func selectSound(for type: CustomSoundManager.SoundType) {
         let panel = NSOpenPanel()
-        panel.title = "Choose \(type.rawValue.capitalized) Sound"
-        panel.message = "Select an audio file"
+        let soundKind = type == .start ? String(localized: "start") : String(localized: "stop")
+        panel.title = String.localizedStringWithFormat(
+            String(localized: "Choose %@ Sound"),
+            soundKind
+        )
+        panel.message = String(localized: "Select an audio file")
         panel.allowedContentTypes = [
             UTType.audio,
             UTType.mp3,
@@ -86,7 +93,7 @@ struct CustomSoundSettingsView: View {
 
             let result = customSoundManager.setCustomSound(url: url, for: type)
             if case .failure(let error) = result {
-                alertTitle = "Invalid Audio File"
+                alertTitle = String(localized: "Invalid Audio File")
                 alertMessage = error.localizedDescription
                 showingAlert = true
             }

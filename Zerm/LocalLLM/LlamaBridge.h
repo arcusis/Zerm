@@ -8,7 +8,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// to one Objective-C++ translation unit, Swift only ever sees this Foundation-only interface.
 @interface LlamaBridge : NSObject
 
-- (instancetype)initWithModelPath:(NSString *)modelPath;
+- (instancetype)initWithModelPath:(NSString *)modelPath
+                       contextSize:(int)contextSize
+                       threadCount:(int)threadCount;
+
+/// Adjusts CPU-side inference work without reloading model weights.
+- (void)setThreadCount:(int)threadCount;
 
 /// Loads the model, context, and sampler. Idempotent. Returns NO on failure.
 - (BOOL)load;

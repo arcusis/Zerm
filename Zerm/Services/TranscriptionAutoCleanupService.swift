@@ -2,13 +2,14 @@ import Foundation
 import SwiftData
 import OSLog
 
-class TranscriptionAutoCleanupService {
+@MainActor
+final class TranscriptionAutoCleanupService {
     static let shared = TranscriptionAutoCleanupService()
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionAutoCleanupService")
     private var modelContext: ModelContext?
 
-    private let keyIsEnabled = "IsTranscriptionCleanupEnabled"
+    nonisolated private static let keyIsEnabled = "IsTranscriptionCleanupEnabled"
     private let keyRetentionMinutes = "TranscriptionRetentionMinutes"
 
     private let defaultRetentionMinutes: Int = 24 * 60
@@ -38,11 +39,19 @@ class TranscriptionAutoCleanupService {
             object: nil
         )
 
-        if UserDefaults.standard.bool(forKey: keyIsEnabled) {
-            Task { [weak self] in
-                guard let self = self, let modelContext = self.modelContext else { return }
-                await self.sweepOldTranscriptions(modelContext: modelContext)
-                await self.cleanupOrphanAudioFiles(modelContext: modelContext)
+        if UserDefaults.standard.bool(forKey: Self.keyIsEnabled) {
+            let modelContainer = modelContext.container
+            let effectiveMinutes = max(retentionMinutes, 0)
+            let recordingsDirectory = recordingsDirectory
+            Task.detached(priority: .utility) {
+                await Self.sweepOldTranscriptions(
+                    modelContainer: modelContainer,
+                    effectiveMinutes: effectiveMinutes
+                )
+                await Self.cleanupOrphanAudioFiles(
+                    modelContainer: modelContainer,
+                    recordingsDirectory: recordingsDirectory
+                )
             }
         }
     }
@@ -52,18 +61,29 @@ class TranscriptionAutoCleanupService {
     }
 
     func runManualCleanup(modelContext: ModelContext) async {
-        await sweepOldTranscriptions(modelContext: modelContext)
+        let modelContainer = modelContext.container
+        let effectiveMinutes = max(retentionMinutes, 0)
+        await Task.detached(priority: .utility) {
+            await Self.sweepOldTranscriptions(
+                modelContainer: modelContainer,
+                effectiveMinutes: effectiveMinutes
+            )
+        }.value
     }
 
     @objc private func handleTranscriptionCompleted(_ notification: Notification) {
-        let isEnabled = UserDefaults.standard.bool(forKey: keyIsEnabled)
+        let isEnabled = UserDefaults.standard.bool(forKey: Self.keyIsEnabled)
         guard isEnabled else { return }
 
         if retentionMinutes > 0 {
             if let modelContext = self.modelContext {
-                Task { [weak self] in
-                    guard let self = self else { return }
-                    await self.sweepOldTranscriptions(modelContext: modelContext)
+                let modelContainer = modelContext.container
+                let effectiveMinutes = max(retentionMinutes, 0)
+                Task.detached(priority: .utility) {
+                    await Self.sweepOldTranscriptions(
+                        modelContainer: modelContainer,
+                        effectiveMinutes: effectiveMinutes
+                    )
                 }
             }
             return
@@ -94,16 +114,16 @@ class TranscriptionAutoCleanupService {
         }
     }
 
-    private func sweepOldTranscriptions(modelContext: ModelContext) async {
-        guard UserDefaults.standard.bool(forKey: keyIsEnabled) else {
+    nonisolated private static func sweepOldTranscriptions(
+        modelContainer: ModelContainer,
+        effectiveMinutes: Int
+    ) async {
+        guard UserDefaults.standard.bool(forKey: Self.keyIsEnabled) else {
             return
         }
 
-        let effectiveMinutes = max(retentionMinutes, 0)
-
         let cutoffDate = Date().addingTimeInterval(TimeInterval(-effectiveMinutes * 60))
-
-        let modelContainer = await MainActor.run { modelContext.container }
+        let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionAutoCleanupService")
 
         do {
             let backgroundContext = ModelContext(modelContainer)
@@ -137,12 +157,15 @@ class TranscriptionAutoCleanupService {
     }
 
     /// Deletes audio files in Recordings directory that have no corresponding Transcription record
-    private func cleanupOrphanAudioFiles(modelContext: ModelContext) async {
-        guard UserDefaults.standard.bool(forKey: keyIsEnabled) else {
+    nonisolated private static func cleanupOrphanAudioFiles(
+        modelContainer: ModelContainer,
+        recordingsDirectory: URL
+    ) async {
+        guard UserDefaults.standard.bool(forKey: Self.keyIsEnabled) else {
             return
         }
 
-        let modelContainer = await MainActor.run { modelContext.container }
+        let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionAutoCleanupService")
 
         do {
             let backgroundContext = ModelContext(modelContainer)

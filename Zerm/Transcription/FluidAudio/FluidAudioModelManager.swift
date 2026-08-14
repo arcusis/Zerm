@@ -14,7 +14,7 @@ class FluidAudioModelManager: ObservableObject {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "FluidAudioModelManager")
 
     // Add new Fluid Audio models here when support is added.
-    static let modelVersionMap: [String: AsrModelVersion] = [
+    nonisolated static let modelVersionMap: [String: AsrModelVersion] = [
         "parakeet-tdt-0.6b-v2": .v2,
         "parakeet-tdt-0.6b-v3": .v3,
     ]

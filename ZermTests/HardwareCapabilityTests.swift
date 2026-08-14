@@ -54,4 +54,30 @@ struct HardwareCapabilityTests {
         #expect(threads <= 8)
         #expect(HardwareCapability.performanceCoreCount >= 1)
     }
+
+    @Test func localLLMRecommendationKeepsAppleSiliconOnTheEfficientDefault() {
+        #expect(HardwareCapability.recommendedLocalLLMFileName(
+            physicalMemoryGB: 8,
+            isAppleSilicon: true
+        ) == "gemma-4-E2B_q4_0-it.gguf")
+        #expect(HardwareCapability.recommendedLocalLLMFileName(
+            physicalMemoryGB: 16,
+            isAppleSilicon: true
+        ) == "gemma-4-E2B_q4_0-it.gguf")
+        #expect(HardwareCapability.recommendedLocalLLMFileName(
+            physicalMemoryGB: 64,
+            isAppleSilicon: true
+        ) == "gemma-4-E2B_q4_0-it.gguf")
+        #expect(HardwareCapability.recommendedLocalLLMFileName(
+            physicalMemoryGB: 64,
+            isAppleSilicon: false
+        ) == "gemma-3-1b-it-Q4_K_M.gguf")
+    }
+
+    @Test func localLLMContextLeavesRoomForOtherOnDeviceModels() {
+        #expect(HardwareCapability.localLLMContextSize(physicalMemoryGB: 8) == 4_096)
+        #expect(HardwareCapability.localLLMContextSize(physicalMemoryGB: 16) == 8_192)
+        #expect(HardwareCapability.localLLMContextSize(physicalMemoryGB: 32) == 8_192)
+        #expect(HardwareCapability.localLLMContextSize(physicalMemoryGB: 64) == 8_192)
+    }
 }

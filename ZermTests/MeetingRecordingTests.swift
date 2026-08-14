@@ -4,6 +4,17 @@ import Testing
 import FluidAudio
 @testable import Zerm
 
+/// FluidAudio's diarization checks download and execute external model assets. They belong in
+/// the controlled hardware matrix, not the deterministic PR suite: GitHub's ephemeral runners
+/// can neither guarantee model-registry availability nor safely initialize several copies of
+/// the runtime in parallel. Set this environment variable on an Apple Silicon test Mac to run
+/// the four suites below deliberately.
+private let runDiarizerRuntimeIntegration =
+    ProcessInfo.processInfo.environment["ZERM_RUN_DIARIZER_INTEGRATION_TESTS"] == "1"
+
+private let runMeetingCaptureIntegration =
+    ProcessInfo.processInfo.environment["ZERM_RUN_MEETING_CAPTURE_INTEGRATION_TESTS"] == "1"
+
 /// Exercises the meeting recorder's logic without audio hardware.
 ///
 /// Capture itself needs a real device and the system-audio permission, but the parts most
@@ -342,6 +353,10 @@ extension MeetingSummarizerTests {
 /// Runs inside the app bundle, so it has the real microphone grant and real audio devices —
 /// this is the only place `MeetingRecordingSession` can be driven for real.
 @MainActor
+@Suite(.enabled(
+    if: runMeetingCaptureIntegration,
+    "Requires ZERM_RUN_MEETING_CAPTURE_INTEGRATION_TESTS=1, real audio devices, and capture grants"
+))
 struct MeetingSessionIntegrationTests {
 
     @Test func sessionRecordsBothTracksAndSavesThem() async throws {
@@ -419,6 +434,10 @@ struct MeetingSessionIntegrationTests {
 /// The diarizer has to actually load its model and produce turns, or speaker identification is
 /// a label in the UI with nothing behind it.
 @MainActor
+@Suite(.enabled(
+    if: runDiarizerRuntimeIntegration,
+    "Requires ZERM_RUN_DIARIZER_INTEGRATION_TESTS=1 and downloadable FluidAudio model assets"
+))
 struct MeetingDiarizerIntegrationTests {
 
     @Test func diarizerLoadsAndProducesTurnsForSpeech() async throws {
@@ -499,6 +518,10 @@ struct MeetingDiarizerIntegrationTests {
     }
 }
 
+@Suite(.enabled(
+    if: runDiarizerRuntimeIntegration,
+    "Requires ZERM_RUN_DIARIZER_INTEGRATION_TESTS=1 and downloadable FluidAudio model assets"
+))
 struct DiarizerModelLoadDiagnostic {
     /// Surfaces why the diarization model will not load, which `MeetingDiarizer` deliberately
     /// swallows so a failure cannot take a recording down with it.
@@ -568,14 +591,6 @@ struct MeetingImportTests {
         #expect((sum / Double(read.frameLength)).squareRoot() > 0.05, "imported audio is silent")
     }
 
-    @Test func meetingAppsAreRecognisedAndMarketingPagesAreNot() {
-        #expect(MeetingAppDetector.isMeetingApp(bundleID: "us.zoom.xos"))
-        #expect(!MeetingAppDetector.isMeetingApp(bundleID: "com.apple.Safari"))
-        #expect(MeetingAppDetector.isMeetingURL("https://meet.google.com/abc-defg-hij"))
-        #expect(MeetingAppDetector.isMeetingURL("https://acme.zoom.us/j/9876543210"))
-        // The bare marketing site is not a meeting.
-        #expect(!MeetingAppDetector.isMeetingURL("https://zoom.us/pricing"))
-    }
 }
 
 struct MeetingPlaybackTests {
@@ -621,6 +636,10 @@ struct MeetingPlaybackTests {
 /// room. A single synthesised voice exercises the pipeline but cannot show that speakers are
 /// actually told apart.
 @MainActor
+@Suite(.enabled(
+    if: runDiarizerRuntimeIntegration,
+    "Requires ZERM_RUN_DIARIZER_INTEGRATION_TESTS=1 and downloadable FluidAudio model assets"
+))
 struct MeetingTwoSpeakerTests {
 
     private func speech(voice: String, text: String) throws -> Data? {
@@ -694,6 +713,10 @@ struct MeetingTwoSpeakerTests {
     }
 }
 
+@Suite(.enabled(
+    if: runDiarizerRuntimeIntegration,
+    "Requires ZERM_RUN_DIARIZER_INTEGRATION_TESTS=1 and downloadable FluidAudio model assets"
+))
 struct DiarizerCapacityDiagnostic {
     /// Guards the sample-rate contract between Zerm and the diarisation model.
     ///

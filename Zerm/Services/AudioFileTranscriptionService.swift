@@ -39,9 +39,7 @@ class AudioTranscriptionService: ObservableObject {
             throw TranscriptionError.noAudioFile
         }
         
-        await MainActor.run {
-            isTranscribing = true
-        }
+        isTranscribing = true
         
         do {
             let transcriptionStart = Date()
@@ -86,7 +84,7 @@ class AudioTranscriptionService: ObservableObject {
             var promptDetectionResult: PromptDetectionService.PromptDetectionResult? = nil
 
             if let enhancementService = enhancementService, enhancementService.isConfigured {
-                let detectionResult = await promptDetectionService.analyzeText(text, with: enhancementService)
+                let detectionResult = promptDetectionService.analyzeText(text, with: enhancementService)
                 promptDetectionResult = detectionResult
                 await promptDetectionService.applyDetectionResult(detectionResult, to: enhancementService)
             }
@@ -130,9 +128,7 @@ class AudioTranscriptionService: ObservableObject {
                         await promptDetectionService.restoreOriginalSettings(result, to: enhancementService)
                     }
 
-                    await MainActor.run {
-                        isTranscribing = false
-                    }
+                    isTranscribing = false
 
                     return newTranscription
                 } catch {
@@ -159,9 +155,7 @@ class AudioTranscriptionService: ObservableObject {
                     }
                     UsageStatsService.shared.record(newTranscription)
 
-                    await MainActor.run {
-                        isTranscribing = false
-                    }
+                    isTranscribing = false
 
                     return newTranscription
                 }
@@ -186,9 +180,7 @@ class AudioTranscriptionService: ObservableObject {
                 }
                 UsageStatsService.shared.record(newTranscription)
 
-                await MainActor.run {
-                    isTranscribing = false
-                }
+                isTranscribing = false
 
                 return newTranscription
             }

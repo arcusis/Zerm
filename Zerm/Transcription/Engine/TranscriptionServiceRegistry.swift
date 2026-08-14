@@ -41,7 +41,31 @@ class TranscriptionServiceRegistry {
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
         let service = service(for: model.provider)
         logger.debug("Transcribing with \(model.displayName, privacy: .public) using \(String(describing: type(of: service)), privacy: .public)")
-        return try await service.transcribe(audioURL: audioURL, model: model)
+        return try await TranscriptionInferenceScheduler.shared.run(
+            provider: model.provider,
+            priority: .dictation
+        ) {
+            try await service.transcribe(audioURL: audioURL, model: model)
+        }
+    }
+
+    /// Uses the language captured when a durable job was created, without changing the user's
+    /// current Dictation setting underneath concurrent work.
+    func transcribe(
+        audioURL: URL,
+        model: any TranscriptionModel,
+        languageCode: String
+    ) async throws -> String {
+        let service = service(for: model.provider)
+        logger.debug("Transcribing with snapshotted model \(model.displayName, privacy: .public) and language \(languageCode, privacy: .public)")
+        return try await TranscriptionInferenceScheduler.shared.run(
+            provider: model.provider,
+            priority: .meeting
+        ) {
+            try await LanguagePreference.$operationOverrideCode.withValue(languageCode) {
+                try await service.transcribe(audioURL: audioURL, model: model)
+            }
+        }
     }
 
     /// Creates a streaming or file-based session depending on the model's capabilities.
@@ -53,9 +77,16 @@ class TranscriptionServiceRegistry {
                 onPartialTranscript: onPartialTranscript
             )
             let fallback = service(for: model.provider)
-            return StreamingTranscriptionSession(streamingService: streamingService, fallbackService: fallback)
+            return StreamingTranscriptionSession(
+                streamingService: streamingService,
+                fallbackService: fallback,
+                provider: model.provider
+            )
         } else {
-            return FileTranscriptionSession(service: service(for: model.provider))
+            return FileTranscriptionSession(
+                service: service(for: model.provider),
+                provider: model.provider
+            )
         }
     }
 

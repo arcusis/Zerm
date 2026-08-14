@@ -18,8 +18,12 @@ class MenuBarManager: ObservableObject {
     private var modelContainer: ModelContainer?
     private var engine: ZermEngine?
 
-    init() {
-        self.isMenuBarOnly = UserDefaults.standard.bool(forKey: "IsMenuBarOnly")
+    init(initialMenuBarOnly: Bool? = nil) {
+        // Injection is used by the explicit Debug UI-test host so a stale preference or
+        // launch-argument registration race cannot start the process as an accessory app.
+        // Product launches continue to read the user's persisted preference unchanged.
+        self.isMenuBarOnly = initialMenuBarOnly
+            ?? UserDefaults.standard.bool(forKey: "IsMenuBarOnly")
         updateAppActivationPolicy()
         MenuBarManager.shared = self
 
@@ -44,7 +48,7 @@ class MenuBarManager: ObservableObject {
             }
             if !hasVisibleWindows && NSApplication.shared.activationPolicy() != .accessory {
                 self?.logger.notice("windowDidClose: no visible windows, switching to .accessory policy")
-                NSApplication.shared.setActivationPolicy(.accessory)
+                _ = NSApplication.shared.setActivationPolicy(.accessory)
             }
         }
     }
@@ -63,7 +67,7 @@ class MenuBarManager: ObservableObject {
     }
     
     func focusMainWindow() {
-        NSApplication.shared.setActivationPolicy(.regular)
+        _ = NSApplication.shared.setActivationPolicy(.regular)
         logger.notice("focusMainWindow: activation policy set to .regular")
         if WindowManager.shared.showMainWindow() == nil {
             logger.error("focusMainWindow: showMainWindow returned nil")
@@ -80,12 +84,12 @@ class MenuBarManager: ObservableObject {
             let application = NSApplication.shared
             if self.isMenuBarOnly {
                 self.logger.notice("updateAppActivationPolicy: switching to .accessory (dock icon hidden)")
-                application.setActivationPolicy(.accessory)
+                _ = application.setActivationPolicy(.accessory)
                 WindowManager.shared.hideMainWindow()
             } else {
                 self.logger.notice("updateAppActivationPolicy: switching to .regular (dock icon visible)")
-                application.setActivationPolicy(.regular)
-                WindowManager.shared.showMainWindow()
+                _ = application.setActivationPolicy(.regular)
+                _ = WindowManager.shared.showMainWindow()
             }
         }
     }
@@ -93,7 +97,7 @@ class MenuBarManager: ObservableObject {
     func openMainWindowAndNavigate(to destination: String) {
         logger.notice("openMainWindowAndNavigate: requested destination=\(destination, privacy: .public), isMenuBarOnly=\(self.isMenuBarOnly, privacy: .public)")
 
-        NSApplication.shared.setActivationPolicy(.regular)
+        _ = NSApplication.shared.setActivationPolicy(.regular)
         logger.notice("openMainWindowAndNavigate: activation policy set to .regular")
 
         // Defer the show to the next run loop so the activation policy change takes
@@ -126,7 +130,7 @@ class MenuBarManager: ObservableObject {
             return
         }
         logger.notice("openHistoryWindow: opening history window")
-        NSApplication.shared.setActivationPolicy(.regular)
+        _ = NSApplication.shared.setActivationPolicy(.regular)
         logger.notice("openHistoryWindow: activation policy set to .regular")
         HistoryWindowController.shared.showHistoryWindow(
             modelContainer: modelContainer,

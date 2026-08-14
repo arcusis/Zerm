@@ -1,542 +1,470 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Recording tab.
-///
-/// Two dedicated screens behind one segmented control: **Record**, which is only what you look at
-/// while a meeting runs, and **Library**, which is only past recordings. Everything you set once
-/// lives in the settings panel behind the gear, not in the middle of either screen.
+/// The Meetings workspace: prepare, record, process, review and return to the library without
+/// mixing configuration controls into the live transcript.
 struct MeetingRecordingView: View {
-    @EnvironmentObject private var engine: ZermEngine
-    @StateObject private var controller: MeetingRecordingController
-
+    @EnvironmentObject private var controller: MeetingRecordingController
+    @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
+    @StateObject private var applicationSource = MeetingCaptureApplicationSource()
     @StateObject private var store = MeetingRecordingStore()
-    @StateObject private var detector = MeetingAppDetector()
 
     @AppStorage("meetingCaptureMicrophone") private var captureMicrophone = true
     @AppStorage("meetingCaptureSystemAudio") private var captureSystemAudio = true
+    @AppStorage("meetingCaptureTargetMode") private var captureTargetMode = "detectedApplication"
+    @AppStorage("meetingCaptureApplicationBundleID") private var selectedApplicationBundleID = ""
     @AppStorage("meetingLiveTranscript") private var liveTranscript = true
     @AppStorage("meetingIdentifySpeakers") private var identifySpeakers = true
     @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
-    @AppStorage("meetingAutoDetect") private var autoDetectMeetings = true
+    @AppStorage("ollamaSelectedModel") private var ollamaSummaryModel = "mistral"
+    @AppStorage("SelectedLanguage") private var selectedLanguage = "auto"
 
-    @State private var tab: Tab = .record
-    @State private var isShowingSettings = false
     @State private var importError: String?
-    /// The recording opened inside the Library tab. nil means the list itself.
-    @State private var selected: MeetingRecordingStore.Item?
+    @State private var isFinishing = false
+    @State private var isShowingRecordChooser = false
+    @State private var pendingSource: MeetingRecordingSourceSelection = .room
+    @State private var selectedRecording: MeetingRecordingStore.Item?
+    @State private var isCheckingSummaryAvailability = false
 
-    enum Tab: String, CaseIterable, Identifiable {
-        case record = "Record"
-        case library = "Library"
+    enum Destination {
+        case meeting
+        case library
+    }
 
-        var id: String { rawValue }
-        var icon: String {
-            switch self {
-            case .record: return "record.circle"
-            case .library: return "rectangle.stack.fill"
-            }
+    private let destination: Destination
+
+    init(initialDestination: Destination = .meeting) {
+        destination = initialDestination
+    }
+
+    private enum WorkspacePhase {
+        case preflight
+        case live
+        case processing
+        case review
+    }
+
+    private var phase: WorkspacePhase {
+        if isFinishing || controller.isSummarising { return .processing }
+        switch controller.lifecycle.phase {
+        case .capturing:
+            return .live
+        case .stopping, .processing:
+            return .processing
+        case .ready, .partial:
+            return controller.lastRecording == nil ? .preflight : .review
+        case .idle, .preflighting, .failed:
+            return controller.lastRecording == nil ? .preflight : .review
         }
     }
 
-    init(engine: ZermEngine? = nil) {
-        _controller = StateObject(wrappedValue: MeetingRecordingController(engine: engine))
+    private var selectedModel: (any TranscriptionModel)? {
+        transcriptionModelManager.currentTranscriptionModel
+    }
+
+    private var modelName: String {
+        controller.transcriptionSnapshot?.modelDisplayName
+            ?? selectedModel?.displayName
+            ?? String(localized: "No model selected")
+    }
+
+    private var providerName: String {
+        controller.transcriptionSnapshot?.provider.rawValue
+            ?? selectedModel?.provider.rawValue
+            ?? String(localized: "Dictation")
+    }
+
+    private var languagePresentation: MeetingLanguagePresentation.Result {
+        guard let provider = controller.transcriptionSnapshot?.provider ?? selectedModel?.provider else {
+            return .init(
+                code: selectedLanguage,
+                displayName: String(localized: "Not selected"),
+                disclosure: nil
+            )
+        }
+        let code = controller.transcriptionSnapshot?.languageCode ?? selectedLanguage
+        let languages = provider == .nativeApple
+            ? LanguageDictionary.appleNative
+            : selectedModel?.supportedLanguages ?? [:]
+        return MeetingLanguagePresentation.resolve(
+            provider: provider,
+            requestedCode: code,
+            supportedLanguages: languages
+        )
+    }
+
+    private var languageName: String { languagePresentation.displayName }
+
+    private var usesCloudModel: Bool {
+        if let snapshot = controller.transcriptionSnapshot {
+            return snapshot.route == .cloud
+        }
+        guard let provider = selectedModel?.provider else { return false }
+        switch provider {
+        case .whisper, .fluidAudio, .nativeApple:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private var usesAllSystemAudio: Binding<Bool> {
+        Binding(
+            get: { captureTargetMode == "allSystemAudio" },
+            set: { captureTargetMode = $0 ? "allSystemAudio" : "detectedApplication" }
+        )
+    }
+
+    private var selectedCaptureApplication: MeetingCaptureApplicationSource.Application? {
+        applicationSource.applications.first { $0.bundleID == selectedApplicationBundleID }
+    }
+
+    private var configurationSummary: MeetingConfigurationSummary {
+        MeetingConfigurationSummary(
+            modelName: modelName,
+            providerName: providerName,
+            languageName: languageName,
+            languageDisclosure: languagePresentation.disclosure,
+            usesCloud: usesCloudModel
+        )
+    }
+
+    private var transcriptItems: [MeetingTranscriptItem] {
+        controller.segments.map { segment in
+            MeetingTranscriptItem(
+                id: segment.id,
+                start: segment.start,
+                speaker: controller.speakerLabel(for: segment),
+                isSpeakerEstimated: segment.speakerConfidence == .estimatedFromWindow,
+                text: segment.text
+            )
+        }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            Divider()
-
-            Group {
-                switch tab {
-                case .record: recordTab
-                case .library: libraryTab
-                }
+        Group {
+            if destination == .library {
+                library
+            } else {
+                workspace
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .slidingPanel(isPresented: $isShowingSettings, width: 400) {
-            MeetingRecordingSettingsPanel(
-                isRecording: controller.isRecording,
-                onImport: importRecording,
-                onDismiss: closeSettings
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .sheet(isPresented: $isShowingRecordChooser) {
+            MeetingRecordSourceSheet(
+                selection: $pendingSource,
+                applications: applicationSource.applications,
+                modelName: modelName,
+                languageName: languageName,
+                hasSelectedModel: selectedModel != nil,
+                refreshApplications: applicationSource.refresh,
+                openModels: {
+                    isShowingRecordChooser = false
+                    openDictationModels()
+                },
+                start: startRecordingFromChooser,
+                cancel: { isShowingRecordChooser = false }
             )
         }
         .task {
             store.reload()
-            if autoDetectMeetings { detector.start() }
+            applicationSource.start()
         }
-        .onDisappear { detector.stop() }
-        .onChange(of: autoDetectMeetings) { _, enabled in
-            enabled ? detector.start() : detector.stop()
+        .task(id: summaryAvailabilityCheckID) {
+            guard phase == .preflight, summariseAfterMeeting else { return }
+            isCheckingSummaryAvailability = true
+            _ = await controller.checkLocalSummaryAvailability()
+            isCheckingSummaryAvailability = false
         }
-        // A detected call is only actionable on the Record screen, so go there rather than
-        // showing a prompt the user cannot act on.
-        .onChange(of: detector.detected) { _, detection in
-            if detection != nil && !controller.isRecording { tab = .record }
+        .onDisappear {
+            applicationSource.stop()
         }
     }
 
-    // MARK: - Top bar
-
-    private var topBar: some View {
-        HStack(spacing: 12) {
-            if tab == .library, selected != nil {
-                Button {
-                    selected = nil
-                } label: {
-                    Label("Library", systemImage: "chevron.left")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
-                .help("Back to all recordings")
-            } else {
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 190)
-            }
-
-            Spacer()
-
-            // The one thing that has to stay visible from either screen: whether tape is rolling.
-            if controller.isRecording {
-                Button { tab = .record } label: {
-                    HStack(spacing: 6) {
-                        Circle().fill(Color.red).frame(width: 7, height: 7)
-                        Text(Self.clock(controller.session.elapsed))
-                            .font(.system(size: 12, weight: .medium))
-                            .monospacedDigit()
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.red.opacity(0.12)))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.red)
-                .help("Recording in progress")
-            }
-
-            if tab == .library {
-                Button(action: importRecording) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.and.arrow.down")
-                        Text("Import")
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
-                .help("Add existing audio files to your library")
-            }
-
-            Button {
-                withAnimation(.smooth(duration: 0.3)) { isShowingSettings.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "gear")
-                    Text("Settings")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(isShowingSettings ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Capture sources, transcript and library settings")
-            .accessibilityLabel("Recording settings")
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-
-    // MARK: - Record tab
-
-    private var recordTab: some View {
+    @ViewBuilder
+    private var workspace: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                transportCard
+            VStack(alignment: .leading, spacing: 16) {
+                notices
 
-                if let message = importError {
-                    banner(message, icon: "exclamationmark.triangle.fill", tint: .orange)
-                }
-                if let message = controller.errorMessage {
-                    banner(message, icon: "exclamationmark.triangle.fill", tint: .orange)
-                }
-                if controller.session.systemAudioSilent {
-                    banner(
-                        "No system audio is coming through. If the other participants should be recorded, allow Zerm under System Settings › Privacy & Security › Audio Recording.",
-                        icon: "speaker.slash.fill",
-                        tint: .orange,
-                        action: ("Open Settings", openAudioCaptureSettings)
+                switch phase {
+                case .preflight:
+                    MeetingPreflightView(
+                        captureMicrophone: $captureMicrophone,
+                        captureSystemAudio: $captureSystemAudio,
+                        usesAllSystemAudio: usesAllSystemAudio,
+                        selectedApplicationBundleID: $selectedApplicationBundleID,
+                        liveTranscript: $liveTranscript,
+                        identifySpeakers: $identifySpeakers,
+                        summariseAfterMeeting: $summariseAfterMeeting,
+                        applications: applicationSource.applications,
+                        modelName: modelName,
+                        providerName: providerName,
+                        languageName: languageName,
+                        languageDisclosure: languagePresentation.disclosure,
+                        usesCloud: usesCloudModel,
+                        hasSelectedModel: selectedModel != nil,
+                        summarySnapshot: controller.summarySnapshot ?? .configuredOllama,
+                        summaryAvailability: controller.isLocalSummaryAvailable,
+                        isCheckingSummaryAvailability: isCheckingSummaryAvailability,
+                        start: presentRecordChooser,
+                        openModels: openDictationModels,
+                        refreshApplications: applicationSource.refresh,
+                        refreshSummaryAvailability: refreshSummaryAvailability
                     )
-                }
-                if let detection = detector.detected, !controller.isRecording {
-                    banner(
-                        "\(detection.appName) is running. Record this meeting?",
-                        icon: "video.fill",
-                        tint: .accentColor,
-                        action: ("Start Recording", { detector.dismiss(); toggle() }),
-                        secondary: ("Not now", { detector.dismiss() })
+                case .live:
+                    MeetingLiveView(
+                        elapsed: controller.session.elapsed,
+                        capturesMicrophone: captureMicrophone,
+                        capturesSystemAudio: captureSystemAudio,
+                        microphoneLevel: controller.session.microphoneLevelDb,
+                        systemAudioLevel: controller.session.systemAudioLevelDb,
+                        configuration: configurationSummary,
+                        transcriptItems: transcriptItems,
+                        isTranscribing: controller.isTranscribing,
+                        isPreparingSpeakers: controller.isPreparingDiarizer,
+                        speakerCount: controller.speakerCount,
+                        sourceHealth: controller.sourceHealth,
+                        stop: stopRecording,
+                        copyTranscript: copyTranscript
                     )
+                case .processing:
+                    MeetingProcessingView(
+                        transcriptItems: transcriptItems,
+                        isTranscribing: controller.isTranscribing,
+                        isSummarising: controller.isSummarising,
+                        progress: controller.processingProgress,
+                        pendingJobs: controller.lifecycle.pendingJobs,
+                        speakerCount: controller.speakerCount,
+                        copyTranscript: copyTranscript
+                    )
+                case .review:
+                    review
                 }
-
-                if controller.isSummarising || controller.summary != nil || controller.summaryError != nil {
-                    summaryCard
-                }
-
-                transcriptCard
             }
             .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 920, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
-    private var transportCard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        if controller.isRecording {
-                            Circle().fill(Color.red).frame(width: 8, height: 8)
-                        }
-                        Text(controller.isRecording ? "Recording" : "Record a meeting")
-                            .font(.system(size: 20, weight: .semibold))
-                    }
+    @ViewBuilder
+    private var notices: some View {
+        ForEach(controller.lifecycle.issues) { issue in
+            MeetingNotice(
+                message: issue.message,
+                icon: issue.severity == .error
+                    ? "xmark.octagon.fill"
+                    : "exclamationmark.triangle.fill",
+                tint: issue.severity == .error ? .red : .orange
+            )
+        }
 
-                    if controller.isRecording {
-                        Text(Self.clock(controller.session.elapsed))
-                            .font(.system(size: 30, weight: .light))
-                            .monospacedDigit()
-                            .foregroundColor(.primary)
-                    } else {
-                        Text("Captures the room through your microphone and the call through your Mac's audio.")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        if let importError {
+            MeetingNotice(
+                message: importError,
+                icon: "exclamationmark.triangle.fill",
+                tint: .orange
+            )
+        }
+
+        if let message = controller.errorMessage {
+            MeetingNotice(
+                message: message,
+                icon: "exclamationmark.triangle.fill",
+                tint: .orange
+            )
+        }
+
+        if controller.session.systemAudioSilent {
+            MeetingNotice(
+                message: String(localized: "No call audio is arriving. Check Audio Recording permission before continuing."),
+                icon: "speaker.slash.fill",
+                tint: .orange,
+                primaryAction: ("Open System Settings", openAudioCaptureSettings)
+            )
+        }
+
+    }
+
+    @ViewBuilder
+    private var review: some View {
+        if let recording = controller.lastRecording {
+            MeetingReviewView(
+                duration: recording.duration,
+                folderName: recording.folder.lastPathComponent,
+                transcriptItems: transcriptItems,
+                speakerCount: controller.speakerCount,
+                summary: controller.summary,
+                summaryError: controller.summaryError,
+                copyTranscript: copyTranscript,
+                openLibrary: openLastRecording,
+                showInFinder: {
+                    NSWorkspace.shared.activateFileViewerSelecting([recording.folder])
                 }
+            )
+        }
+    }
 
-                Spacer()
-
-                if controller.isRecording {
-                    HStack(spacing: 14) {
-                        if captureMicrophone {
-                            LevelMeter(label: "Mic", db: controller.session.microphoneLevelDb)
-                        }
-                        if captureSystemAudio {
-                            LevelMeter(label: "System", db: controller.session.systemAudioLevelDb)
-                        }
+    @ViewBuilder
+    private var library: some View {
+        if let selectedRecording {
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        self.selectedRecording = nil
+                    } label: {
+                        Label("All Meetings", systemImage: "chevron.left")
                     }
-                }
-
-                Button(action: toggle) {
-                    HStack(spacing: 6) {
-                        Image(systemName: controller.isRecording ? "stop.fill" : "record.circle")
-                        Text(controller.isRecording ? "Stop" : "Start")
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 76)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(controller.isRecording ? .red : .accentColor)
-                .disabled(!hasSource)
-            }
-
-            Divider()
-
-            if hasSource {
-                captureSummary
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                    Text("No capture source is on, so there is nothing to record.")
-                        .font(.system(size: 12))
+                    .buttonStyle(.bordered)
                     Spacer()
-                    Button("Open Settings") {
-                        withAnimation(.smooth(duration: 0.3)) { isShowingSettings = true }
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 12, weight: .semibold))
                 }
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .metricsCardSurface()
-    }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
 
-    /// What the next recording will do, read-only. Changing any of it is the settings panel's job.
-    private var captureSummary: some View {
-        HStack(spacing: 8) {
-            if captureMicrophone { CaptureChip(icon: "mic.fill", label: "Microphone") }
-            if captureSystemAudio { CaptureChip(icon: "speaker.wave.2.fill", label: "System audio") }
-            if liveTranscript { CaptureChip(icon: "text.alignleft", label: "Live transcript") }
-            if liveTranscript && identifySpeakers && captureMicrophone {
-                CaptureChip(icon: "person.2.fill", label: "Speakers")
-            }
-            if liveTranscript && summariseAfterMeeting { CaptureChip(icon: "sparkles", label: "Summary") }
+                Divider()
 
-            Spacer()
-
-            Button("Change") {
-                withAnimation(.smooth(duration: 0.3)) { isShowingSettings = true }
-            }
-            .buttonStyle(.link)
-            .font(.system(size: 11))
-            .disabled(controller.isRecording)
-        }
-    }
-
-    private var hasSource: Bool { captureMicrophone || captureSystemAudio }
-
-    // MARK: - Transcript
-
-    private var transcriptCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text("Transcript")
-                    .font(.system(size: 13, weight: .semibold))
-                if controller.isTranscribing && controller.isRecording {
-                    ProgressView().controlSize(.small)
-                }
-                if controller.isPreparingDiarizer {
-                    Text("preparing speaker model…")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                } else if controller.speakerCount > 0 {
-                    Label("\(controller.speakerCount)", systemImage: "person.2.fill")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .help("Distinct voices heard in the room")
-                }
-                Spacer()
-                if !controller.segments.isEmpty {
-                    Button("Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(controller.transcript, forType: .string)
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 12))
-                }
-            }
-
-            if controller.segments.isEmpty {
-                emptyTranscript
-            } else {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(controller.segments) { segment in
-                        MeetingTranscriptRow(
-                            start: segment.start,
-                            speaker: controller.speakerLabel(for: segment),
-                            text: segment.text
-                        )
-                    }
-                }
-            }
-
-            if let recording = controller.lastRecording, !controller.isRecording {
-                Divider().padding(.vertical, 4)
-                HStack(spacing: 8) {
-                    Text("Saved \(Self.clock(recording.duration)) to \(recording.folder.lastPathComponent)")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button("Open in Library") {
-                        selected = store.items.first { $0.folder == recording.folder }
-                        tab = .library
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11))
-                    Button("Show in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([recording.folder])
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11))
-                }
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .metricsCardSurface()
-    }
-
-    @ViewBuilder
-    private var emptyTranscript: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if controller.isRecording && !liveTranscript {
-                Text("Transcribing while recording is off, so the transcript is not being written.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            } else {
-                Text(controller.isRecording
-                     ? "Listening — the first lines appear once there is enough audio."
-                     : "Nothing recorded yet.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
-    }
-
-    // MARK: - Summary
-
-    @ViewBuilder
-    private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text("Summary")
-                    .font(.system(size: 13, weight: .semibold))
-                if controller.isSummarising {
-                    ProgressView().controlSize(.small)
-                    Text("summarising…")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            if let message = controller.summaryError {
-                Text("Could not summarise: \(message). The transcript and audio are saved either way.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let summary = controller.summary {
-                if !summary.summary.isEmpty {
-                    Text(summary.summary)
-                        .font(.system(size: 13))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if !summary.actionItems.isEmpty {
-                    Text("Actions")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
-                    ForEach(Array(summary.actionItems.enumerated()), id: \.offset) { _, item in
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "circle")
-                                .font(.system(size: 6))
-                                .padding(.top, 5)
-                                .foregroundColor(.secondary)
-                            Text(item)
-                                .font(.system(size: 12))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-
-                if !summary.chapters.isEmpty {
-                    Text("Chapters")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
-                    ForEach(Array(summary.chapters.enumerated()), id: \.offset) { _, chapter in
-                        HStack(spacing: 8) {
-                            Text(Self.clock(chapter.start))
-                                .font(.system(size: 11))
-                                .monospacedDigit()
-                                .foregroundColor(.secondary)
-                            Text(chapter.title)
-                                .font(.system(size: 12))
-                        }
-                    }
-                }
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .metricsCardSurface()
-    }
-
-    // MARK: - Library tab
-
-    @ViewBuilder
-    private var libraryTab: some View {
-        if let item = selected {
-            ScrollView {
-                MeetingDetailView(item: item, sidecar: store.readSidecar(in: item.folder))
+                ScrollView {
+                    MeetingDetailView(
+                        item: selectedRecording,
+                        sidecar: store.readSidecar(in: selectedRecording.folder),
+                        onProcessed: { refreshSelectedRecording(folder: selectedRecording.folder) }
+                    )
                     .padding(24)
+                    .frame(maxWidth: 920)
+                    .frame(maxWidth: .infinity)
+                }
             }
         } else {
             MeetingLibraryView(
                 store: store,
-                onOpen: { selected = $0 },
+                onOpen: { selectedRecording = $0 },
                 onImport: importRecording
             )
         }
     }
 
-    // MARK: - Actions
+    private func startRecording() {
+        var sources: MeetingRecordingSession.Sources = []
+        if captureMicrophone { sources.insert(.microphone) }
+        if captureSystemAudio { sources.insert(.systemAudio) }
 
-    private func closeSettings() {
-        withAnimation(.smooth(duration: 0.3)) { isShowingSettings = false }
+        let target: MeetingCaptureTarget
+        if captureSystemAudio, captureTargetMode != "allSystemAudio" {
+            guard let selectedCaptureApplication else { return }
+            target = selectedCaptureApplication.captureTarget
+        } else {
+            target = .allSystemAudio
+        }
+
+        controller.start(request: MeetingRecordingRequest(
+            sources: sources,
+            target: target,
+            transcribeLive: liveTranscript,
+            identifySpeakers: identifySpeakers
+        ))
     }
 
-    private func toggle() {
-        if controller.isRecording {
-            Task {
-                await controller.stop()
-                // Persist first: the transcript must be on disk whether or not the summary
-                // model is reachable.
-                persistLastRecording()
-                store.reload()
-                if summariseAfterMeeting {
-                    await controller.summarise()
-                    persistLastRecording()
-                    store.reload()
-                }
-            }
+    private func presentRecordChooser() {
+        applicationSource.refresh()
+
+        if captureSystemAudio, captureTargetMode == "allSystemAudio" {
+            pendingSource = .allSystemAudio
+        } else if captureSystemAudio,
+                  let selectedCaptureApplication {
+            pendingSource = .application(selectedCaptureApplication.bundleID)
+        } else if let recommended = applicationSource.recommendedApplication {
+            pendingSource = .application(recommended.bundleID)
         } else {
-            tab = .record
-            var sources: MeetingRecordingSession.Sources = []
-            if captureMicrophone { sources.insert(.microphone) }
-            if captureSystemAudio { sources.insert(.systemAudio) }
-            controller.start(
-                sources: sources,
-                transcribeLive: liveTranscript,
-                identifySpeakers: identifySpeakers
+            pendingSource = .room
+        }
+        isShowingRecordChooser = true
+    }
+
+    private func startRecordingFromChooser() {
+        switch pendingSource {
+        case .room:
+            captureMicrophone = true
+            captureSystemAudio = false
+            captureTargetMode = "detectedApplication"
+        case .application(let bundleID):
+            captureMicrophone = true
+            captureSystemAudio = true
+            captureTargetMode = "detectedApplication"
+            selectedApplicationBundleID = bundleID
+        case .allSystemAudio:
+            captureMicrophone = true
+            captureSystemAudio = true
+            captureTargetMode = "allSystemAudio"
+        }
+
+        isShowingRecordChooser = false
+        startRecording()
+    }
+
+    private func stopRecording() {
+        guard !isFinishing else { return }
+        isFinishing = true
+        Task {
+            await controller.stopAndSummarise(
+                ifRequested: summariseAfterMeeting && controller.isLocalSummaryAvailable == true
             )
+            store.reload()
+            isFinishing = false
         }
     }
 
-    /// Written only once the transcript has finished, so a reopened recording shows the same
-    /// text the live view ended on rather than a truncated version of it.
-    private func persistLastRecording() {
-        guard let recording = controller.lastRecording else { return }
-        store.writeSidecar(
-            into: recording.folder,
-            startedAt: recording.startedAt,
-            duration: recording.duration,
-            segments: controller.segments,
-            speakerLabel: { controller.speakerLabel(for: $0) },
-            speakerCount: controller.speakerCount,
-            summary: controller.summary
+    private func copyTranscript() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(controller.transcript, forType: .string)
+    }
+
+    private var summaryAvailabilityCheckID: String {
+        "\(phase == .preflight)-\(summariseAfterMeeting)-\(ollamaSummaryModel)"
+    }
+
+    private func refreshSummaryAvailability() {
+        Task {
+            isCheckingSummaryAvailability = true
+            _ = await controller.checkLocalSummaryAvailability()
+            isCheckingSummaryAvailability = false
+        }
+    }
+
+    private func openLastRecording() {
+        store.reload()
+        NotificationCenter.default.post(
+            name: .navigateToDestination,
+            object: nil,
+            userInfo: ["route": AppRoute.meetingsHistory]
         )
     }
 
-    /// Adopts an existing audio file as a meeting, converting it to the recorder's own format
-    /// so transcription, diarisation and summarising all work on it unchanged.
+    private func refreshSelectedRecording(folder: URL) {
+        store.reload()
+        selectedRecording = store.items.first { $0.folder == folder }
+    }
+
+    private func openDictationModels() {
+        NotificationCenter.default.post(
+            name: .navigateToDestination,
+            object: nil,
+            userInfo: ["route": AppRoute.dictationModels]
+        )
+    }
+
     private func importRecording() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = MeetingRecordingStore.importableExtensions
             .compactMap { UTType(filenameExtension: $0) }
-        panel.message = "Choose recordings to add to your library"
+        panel.message = "Choose recordings to add to your Meetings library"
 
         guard panel.runModal() == .OK else { return }
         importError = nil
+
         for url in panel.urls {
             do {
                 _ = try store.importRecording(from: url)
@@ -544,51 +472,18 @@ struct MeetingRecordingView: View {
                 importError = error.localizedDescription
             }
         }
+
+        store.reload()
         if importError == nil {
-            closeSettings()
-            selected = nil
-            tab = .library
-        } else {
-            tab = .record
+            selectedRecording = nil
         }
     }
 
     private func openAudioCaptureSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") else { return }
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"
+        ) else { return }
         NSWorkspace.shared.open(url)
-    }
-
-    private func banner(
-        _ message: String,
-        icon: String,
-        tint: Color,
-        action: (title: String, run: () -> Void)? = nil,
-        secondary: (title: String, run: () -> Void)? = nil
-    ) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).foregroundColor(tint)
-            Text(message)
-                .font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            if let secondary {
-                Button(secondary.title, action: secondary.run)
-                    .buttonStyle(.link)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            if let action {
-                Button(action.title, action: action.run)
-                    .buttonStyle(.link)
-                    .font(.system(size: 12, weight: .semibold))
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(tint.opacity(0.12))
-        )
     }
 
     static func clock(_ interval: TimeInterval) -> String {
@@ -599,52 +494,5 @@ struct MeetingRecordingView: View {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
             : String(format: "%d:%02d", minutes, seconds)
-    }
-}
-
-/// One read-only fact about what the next recording will capture.
-private struct CaptureChip: View {
-    let icon: String
-    let label: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 9))
-            Text(label).font(.system(size: 10, weight: .medium))
-        }
-        .foregroundColor(.secondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(Color.secondary.opacity(0.10)))
-    }
-}
-
-/// A small horizontal meter. dBFS is compressed into a 0…1 bar over a 60 dB window, which is
-/// where speech actually lives — a linear amplitude bar barely moves at conversational level.
-private struct LevelMeter: View {
-    let label: String
-    let db: Float
-
-    private var fraction: Double {
-        let floorDb: Float = -60
-        guard db > floorDb else { return 0 }
-        return Double((db - floorDb) / -floorDb)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(.secondary)
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.18))
-                    Capsule()
-                        .fill(fraction > 0.9 ? Color.orange : Color.accentColor)
-                        .frame(width: max(2, geometry.size.width * fraction))
-                }
-            }
-            .frame(width: 64, height: 5)
-        }
     }
 }

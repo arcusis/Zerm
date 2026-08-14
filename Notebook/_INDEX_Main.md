@@ -1,6 +1,6 @@
 # Zerm Notebook
 
-Last updated: 2026-07-27
+Last updated: 2026-08-10
 
 This notebook captures durable project context for Zerm. Start here, then follow the linked notes relevant to the task.
 
@@ -8,6 +8,7 @@ This notebook captures durable project context for Zerm. Start here, then follow
 
 - [[Zerm Overview]]
 - [[Zerm Architecture]]
+- [[Zerm Meeting Recording]] — durable, source-aware meeting capture and processing
 - [[Zerm Three Model Platform]] — the STT + TTS + LLM design
 - [[Zerm Read Aloud]] — text-to-speech subsystem
 - [[Zerm On-Device LLM]] — Gemma via llama.cpp
@@ -25,21 +26,23 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Refine In Place]] — instant paste + AI enhancement at once; the AX swap and where it cannot work
 - [[Zerm Usage Statistics]] — the durable `usage.store` behind the Dashboard, and why it is a separate store
 - [[Zerm Known Follow Ups]]
+- [[Zerm Verification Workflow]] — Office Mac build, install, and behavioral release gate
 
-## Current State (2026-07-13)
+## Current State (2026-08-10)
 
-- Branch: `Production` · Version: `2.6.1` (build 261)
+- **Published baseline:** `Production` is v2.8.1 (build 281). The meeting-recording rearchitecture is an unpublished development worktree targeting v2.8.2 (build 282); it has not yet been packaged, installed or released.
 - **Repo is flat:** the Xcode project lives at the **repository root** (`Zerm.xcodeproj`), matching VoiceInk. The old `native-macos/` nesting (a Tauri-era vestige) is gone.
-- **Three on-device models:** Whisper (STT), Kokoro (TTS), Gemma (agentic LLM) — each auto-downloaded and managed in-app; cloud providers optional per task.
-- **Read Aloud** ships with smart reading (instant cleanup + optional on-device AI rewrite).
-- CI builds the Swift app on every PR (all actions SHA-pinned per repo policy).
+- **Speech workspace:** Recording owns live capture and its History/Enhancements views; Read Aloud and Power Modes remain separate; Permissions, Audio Input, Dictionary and app-wide Settings are shared destinations.
+- **Models remain user-selected:** Whisper/FluidAudio/Apple and configured cloud providers serve Dictation and recording transcription; Kokoro/system/cloud voices serve Read Aloud; local and cloud enhancement providers remain explicit choices.
+- **Audio-route policy:** Dictation and meeting capture continue when headphones disconnect. Read Aloud only starts on a confirmed wired, Bluetooth/AirPods or USB-headset route and stops with a notification when that safe route is lost; built-in and external speakers are unsafe by default.
+- **Verification status:** CI compiles the Debug app, runs unit tests and compiles/links `ZermUITests`. UI execution, real microphone/headset behavior, Developer ID signing/notarization, installation and update-from-public-build remain runtime release gates; see [[Zerm Verification Workflow]].
 
 ## Quick Build Reference
 
 ```bash
-# From the repo root
-make install            # build + ad-hoc sign + install to /Applications (resets TCC)
-make reset-permissions  # tccutil reset Accessibility + ScreenCapture
+# Run only in the isolated Office Mac worktree; the local development Mac is production.
+xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
 Full build guide: `BUILDING.md`

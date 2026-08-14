@@ -139,100 +139,94 @@ class PowerModeSessionManager {
         guard let enhancementService = enhancementService,
               let stateProvider = stateProvider else { return }
 
-        await MainActor.run {
-            let outputMode = DictationOutputMode.current
-            let enhancementWanted: Bool
-            switch outputMode {
-            case .instant:
-                // Instant genuinely never enhances, whatever the config says.
-                enhancementWanted = false
-            case .instantRefine, .enhanced:
-                switch config.enhancementOverride {
-                case .inherit: enhancementWanted = enhancementService.isEnhancementEnabled
-                case .on: enhancementWanted = true
-                case .off: enhancementWanted = false
-                }
-            }
-
-            enhancementService.isEnhancementEnabled = enhancementWanted
-            // Screen context costs a capture plus OCR, which no refine budget can absorb.
-            enhancementService.useScreenCaptureContext =
-                (outputMode == .enhanced) ? config.useScreenCapture : false
-
-            if let promptId = config.selectedPrompt, let uuid = UUID(uuidString: promptId) {
-                enhancementService.selectedPromptId = uuid
-            }
-
-            if enhancementWanted {
-                if let aiService = enhancementService.getAIService() {
-                    if let providerName = config.selectedAIProvider, let provider = AIProvider(rawValue: providerName) {
-                        aiService.selectedProvider = provider
-                    }
-                    if let model = config.selectedAIModel {
-                        aiService.selectModel(model)
-                    }
-                }
-            }
-
-            UserDefaults.standard.set(config.isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
-            PunctuationCleanupMode.setCurrent(config.punctuationCleanupMode)
-            UserDefaults.standard.set(config.lowercaseTranscription, forKey: "LowercaseTranscription")
-
-            if let language = config.selectedLanguage {
-                UserDefaults.standard.set(language, forKey: "SelectedLanguage")
-                NotificationCenter.default.post(name: .languageDidChange, object: nil)
+        let outputMode = DictationOutputMode.current
+        let enhancementWanted: Bool
+        switch outputMode {
+        case .instant:
+            // Instant genuinely never enhances, whatever the config says.
+            enhancementWanted = false
+        case .instantRefine, .enhanced:
+            switch config.enhancementOverride {
+            case .inherit: enhancementWanted = enhancementService.isEnhancementEnabled
+            case .on: enhancementWanted = true
+            case .off: enhancementWanted = false
             }
         }
 
+        enhancementService.isEnhancementEnabled = enhancementWanted
+        // Screen context costs a capture plus OCR, which no refine budget can absorb.
+        enhancementService.useScreenCaptureContext =
+            (outputMode == .enhanced) ? config.useScreenCapture : false
+
+        if let promptId = config.selectedPrompt, let uuid = UUID(uuidString: promptId) {
+            enhancementService.selectedPromptId = uuid
+        }
+
+        if enhancementWanted {
+            if let aiService = enhancementService.getAIService() {
+                if let providerName = config.selectedAIProvider, let provider = AIProvider(rawValue: providerName) {
+                    aiService.selectedProvider = provider
+                }
+                if let model = config.selectedAIModel {
+                    aiService.selectModel(model)
+                }
+            }
+        }
+
+        UserDefaults.standard.set(config.isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
+        PunctuationCleanupMode.setCurrent(config.punctuationCleanupMode)
+        UserDefaults.standard.set(config.lowercaseTranscription, forKey: "LowercaseTranscription")
+
+        if let language = config.selectedLanguage {
+            UserDefaults.standard.set(language, forKey: "SelectedLanguage")
+            NotificationCenter.default.post(name: .languageDidChange, object: nil)
+        }
+
         if let modelName = config.selectedTranscriptionModelName,
-           let selectedModel = await stateProvider.allAvailableModels.first(where: { $0.name == modelName }),
+           let selectedModel = stateProvider.allAvailableModels.first(where: { $0.name == modelName }),
            stateProvider.currentTranscriptionModel?.name != modelName {
             await handleModelChange(to: selectedModel)
         }
 
-        await MainActor.run {
-            NotificationCenter.default.post(name: .powerModeConfigurationApplied, object: nil)
-        }
+        NotificationCenter.default.post(name: .powerModeConfigurationApplied, object: nil)
     }
 
     private func restoreState(_ state: ApplicationState) async {
         guard let enhancementService = enhancementService,
               let stateProvider = stateProvider else { return }
 
-        await MainActor.run {
-            enhancementService.isEnhancementEnabled = state.isEnhancementEnabled
-            enhancementService.useScreenCaptureContext = state.useScreenCaptureContext
-            enhancementService.selectedPromptId = state.selectedPromptId.flatMap(UUID.init)
+        enhancementService.isEnhancementEnabled = state.isEnhancementEnabled
+        enhancementService.useScreenCaptureContext = state.useScreenCaptureContext
+        enhancementService.selectedPromptId = state.selectedPromptId.flatMap(UUID.init)
 
-            if let aiService = enhancementService.getAIService() {
-                if let providerName = state.selectedAIProvider, let provider = AIProvider(rawValue: providerName) {
-                    aiService.selectedProvider = provider
-                }
-                if let model = state.selectedAIModel {
-                    aiService.selectModel(model)
-                }
+        if let aiService = enhancementService.getAIService() {
+            if let providerName = state.selectedAIProvider, let provider = AIProvider(rawValue: providerName) {
+                aiService.selectedProvider = provider
             }
-
-            if let isTextFormattingEnabled = state.isTextFormattingEnabled {
-                UserDefaults.standard.set(isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
-            }
-            if let punctuationCleanupMode = state.punctuationCleanupMode {
-                PunctuationCleanupMode.setCurrent(punctuationCleanupMode)
-            } else if let removePunctuation = state.removePunctuation {
-                PunctuationCleanupMode.setCurrent(removePunctuation ? .removeAll : .keep)
-            }
-            if let lowercaseTranscription = state.lowercaseTranscription {
-                UserDefaults.standard.set(lowercaseTranscription, forKey: "LowercaseTranscription")
-            }
-
-            if let language = state.selectedLanguage {
-                UserDefaults.standard.set(language, forKey: "SelectedLanguage")
-                NotificationCenter.default.post(name: .languageDidChange, object: nil)
+            if let model = state.selectedAIModel {
+                aiService.selectModel(model)
             }
         }
 
+        if let isTextFormattingEnabled = state.isTextFormattingEnabled {
+            UserDefaults.standard.set(isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
+        }
+        if let punctuationCleanupMode = state.punctuationCleanupMode {
+            PunctuationCleanupMode.setCurrent(punctuationCleanupMode)
+        } else if let removePunctuation = state.removePunctuation {
+            PunctuationCleanupMode.setCurrent(removePunctuation ? .removeAll : .keep)
+        }
+        if let lowercaseTranscription = state.lowercaseTranscription {
+            UserDefaults.standard.set(lowercaseTranscription, forKey: "LowercaseTranscription")
+        }
+
+        if let language = state.selectedLanguage {
+            UserDefaults.standard.set(language, forKey: "SelectedLanguage")
+            NotificationCenter.default.post(name: .languageDidChange, object: nil)
+        }
+
         if let modelName = state.transcriptionModelName,
-           let selectedModel = await stateProvider.allAvailableModels.first(where: { $0.name == modelName }),
+           let selectedModel = stateProvider.allAvailableModels.first(where: { $0.name == modelName }),
            stateProvider.currentTranscriptionModel?.name != modelName {
             await handleModelChange(to: selectedModel)
         }
@@ -241,12 +235,12 @@ class PowerModeSessionManager {
     private func handleModelChange(to newModel: any TranscriptionModel) async {
         guard let stateProvider = stateProvider else { return }
 
-        await stateProvider.setDefaultTranscriptionModel(newModel)
+        stateProvider.setDefaultTranscriptionModel(newModel)
 
         switch newModel.provider {
         case .whisper:
             await stateProvider.cleanupModelResources()
-            if let whisperModel = await stateProvider.availableModels.first(where: { $0.name == newModel.name }) {
+            if let whisperModel = stateProvider.availableModels.first(where: { $0.name == newModel.name }) {
                 do {
                     try await stateProvider.loadModel(whisperModel)
                 } catch {
@@ -261,7 +255,7 @@ class PowerModeSessionManager {
     }
 
     private func recoverSession() {
-        guard let session = loadSession() else { return }
+        guard loadSession() != nil else { return }
         print("Recovering abandoned Power Mode session.")
         Task {
             await endSession()
