@@ -12,6 +12,9 @@ import FluidAudio
 private let runDiarizerRuntimeIntegration =
     ProcessInfo.processInfo.environment["ZERM_RUN_DIARIZER_INTEGRATION_TESTS"] == "1"
 
+private let runMeetingCaptureIntegration =
+    ProcessInfo.processInfo.environment["ZERM_RUN_MEETING_CAPTURE_INTEGRATION_TESTS"] == "1"
+
 /// Exercises the meeting recorder's logic without audio hardware.
 ///
 /// Capture itself needs a real device and the system-audio permission, but the parts most
@@ -350,6 +353,10 @@ extension MeetingSummarizerTests {
 /// Runs inside the app bundle, so it has the real microphone grant and real audio devices —
 /// this is the only place `MeetingRecordingSession` can be driven for real.
 @MainActor
+@Suite(.enabled(
+    if: runMeetingCaptureIntegration,
+    "Requires ZERM_RUN_MEETING_CAPTURE_INTEGRATION_TESTS=1, real audio devices, and capture grants"
+))
 struct MeetingSessionIntegrationTests {
 
     @Test func sessionRecordsBothTracksAndSavesThem() async throws {

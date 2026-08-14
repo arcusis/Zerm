@@ -99,6 +99,7 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             -only-testing:ZermTests \
+            -skip-testing:ZermTests/MeetingSessionIntegrationTests \
             -skip-testing:ZermTests/MeetingDiarizerIntegrationTests \
             -skip-testing:ZermTests/DiarizerModelLoadDiagnostic \
             -skip-testing:ZermTests/MeetingTwoSpeakerTests \
