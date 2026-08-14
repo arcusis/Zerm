@@ -3,22 +3,25 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.1</title>
+            <title>2.8.2</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.1</h3>
+                <h3>What's New in v2.8.2</h3>
                 <ul>
-                    <li>The Recording tab is rebuilt as two dedicated screens — Record for the meeting in progress, Library for everything you have recorded — instead of one crowded pane.</li>
-                    <li>Capture, transcript and automation settings moved into their own panel behind a Settings button, so the recording screen shows only what is happening now.</li>
-                    <li>The Library is searchable, shows each recording's length, speakers, size and summary at a glance, and opens any of them for playback.</li>
-                    <li>Speaker colours in a transcript are stable and distinct — the same voice now keeps its colour between launches instead of every speaker coming out the same shade.</li>
-                    <li>A transcript no longer highlights its first line as if it were playing before you press play.</li>
+                    <li>Rebuilt Meetings with explicit Room, selected-app, and all-system-audio capture; durable recovery; speaker attribution; and synchronized playback.</li>
+                    <li>Improved Hebrew and automatic language transcription across local and supported cloud models.</li>
+                    <li>Rebuilt Read Aloud with Retell, Summarize, Explain, and Simplify modes, local history, and improved Hebrew voice support.</li>
+                    <li>Fixed repeated clipboard operations, safer in-place replacement, and clearer paste/refinement feedback.</li>
+                    <li>Improved technical terminology for software, cloud, codecs, models, and CLI tools.</li>
+                    <li>Reduced local-AI memory pressure with the official memory-efficient Gemma 4 E2B model, idle unloading, and hardware-aware recommendations. Larger models remain manual opt-ins.</li>
+                    <li>Reorganized navigation, Settings, permissions, and recording preflight for a clearer native macOS workflow.</li>
+                    <li>Added stability, privacy, accessibility, localization, and release-infrastructure fixes throughout the app.</li>
                 </ul>
             ]]></description>
-            <pubDate>Sat, 01 Aug 2026 15:42:31 +0000</pubDate>
-            <sparkle:version>281</sparkle:version>
-            <sparkle:shortVersionString>2.8.1</sparkle:shortVersionString>
+            <pubDate>Fri, 14 Aug 2026 21:34:02 +0000</pubDate>
+            <sparkle:version>282</sparkle:version>
+            <sparkle:shortVersionString>2.8.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.1/Zerm-2.8.1-macos.zip" length="24524967" type="application/octet-stream" sparkle:edSignature="HJt20OmlAooU9ZJBIkWH3KbEonALw1/xQXUIKamL5sTgT2Ra7tGzW1ka1tmx5hYJ9tdGciLLZ9gQHFbJuZvgBQ=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.2/Zerm-2.8.2-macos.zip" length="25300603" type="application/octet-stream" sparkle:edSignature="OkZGDT61sKUyxAS6hs+yLvALoZjrjPLKF5obtf8m5YIA9W95SIhG9zSS3lTeyJEUjdSF2JBnbyBCqh+pjnpRDw=="/>
         </item>
     </channel>
 </rss>

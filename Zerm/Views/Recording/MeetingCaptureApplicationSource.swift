@@ -21,7 +21,23 @@ final class MeetingCaptureApplicationSource: ObservableObject {
 
     @Published private(set) var applications: [Application] = []
 
+    /// A conservative suggestion for the source chooser. Only dedicated calling apps are
+    /// suggested automatically; a merely-running browser is never treated as proof of a call.
+    var recommendedApplication: Application? {
+        applications.first { Self.knownMeetingBundleIDs.contains($0.bundleID) }
+    }
+
     private var observers: [NSObjectProtocol] = []
+
+    private static let knownMeetingBundleIDs: Set<String> = [
+        "com.apple.FaceTime",
+        "com.cisco.webex2",
+        "com.cisco.webexmeetingsapp",
+        "com.microsoft.teams",
+        "com.microsoft.teams2",
+        "com.tinyspeck.slackmacgap",
+        "us.zoom.xos",
+    ]
 
     func start() {
         if installUITestFixturesIfNeeded() { return }

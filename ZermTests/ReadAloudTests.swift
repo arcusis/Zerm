@@ -140,6 +140,33 @@ struct ReadAloudTests {
 }
 
 struct OfficeLocalReadAloudIntegrationTests {
+    /// Reproduces the 2026-08-14 production crash: a prompt larger than llama.cpp's logical
+    /// decode batch and a response budget that together exceed the 4K KV context. This is
+    /// opt-in because it loads the multi-gigabyte local model, but it must complete without a
+    /// process-level ggml_abort before a feedback build is installed.
+    @Test @MainActor func longLocalEnhancementStaysInsideBatchAndContextLimits() async throws {
+        let marker = URL(fileURLWithPath: "/tmp/ZermRunLocalLLMLongContextIntegration")
+        guard FileManager.default.fileExists(atPath: marker.path) else { return }
+
+        let manager = LocalLLMModelManager.shared
+        let package = LocalLLMModelManager.defaultPackage
+        manager.select(package)
+        if !manager.isDownloaded(package) {
+            await manager.download(package)
+        }
+        #expect(manager.isDownloaded(package))
+
+        let paragraph = "The product team reviewed the meeting transcript, preserved every decision, and corrected the wording without changing the meaning. "
+        let source = String(repeating: paragraph, count: 180)
+        let result = try await manager.generate(
+            system: "Rewrite the transcript clearly. Return only the rewritten text.",
+            user: "<TRANSCRIPT>\(source)</TRANSCRIPT>",
+            maxNewTokens: 512
+        )
+
+        #expect(!result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
     /// Downloads/verifies the current shipped local LLM when necessary, runs the real Retell
     /// transformation in Hebrew, and then synthesizes the transformed text with an installed
     /// local voice. This is deliberately opt-in because the default model is several gigabytes.

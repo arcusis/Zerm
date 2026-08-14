@@ -227,19 +227,12 @@ struct ZermApp: App {
         // onnxruntime session construction and segfaults on the way out.
         ProcessLifecycle.isTerminating = uiTestConfiguration.isEnabled || NSClassFromString("XCTestCase") != nil
 
-        // Pre-warm Kokoro (~330 MB) so the first Read Aloud is instant.
-        //
-        // The selected local language model is the first stage of Retell/Summarize/Explain, so a
-        // cold multi-gigabyte load on the hotkey path makes Read Aloud appear frozen. Warm it after
-        // launch only when the confirmed AI reading mode is active and the model is installed.
-        // The model actor performs the work off MainActor and the memory-pressure handler remains
-        // authoritative about releasing it when the system needs RAM.
+        // Pre-warm only Kokoro (~330 MB) so speech can start promptly. Do not load the
+        // multi-gigabyte local LLM at launch: many users run Zerm alongside memory-intensive
+        // development work. Dictation pre-warms it while audio is being captured when needed;
+        // Read Aloud loads it on demand and the manager releases it after a short idle window.
         if !uiTestConfiguration.isEnabled {
             Task { await KokoroModelManager.shared.prewarmIfNeeded() }
-            Task(priority: .utility) {
-                try? await Task.sleep(for: .seconds(2))
-                await LocalLLMModelManager.shared.prewarmIfNeeded()
-            }
             AppShortcuts.updateAppShortcutParameters()
         }
 

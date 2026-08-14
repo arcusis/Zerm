@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 /// The Meetings workspace: prepare, record, process, review and return to the library without
 /// mixing configuration controls into the live transcript.
 struct MeetingRecordingView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var controller: MeetingRecordingController
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
     @StateObject private var applicationSource = MeetingCaptureApplicationSource()
@@ -20,29 +19,22 @@ struct MeetingRecordingView: View {
     @AppStorage("ollamaSelectedModel") private var ollamaSummaryModel = "mistral"
     @AppStorage("SelectedLanguage") private var selectedLanguage = "auto"
 
-    @State private var destination: Destination = .meeting
     @State private var importError: String?
     @State private var isFinishing = false
-    @State private var isShowingSettings = false
+    @State private var isShowingRecordChooser = false
+    @State private var pendingSource: MeetingRecordingSourceSelection = .room
     @State private var selectedRecording: MeetingRecordingStore.Item?
     @State private var isCheckingSummaryAvailability = false
 
-    enum Destination: String, CaseIterable, Identifiable {
+    enum Destination {
         case meeting
         case library
-
-        var id: Self { self }
-
-        var title: LocalizedStringKey {
-            switch self {
-            case .meeting: "Meeting"
-            case .library: "Library"
-            }
-        }
     }
 
+    private let destination: Destination
+
     init(initialDestination: Destination = .meeting) {
-        _destination = State(initialValue: initialDestination)
+        destination = initialDestination
     }
 
     private enum WorkspacePhase {
@@ -150,37 +142,30 @@ struct MeetingRecordingView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            MeetingWorkspaceToolbar(
-                destination: $destination,
-                selectedRecordingTitle: selectedRecording?.title,
-                isRecording: controller.isRecording,
-                elapsed: controller.session.elapsed,
-                showMeeting: showMeeting,
-                showLibraryRoot: showLibraryRoot,
-                importRecording: importRecording,
-                showSettings: { isShowingSettings = true }
-            )
-
-            Divider()
-
-            Group {
-                if destination == .library {
-                    library
-                } else {
-                    workspace
-                }
+        Group {
+            if destination == .library {
+                library
+            } else {
+                workspace
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .controlBackgroundColor))
-        .sheet(isPresented: $isShowingSettings) {
-            MeetingRecordingSettingsPanel(
-                isRecording: controller.isRecording,
-                onImport: importFromSettings,
-                onDismiss: { isShowingSettings = false }
+        .sheet(isPresented: $isShowingRecordChooser) {
+            MeetingRecordSourceSheet(
+                selection: $pendingSource,
+                applications: applicationSource.applications,
+                modelName: modelName,
+                languageName: languageName,
+                hasSelectedModel: selectedModel != nil,
+                refreshApplications: applicationSource.refresh,
+                openModels: {
+                    isShowingRecordChooser = false
+                    openDictationModels()
+                },
+                start: startRecordingFromChooser,
+                cancel: { isShowingRecordChooser = false }
             )
-            .frame(minWidth: 520, minHeight: 620)
         }
         .task {
             store.reload()
@@ -223,7 +208,7 @@ struct MeetingRecordingView: View {
                         summarySnapshot: controller.summarySnapshot ?? .configuredOllama,
                         summaryAvailability: controller.isLocalSummaryAvailable,
                         isCheckingSummaryAvailability: isCheckingSummaryAvailability,
-                        start: startRecording,
+                        start: presentRecordChooser,
                         openModels: openDictationModels,
                         refreshApplications: applicationSource.refresh,
                         refreshSummaryAvailability: refreshSummaryAvailability
@@ -325,15 +310,31 @@ struct MeetingRecordingView: View {
     @ViewBuilder
     private var library: some View {
         if let selectedRecording {
-            ScrollView {
-                MeetingDetailView(
-                    item: selectedRecording,
-                    sidecar: store.readSidecar(in: selectedRecording.folder),
-                    onProcessed: { refreshSelectedRecording(folder: selectedRecording.folder) }
-                )
-                .padding(24)
-                .frame(maxWidth: 920)
-                .frame(maxWidth: .infinity)
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        self.selectedRecording = nil
+                    } label: {
+                        Label("All Meetings", systemImage: "chevron.left")
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+
+                Divider()
+
+                ScrollView {
+                    MeetingDetailView(
+                        item: selectedRecording,
+                        sidecar: store.readSidecar(in: selectedRecording.folder),
+                        onProcessed: { refreshSelectedRecording(folder: selectedRecording.folder) }
+                    )
+                    .padding(24)
+                    .frame(maxWidth: 920)
+                    .frame(maxWidth: .infinity)
+                }
             }
         } else {
             MeetingLibraryView(
@@ -341,17 +342,6 @@ struct MeetingRecordingView: View {
                 onOpen: { selectedRecording = $0 },
                 onImport: importRecording
             )
-        }
-    }
-
-    private func showMeeting() {
-        animate { destination = .meeting }
-    }
-
-    private func showLibraryRoot() {
-        animate {
-            selectedRecording = nil
-            destination = .library
         }
     }
 
@@ -374,6 +364,43 @@ struct MeetingRecordingView: View {
             transcribeLive: liveTranscript,
             identifySpeakers: identifySpeakers
         ))
+    }
+
+    private func presentRecordChooser() {
+        applicationSource.refresh()
+
+        if captureSystemAudio, captureTargetMode == "allSystemAudio" {
+            pendingSource = .allSystemAudio
+        } else if captureSystemAudio,
+                  let selectedCaptureApplication {
+            pendingSource = .application(selectedCaptureApplication.bundleID)
+        } else if let recommended = applicationSource.recommendedApplication {
+            pendingSource = .application(recommended.bundleID)
+        } else {
+            pendingSource = .room
+        }
+        isShowingRecordChooser = true
+    }
+
+    private func startRecordingFromChooser() {
+        switch pendingSource {
+        case .room:
+            captureMicrophone = true
+            captureSystemAudio = false
+            captureTargetMode = "detectedApplication"
+        case .application(let bundleID):
+            captureMicrophone = true
+            captureSystemAudio = true
+            captureTargetMode = "detectedApplication"
+            selectedApplicationBundleID = bundleID
+        case .allSystemAudio:
+            captureMicrophone = true
+            captureSystemAudio = true
+            captureTargetMode = "allSystemAudio"
+        }
+
+        isShowingRecordChooser = false
+        startRecording()
     }
 
     private func stopRecording() {
@@ -406,10 +433,12 @@ struct MeetingRecordingView: View {
     }
 
     private func openLastRecording() {
-        guard let folder = controller.lastRecording?.folder else { return }
         store.reload()
-        selectedRecording = store.items.first { $0.folder == folder }
-        destination = .library
+        NotificationCenter.default.post(
+            name: .navigateToDestination,
+            object: nil,
+            userInfo: ["route": AppRoute.meetingsHistory]
+        )
     }
 
     private func refreshSelectedRecording(folder: URL) {
@@ -423,11 +452,6 @@ struct MeetingRecordingView: View {
             object: nil,
             userInfo: ["route": AppRoute.dictationModels]
         )
-    }
-
-    private func importFromSettings() {
-        isShowingSettings = false
-        DispatchQueue.main.async { importRecording() }
     }
 
     private func importRecording() {
@@ -452,9 +476,6 @@ struct MeetingRecordingView: View {
         store.reload()
         if importError == nil {
             selectedRecording = nil
-            destination = .library
-        } else {
-            destination = .meeting
         }
     }
 
@@ -465,10 +486,6 @@ struct MeetingRecordingView: View {
         NSWorkspace.shared.open(url)
     }
 
-    private func animate(_ changes: () -> Void) {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25), changes)
-    }
-
     static func clock(_ interval: TimeInterval) -> String {
         let total = Int(interval.rounded())
         let hours = total / 3600
@@ -477,62 +494,5 @@ struct MeetingRecordingView: View {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
             : String(format: "%d:%02d", minutes, seconds)
-    }
-}
-
-private struct MeetingWorkspaceToolbar: View {
-    @Binding var destination: MeetingRecordingView.Destination
-
-    let selectedRecordingTitle: String?
-    let isRecording: Bool
-    let elapsed: TimeInterval
-    let showMeeting: () -> Void
-    let showLibraryRoot: () -> Void
-    let importRecording: () -> Void
-    let showSettings: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if destination == .library, selectedRecordingTitle != nil {
-                Button(action: showLibraryRoot) {
-                    Label("All Meetings", systemImage: "chevron.left")
-                }
-            } else {
-                Picker("Meetings view", selection: $destination) {
-                    ForEach(MeetingRecordingView.Destination.allCases) { destination in
-                        Text(destination.title).tag(destination)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 210)
-            }
-
-            Spacer()
-
-            if isRecording {
-                Button(action: showMeeting) {
-                    Label(MeetingRecordingView.clock(elapsed), systemImage: "record.circle.fill")
-                        .monospacedDigit()
-                        .foregroundStyle(.red)
-                }
-                .help("Return to the active meeting")
-                .accessibilityLabel("Recording in progress, \(MeetingRecordingView.clock(elapsed)) elapsed")
-            }
-
-            if destination == .library {
-                Button(action: importRecording) {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-            }
-
-            Button(action: showSettings) {
-                Label("Meeting Settings", systemImage: "gearshape")
-            }
-            .accessibilityIdentifier("meeting-settings")
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

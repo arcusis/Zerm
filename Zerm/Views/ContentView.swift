@@ -127,11 +127,11 @@ struct ContentView: View {
                 isMeetingsExpanded: $isMeetingsExpanded,
                 isReadAloudExpanded: $isReadAloudExpanded,
                 showsPowerModes: powerModeUIFlag,
-                updater: updaterViewModel,
-                openSettings: { openSettings() }
+                updater: updaterViewModel
             )
         } detail: {
             DetailDestination(route: selectedRoute ?? .dashboard)
+                .id(selectedRoute ?? .dashboard)
                 .navigationTitle((selectedRoute ?? .dashboard).title)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("destination-\((selectedRoute ?? .dashboard).rawValue)")
@@ -184,82 +184,86 @@ private struct SidebarView: View {
 
     let showsPowerModes: Bool
     @ObservedObject var updater: UpdaterViewModel
-    let openSettings: () -> Void
 
     var body: some View {
-        List(selection: $selectedRoute) {
-            NavigationLink(value: AppRoute.dashboard) {
-                SidebarLabel(route: .dashboard, prominence: .primary)
-            }
-            .accessibilityIdentifier("sidebar-dashboard")
-
-            Section {
-                DisclosureGroup(isExpanded: $isDictationExpanded) {
-                    SidebarLink(route: .dictationHistory, prominence: .secondary)
-                    SidebarLink(route: .dictationModels, prominence: .secondary)
-                    SidebarLink(route: .dictationVocabulary, prominence: .secondary)
-                } label: {
-                    Label("Dictation", systemImage: "mic.badge.plus")
-                        .fontWeight(.semibold)
-                        .accessibilityIdentifier("dictation-navigation-group")
+        VStack(spacing: 0) {
+            List(selection: $selectedRoute) {
+                NavigationLink(value: AppRoute.dashboard) {
+                    SidebarLabel(route: .dashboard, prominence: .primary)
                 }
+                .accessibilityIdentifier("sidebar-dashboard")
 
-                DisclosureGroup(isExpanded: $isMeetingsExpanded) {
-                    SidebarLink(route: .meetingsRecord, prominence: .secondary)
-                    SidebarLink(route: .meetingsHistory, prominence: .secondary)
-                    SidebarLink(route: .meetingsModels, prominence: .secondary)
-                } label: {
-                    Label("Meetings", systemImage: "person.2.wave.2")
-                        .fontWeight(.semibold)
-                        .accessibilityIdentifier("meetings-navigation-group")
-                }
-
-                DisclosureGroup(isExpanded: $isReadAloudExpanded) {
-                    SidebarLink(route: .readAloudSpeak, prominence: .secondary)
-                    SidebarLink(route: .readAloudHistory, prominence: .secondary)
-                    SidebarLink(route: .readAloudModels, prominence: .secondary)
-                } label: {
-                    Label("Read Aloud", systemImage: "speaker.wave.2")
-                        .fontWeight(.semibold)
-                        .accessibilityIdentifier("read-aloud-navigation-group")
-                }
-
-                SidebarLink(route: .enhancement, prominence: .primary)
-            } header: {
-                SidebarSectionHeader("Speech", identifier: "sidebar-group-speech")
-            }
-
-            if showsPowerModes {
                 Section {
-                    SidebarLink(route: .powerModes, prominence: .primary)
+                    DisclosureGroup(isExpanded: $isDictationExpanded) {
+                        SidebarLink(route: .dictationHistory, prominence: .secondary)
+                        SidebarLink(route: .dictationModels, prominence: .secondary)
+                        SidebarLink(route: .dictationVocabulary, prominence: .secondary)
+                    } label: {
+                        Label("Dictation", systemImage: "mic.badge.plus")
+                            .fontWeight(.semibold)
+                            .accessibilityIdentifier("dictation-navigation-group")
+                    }
+
+                    DisclosureGroup(isExpanded: $isMeetingsExpanded) {
+                        SidebarLink(route: .meetingsRecord, prominence: .secondary)
+                        SidebarLink(route: .meetingsHistory, prominence: .secondary)
+                        SidebarLink(route: .meetingsModels, prominence: .secondary)
+                    } label: {
+                        Label("Meetings", systemImage: "person.2.wave.2")
+                            .fontWeight(.semibold)
+                            .accessibilityIdentifier("meetings-navigation-group")
+                    }
+
+                    DisclosureGroup(isExpanded: $isReadAloudExpanded) {
+                        SidebarLink(route: .readAloudSpeak, prominence: .secondary)
+                        SidebarLink(route: .readAloudHistory, prominence: .secondary)
+                        SidebarLink(route: .readAloudModels, prominence: .secondary)
+                    } label: {
+                        Label("Read Aloud", systemImage: "speaker.wave.2")
+                            .fontWeight(.semibold)
+                            .accessibilityIdentifier("read-aloud-navigation-group")
+                    }
+
+                    SidebarLink(route: .enhancement, prominence: .primary)
                 } header: {
-                    SidebarSectionHeader("Automation", identifier: "sidebar-group-automation")
+                    SidebarSectionHeader("Speech", identifier: "sidebar-group-speech")
+                }
+
+                if showsPowerModes {
+                    Section {
+                        SidebarLink(route: .powerModes, prominence: .primary)
+                    } header: {
+                        SidebarSectionHeader("Automation", identifier: "sidebar-group-automation")
+                    }
+                }
+
+                Section {
+                    SidebarLink(route: .permissions, prominence: .primary)
+                    SidebarLink(route: .audioInput, prominence: .primary)
+                } header: {
+                    SidebarSectionHeader("System", identifier: "sidebar-group-system")
                 }
             }
+            .listStyle(.sidebar)
+            .accessibilityIdentifier("primary-sidebar")
 
-            Section {
-                SidebarLink(route: .permissions, prominence: .primary)
-                SidebarLink(route: .audioInput, prominence: .primary)
-
-                Button(action: openSettings) {
-                    SidebarLabel(route: .settings, prominence: .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Settings")
-                .accessibilityIdentifier("sidebar-settings")
-            } header: {
-                SidebarSectionHeader("System", identifier: "sidebar-group-system")
+            Divider()
+            SettingsLink {
+                SidebarLabel(route: .settings, prominence: .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
             }
-        }
-        .listStyle(.sidebar)
-        .navigationTitle("Zerm")
-        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .buttonStyle(.plain)
+            .help("Settings")
+            .accessibilityIdentifier("sidebar-settings")
+
+            Divider()
             SidebarUpdateBanner(updater: updater)
         }
-        .accessibilityIdentifier("primary-sidebar")
+        .navigationTitle("Zerm")
+        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
     }
 }
 

@@ -54,6 +54,256 @@ struct MeetingTranscriptItem: Identifiable {
     let text: String
 }
 
+enum MeetingRecordingSourceSelection: Hashable {
+    case room
+    case application(String)
+    case allSystemAudio
+}
+
+struct MeetingRecordSourceSheet: View {
+    @Binding var selection: MeetingRecordingSourceSelection
+    @StateObject private var systemAudioReadiness = SystemAudioCaptureReadiness.shared
+
+    let applications: [MeetingCaptureApplicationSource.Application]
+    let modelName: String
+    let languageName: String
+    let hasSelectedModel: Bool
+    let refreshApplications: () -> Void
+    let openModels: () -> Void
+    let start: () -> Void
+    let cancel: () -> Void
+
+    private var capturesSystemAudio: Bool {
+        switch selection {
+        case .room: false
+        case .application, .allSystemAudio: true
+        }
+    }
+
+    private var systemAudioIsVerified: Bool {
+        if case .verified = systemAudioReadiness.status { return true }
+        return false
+    }
+
+    private var selectedApplication: MeetingCaptureApplicationSource.Application? {
+        guard case .application(let bundleID) = selection else { return nil }
+        return applications.first { $0.bundleID == bundleID }
+    }
+
+    private var selectionIsAvailable: Bool {
+        switch selection {
+        case .room, .allSystemAudio: true
+        case .application: selectedApplication != nil
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What do you want to record?")
+                        .font(.title2.weight(.semibold))
+                    Text("Zerm records locally unless your selected Dictation model is a cloud provider.")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: refreshApplications) {
+                    Label("Refresh Applications", systemImage: "arrow.clockwise")
+                }
+                .labelStyle(.iconOnly)
+                .help("Refresh the running application list")
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(spacing: 8) {
+                        sourceButton(
+                            selection: .room,
+                            title: String(localized: "People in the room"),
+                            detail: String(localized: "Record this Mac's microphone only."),
+                            icon: "person.2.wave.2",
+                            identifier: "meeting-source-room"
+                        )
+
+                        ForEach(applications) { application in
+                            sourceButton(
+                                selection: .application(application.bundleID),
+                                title: application.name,
+                                detail: String(localized: "Record the microphone and this application's audio."),
+                                icon: "macwindow.badge.plus",
+                                identifier: "meeting-source-app-\(application.bundleID)"
+                            )
+                        }
+
+                        sourceButton(
+                            selection: .allSystemAudio,
+                            title: String(localized: "All system audio"),
+                            detail: String(localized: "Record the microphone and every sound playing on this Mac."),
+                            icon: "speaker.wave.3",
+                            identifier: "meeting-source-all-system"
+                        )
+                    }
+                    if selection == .allSystemAudio {
+                        Label(
+                            "This can include notifications, music, and applications outside the meeting.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("meeting-all-system-warning")
+                    } else if let selectedApplication,
+                              Self.isBrowser(bundleID: selectedApplication.bundleID) {
+                        Label(
+                            "Browser capture can include audio from other tabs and helper processes owned by the browser.",
+                            systemImage: "hand.raised.fill"
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("meeting-browser-privacy-warning")
+                    }
+
+                    if capturesSystemAudio {
+                        systemAudioStatus
+                    }
+
+                    GroupBox("Transcript") {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(modelName)
+                                    .font(.headline)
+                                Text(languageName)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if !hasSelectedModel {
+                                Button("Choose Model", action: openModels)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(20)
+            }
+
+            Divider()
+
+            HStack {
+                Button("Cancel", action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(action: start) {
+                    Label("Start Recording", systemImage: "record.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+                .disabled(
+                    !hasSelectedModel
+                        || !selectionIsAvailable
+                        || (capturesSystemAudio && !systemAudioIsVerified)
+                )
+                .accessibilityIdentifier("meeting-confirm-recording")
+            }
+            .padding(20)
+        }
+        .frame(width: 600)
+        .frame(minHeight: 560)
+    }
+
+    private func sourceButton(
+        selection candidate: MeetingRecordingSourceSelection,
+        title: String,
+        detail: String,
+        icon: String,
+        identifier: String
+    ) -> some View {
+        Button {
+            selection = candidate
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .frame(width: 28)
+                    .font(.title3)
+                    .foregroundStyle(selection == candidate ? Color.accentColor : Color.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: selection == candidate ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selection == candidate ? Color.accentColor : Color.secondary)
+            }
+            .contentShape(Rectangle())
+            .padding(12)
+            .background(
+                selection == candidate ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selection == candidate ? .isSelected : [])
+        .accessibilityLabel(title)
+        .accessibilityValue(detail)
+        .accessibilityIdentifier(identifier)
+    }
+
+    @ViewBuilder
+    private var systemAudioStatus: some View {
+        switch systemAudioReadiness.status {
+        case .verified:
+            Label("System audio is verified on this Mac.", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("meeting-system-audio-ready")
+        case .testing:
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Testing system audio…")
+            }
+        case .notTested:
+            HStack {
+                Label("Verify call audio before recording.", systemImage: "speaker.badge.exclamationmark")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Test System Audio", action: systemAudioReadiness.test)
+                    .buttonStyle(.borderedProminent)
+            }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 10) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                HStack {
+                    Button("Test Again", action: systemAudioReadiness.test)
+                    Button("Open System Settings", action: systemAudioReadiness.openSystemSettings)
+                }
+            }
+        }
+    }
+
+    private static func isBrowser(bundleID: String) -> Bool {
+        let knownBrowsers = [
+            "com.apple.Safari",
+            "com.brave.Browser",
+            "com.google.Chrome",
+            "com.microsoft.edgemac",
+            "company.thebrowser.Browser",
+            "org.mozilla.firefox",
+        ]
+        return knownBrowsers.contains(bundleID)
+    }
+}
+
 struct MeetingConfigurationSummary: View {
     let modelName: String
     let providerName: String
@@ -119,96 +369,44 @@ struct MeetingPreflightView: View {
     let refreshApplications: () -> Void
     let refreshSummaryAvailability: () -> Void
 
-    private var hasSource: Bool { captureMicrophone || captureSystemAudio }
-    private var hasCallAudioTarget: Bool {
-        !captureSystemAudio
-            || usesAllSystemAudio
-            || applications.contains { $0.bundleID == selectedApplicationBundleID }
-    }
+    @State private var showsOptions = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Prepare your meeting")
-                    .font(.title2.weight(.semibold))
-                    .accessibilityIdentifier("meeting-prepare-title")
-                Text("Confirm what Zerm will capture and where transcription will run before recording starts.")
-                    .foregroundStyle(.secondary)
-            }
+            VStack(spacing: 16) {
+                Image(systemName: "record.circle")
+                    .font(.system(size: 54, weight: .light))
+                    .foregroundStyle(.red)
 
-            GroupBox("Capture") {
-                VStack(alignment: .leading, spacing: 14) {
-                    Toggle("Microphone — people in the room", isOn: $captureMicrophone)
-                        .accessibilityIdentifier("meeting-capture-microphone")
-                    Toggle("Call audio — people in the meeting app", isOn: $captureSystemAudio)
-                        .accessibilityIdentifier("meeting-capture-call-audio")
-
-                    if captureSystemAudio {
-                        Picker("Call audio source", selection: $usesAllSystemAudio) {
-                            Text("Selected application").tag(false)
-                            Text("All system audio").tag(true)
-                        }
-                        .help("Choose one running application whenever possible. All system audio can include notifications, music and other applications.")
-                        .accessibilityIdentifier("meeting-call-audio-source")
-
-                        if usesAllSystemAudio {
-                            Label(
-                                "All system audio may include sounds outside the meeting.",
-                                systemImage: "exclamationmark.triangle"
-                            )
-                            .font(.callout)
-                            .foregroundStyle(.orange)
-                            .accessibilityIdentifier("meeting-all-system-warning")
-                        } else {
-                            HStack {
-                                Picker("Meeting application", selection: $selectedApplicationBundleID) {
-                                    Text("Choose an application…").tag("")
-                                    ForEach(applications) { application in
-                                        Text(application.name).tag(application.bundleID)
-                                    }
-                                }
-                                .accessibilityIdentifier("meeting-application-picker")
-
-                                Button(action: refreshApplications) {
-                                    Label("Refresh Applications", systemImage: "arrow.clockwise")
-                                }
-                                .labelStyle(.iconOnly)
-                                .help("Refresh the running application list")
-                            }
-
-                            Text("For a browser-based meeting, choose the browser that contains the meeting tab.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-
-                            Label(
-                                "Browser capture may include audio from every tab or helper process owned by that browser, not only the visible meeting tab.",
-                                systemImage: "hand.raised.fill"
-                            )
-                            .font(.callout)
-                            .foregroundStyle(.orange)
-                            .accessibilityIdentifier("meeting-browser-privacy-warning")
-
-                            if !hasCallAudioTarget {
-                                Label(
-                                    "Choose the meeting application or explicitly select All system audio.",
-                                    systemImage: "exclamationmark.triangle.fill"
-                                )
-                                .font(.callout)
-                                .foregroundStyle(.orange)
-                            }
-                        }
-                    }
-
-                    if !hasSource {
-                        Label("Turn on at least one capture source.", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    }
+                VStack(spacing: 6) {
+                    Text("Record a meeting")
+                        .font(.title2.weight(.semibold))
+                    Text("Choose Room, a meeting application, or all system audio when you start.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 6)
-            }
 
-            GroupBox("Transcript") {
+                Button(action: start) {
+                    Label("Record", systemImage: "record.circle.fill")
+                        .font(.title3.weight(.semibold))
+                        .frame(minWidth: 160)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.large)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .accessibilityIdentifier("meeting-start-recording")
+
+                Text("Nothing is captured until you confirm the source.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("meeting-prepare-title")
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+
+            GroupBox("Transcription") {
                 VStack(alignment: .leading, spacing: 14) {
                     if hasSelectedModel {
                         MeetingConfigurationSummary(
@@ -226,8 +424,13 @@ struct MeetingPreflightView: View {
                             Button("Choose Model", action: openModels)
                         }
                     }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+            }
 
-                    Divider()
+            DisclosureGroup(isExpanded: $showsOptions) {
+                VStack(alignment: .leading, spacing: 12) {
                     Toggle("Show transcript while recording", isOn: $liveTranscript)
                         .accessibilityIdentifier("meeting-live-transcript")
                     Toggle("Identify speakers", isOn: $identifySpeakers)
@@ -236,10 +439,7 @@ struct MeetingPreflightView: View {
                         .accessibilityIdentifier("meeting-create-summary")
 
                     if summariseAfterMeeting {
-                        Divider()
                         VStack(alignment: .leading, spacing: 8) {
-                            Label("Meeting summary", systemImage: "text.document")
-                                .font(.headline)
                             Text("Summary runs separately from Dictation and always uses the selected local Ollama model.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
@@ -267,26 +467,13 @@ struct MeetingPreflightView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 6)
+                .padding(.top, 12)
+            } label: {
+                Label("Recording options", systemImage: "slider.horizontal.3")
+                    .font(.headline)
             }
-
-            HStack {
-                Spacer()
-                Button(action: start) {
-                    Label("Start Recording", systemImage: "record.circle")
-                        .frame(minWidth: 120)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(
-                    !hasSource
-                        || !hasCallAudioTarget
-                        || ((liveTranscript || summariseAfterMeeting) && !hasSelectedModel)
-                        || (summariseAfterMeeting && (isCheckingSummaryAvailability || summaryAvailability == nil))
-                )
-                .accessibilityIdentifier("meeting-start-recording")
-            }
+            .padding()
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 }

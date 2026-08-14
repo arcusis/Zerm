@@ -25,8 +25,8 @@ struct LocalLLMPackage: Identifiable, Hashable, Sendable {
 final class LocalLLMModelManager: ObservableObject {
     static let shared = LocalLLMModelManager()
 
-    /// The downloadable catalogue — all Google Gemma (GGUF, 4-bit Q4_K_M), spanning tiny→medium.
-    /// Users pick one as the active on-device model. Add new entries here to offer more.
+    /// The downloadable catalogue. The memory-efficient official Google QAT build is the default;
+    /// larger and legacy community quantizations remain explicit user choices.
     nonisolated static let packages: [LocalLLMPackage] = [
         LocalLLMPackage(
             fileName: "gemma-3-1b-it-Q4_K_M.gguf",
@@ -37,8 +37,16 @@ final class LocalLLMModelManager: ObservableObject {
             sha256: "8270790f3ab69fdfe860b7b64008d9a19986d8df7e407bb018184caa08798ebd"
         ),
         LocalLLMPackage(
+            fileName: "gemma-4-E2B_q4_0-it.gguf",
+            displayName: "Gemma 4 E2B (recommended)",
+            approxSize: "~3.35 GB",
+            estimatedRAMGB: 4.0,
+            downloadURL: URL(string: "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf")!,
+            sha256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634"
+        ),
+        LocalLLMPackage(
             fileName: "gemma-4-E2B-it-Q4_K_M.gguf",
-            displayName: "Gemma 4 E2B (on-device)",
+            displayName: "Gemma 4 E2B (legacy Q4_K_M)",
             approxSize: "~3.1 GB",
             estimatedRAMGB: 4.0,
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/0314792d7f1f7e229411f620751375812bb9faf2/gemma-4-E2B-it-Q4_K_M.gguf")!,
@@ -71,14 +79,47 @@ final class LocalLLMModelManager: ObservableObject {
     ]
 
     /// The shipped default (out-of-box) model.
-    nonisolated static let defaultPackage = packages.first { $0.fileName == "gemma-4-E2B-it-Q4_K_M.gguf" } ?? packages[1]
+    nonisolated static let defaultPackage = packages.first {
+        $0.fileName == "gemma-4-E2B_q4_0-it.gguf"
+    } ?? packages[1]
+
+    /// Best quality/performance balance for this Mac. Displayed as guidance; it never silently
+    /// replaces an installed or explicitly selected model.
+    nonisolated static var recommendedPackage: LocalLLMPackage {
+        packages.first { $0.fileName == HardwareCapability.recommendedLocalLLMFileName }
+            ?? defaultPackage
+    }
 
     nonisolated private static let currentModelKey = "CurrentLocalLLMModel"
 
     /// The currently-selected on-device model (shared by Enhancement + Read Aloud).
     nonisolated static var current: LocalLLMPackage {
         let saved = UserDefaults.standard.string(forKey: currentModelKey)
-        return packages.first { $0.fileName == saved } ?? defaultPackage
+        if let selected = packages.first(where: { $0.fileName == saved }) {
+            return selected
+        }
+
+        // Preserve installations that predate explicit model selection, but never infer that the
+        // largest model found on disk is the desired one. Prefer the memory-efficient default,
+        // then the legacy E2B, then the smallest installed catalogue entry.
+        let modelDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+            .appendingPathComponent("com.arcusis.zerm")
+            .appendingPathComponent("LLMModels")
+        let compatibilityOrder = [
+            defaultPackage.fileName,
+            "gemma-4-E2B-it-Q4_K_M.gguf"
+        ] + packages.map(\.fileName)
+        if let installedFile = compatibilityOrder.first(where: {
+            FileManager.default.fileExists(
+                atPath: modelDirectory.appendingPathComponent($0).path
+            )
+        }), let installed = packages.first(where: { $0.fileName == installedFile }) {
+            return installed
+        }
+        return recommendedPackage
     }
 
     /// Backward-compatible alias for the many call sites that referenced the single package;
@@ -96,6 +137,9 @@ final class LocalLLMModelManager: ObservableObject {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "LocalLLMModelManager")
     private var engine: LlamaEngine?
     private var engineFileName: String?
+    private var activeOperations = 0
+    private var idleUnloadTask: Task<Void, Never>?
+    private static let idleUnloadDelayNanoseconds: UInt64 = 120_000_000_000
     private var downloadTasks: [String: URLSessionDownloadTask] = [:]
     private var progressObservations: [String: NSKeyValueObservation] = [:]
 
@@ -145,6 +189,7 @@ final class LocalLLMModelManager: ObservableObject {
     /// loads the newly-selected weights.
     func select(_ package: LocalLLMPackage) {
         guard package.fileName != currentFileName else { return }
+        cancelIdleUnload()
         UserDefaults.standard.set(package.fileName, forKey: Self.currentModelKey)
         currentFileName = package.fileName
         if engineFileName != package.fileName {
@@ -195,7 +240,11 @@ final class LocalLLMModelManager: ObservableObject {
     }
 
     func delete(_ package: LocalLLMPackage) {
-        if engineFileName == package.fileName { engine = nil; engineFileName = nil }
+        if engineFileName == package.fileName {
+            cancelIdleUnload()
+            engine = nil
+            engineFileName = nil
+        }
         try? FileManager.default.removeItem(at: path(for: package))
         refreshInstalled()
     }
@@ -205,7 +254,8 @@ final class LocalLLMModelManager: ObservableObject {
 
     /// Release the warm engine so it doesn't pin GB of RAM after idle.
     func unloadIfIdle() {
-        guard engine != nil else { return }
+        guard activeOperations == 0, engine != nil else { return }
+        cancelIdleUnload()
         logger.notice("Unloading local LLM engine (idle / memory reclaim)")
         engine = nil
         engineFileName = nil
@@ -252,6 +302,8 @@ final class LocalLLMModelManager: ObservableObject {
         guard isInstalled else {
             throw TTSError.notAvailable("The on-device model isn't downloaded yet. Download it in Enhancement or Read Aloud settings.")
         }
+        beginOperation()
+        defer { endOperation() }
         let engine = ensureEngine()
         return try await engine.generate(system: system, user: user, maxNewTokens: maxNewTokens, isCancelled: isCancelled)
     }
@@ -266,15 +318,46 @@ final class LocalLLMModelManager: ObservableObject {
     /// needs the model resident before transcription finishes, not after.
     func prewarm() async {
         guard isInstalled else { return }
+        beginOperation()
+        defer { endOperation() }
         let engine = ensureEngine()
         try? await engine.warmUp()
     }
 
     private func ensureEngine() -> LlamaEngine {
+        cancelIdleUnload()
         if let engine, engineFileName == currentPackage.fileName { return engine }
-        let engine = LlamaEngine(modelPath: modelPath.path)
+        let engine = LlamaEngine(
+            modelPath: modelPath.path,
+            contextSize: HardwareCapability.localLLMContextSize,
+            threadCount: HardwareCapability.inferenceThreadCount
+        )
         self.engine = engine
         self.engineFileName = currentPackage.fileName
         return engine
+    }
+
+    private func beginOperation() {
+        cancelIdleUnload()
+        activeOperations += 1
+    }
+
+    private func endOperation() {
+        activeOperations = max(0, activeOperations - 1)
+        guard activeOperations == 0, engine != nil else { return }
+        idleUnloadTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.idleUnloadDelayNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.unloadIfIdle()
+        }
+    }
+
+    private func cancelIdleUnload() {
+        idleUnloadTask?.cancel()
+        idleUnloadTask = nil
     }
 }

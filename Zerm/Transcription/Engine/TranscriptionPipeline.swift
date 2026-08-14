@@ -161,11 +161,26 @@ class TranscriptionPipeline {
             // nothing left to refine afterwards. Where both are configured the only
             // coherent outcome is to enhance first and send the enhanced text, so this
             // falls back to Enhanced rather than silently dropping the enhancement.
-            let outputMode: DictationOutputMode = {
-                let configured = DictationOutputMode.current
-                guard configured == .instantRefine, autoSendKey?.isEnabled == true else { return configured }
-                return .enhanced
-            }()
+            let configuredOutputMode = DictationOutputMode.current
+            var canReplaceAfterPaste = true
+            if configuredOutputMode == .instantRefine {
+                let snapshot = await Task.detached(priority: .userInitiated) {
+                    AXTextAnchorCapture.capture()
+                }.value
+                if let snapshot {
+                    canReplaceAfterPaste = await TargetAppCapabilities.shared.verdict(for: snapshot) != .fallbackOnly
+                } else {
+                    canReplaceAfterPaste = false
+                }
+            }
+            let outputMode = DictationOutputMode.effective(
+                configured: configuredOutputMode,
+                autoSendEnabled: autoSendKey?.isEnabled == true,
+                canReplaceAfterPaste: canReplaceAfterPaste
+            )
+            if configuredOutputMode == .instantRefine, outputMode == .enhanced {
+                logger.notice("Instant + Refine will wait and paste once because the target cannot support a safe post-paste replacement")
+            }
             let blocksOnEnhancement = outputMode == .enhanced
             let allowPromptTriggeredEnhancement = UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement")
 

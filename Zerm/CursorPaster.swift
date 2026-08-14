@@ -20,7 +20,48 @@ class CursorPaster {
 
     private static let prePasteDelay: TimeInterval = 0.10
     private static let pasteShortcutEventDelay: TimeInterval = 0.01
+    private static let unicodeEventDelay: TimeInterval = 0.003
+    private static let unicodeEventUTF16Limit = 20
     private static let minimumClipboardRestoreDelay: TimeInterval = 0.25
+
+    /// Orca intentionally turns clipboard pastes into `[Pasted text #…]` attachments. Its
+    /// editor is also opaque to macOS Accessibility, so AX selected-text insertion is not an
+    /// option. Delivering normal Unicode keyboard events matches actual typing and leaves the
+    /// user's clipboard untouched. Keep this allow-list narrow because AppKit documents that
+    /// some application frameworks may ignore a keyboard event's overridden Unicode string.
+    static func prefersClipboardFreeInsertion(bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == "com.stablyai.orca"
+    }
+
+    /// Splits on Character boundaries so surrogate pairs, emoji sequences, and Hebrew marks are
+    /// never torn between Core Graphics keyboard events.
+    static func unicodeEventChunks(
+        for text: String,
+        maxUTF16Units: Int = unicodeEventUTF16Limit
+    ) -> [String] {
+        guard !text.isEmpty, maxUTF16Units > 0 else { return [] }
+
+        var chunks: [String] = []
+        var current = ""
+        var currentUTF16Count = 0
+
+        for character in text {
+            let value = String(character)
+            let valueUTF16Count = value.utf16.count
+            if !current.isEmpty, currentUTF16Count + valueUTF16Count > maxUTF16Units {
+                chunks.append(current)
+                current = ""
+                currentUTF16Count = 0
+            }
+            current.append(character)
+            currentUTF16Count += valueUTF16Count
+        }
+
+        if !current.isEmpty {
+            chunks.append(current)
+        }
+        return chunks
+    }
 
     static func pasteAtCursor(_ text: String) {
         Task {
@@ -57,6 +98,55 @@ class CursorPaster {
         await performPasteSession(text, captureAnchor: true)
     }
 
+    /// Replaces a range that `AXTextAnchorCapture` has already verified by selecting it through
+    /// Accessibility and posting the standard Paste command. Clipboard contents are restored
+    /// under the same session-ownership guard as ordinary dictation paste.
+    @MainActor
+    static func replaceVerifiedSelectionByPasting(
+        _ text: String,
+        anchor: AXTextAnchor
+    ) async -> PasteResult {
+        let pasteboard = NSPasteboard.general
+        // Deferred refinement is not the user's direct paste action. It must never silently
+        // replace their clipboard, regardless of the preference used for ordinary dictation.
+        let savedContents = snapshotClipboard(from: pasteboard)
+        let sessionID = UUID().uuidString
+
+        guard ClipboardManager.setClipboard(
+            text,
+            transient: true,
+            sessionID: sessionID,
+            on: pasteboard
+        ) else {
+            logger.error("Failed to prepare refined text for replacement paste")
+            return .commandNotPosted
+        }
+
+        let refusal = await Task.detached(priority: .userInitiated) {
+            AXTextReplacer.prepareSelectionForPaste(anchor, with: text)
+        }.value
+
+        guard refusal == nil,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == anchor.pid else {
+            restoreClipboardImmediatelyIfOwned(
+                savedContents,
+                expectedText: text,
+                sessionID: sessionID,
+                on: pasteboard
+            )
+            return .commandNotPosted
+        }
+
+        let result = await postPasteCommand()
+        scheduleClipboardRestore(
+            savedContents,
+            expectedText: text,
+            sessionID: sessionID,
+            on: pasteboard
+        )
+        return result
+    }
+
     @MainActor
     @discardableResult
     private static func performPasteSession(
@@ -74,10 +164,23 @@ class CursorPaster {
             ? Task.detached(priority: .userInitiated) { AXTextAnchorCapture.capture() }
             : nil
 
+        let targetBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if prefersClipboardFreeInsertion(bundleIdentifier: targetBundleIdentifier) {
+            await wait(prePasteDelay)
+            let snapshot = await anchorTask?.value
+            let result = await typeTextWithoutClipboard(text)
+            if result == .commandPosted {
+                logger.notice("Unicode text events posted without modifying the clipboard")
+                return (result, snapshot)
+            }
+            logger.error("Clipboard-free insertion could not be posted; using paste fallback")
+        }
+
         guard ClipboardManager.setClipboard(
             text,
             transient: shouldRestoreClipboard,
-            sessionID: shouldRestoreClipboard ? sessionID : nil
+            sessionID: shouldRestoreClipboard ? sessionID : nil,
+            on: pasteboard
         ) else {
             logger.error("Failed to prepare clipboard for paste")
             anchorTask?.cancel()
@@ -151,6 +254,23 @@ class CursorPaster {
     ) -> Bool {
         pasteboard.string(forType: .string) == expectedText &&
             pasteboard.string(forType: ClipboardManager.pasteSessionType) == sessionID
+    }
+
+    private static func restoreClipboardImmediatelyIfOwned(
+        _ savedContents: ClipboardSnapshot,
+        expectedText: String,
+        sessionID: String,
+        on pasteboard: NSPasteboard
+    ) {
+        guard pasteboardStillOwnedByPasteSession(
+            pasteboard,
+            expectedText: expectedText,
+            sessionID: sessionID
+        ) else { return }
+        pasteboard.clearContents()
+        if !savedContents.isEmpty {
+            pasteboard.writeObjects(pasteboardItems(from: savedContents))
+        }
     }
 
     private static func pasteboardItems(from snapshot: ClipboardSnapshot) -> [NSPasteboardItem] {
@@ -245,6 +365,75 @@ class CursorPaster {
 
         logger.notice("CGEvents posted for Cmd+V")
         return .commandPosted
+    }
+
+    // MARK: - Clipboard-free text insertion
+
+    /// Posts text as ordinary Unicode keyboard input. Newlines are represented as Shift-Return
+    /// rather than a bare Return so chat-style editors insert a line break instead of sending.
+    @MainActor
+    private static func typeTextWithoutClipboard(_ text: String) async -> PasteResult {
+        guard AXIsProcessTrusted() else {
+            logger.error("Accessibility permission is required for clipboard-free text insertion")
+            return .commandNotPosted
+        }
+
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
+
+        for (lineIndex, line) in lines.enumerated() {
+            for chunk in unicodeEventChunks(for: String(line)) {
+                guard postUnicodeChunk(chunk) else { return .commandNotPosted }
+                await wait(unicodeEventDelay)
+            }
+
+            if lineIndex < lines.count - 1 {
+                guard postLineBreak() else { return .commandNotPosted }
+                await wait(unicodeEventDelay)
+            }
+        }
+
+        return .commandPosted
+    }
+
+    private static func postUnicodeChunk(_ chunk: String) -> Bool {
+        let source = CGEventSource(stateID: .privateState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+            logger.error("Failed to create Unicode keyboard events")
+            return false
+        }
+
+        let utf16 = Array(chunk.utf16)
+        utf16.withUnsafeBufferPointer { buffer in
+            down.keyboardSetUnicodeString(
+                stringLength: buffer.count,
+                unicodeString: buffer.baseAddress
+            )
+            up.keyboardSetUnicodeString(
+                stringLength: buffer.count,
+                unicodeString: buffer.baseAddress
+            )
+        }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
+    }
+
+    private static func postLineBreak() -> Bool {
+        let source = CGEventSource(stateID: .privateState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: false) else {
+            logger.error("Failed to create line-break keyboard events")
+            return false
+        }
+        down.flags = .maskShift
+        up.flags = .maskShift
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
     }
 
     private static func wait(_ seconds: TimeInterval) async {

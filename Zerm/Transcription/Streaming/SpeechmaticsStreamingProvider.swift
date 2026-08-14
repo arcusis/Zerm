@@ -90,22 +90,7 @@ final class SpeechmaticsStreamingProvider: StreamingTranscriptionProvider {
     }
 
     private func getCustomVocabularyTerms() -> [String] {
-        let descriptor = FetchDescriptor<VocabularyWord>(sortBy: [SortDescriptor(\.word)])
-        guard let vocabularyWords = try? modelContext.fetch(descriptor) else {
-            return []
-        }
-        var seen = Set<String>()
-        var unique: [String] = []
-        for word in vocabularyWords {
-            let trimmed = word.word.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let key = trimmed.lowercased()
-            if !seen.contains(key) {
-                seen.insert(key)
-                unique.append(trimmed)
-            }
-        }
-        return unique
+        VocabularyTerms.transcriptionTerms(from: modelContext)
     }
 
     private func mapError(_ error: Error) -> Error {

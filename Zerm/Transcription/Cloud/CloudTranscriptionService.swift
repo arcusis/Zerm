@@ -109,7 +109,7 @@ class CloudTranscriptionService: TranscriptionService {
     }
 
     private func getCustomDictionaryTerms() -> [String] {
-        VocabularyTerms.fetch(from: modelContext)
+        VocabularyTerms.transcriptionTerms(from: modelContext)
     }
 
     private func mapLLMKitError(_ error: LLMKitError) -> CloudTranscriptionError {

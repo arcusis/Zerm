@@ -24,9 +24,26 @@ enum VocabularyTerms {
         return unique
     }
 
+    /// User vocabulary plus the profile-specific built-in terminology. User terms come first so
+    /// the fixed provider limits cannot crowd out customer names and product vocabulary.
+    static func transcriptionTerms(
+        from modelContext: ModelContext,
+        selectedPromptID: UUID? = TechnicalTerminology.selectedPromptID,
+        limit: Int = 100
+    ) -> [String] {
+        let candidates = fetch(from: modelContext, limit: limit)
+            + TechnicalTerminology.terms(for: selectedPromptID)
+        var seen = Set<String>()
+        return candidates.compactMap { term in
+            let key = term.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            guard seen.insert(key).inserted else { return nil }
+            return term
+        }.prefix(limit).map { $0 }
+    }
+
     /// Phrase suitable for Whisper `initial_prompt` bias (capped length).
     static func whisperPromptSuffix(from modelContext: ModelContext, maxChars: Int = 400) -> String {
-        let terms = fetch(from: modelContext, limit: 80)
+        let terms = transcriptionTerms(from: modelContext, limit: 80)
         guard !terms.isEmpty else { return "" }
         var suffix = " Vocabulary: " + terms.joined(separator: ", ") + "."
         if suffix.count > maxChars {

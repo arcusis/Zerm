@@ -17,8 +17,12 @@ actor LlamaEngine {
 
     private let bridge: LlamaBridge
 
-    init(modelPath: String) {
-        bridge = LlamaBridge(modelPath: modelPath)
+    init(modelPath: String, contextSize: Int, threadCount: Int) {
+        bridge = LlamaBridge(
+            modelPath: modelPath,
+            contextSize: Int32(contextSize),
+            threadCount: Int32(threadCount)
+        )
     }
 
     /// Loads the model without generating, so the first real request is fast.
@@ -29,6 +33,9 @@ actor LlamaEngine {
     /// Runs one instruction-style generation. `isCancelled` is polled between tokens.
     func generate(system: String, user: String, maxNewTokens: Int = 400,
                   isCancelled: @escaping @Sendable () -> Bool = { false }) throws -> String {
+        // Re-evaluate this immediately before inference so Low Power Mode and thermal pressure
+        // take effect without unloading several gigabytes of model weights.
+        bridge.setThreadCount(Int32(HardwareCapability.inferenceThreadCount))
         guard let result = bridge.generate(withSystem: system, user: user,
                                            maxNewTokens: Int32(maxNewTokens),
                                            isCancelled: { isCancelled() }) else {

@@ -48,15 +48,22 @@ final class ZermUITests: XCTestCase {
         openSidebarRoute("meetingsRecord")
 
         assertExists("meeting-prepare-title")
-        let applicationPicker = element("meeting-application-picker")
-        XCTAssertTrue(applicationPicker.waitForExistence(timeout: 3))
-        XCTAssertTrue(String(describing: applicationPicker.value).contains("Example Meeting"))
-        XCTAssertFalse(element("meeting-all-system-warning").exists)
-
+        XCTAssertFalse(element("meeting-settings").exists)
+        XCTAssertFalse(app.segmentedControls["Meetings view"].exists)
         let disclosure = element("meeting-language-disclosure")
         XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
         XCTAssertFalse(disclosure.label.localizedCaseInsensitiveContains("auto-detect"))
-        XCTAssertTrue(element("meeting-start-recording").isEnabled)
+
+        element("meeting-start-recording").click()
+        let selectedApplication = element("meeting-source-app-com.example.meeting")
+        XCTAssertTrue(selectedApplication.waitForExistence(timeout: 3))
+        XCTAssertTrue(selectedApplication.isSelected)
+        let systemAudioIsReady = element("meeting-system-audio-ready").exists
+        XCTAssertTrue(
+            systemAudioIsReady || app.buttons["Test System Audio"].exists,
+            "System-audio capture must either be verified or offer its native end-to-end test"
+        )
+        XCTAssertEqual(element("meeting-confirm-recording").isEnabled, systemAudioIsReady)
     }
 
     @MainActor
@@ -64,10 +71,17 @@ final class ZermUITests: XCTestCase {
         app = launch(scenario: "nativeApple")
         openSidebarRoute("meetingsRecord")
 
-        choosePicker(identifier: "meeting-call-audio-source", option: "All system audio")
+        element("meeting-start-recording").click()
+        let allSystemAudio = element("meeting-source-all-system")
+        XCTAssertTrue(allSystemAudio.waitForExistence(timeout: 3))
+        allSystemAudio.click()
         assertExists("meeting-all-system-warning")
-        XCTAssertFalse(element("meeting-application-picker").exists)
-        XCTAssertTrue(element("meeting-start-recording").isEnabled)
+        let systemAudioIsReady = element("meeting-system-audio-ready").exists
+        XCTAssertEqual(element("meeting-confirm-recording").isEnabled, systemAudioIsReady)
+
+        let room = element("meeting-source-room")
+        room.click()
+        XCTAssertTrue(element("meeting-confirm-recording").isEnabled)
     }
 
     @MainActor
@@ -154,7 +168,7 @@ final class ZermUITests: XCTestCase {
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
         openSidebarRoute("meetingsRecord")
         assertExists("meeting-prepare-title")
-        XCTAssertTrue(app.descendants(matching: .any)["הכנת הפגישה"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["הקלטת פגישה"].exists)
 
         app.typeKey(",", modifierFlags: .command)
         assertExists("settings-root", timeout: 5)

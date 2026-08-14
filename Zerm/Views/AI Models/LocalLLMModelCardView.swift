@@ -5,6 +5,14 @@ import SwiftUI
 struct LocalLLMModelListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Label {
+                Text("\(HardwareCapability.summary) · Zerm defaults to the memory-efficient \(LocalLLMModelManager.recommendedPackage.displayName) with a \(HardwareCapability.localLLMContextSize / 1_024)K context. Larger models are opt-in, and your explicit selection is always preserved.")
+            } icon: {
+                Image(systemName: "memorychip")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
             ForEach(LocalLLMModelManager.packages) { package in
                 LocalLLMModelCardView(package: package)
             }
@@ -22,6 +30,9 @@ struct LocalLLMModelCardView: View {
     private var isCurrent: Bool { manager.currentFileName == package.fileName }
     private var isDownloaded: Bool { manager.isDownloaded(package) }
     private var progress: Double? { manager.downloadProgress[package.fileName] }
+    private var isRecommended: Bool {
+        package.fileName == LocalLLMModelManager.recommendedPackage.fileName
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -36,6 +47,11 @@ struct LocalLLMModelCardView: View {
                 if isCurrent {
                     Label("In use", systemImage: "checkmark.circle.fill")
                         .font(.caption2).foregroundStyle(.green)
+                }
+                if isRecommended {
+                    Label("Memory-efficient default", systemImage: "memorychip")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 Text(package.approxSize).font(.caption).foregroundStyle(.secondary)
             }

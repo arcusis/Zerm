@@ -107,6 +107,38 @@ enum HardwareCapability {
             return ["ggml-base.en", "parakeet-tdt-0.6b-v2", "ggml-large-v3-turbo-q5_0", "whisper-large-v3-turbo"]
         }
     }
+
+    /// The on-device LLM recommendation deliberately does not scale with installed RAM. Zerm's
+    /// rewrite and narration tasks do not justify reserving more unified memory simply because a
+    /// Mac has it. Larger models remain explicit opt-ins.
+    static var recommendedLocalLLMFileName: String {
+        recommendedLocalLLMFileName(
+            physicalMemoryGB: physicalMemoryGB,
+            isAppleSilicon: !SystemArchitecture.isIntelMac
+        )
+    }
+
+    static func recommendedLocalLLMFileName(
+        physicalMemoryGB _: Double,
+        isAppleSilicon: Bool
+    ) -> String {
+        guard isAppleSilicon else { return "gemma-3-1b-it-Q4_K_M.gguf" }
+        return "gemma-4-E2B_q4_0-it.gguf"
+    }
+
+    /// Zerm caps the default context at 8K even on high-memory Macs. Its focused rewrite and
+    /// narration jobs do not need a 16K/32K KV cache, and unified memory belongs to the user's
+    /// other applications as well as Zerm's STT and TTS runtimes.
+    static var localLLMContextSize: Int {
+        localLLMContextSize(physicalMemoryGB: physicalMemoryGB)
+    }
+
+    static func localLLMContextSize(physicalMemoryGB memory: Double) -> Int {
+        switch memory {
+        case ..<12: return 4_096
+        default: return 8_192
+        }
+    }
 }
 
 // MARK: - Model RAM estimates

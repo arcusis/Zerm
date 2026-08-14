@@ -101,6 +101,11 @@ struct MeetingLibraryView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .monospacedDigit()
+
+            Button(action: onImport) {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.bordered)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
