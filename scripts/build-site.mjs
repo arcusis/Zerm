@@ -223,6 +223,7 @@ function buildChangelog() {
       ]
         .filter(Boolean)
         .join("");
+      const badgesLine = badges ? `            ${badges}\n` : "";
 
       const download = dmg
         ? `<a class="rel-dl" href="${dmg.url}">Download .dmg <span>${(dmg.size / 1048576).toFixed(1)} MB</span></a>`
@@ -232,8 +233,7 @@ function buildChangelog() {
           <div class="rel-meta">
             <a class="rel-tag" href="#${esc(r.tag)}">${esc(r.tag)}</a>
             <time>${esc(when)}</time>
-            ${badges}
-            ${download}
+${badgesLine}            ${download}
           </div>
           <div class="rel-body">
             <h2>${esc(heading)}</h2>
