@@ -3,25 +3,22 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.2</title>
+            <title>2.8.3</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.2</h3>
+                <h3>What's New in v2.8.3</h3>
                 <ul>
-                    <li>Rebuilt Meetings with explicit Room, selected-app, and all-system-audio capture; durable recovery; speaker attribution; and synchronized playback.</li>
-                    <li>Improved Hebrew and automatic language transcription across local and supported cloud models.</li>
-                    <li>Rebuilt Read Aloud with Retell, Summarize, Explain, and Simplify modes, local history, and improved Hebrew voice support.</li>
-                    <li>Fixed repeated clipboard operations, safer in-place replacement, and clearer paste/refinement feedback.</li>
-                    <li>Improved technical terminology for software, cloud, codecs, models, and CLI tools.</li>
-                    <li>Reduced local-AI memory pressure with the official memory-efficient Gemma 4 E2B model, idle unloading, and hardware-aware recommendations. Larger models remain manual opt-ins.</li>
-                    <li>Reorganized navigation, Settings, permissions, and recording preflight for a clearer native macOS workflow.</li>
-                    <li>Added stability, privacy, accessibility, localization, and release-infrastructure fixes throughout the app.</li>
+                    <li>Recordings are saved even if transcription or AI fails. Retry from History.</li>
+                    <li>English and mixed dictation no longer collapse to Hebrew. Enhancement keeps the original script.</li>
+                    <li>Instant + Refine pastes once. Enhanced no longer copies the selection after you finish speaking.</li>
+                    <li>Enhancement defaults to Qwen3. Gemma stays on Read Aloud.</li>
+                    <li>Word replacements respect Unicode word boundaries. Microphone detection no longer under-allocates the Core Audio buffer list.</li>
                 </ul>
             ]]></description>
-            <pubDate>Fri, 14 Aug 2026 21:34:02 +0000</pubDate>
-            <sparkle:version>282</sparkle:version>
-            <sparkle:shortVersionString>2.8.2</sparkle:shortVersionString>
+            <pubDate>Mon, 17 Aug 2026 10:28:37 +0000</pubDate>
+            <sparkle:version>283</sparkle:version>
+            <sparkle:shortVersionString>2.8.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.2/Zerm-2.8.2-macos.zip" length="25300603" type="application/octet-stream" sparkle:edSignature="OkZGDT61sKUyxAS6hs+yLvALoZjrjPLKF5obtf8m5YIA9W95SIhG9zSS3lTeyJEUjdSF2JBnbyBCqh+pjnpRDw=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.3/Zerm-2.8.3-macos.zip" length="25297705" type="application/octet-stream" sparkle:edSignature="MwMBLFxoAwkzXjCjf0FeZVlChh9cCWWFagr+cWzbA7xbleTNz03J5zpGXWflqcYavoINme1FXEtthVi1u02FAA=="/>
         </item>
     </channel>
 </rss>
