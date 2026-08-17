@@ -6,11 +6,28 @@ Open work is tracked in `arcusis/Zerm` GitHub Issues. Issue counts and tracker s
 
 | Issue | Title | Notes |
 |-------|-------|-------|
+| #300 | Hebrew takes over mixed-language dictation after 2.8.2 | Fixed in v2.8.3 tree. Close after the signed build ships. See [[Zerm Enhancement Language Fidelity]]. |
+| #301 | Instant+Refine copies, waits, then copies again | Fixed in v2.8.3 tree. Close after ship. See [[Zerm Refine In Place]]. |
+| #302 | Instant enhancement model — split Qwen3 0.6B from Gemma | Fixed in v2.8.3 tree. Close after ship. |
+| #303 | Long dictation can fail with a generic error and lose the WAV | Fixed in v2.8.3 tree. Close after ship. See [[Zerm Lost Recording 2026-08-17]]. |
+| #278 | CI / clean checkout missing llama target | Still real. |
+| #173 | Parakeet V3 hang after FluidAudio migration | Still real. |
+| #2 | High CPU / battery in background | Still unprofiled. |
+
+## Previously listed P1 Bugs (open in GitHub)
+
+| Issue | Title | Notes |
+|-------|-------|-------|
 | Z#2 / VI#672 | High CPU / battery drain in background | Root cause unknown; likely polling. Needs profiling. |
 | Z#173 / VI#632 | Parakeet V3 hangs after partial FluidAudio migration | 120 s timeout now prevents infinite hang; root cause needs `FluidAudioTranscriptionService` error surfacing |
 
 ## Recently Closed Tracker Items
 
+- **Z#220 and TTS children (#208–#219, #211–#216):** Read Aloud shipped. Closed 2026-08-17.
+- **Z#227:** local llama.cpp enhancement models shipped (Qwen3 catalog). Remaining default/Gemma split is #302.
+- **Z#177 / VI#537:** privacy disclosure for screen/clipboard context. Closed 2026-08-17.
+- **Z#290:** VoiceInk sweep through v2.1, plus v2.11 compare. One port taken (Unicode word boundaries). Closed 2026-08-17.
+- VoiceInk-only imports closed as not planned: SenseVoice/Qwen-ASR, Alibaba, MCP, Voxtral, F5-for-VoiceInk, settings sync, workflow router, in-app downgrade, local-model HTTP.
 - **Z#199 / VI#687 — intermittent empty or truncated transcription:** closed in GitHub on 2026-06-14. Reopen with fresh runtime evidence if the symptom returns.
 - **Z#175 / VI#702 — numeric words converted to digits:** closed in GitHub on 2026-05-22 after the Whisper prompt correction and monitoring period.
 

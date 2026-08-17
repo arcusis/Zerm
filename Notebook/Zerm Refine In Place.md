@@ -23,7 +23,7 @@ The same migration also pinned `EnhancementTimeoutSeconds = 2` with retry off. T
 | Mode | Behaviour |
 |---|---|
 | `instant` | Paste raw, never enhance. Byte-for-byte the old fast path. |
-| `instantRefine` | Paste raw immediately, then replace it in place when the enhancement returns. |
+| `instantRefine` | Paste raw immediately, then replace it in place only via a direct AX write. Never a second clipboard paste. |
 | `enhanced` | Wait for the enhancement, paste once. |
 
 Enhancement is slow only because of *where* it sat. Moving it after the paste costs the paste path nothing.
@@ -55,14 +55,16 @@ Enhancement is slow only because of *where* it sat. Moving it after the paste co
 | Terminals / TUIs | **Hard deny-list.** The shell owns the line buffer; AX mirrors a read-only screen |
 | Secure fields, or any time `IsSecureEventInputEnabled()` | Never read, never write |
 
-The fallback is therefore the *usual* path, not an edge case: the refined text is persisted to the record and offered via a notification with a Copy action. It is never placed on the clipboard unasked.
+The fallback is therefore the *usual* path, not an edge case: the refined text is persisted to the record and offered via a notification with a Copy action. Chromium fields that can select a range but cannot AX-write are classified `.clipboardPaste` and treated as fallback — a second ⌘V is not a refine. The refined text is never placed on the clipboard unasked.
+
+Opaque editors do **not** degrade Instant + Refine to Enhanced. Only auto-send does that, because the field is gone ~500 ms later. See GitHub #300 (language fidelity) and #301 (no copy-enhance-copy).
 
 **Every gate fails closed. The design can fail to improve the text; it cannot corrupt it.**
 
 ## Interactions that bite
 
 - **Auto-send is incompatible.** The field is submitted ~500 ms after the paste, so there is nothing left to refine. When a Power Mode has an auto-send key, the mode degrades to `.enhanced` — decided at mode-resolution time, not at paste time.
-- **`SelectedTextService.fetchSelectedText()` posts a synthetic ⌘C** and is called from `getSystemMessage`. During a background refine that would fire while the user is typing. `EnhancementContextPolicy.minimal` suppresses it, and screen capture, for refine.
+- **`SelectedTextService.fetchSelectedText()` posts a synthetic ⌘C** and is called from `getSystemMessage`. During a just-finished paste that would fire into whatever the user is doing. Dictation enhancement — Instant + Refine **and** Enhanced — uses `EnhancementContextPolicy.minimal`, which suppresses the selected-text read and screen capture. Clipboard/screen context that Enhanced needs is captured at record start, not by copying after transcribe.
 - **`LlamaEngine` is an `actor`**, so a refine serialises against a Read Aloud rewrite. `RefineInPlaceCoordinator.shouldYield` cancels the refine when Read Aloud starts — Read Aloud is user-initiated, refine is speculative.
 - **`scheduleWhisperIdleUnload`** only guarded on `recordingState == .idle`, which is true during a refine. It now also checks `isRefining`.
 - **Power Mode enhancement** is now a tri-state (`PowerModeEnhancementOverride`: inherit / on / off). The old bool could not express "leave it alone", which is what made every Power Mode clobber the global toggle. Legacy configs decode `true → .on` and `false → .inherit`, because a `false` was almost always the seeded default rather than a deliberate choice.

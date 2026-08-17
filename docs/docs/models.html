@@ -152,10 +152,20 @@ prompts you to choose another first.</p>
 before you press anything, so the first dictation of the day is not the slow one.</p>
 <h2>The enhancement model is separate</h2>
 <p>If you turn on <a href="enhancement.html">enhancement</a>, that runs on a second model —<br>
-on-device Gemma via <code class="notranslate">llama.cpp</code>, Ollama, a local CLI, or a cloud provider. It is chosen<br>
-separately and downloaded separately. The bundled on-device options range from a 1B<br>
-model up to 27B, so it is worth matching the choice to your Mac rather than taking the<br>
-largest.</p>
+on-device via <code class="notranslate">llama.cpp</code>, Ollama, a local CLI, or a cloud provider. It is chosen<br>
+separately and downloaded separately.</p>
+<p>Zerm uses three different on-device jobs, and they do not share a default model.</p>
+<p><strong>Dictation</strong> is Whisper (or another speech model). That path is already instant.<br>
+It is configured under Dictation Models.</p>
+<p><strong>Enhancement</strong> cleans the transcript after dictation. Instant + Refine defaults<br>
+to <strong>Qwen3 1.7B</strong> (~1.11 GB): multilingual, follows “clean the line, do not<br>
+chat,” small enough to stay warm. <strong>Qwen3 0.6B</strong> is the speed opt-in. <strong>Qwen3<br>
+4B</strong> is the quality opt-in. Gemma 4 is not offered here — it introduces itself<br>
+as a Google DeepMind model instead of rewriting the line.</p>
+<p><strong>Read Aloud</strong> keeps <strong>Gemma 4 E2B</strong>. Retell can wait. Larger Gemma models stay<br>
+opt-in on that screen only.</p>
+<p>Phi-4 Mini and Llama 3.2 were considered and not catalogued: Phi is a reasoner<br>
+(slow, chatty), Llama 3.2 is weak on Hebrew and mixed speech.</p>
 <p>Read Aloud uses a third model again. See <a href="read-aloud.html">read aloud</a>.</p>
         </div>
         <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>

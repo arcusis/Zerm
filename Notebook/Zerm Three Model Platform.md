@@ -14,7 +14,7 @@ The middle model (**Gemma**) is the agentic layer serving *both* sides: it clean
 
 | | STT | TTS | LLM |
 |---|---|---|---|
-| Default | Whisper (ggml) | Kokoro-82M | Gemma 4 E2B QAT Q4_0 |
+| Default | Whisper (ggml) | Kokoro-82M | Qwen3 1.7B (enhance) / Gemma 4 E2B (Read Aloud) |
 | Engine | `whisper.cpp` | `sherpa-onnx` | `llama.cpp` |
 | ~Size | 150 MB–3 GB | ~330 MB | ~3.35 GB |
 | Manager | `WhisperModelManager` | `KokoroModelManager` | `LocalLLMModelManager` |

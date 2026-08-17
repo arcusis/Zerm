@@ -52,11 +52,11 @@ output mode is where you make that trade explicitly.</p>
 <h2>Instant</h2>
 <p>The transcript is pasted at your cursor the moment transcription finishes. No language<br>
 model is involved at any point — nothing is sent to a provider, nothing is waited on.</p>
-<p>This is the default, and it is the fastest path in the app. Filler-word removal, your<br>
+<p>This is the fastest path in the app. Filler-word removal, your<br>
 <a href="dictionary.html">dictionary</a> replacements, and formatting still apply, because those<br>
 run locally and cost nothing.</p>
 <p>Choose Instant if you dictate short messages, if you are offline, or if you would rather<br>
-fix the occasional word yourself than wait.</p>
+fix the occasional word yourself than wait. Instant + Refine is the shipped default.</p>
 <h2>Instant + Refine</h2>
 <p>The transcript is pasted immediately — byte-for-byte the same path as Instant, with the<br>
 same latency. The enhancement then runs in the background and, when it comes back,<br>
@@ -82,7 +82,9 @@ screen, so writing to it would be meaningless.</li>
 </ul>
 <p>In all of those, Refine still runs — but instead of changing text you have already<br>
 typed, the refined version is <strong>offered</strong> to you, and what is on screen is left alone.<br>
-Nothing is silently rewritten and nothing is silently lost.</p>
+Nothing is silently rewritten, nothing is copied a second time, and nothing is<br>
+silently lost. Replacement is only allowed through a direct accessibility write;<br>
+Zerm never pastes the refinement via the clipboard.</p>
 <p>Zerm does not guess. Terminals are on a fixed deny-list, and every other application is<br>
 probed once for a working setter; the answer is cached per app, so the second dictation<br>
 into a given app costs nothing to decide.</p>
@@ -117,14 +119,14 @@ expires, Zerm falls back to the raw transcript rather than losing what you said.
 <tr>
 <td><strong>Instant + Refine</strong></td>
 <td>immediately</td>
-<td>afterwards, where supported</td>
-<td>most dictation in native apps</td>
+<td>afterwards, in native apps</td>
+<td>everyday dictation (the default)</td>
 </tr>
 <tr>
 <td><strong>Enhanced</strong></td>
 <td>after the model</td>
 <td>before you see it</td>
-<td>documents, Electron apps, terminals</td>
+<td>when the first paste must already be final</td>
 </tr>
 </tbody>
 </table>

@@ -139,14 +139,17 @@ class WhisperTranscriptionService: TranscriptionService {
 
         // Short Hebrew phrases are Whisper's most common auto-detection failure in this app:
         // an English keyboard-independent auto pass can return confident-looking Latin text.
-        // When the active input source is Hebrew, compare one forced-Hebrew pass and keep it only
-        // when the result is both Hebrew-script and comparably probable. Auto remains the primary
-        // path, and long recordings never pay for a second inference.
+        // When the active keyboard is Hebrew, compare one forced-Hebrew pass and keep it only
+        // when the result is Hebrew-script and actually competitive. Auto remains the primary
+        // path. Preferred languages, pinned non-Hebrew modes, and long recordings never pay
+        // for a second inference.
         if WhisperLanguageCandidateSelector.shouldEvaluateFallback(
             selectedLanguage: selectedLanguage,
             shouldConsiderHebrew: shouldConsiderHebrew,
             detectedLanguage: candidate.languageCode,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            primaryText: candidate.text,
+            primaryProbability: candidate.averageTokenProbability
         ) {
             let hebrewSucceeded = await whisperContext.fullTranscribe(
                 samples: data,

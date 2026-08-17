@@ -195,7 +195,7 @@ final class TTSNaturalizer {
             HEBREW OUTPUT IS REQUIRED. The source is Hebrew. Write the entire response in natural Hebrew script and right-to-left Hebrew word order. Do not translate it to English and do not transliterate Hebrew into Latin characters. Keep an English name or technical term only when it already appears that way in the source.
             חובה להחזיר את כל התשובה בעברית טבעית בלבד. אין לתרגם לאנגלית ואין לתעתק עברית לאותיות לטיניות.
             """
-            : "Write in the same predominant language as the source and preserve intentional language switching."
+            : "Keep every span in its original script and language. Mixed-language text stays mixed. Never translate or transliterate."
         let example = sourceUsesHebrew
             ? """
             Example —
@@ -254,10 +254,10 @@ final class TTSNaturalizer {
             return false
         }
 
-        // Small local models sometimes understand Hebrew but translate a Retell response into
-        // English because the surrounding instruction is English. Never present that as a valid
-        // spoken rewrite: Hebrew input must remain predominantly Hebrew.
-        if isPredominantlyHebrew(source), !isPredominantlyHebrew(out) { return false }
+        // Small local models will translate when a prompt names a language. Never present a
+        // script-flipped rewrite as valid — Hebrew-only input must stay Hebrew, and mixed
+        // input must not collapse to one writing system.
+        if !EnhancementLanguageGuard.accept(original: source, enhanced: out) { return false }
 
         // A rewrite should be roughly comparable in length to the source.
         let srcWords = source.split(whereSeparator: \.isWhitespace).count
@@ -274,14 +274,25 @@ final class TTSNaturalizer {
         return true
     }
 
-    private static func isPredominantlyHebrew(_ text: String) -> Bool {
+    /// Hebrew-majority source (not merely mixed). Mixed HE+EN must not take the
+    /// Hebrew-only instruction path — that is how Read Aloud started speaking
+    /// English selections as Hebrew.
+    static func isPredominantlyHebrew(_ text: String) -> Bool {
         var letters = 0
         var hebrew = 0
+        var latin = 0
         for scalar in text.unicodeScalars where CharacterSet.letters.contains(scalar) {
             letters += 1
-            if (0x0590...0x05FF).contains(scalar.value) { hebrew += 1 }
+            if (0x0590...0x05FF).contains(scalar.value) {
+                hebrew += 1
+            } else if EnhancementLanguageGuard.script(of: scalar) == .latin {
+                latin += 1
+            }
         }
-        return letters > 0 && Double(hebrew) / Double(letters) >= 0.5
+        guard letters > 0 else { return false }
+        // Mixed HE+EN with a real English span must not take the Hebrew-only rewrite path.
+        return Double(hebrew) / Double(letters) >= 0.80
+            && Double(latin) / Double(letters) < 0.15
     }
 
     /// Strips any stray quoting/preamble the model might add despite instructions.

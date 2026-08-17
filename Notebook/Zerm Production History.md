@@ -4,7 +4,7 @@
 
 `Production` — main and only production branch. All releases tagged here.
 
-The current published baseline is v2.8.1 (bundle version 2.8.1, build 281). Development worktrees are not production history until their PR is merged, a new version/build is chosen, and signed artifacts are published.
+The published app is still v2.8.2. The working tree is stamped v2.8.3 (build 283) for the language-fidelity, Instant+Refine, recording-durability, and model-split hotfix. It is not a release until it is committed, signed, and published.
 
 ## Historical Commit Snapshot (newest first, 2026-05-22)
 

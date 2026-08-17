@@ -3,6 +3,7 @@ import LLMkit
 
 struct APIKeyManagementView: View {
     @EnvironmentObject private var aiService: AIService
+    @ObservedObject private var localLLM = LocalLLMModelManager.shared
     @State private var apiKey: String = ""
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -38,9 +39,9 @@ struct APIKeyManagementView: View {
                 if aiService.selectedProvider == .localLLM {
                     Spacer()
                     Circle()
-                        .fill(LocalLLMModelManager.isModelDownloaded ? Color.green : Color.orange)
+                        .fill(localLLM.isDownloaded(LocalLLMModelManager.package(for: .enhancement)) ? Color.green : Color.orange)
                         .frame(width: 8, height: 8)
-                    Text(LocalLLMModelManager.isModelDownloaded ? "Ready" : "Not downloaded")
+                    Text(localLLM.isDownloaded(LocalLLMModelManager.package(for: .enhancement)) ? "Ready" : "Not downloaded")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 } else if aiService.isAPIKeyValid && aiService.selectedProvider != .ollama {
@@ -309,10 +310,10 @@ struct APIKeyManagementView: View {
                     }
 
                 } else if aiService.selectedProvider == .localLLM {
-                    Text("Runs entirely on your Mac — no API key, nothing leaves the device. Used to clean up dictation and to make Read Aloud sound natural.")
+                    Text("On-device enhancement is a separate model from dictation (Whisper) and from Read Aloud. Instant + Refine stays instant only if this job uses a small cleanup model, not Gemma.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    LocalLLMModelListView()
+                    LocalLLMModelListView(role: .enhancement)
 
                 } else {
                     if aiService.isAPIKeyValid {

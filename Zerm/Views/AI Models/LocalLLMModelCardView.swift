@@ -1,47 +1,94 @@
 import SwiftUI
 
-/// The full list of downloadable on-device models. Shared by the AI Enhancement screen and
-/// Read Aloud settings so on-device model management looks and behaves the same everywhere.
+/// The downloadable on-device models for one job. Enhancement and Read Aloud
+/// do not share a catalog — Gemma 4 is a Read Aloud model and will introduce
+/// itself if asked to clean a transcript.
 struct LocalLLMModelListView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label {
-                Text("\(HardwareCapability.summary) · Zerm defaults to the memory-efficient \(LocalLLMModelManager.recommendedPackage.displayName) with a \(HardwareCapability.localLLMContextSize / 1_024)K context. Larger models are opt-in, and your explicit selection is always preserved.")
-            } icon: {
-                Image(systemName: "memorychip")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    var role: LocalLLMRole = .reading
+    @ObservedObject private var manager = LocalLLMModelManager.shared
 
-            ForEach(LocalLLMModelManager.packages) { package in
-                LocalLLMModelCardView(package: package)
+    private var visiblePackages: [LocalLLMPackage] {
+        LocalLLMModelManager.packages(for: role)
+    }
+
+    private var activePackage: LocalLLMPackage {
+        LocalLLMModelManager.package(for: role)
+    }
+
+    private var activeIsOffCatalog: Bool {
+        !activePackage.jobs.contains(role)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(role.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(role.jobDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(manager.isDownloaded(activePackage) ? Color.green : Color.orange)
+                    .frame(width: 8, height: 8)
+                Text(manager.isDownloaded(activePackage)
+                     ? "In use: \(activePackage.displayName)"
+                     : "Download \(activePackage.displayName) to use this job on-device")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if activeIsOffCatalog {
+                Label(
+                    "Using \(activePackage.displayName) until you download an enhancement model. Gemma will introduce itself instead of cleaning the line.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(visiblePackages) { package in
+                LocalLLMModelCardView(package: package, role: role)
             }
         }
     }
 }
 
-/// Management card for a single on-device language model (Gemma). Mirrors the voice/speech
-/// model cards: shows size, one-tap download with progress, installed state, delete, and which
-/// model is currently in use.
 struct LocalLLMModelCardView: View {
     let package: LocalLLMPackage
+    var role: LocalLLMRole = .reading
     @ObservedObject private var manager = LocalLLMModelManager.shared
 
-    private var isCurrent: Bool { manager.currentFileName == package.fileName }
+    private var isCurrent: Bool {
+        switch role {
+        case .reading: return manager.currentFileName == package.fileName
+        case .enhancement: return manager.enhancementFileName == package.fileName
+        }
+    }
     private var isDownloaded: Bool { manager.isDownloaded(package) }
     private var progress: Double? { manager.downloadProgress[package.fileName] }
     private var isRecommended: Bool {
-        package.fileName == LocalLLMModelManager.recommendedPackage.fileName
+        switch role {
+        case .reading:
+            return package.fileName == LocalLLMModelManager.recommendedPackage.fileName
+        case .enhancement:
+            return package.fileName == LocalLLMModelManager.enhancementDefaultPackage.fileName
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "brain")
+                Image(systemName: role == .enhancement ? "wand.and.stars" : "text.bubble")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(package.displayName).font(.subheadline.weight(.medium))
-                    Text("Private, on-device. No API key.")
+                    Text(package.blurb)
                         .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 if isCurrent {
@@ -49,7 +96,7 @@ struct LocalLLMModelCardView: View {
                         .font(.caption2).foregroundStyle(.green)
                 }
                 if isRecommended {
-                    Label("Memory-efficient default", systemImage: "memorychip")
+                    Label(role == .enhancement ? "Instant default" : "Read Aloud default", systemImage: "memorychip")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -62,7 +109,7 @@ struct LocalLLMModelCardView: View {
                         .font(.caption).foregroundStyle(.green)
                     Spacer()
                     if !isCurrent {
-                        Button("Use this model") { manager.select(package) }
+                        Button("Use for \(role.title)") { manager.select(package, role: role) }
                             .controlSize(.small)
                     }
                     Button(role: .destructive) { manager.delete(package) } label: {
@@ -88,11 +135,11 @@ struct LocalLLMModelCardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HardwareFitNotice(fit: package.hardwareFit)
                     HStack {
-                        Text("Download once to use on-device. No API key needed.")
+                        Text("Download once. No API key.")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button {
-                            manager.select(package)
+                            manager.select(package, role: role)
                             Task { await manager.download(package) }
                         } label: {
                             Label("Download", systemImage: "arrow.down.circle")

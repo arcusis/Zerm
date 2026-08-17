@@ -49,7 +49,10 @@
 writing about. Zerm can supply three kinds of context, each optional and each off unless<br>
 you switch it on.</p>
 <p>None of them apply when your <a href="output-modes.html">output mode</a> is Instant, because no<br>
-model runs at all in that mode.</p>
+model runs at all in that mode. Instant + Refine also skips a live selected-text or<br>
+screen read: those would copy or OCR after the raw transcript is already in the<br>
+field. Clipboard context is still taken at the start of the recording if you have<br>
+it on. Enhanced mode is the one that can include all three.</p>
 <p><img src="img/contextual-awareness.png" alt="Context settings" style="max-width: 100%;"></p>
 <h2>Selected text</h2>
 <p>Whatever is highlighted in the frontmost application is passed to the model alongside<br>
@@ -58,6 +61,8 @@ your transcript.</p>
 drop the second sentence", and the model has the paragraph to act on.</p>
 <p>Requires Accessibility permission. Without it, nothing is read and the transcript goes<br>
 to the model alone.</p>
+<p>Selected text is only read in <strong>Enhanced</strong> mode. Instant + Refine never posts a<br>
+synthetic copy into the app you just dictated into.</p>
 <h2>Clipboard context</h2>
 <p>The current contents of your clipboard are passed to the model.</p>
 <p>Useful when you have just copied the thing you are replying to. Off by default.</p>

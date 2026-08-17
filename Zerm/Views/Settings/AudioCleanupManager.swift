@@ -21,6 +21,17 @@ class AudioCleanupManager {
     private let cleanupCheckInterval: TimeInterval = 86400 // Check once per day (in seconds)
     
     private init() {}
+
+    /// Missing key must not read as 0. Zero is only an explicit "do not sweep."
+    static func effectiveRetentionDays(
+        defaults: UserDefaults = .standard,
+        defaultDays: Int = 14
+    ) -> Int {
+        guard let stored = defaults.object(forKey: "AudioRetentionPeriod") as? Int else {
+            return defaultDays
+        }
+        return stored
+    }
     
     /// Start the automatic cleanup process
     func startAutomaticCleanup(modelContext: ModelContext) {
@@ -55,7 +66,8 @@ class AudioCleanupManager {
     /// Get information about the files that would be cleaned up
     func getCleanupInfo(modelContext: ModelContext) async -> (fileCount: Int, totalSize: Int64, transcriptions: [Transcription]) {
         // Get retention period from UserDefaults
-        let effectiveRetentionDays = UserDefaults.standard.integer(forKey: "AudioRetentionPeriod")
+        let effectiveRetentionDays = Self.effectiveRetentionDays()
+        guard effectiveRetentionDays > 0 else { return (0, 0, []) }
 
         // Calculate the cutoff date
         let calendar = Calendar.current
@@ -78,6 +90,9 @@ class AudioCleanupManager {
             var eligibleTranscriptions: [Transcription] = []
 
             for transcription in transcriptions {
+                if RecordingAudioStore.shouldPreserveAudio(status: transcription.transcriptionStatus) {
+                    continue
+                }
                 if let urlString = transcription.audioFileURL,
                    let url = URL(string: urlString),
                    FileManager.default.fileExists(atPath: url.path) {
@@ -100,7 +115,10 @@ class AudioCleanupManager {
     /// Perform the cleanup operation
     private func performCleanup(modelContext: ModelContext) async {
         // Get retention period from UserDefaults
-        let effectiveRetentionDays = UserDefaults.standard.integer(forKey: "AudioRetentionPeriod")
+        // `integer(forKey:)` is 0 when the key is missing. That must not mean
+        // "delete every recording older than now" on launch.
+        let effectiveRetentionDays = Self.effectiveRetentionDays()
+        guard effectiveRetentionDays > 0 else { return }
 
         // Check if automatic cleanup is enabled
         let isCleanupEnabled = UserDefaults.standard.bool(forKey: "IsAudioCleanupEnabled")
@@ -124,6 +142,9 @@ class AudioCleanupManager {
             var deletedCount = 0
 
             for transcription in transcriptions {
+                if RecordingAudioStore.shouldPreserveAudio(status: transcription.transcriptionStatus) {
+                    continue
+                }
                 if let urlString = transcription.audioFileURL,
                    let url = URL(string: urlString),
                    FileManager.default.fileExists(atPath: url.path) {

@@ -55,6 +55,24 @@ struct HardwareCapabilityTests {
         #expect(HardwareCapability.performanceCoreCount >= 1)
     }
 
+    @Test @MainActor func enhancementDefaultIsQwen17() {
+        #expect(HardwareCapability.recommendedEnhancementLocalLLMFileName == "Qwen3-1.7B-Q4_K_M.gguf")
+        #expect(LocalLLMModelManager.enhancementDefaultPackage.fileName == "Qwen3-1.7B-Q4_K_M.gguf")
+        #expect(LocalLLMModelManager.enhancementDefaultPackage.disablesThinking)
+        #expect(LocalLLMModelManager.enhancementDefaultPackage.estimatedRAMGB < 3)
+        #expect(LocalLLMModelManager.packages.contains(where: { $0.fileName == "Qwen3-0.6B-Q4_K_M.gguf" }))
+        #expect(LocalLLMModelManager.packages.contains(where: { $0.fileName == "Qwen3-4B-Q4_K_M.gguf" }))
+    }
+
+    @Test @MainActor func enhancementCatalogExcludesGemmaChatModels() {
+        let enhancement = LocalLLMModelManager.packages(for: .enhancement)
+        #expect(enhancement.contains(where: { $0.fileName == "Qwen3-1.7B-Q4_K_M.gguf" }))
+        #expect(!enhancement.contains(where: { $0.fileName.hasPrefix("gemma-4") }))
+        let reading = LocalLLMModelManager.packages(for: .reading)
+        #expect(reading.contains(where: { $0.fileName == "gemma-4-E2B_q4_0-it.gguf" }))
+        #expect(!reading.contains(where: { $0.fileName == "Qwen3-0.6B-Q4_K_M.gguf" }))
+    }
+
     @Test func localLLMRecommendationKeepsAppleSiliconOnTheEfficientDefault() {
         #expect(HardwareCapability.recommendedLocalLLMFileName(
             physicalMemoryGB: 8,

@@ -126,6 +126,12 @@ enum HardwareCapability {
         return "gemma-4-E2B_q4_0-it.gguf"
     }
 
+    /// Instant + Refine default. Independent of RAM: Qwen3 1.7B is the cleanup
+    /// model on every Mac. 0.6B is a speed opt-in; Gemma is for Read Aloud.
+    static var recommendedEnhancementLocalLLMFileName: String {
+        "Qwen3-1.7B-Q4_K_M.gguf"
+    }
+
     /// Zerm caps the default context at 8K even on high-memory Macs. Its focused rewrite and
     /// narration jobs do not need a 16K/32K KV cache, and unified memory belongs to the user's
     /// other applications as well as Zerm's STT and TTS runtimes.

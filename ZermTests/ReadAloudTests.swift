@@ -18,6 +18,26 @@ struct ReadAloudTests {
         #expect(ReadAloudMode.simplify.usesLocalAI)
     }
 
+    @Test @MainActor func hebrewMajoritySourceTakesTheHebrewInstructionPath() {
+        #expect(TTSNaturalizer.isPredominantlyHebrew("צוות המוצר השלים את השינוי החשוב היום"))
+    }
+
+    @Test @MainActor func mixedHebrewAndEnglishDoesNotTakeTheHebrewOnlyPath() {
+        #expect(!TTSNaturalizer.isPredominantlyHebrew(
+            "Let's meet tomorrow בבוקר and then send the report"
+        ))
+    }
+
+    @Test @MainActor func hebrewMajorityWithAnEnglishSpanDoesNotTakeTheHebrewOnlyPath() {
+        #expect(!TTSNaturalizer.isPredominantlyHebrew(
+            "צריך לשלוח the report היום לצוות המוצר"
+        ))
+    }
+
+    @Test @MainActor func englishSourceIsNotTreatedAsHebrew() {
+        #expect(!TTSNaturalizer.isPredominantlyHebrew("Please send the report today."))
+    }
+
     @Test @MainActor func completedReadingsRoundTripThroughTheLocalHistoryStore() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("zerm-read-aloud-tests-\(UUID().uuidString)", isDirectory: true)

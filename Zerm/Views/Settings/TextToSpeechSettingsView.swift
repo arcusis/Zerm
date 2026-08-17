@@ -254,7 +254,7 @@ struct TextToSpeechSettingsView: View {
                     }
                 }
 
-                LocalLLMModelListView()
+                LocalLLMModelListView(role: .reading)
             }
             .padding(8)
         }

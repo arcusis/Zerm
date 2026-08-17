@@ -4,9 +4,12 @@ eyebrow: Dictation
 summary: Providers, prompts, context, and the timeout settings that decide what happens when a model is slow.
 ---
 
-Enhancement takes the raw transcript and runs it through a language model before it
-reaches you — fixing punctuation, structure, and the words a speech model reliably
-mishears. It is off by default. Zerm dictates perfectly well without it.
+Enhancement takes the raw transcript and runs it through a language model —
+fixing punctuation, structure, and the words a speech model reliably mishears.
+
+The shipped default is [Instant + Refine](output-modes.html): the raw transcript
+is pasted immediately, then the model cleans it in the background. Zerm still
+dictates perfectly well if you switch to Instant and turn enhancement off.
 
 ![Enhancement settings](img/enhancement.png)
 
@@ -54,21 +57,37 @@ Trigger-word detection is a separate setting from enhancement itself.
 ## Context
 
 By default the model sees the transcript and nothing else. Three optional context
-sources can be added; each is its own switch.
+sources can be added; each is its own switch. How much of that context is actually
+read depends on the [output mode](output-modes.html).
 
 **Selected text.** Whatever is highlighted in the frontmost app is included, so
 instructions like "rewrite this properly" have something to act on. Needs Accessibility
-permission.
+permission. This is only read in **Enhanced** mode, while Zerm is still waiting to
+paste. Instant + Refine does not copy the current selection — that would fire a
+synthetic ⌘C into the app you just pasted into.
 
-**Clipboard.** The current clipboard contents are included. Useful when you are
-dictating a reply to something you just copied.
+**Clipboard.** The clipboard is read when the recording starts, not when the model
+runs. Useful when you are dictating a reply to something you just copied.
 
 **Screen.** On-screen text is captured and included. Needs Screen Recording permission.
+Like selected text, this only runs in **Enhanced** mode.
 
 The details of what is captured, when, and what is kept are on the
 [contextual awareness](contextual-awareness.html) page. Your
 [dictionary](dictionary.html) vocabulary is also passed along as spelling guidance
 whenever enhancement runs.
+
+## Language
+
+Enhancement cleans the transcript. It does not translate it.
+
+Mixed-language dictation stays mixed. Hebrew stays Hebrew, English stays English,
+Russian stays Russian. If a model returns a different writing system than you spoke,
+Zerm discards that rewrite and keeps the raw transcript.
+
+If you always speak one language in an app, pin that language on the
+[Power Mode](power-mode.html) rather than leaving Auto. Pinning Hebrew when you are
+about to speak English will make the speech model hear everything as Hebrew.
 
 ## Skipping short transcriptions
 

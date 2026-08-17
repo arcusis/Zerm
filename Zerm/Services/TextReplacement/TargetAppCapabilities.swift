@@ -54,9 +54,9 @@ actor TargetAppCapabilities {
         return verdict
     }
 
-    /// Determines whether Instant + Refine can safely return to the exact inserted range before
-    /// any raw text is pasted. Opaque editors (including Orca's current editor) expose no focused
-    /// text range; callers must wait for enhancement and paste the final text once instead.
+    /// Determines whether Instant + Refine can later perform a direct accessibility rewrite.
+    /// Opaque editors expose no focused text range; Instant + Refine still pastes the raw
+    /// transcript immediately and treats replacement as best-effort.
     func verdict(for snapshot: AXTextAnchorCapture.PrePasteSnapshot) -> Verdict {
         guard let bundleID = snapshot.bundleID,
               !Self.terminalBundleIDs.contains(bundleID) else { return .fallbackOnly }

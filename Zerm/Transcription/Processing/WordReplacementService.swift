@@ -37,9 +37,12 @@ class WordReplacementService {
                 let usesBoundaries = usesWordBoundaries(for: original)
 
                 if usesBoundaries {
-                    // Lookarounds instead of \b so punctuation acts as a word boundary
+                    // Lookarounds instead of \b so punctuation acts as a word boundary.
+                    // Word chars are Unicode letters/marks/digits (not just ASCII) so
+                    // triggers cannot match inside "vergrößern" or Hebrew words.
                     let escaped = NSRegularExpression.escapedPattern(for: original)
-                    let pattern = "(?<![a-zA-Z0-9])\(escaped)(?![a-zA-Z0-9])"
+                    let wordChar = "[[\\p{L}\\p{M}\\p{N}]-[\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Hangul}\\p{scx=Thai}]]"
+                    let pattern = "(?<!\(wordChar))\(escaped)(?!\(wordChar))"
                     if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
                         let range = NSRange(modifiedText.startIndex..., in: modifiedText)
                         modifiedText = regex.stringByReplacingMatches(

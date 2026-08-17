@@ -18,7 +18,7 @@ flowchart TB
 ## Key types
 
 - `TTSController` — orchestrator; owns mutual exclusion with dictation via the single `RecordingState`.
-- `TTSProvider` + `TTSProviderRegistry` — provider protocol (mirrors STT `CloudProvider`). Local: Kokoro. Cloud: Deepgram, ElevenLabs, OpenAI, Gemini, Inworld, Cartesia.
+- `TTSProvider` + `TTSProviderRegistry` — provider protocol (mirrors STT `CloudProvider`). Local: Kokoro (English) and Apple System Voices (including Hebrew). Cloud: Deepgram, ElevenLabs, OpenAI, Gemini, Inworld, Cartesia.
 - `TTSPlayer` — one `AVAudioEngine`/`AVAudioPlayerNode` pipeline with a **streaming queue** (`startStreaming`/`enqueue`/`finishEnqueueing`).
 - `KokoroModelManager` / `KokoroEngine` — on-device download + `sherpa-onnx` synthesis.
 
@@ -39,4 +39,6 @@ Dictation remains available during a meeting. Read Aloud is allowed only when `A
 - Metering tap is installed **once, never removed** in hot paths — `removeTap` from the audio-thread completion handler while `stop()` also removed it deadlocked `AVAudioEngine` and froze the app.
 - **Terminal selection fetch (fixed 2026-07-02).** The `.shortcut` strategy posts a synthetic ⌘C at the HID tap, where the OS merges physically-held modifiers — and the Read Aloud hotkey fires on key-down, so the still-held ⌃⌥ turned the copy into ⌃⌥⌘C (ignored by terminals). SelectedTextKit also polls the pasteboard only 100 ms, too short for embedded terminals/Electron panes. `SelectedTextService` now waits for modifier release (≤1 s) before the strategies run, and falls back to its own ⌘C (private CGEventSource, no modifier merge) with a 600 ms pasteboard poll + restore.
 
-Related: [[Zerm Meeting Recording]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]], [[Zerm Three Model Platform]]
+- **Hebrew-only Retell** is only used when the source is ≥65% Hebrew letters. Mixed HE+EN does not take that path, and a script-flipped rewrite is rejected. See [[Zerm Enhancement Language Fidelity]].
+
+Related: [[Zerm Meeting Recording]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]], [[Zerm Three Model Platform]], [[Zerm Enhancement Language Fidelity]]

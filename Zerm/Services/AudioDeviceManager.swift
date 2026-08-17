@@ -221,8 +221,12 @@ class AudioDeviceManager: ObservableObject {
             return false
         }
 
-        let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(propertySize))
-        defer { bufferList.deallocate() }
+        let bufferListStorage = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(propertySize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { bufferListStorage.deallocate() }
+        let bufferList = bufferListStorage.assumingMemoryBound(to: AudioBufferList.self)
 
         result = AudioObjectGetPropertyData(
             deviceID,
@@ -238,8 +242,9 @@ class AudioDeviceManager: ObservableObject {
             return false
         }
 
-        let bufferCount = Int(bufferList.pointee.mNumberBuffers)
-        return bufferCount > 0
+        return UnsafeMutableAudioBufferListPointer(bufferList).contains {
+            $0.mNumberChannels > 0
+        }
     }
 
     func selectDevice(id: AudioDeviceID) {
