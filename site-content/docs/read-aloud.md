@@ -47,11 +47,18 @@ already written to be read.
 
 **Kokoro** is the bundled local voice, running on `sherpa-onnx`. It downloads once and
 then works offline, and it is good enough to listen to a long document without fatigue.
-Nine voices are available.
+Nine voices are available. Kokoro is English-only; Hebrew text needs an installed
+Apple System Voice (or a cloud voice that supports Hebrew).
+
+**Apple System Voices** use the voices already on the Mac, including Hebrew ones if
+you have installed them.
 
 **Cloud voices** — Deepgram, ElevenLabs, OpenAI, Gemini, Inworld, and Cartesia — are
 available if you add a key. They send the text you are reading to that provider. Kokoro
 sends nothing anywhere.
+
+Retell keeps the source writing system. A Hebrew selection stays Hebrew. A mixed
+Hebrew/English selection is not rewritten as all-Hebrew.
 
 Each provider keeps its own voice selection, so switching provider and switching back
 does not lose your choice.

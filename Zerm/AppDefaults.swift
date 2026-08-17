@@ -160,6 +160,29 @@ enum AppDefaults {
             defaults.set(5, forKey: "ZermFastDefaultsVersion")
         }
 
+        if defaults.integer(forKey: "ZermFastDefaultsVersion") < 6 {
+            // Enhancement now has its own tiny default. Do not write the key if the
+            // user already chose one; package(for: .enhancement) falls back to an
+            // installed Gemma until Qwen is downloaded.
+            if defaults.string(forKey: LocalLLMModelManager.enhancementModelKey) == nil {
+                let qwen = LocalLLMModelManager.enhancementDefaultPackage.fileName
+                let qwenPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("com.arcusis.zerm")
+                    .appendingPathComponent("LLMModels")
+                    .appendingPathComponent(qwen).path
+                if FileManager.default.fileExists(atPath: qwenPath) {
+                    defaults.set(qwen, forKey: LocalLLMModelManager.enhancementModelKey)
+                }
+            }
+            defaults.set(6, forKey: "ZermFastDefaultsVersion")
+        }
+
         PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()
+
+        // `integer(forKey:)` is 0 when the key is absent. Production 2.8.2 then
+        // treated retention as "older than now" and could sweep audio on launch.
+        if defaults.object(forKey: "AudioRetentionPeriod") == nil {
+            defaults.set(14, forKey: "AudioRetentionPeriod")
+        }
     }
 }

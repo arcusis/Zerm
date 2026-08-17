@@ -95,6 +95,10 @@ final class TranscriptionAutoCleanupService {
             return
         }
 
+        if RecordingAudioStore.shouldPreserveAudio(status: transcription.transcriptionStatus) {
+            return
+        }
+
         if let urlString = transcription.audioFileURL,
            let url = URL(string: urlString) {
             do {
@@ -136,6 +140,9 @@ final class TranscriptionAutoCleanupService {
             let items = try backgroundContext.fetch(descriptor)
             var deletedCount = 0
             for transcription in items {
+                if RecordingAudioStore.shouldPreserveAudio(status: transcription.transcriptionStatus) {
+                    continue
+                }
                 if let urlString = transcription.audioFileURL,
                    let url = URL(string: urlString),
                    FileManager.default.fileExists(atPath: url.path) {
@@ -189,10 +196,10 @@ final class TranscriptionAutoCleanupService {
             var deletedCount = 0
             for fileURL in filesInDirectory {
                 let fileName = fileURL.lastPathComponent
-                if !referencedFiles.contains(fileName) {
-                    try? FileManager.default.removeItem(at: fileURL)
-                    deletedCount += 1
-                }
+                if referencedFiles.contains(fileName) { continue }
+                if RecordingAudioStore.isWithinOrphanGrace(fileURL) { continue }
+                try? FileManager.default.removeItem(at: fileURL)
+                deletedCount += 1
             }
 
             if deletedCount > 0 {

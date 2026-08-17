@@ -14,10 +14,9 @@ enum EnhancementContextPolicy {
     /// Everything the user has enabled, including the selected-text and screen reads.
     case full
 
-    /// Refine-in-place, which runs *after* the transcript has already been pasted and the
-    /// user may already be typing again. Two things must not happen in that window:
-    /// reading the selection posts a synthetic ⌘C into whatever the user is doing, and a
-    /// screen capture plus OCR is far slower than the refine budget allows.
+    /// Dictation default. The transcript is already in memory, and a live selected-text
+    /// read posts a synthetic ⌘C into whatever the user is doing. Screen capture plus OCR
+    /// is also far slower than the refine budget allows.
     case minimal
 
     var readsSelectedText: Bool { self == .full }
@@ -108,7 +107,7 @@ class AIEnhancementService: ObservableObject {
         }
     }
 
-    private var activeContextPolicy: EnhancementContextPolicy = .full
+    private var activeContextPolicy: EnhancementContextPolicy = .minimal
     private let rateLimitInterval: TimeInterval = 1.0
     private var lastRequestTime: Date?
     private let modelContext: ModelContext
@@ -202,7 +201,7 @@ class AIEnhancementService: ObservableObject {
     var isConfigured: Bool {
         switch aiService.selectedProvider {
         case .localLLM:
-            return LocalLLMModelManager.isModelDownloaded
+            return LocalLLMModelManager.isModelDownloaded(for: .enhancement)
         case .localCLI:
             return aiService.isAPIKeyValid
         case .ollama:
@@ -358,6 +357,7 @@ class AIEnhancementService: ObservableObject {
                     system: systemMessage,
                     user: formattedText,
                     maxNewTokens: Self.tokenBudget(forInput: text),
+                    role: .enhancement,
                     isCancelled: { Task.isCancelled || cancelHook() }
                 )
                 if Task.isCancelled || cancelHook() {
@@ -498,7 +498,7 @@ class AIEnhancementService: ObservableObject {
     func enhance(
         _ text: String,
         isCancelled: @escaping () -> Bool = { false },
-        contextPolicy: EnhancementContextPolicy = .full,
+        contextPolicy: EnhancementContextPolicy = .minimal,
         usingPrompt pinnedPrompt: UUID? = nil
     ) async throws -> (String, TimeInterval, String?) {
         let startTime = Date()
@@ -507,9 +507,10 @@ class AIEnhancementService: ObservableObject {
         activeContextPolicy = contextPolicy
         pinnedPromptId = pinnedPrompt
         let promptName = activePrompt?.title
+        let skipScriptGuard = activePrompt?.id == PredefinedPrompts.assistantPromptId
         defer {
             cancellationCheck = { false }
-            activeContextPolicy = .full
+            activeContextPolicy = .minimal
             pinnedPromptId = nil
         }
 
@@ -520,7 +521,11 @@ class AIEnhancementService: ObservableObject {
             if isCancelled() || Task.isCancelled { throw CancellationError() }
             let endTime = Date()
             let duration = endTime.timeIntervalSince(startTime)
-            return (result, duration, promptName)
+            if skipScriptGuard || EnhancementLanguageGuard.isUsable(original: text, enhanced: result) {
+                return (result, duration, promptName)
+            }
+            logger.notice("Enhancement discarded: model talked about itself or changed the writing system")
+            return (text, duration, promptName)
         } catch {
             throw error
         }

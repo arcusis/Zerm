@@ -15,12 +15,12 @@ output mode is where you make that trade explicitly.
 The transcript is pasted at your cursor the moment transcription finishes. No language
 model is involved at any point — nothing is sent to a provider, nothing is waited on.
 
-This is the default, and it is the fastest path in the app. Filler-word removal, your
+This is the fastest path in the app. Filler-word removal, your
 [dictionary](dictionary.html) replacements, and formatting still apply, because those
 run locally and cost nothing.
 
 Choose Instant if you dictate short messages, if you are offline, or if you would rather
-fix the occasional word yourself than wait.
+fix the occasional word yourself than wait. Instant + Refine is the shipped default.
 
 ## Instant + Refine
 
@@ -53,7 +53,9 @@ SwiftUI apps, and simple form fields.
 
 In all of those, Refine still runs — but instead of changing text you have already
 typed, the refined version is **offered** to you, and what is on screen is left alone.
-Nothing is silently rewritten and nothing is silently lost.
+Nothing is silently rewritten, nothing is copied a second time, and nothing is
+silently lost. Replacement is only allowed through a direct accessibility write;
+Zerm never pastes the refinement via the clipboard.
 
 Zerm does not guess. Terminals are on a fixed deny-list, and every other application is
 probed once for a working setter; the answer is cached per app, so the second dictation
@@ -80,8 +82,8 @@ expires, Zerm falls back to the raw transcript rather than losing what you said.
 | | Text appears | AI improves it | Good for |
 | --- | --- | --- | --- |
 | **Instant** | immediately | never | speed, offline, short messages |
-| **Instant + Refine** | immediately | afterwards, where supported | most dictation in native apps |
-| **Enhanced** | after the model | before you see it | documents, Electron apps, terminals |
+| **Instant + Refine** | immediately | afterwards, in native apps | everyday dictation (the default) |
+| **Enhanced** | after the model | before you see it | when the first paste must already be final |
 
 The mode is a global setting, but a [Power Mode](power-mode.html) can turn enhancement
 on or off per app and per website, which in practice is the finer control.

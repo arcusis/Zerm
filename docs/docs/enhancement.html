@@ -45,9 +45,11 @@
         <p class="lede">Providers, prompts, context, and the timeout settings that decide what happens when a model is slow.</p>
       </section>
       <section class="doc"><div class="prose">
-<p>Enhancement takes the raw transcript and runs it through a language model before it<br>
-reaches you — fixing punctuation, structure, and the words a speech model reliably<br>
-mishears. It is off by default. Zerm dictates perfectly well without it.</p>
+<p>Enhancement takes the raw transcript and runs it through a language model —<br>
+fixing punctuation, structure, and the words a speech model reliably mishears.</p>
+<p>The shipped default is <a href="output-modes.html">Instant + Refine</a>: the raw transcript<br>
+is pasted immediately, then the model cleans it in the background. Zerm still<br>
+dictates perfectly well if you switch to Instant and turn enhancement off.</p>
 <p><img src="img/enhancement.png" alt="Enhancement settings" style="max-width: 100%;"></p>
 <h2>Providers</h2>
 <p>Enhancement is provider-agnostic. Whatever you pick, the transcript and the active<br>
@@ -79,17 +81,29 @@ can select the summarising prompt without touching the interface.</p>
 <p>Trigger-word detection is a separate setting from enhancement itself.</p>
 <h2>Context</h2>
 <p>By default the model sees the transcript and nothing else. Three optional context<br>
-sources can be added; each is its own switch.</p>
+sources can be added; each is its own switch. How much of that context is actually<br>
+read depends on the <a href="output-modes.html">output mode</a>.</p>
 <p><strong>Selected text.</strong> Whatever is highlighted in the frontmost app is included, so<br>
 instructions like "rewrite this properly" have something to act on. Needs Accessibility<br>
-permission.</p>
-<p><strong>Clipboard.</strong> The current clipboard contents are included. Useful when you are<br>
-dictating a reply to something you just copied.</p>
-<p><strong>Screen.</strong> On-screen text is captured and included. Needs Screen Recording permission.</p>
+permission. This is only read in <strong>Enhanced</strong> mode, while Zerm is still waiting to<br>
+paste. Instant + Refine does not copy the current selection — that would fire a<br>
+synthetic ⌘C into the app you just pasted into.</p>
+<p><strong>Clipboard.</strong> The clipboard is read when the recording starts, not when the model<br>
+runs. Useful when you are dictating a reply to something you just copied.</p>
+<p><strong>Screen.</strong> On-screen text is captured and included. Needs Screen Recording permission.<br>
+Like selected text, this only runs in <strong>Enhanced</strong> mode.</p>
 <p>The details of what is captured, when, and what is kept are on the<br>
 <a href="contextual-awareness.html">contextual awareness</a> page. Your<br>
 <a href="dictionary.html">dictionary</a> vocabulary is also passed along as spelling guidance<br>
 whenever enhancement runs.</p>
+<h2>Language</h2>
+<p>Enhancement cleans the transcript. It does not translate it.</p>
+<p>Mixed-language dictation stays mixed. Hebrew stays Hebrew, English stays English,<br>
+Russian stays Russian. If a model returns a different writing system than you spoke,<br>
+Zerm discards that rewrite and keeps the raw transcript.</p>
+<p>If you always speak one language in an app, pin that language on the<br>
+<a href="power-mode.html">Power Mode</a> rather than leaving Auto. Pinning Hebrew when you are<br>
+about to speak English will make the speech model hear everything as Hebrew.</p>
 <h2>Skipping short transcriptions</h2>
 <p>"Yes", "thanks", and "on my way" do not benefit from a language model, and sending them<br>
 adds latency for nothing. <strong>Skip short transcriptions</strong> is on by default and bypasses<br>

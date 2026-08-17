@@ -287,6 +287,9 @@ final class CoreAudioRecorder: @unchecked Sendable {
             ExtAudioFileDispose(file)
             audioFile = nil
         }
+        if let sessionURL {
+            RecordingAudioStore.synchronize(sessionURL)
+        }
 
         // Free conversion buffer
         if let buffer = conversionBuffer {

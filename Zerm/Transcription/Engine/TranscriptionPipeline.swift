@@ -49,6 +49,10 @@ class TranscriptionPipeline {
         onDismiss: @escaping () async -> Void
     ) async {
         if shouldCancel() || !isRunStillValid() {
+            markPreservedFailure(
+                transcription,
+                message: "Recording saved — transcription was cancelled. Retry from History."
+            )
             await onCleanup()
             return
         }
@@ -76,9 +80,11 @@ class TranscriptionPipeline {
             }
             // If this run was superseded while awaiting transcription, drop the result.
             if !isRunStillValid() {
-                logger.notice("⏹️ Transcription superseded by newer run — discarding")
-                modelContext.delete(transcription)
-                try? modelContext.save()
+                logger.notice("⏹️ Transcription superseded by newer run — keeping audio")
+                markPreservedFailure(
+                    transcription,
+                    message: "Recording saved — a newer take started before this one finished. Retry from History."
+                )
                 await onCleanup()
                 return
             }
@@ -91,8 +97,6 @@ class TranscriptionPipeline {
             let activePowerModeConfig = powerModeManager.currentActiveConfiguration
             let powerModeName = (activePowerModeConfig?.isEnabled == true) ? activePowerModeConfig?.name : nil
             let powerModeEmoji = (activePowerModeConfig?.isEnabled == true) ? activePowerModeConfig?.emoji : nil
-
-            if shouldCancel() { await onCleanup(); return }
 
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -161,25 +165,14 @@ class TranscriptionPipeline {
             // nothing left to refine afterwards. Where both are configured the only
             // coherent outcome is to enhance first and send the enhanced text, so this
             // falls back to Enhanced rather than silently dropping the enhancement.
+            // Opaque editors no longer wait: Instant + Refine always pastes raw first.
             let configuredOutputMode = DictationOutputMode.current
-            var canReplaceAfterPaste = true
-            if configuredOutputMode == .instantRefine {
-                let snapshot = await Task.detached(priority: .userInitiated) {
-                    AXTextAnchorCapture.capture()
-                }.value
-                if let snapshot {
-                    canReplaceAfterPaste = await TargetAppCapabilities.shared.verdict(for: snapshot) != .fallbackOnly
-                } else {
-                    canReplaceAfterPaste = false
-                }
-            }
             let outputMode = DictationOutputMode.effective(
                 configured: configuredOutputMode,
-                autoSendEnabled: autoSendKey?.isEnabled == true,
-                canReplaceAfterPaste: canReplaceAfterPaste
+                autoSendEnabled: autoSendKey?.isEnabled == true
             )
             if configuredOutputMode == .instantRefine, outputMode == .enhanced {
-                logger.notice("Instant + Refine will wait and paste once because the target cannot support a safe post-paste replacement")
+                logger.notice("Instant + Refine will wait and paste once because auto-send would submit the raw field")
             }
             let blocksOnEnhancement = outputMode == .enhanced
             let allowPromptTriggeredEnhancement = UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement")
@@ -205,16 +198,16 @@ class TranscriptionPipeline {
 
             if let enhancementService,
                blocksOnEnhancement,
-               canEnhance {
-                if shouldCancel() { await onCleanup(); return }
-
+               canEnhance,
+               !shouldCancel() {
                 onStateChange(.enhancing)
                 let textForAI = promptDetectionResult?.processedText ?? text
 
                 do {
                     let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(
                         textForAI,
-                        isCancelled: { shouldCancel() }
+                        isCancelled: { shouldCancel() },
+                        contextPolicy: .minimal
                     )
                     logger.notice("📝 AI enhancement: \(enhancedText.count, privacy: .public) characters")
                     transcription.enhancedText = enhancedText
@@ -246,40 +239,24 @@ class TranscriptionPipeline {
                             type: .warning
                         )
                     }
-                    if shouldCancel() { await onCleanup(); return }
                 }
             }
 
             transcription.transcriptionStatus = TranscriptionStatus.completed.rawValue
 
         } catch is CancellationError {
-            // The pipeline task was cancelled — e.g. a new recording started, the
-            // engine was torn down, or the user toggled again mid-transcription.
-            // This is normal control flow, NOT a failure: a raw CancellationError
-            // surfaces as the confusing "The operation couldn't be completed.
-            // (Swift.CancellationError error 1.)".  Discard the empty pending record
-            // and bail out quietly instead of writing a "Transcription Failed" entry.
-            logger.notice("⏹️ Transcription cancelled — discarding pending record")
-            modelContext.delete(transcription)
-            try? modelContext.save()
-            await onCleanup()
-            return
+            logger.notice("⏹️ Transcription cancelled — keeping audio for retry")
+            markPreservedFailure(
+                transcription,
+                message: Self.describeTranscriptionFailure(CancellationError())
+            )
+            finalPastedText = nil
         } catch {
-            // A late/transitive cancellation can arrive wrapped or after the task is
-            // already cancelled; treat that as a cancel too rather than a hard failure.
-            if Task.isCancelled {
-                logger.notice("⏹️ Transcription cancelled (task) — discarding pending record")
-                modelContext.delete(transcription)
-                try? modelContext.save()
-                await onCleanup()
-                return
-            }
-            let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            let errorDescription = Self.describeTranscriptionFailure(error)
             let recoverySuggestion = (error as? LocalizedError)?.recoverySuggestion ?? ""
             let fullErrorText = recoverySuggestion.isEmpty ? errorDescription : "\(errorDescription) \(recoverySuggestion)"
 
-            transcription.text = "Transcription Failed: \(fullErrorText)"
-            transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
+            markPreservedFailure(transcription, message: "Transcription Failed: \(fullErrorText)")
             finalPastedText = nil
             let shortReason = String(fullErrorText.prefix(100))
             await MainActor.run {
@@ -373,13 +350,53 @@ class TranscriptionPipeline {
             await onCleanup()
         }
     }
+
+    private func markPreservedFailure(_ transcription: Transcription, message: String) {
+        if transcription.text.isEmpty || transcription.text.hasPrefix("Transcription Failed") {
+            transcription.text = message
+        }
+        transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
+        if transcription.duration <= 0,
+           let urlString = transcription.audioFileURL,
+           let url = URL(string: urlString),
+           let duration = RecordingAudioStore.inspect(url)?.duration {
+            transcription.duration = duration
+        }
+        try? modelContext.save()
+    }
 }
 
 // MARK: - Transcription timeout helper
 
 private struct TranscriptionTimeoutError: LocalizedError {
-    var errorDescription: String? { "Transcription timed out. The model may be unresponsive — please try again." }
+    var errorDescription: String? { "Transcription timed out after 120 seconds. The audio was kept — retry from History." }
     var recoverySuggestion: String? { "If this keeps happening, try reloading the model in Settings." }
+}
+
+extension TranscriptionPipeline {
+    /// Cocoa and Whisper cancel paths surface as "The operation could not be completed"
+    /// with no mention of timeout or a missing file. That is what History row 14155 stored.
+    static func describeTranscriptionFailure(_ error: Error) -> String {
+        if error is CancellationError {
+            return "Transcription was cancelled. The audio was kept — retry from History."
+        }
+        if error is TranscriptionTimeoutError {
+            return error.localizedDescription
+        }
+        if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
+            return localized
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain, nsError.code == 260 {
+            return "The recording file could not be opened. If the audio is still in History, retry from there."
+        }
+        let lower = nsError.localizedDescription.lowercased()
+        if lower.contains("operation could not be completed")
+            || lower.contains("operation couldn't be completed") {
+            return "Transcription was interrupted (the file was still being written, or the 120s limit cancelled Whisper). The audio should still be in Recordings — retry from History."
+        }
+        return nsError.localizedDescription
+    }
 }
 
 /// Runs `operation` and throws `TranscriptionTimeoutError` if it has not returned

@@ -2,7 +2,7 @@
 
 The third local model — Gemma via `llama.cpp` — powers smart reading and AI enhancement. Code in `Zerm/LocalLLM/`.
 
-**Default:** Google's official Gemma 4 E2B Instruct QAT Q4_0 GGUF (~3.35 GB), pinned to Hugging Face revision `675cff42` and verified with SHA-256 before installation. E2B is the smallest Gemma 4 (PLE, effective ~2B) and is deliberately the default on every Apple-silicon memory tier. E4B, 12B, and 27B remain manual opt-ins; installed RAM never silently selects a larger model. The previous Unsloth E2B Q4_K_M remains catalogued for compatibility with existing downloads.
+**Three jobs, three catalogs.** Dictation is Whisper (already instant). Enhancement defaults to Qwen3 1.7B Instruct Q4_K_M (~1.11 GB, Unsloth, SHA `b139949c…`, `/no_think`). Qwen3 0.6B is the speed opt-in; Qwen3 4B is the quality opt-in. Read Aloud keeps Gemma 4 E2B. The enhancement UI does not offer Gemma 4 — it introduces itself instead of cleaning the line. Existing Gemma installs keep enhancing on Gemma until Qwen is downloaded. Rejected for the catalog: Phi-4 Mini (reasoner, slow), Llama 3.2 (weak Hebrew). See GitHub #302.
 
 The runtime uses a 4K context on sub-12 GB systems and an 8K context elsewhere. It does not allocate 16K/32K caches for Zerm's focused rewriting and narration jobs. A warm model is released after two idle minutes, while memory-pressure handling can reclaim it immediately. This keeps burst performance without permanently reserving several gigabytes of unified memory.
 
@@ -44,6 +44,6 @@ flowchart LR
 - Read Aloud naturalization (`TTSNaturalizer`) — see [[Zerm Smart Reading]].
 - AI enhancement (`AIProvider.localLLM`, recommended default, no key).
 
-Both share one `LocalLLMModelManager` / one loaded model.
+They share `LocalLLMModelManager` but not one weights file. Enhancement and Read Aloud each have a selection and can keep a warm engine. Enhancement uses a 2K context.
 
 Related: [[Zerm Smart Reading]], [[Zerm Read Aloud]], [[Zerm Architecture]]

@@ -50,15 +50,14 @@ enum LanguagePreference {
         return Locale(identifier: identifier).language.languageCode?.identifier
     }
 
-    /// Whether Hebrew is a reasonable second-pass candidate for this user. Keyboard layout is
-    /// the strongest signal, but bilingual users often dictate Hebrew while an English layout is
-    /// still active; the macOS preferred-language list keeps Auto useful in that common case.
+    /// Whether a forced-Hebrew Whisper pass is even worth considering.
+    ///
+    /// Only the active keyboard is a dictation prior. Having Hebrew in macOS preferred
+    /// languages — or using the Hebrew UI — is not: that used to run a second `he` pass on
+    /// every short Auto dictation and let hallucinated Hebrew beat English or Russian.
     @MainActor
     static func prefersHebrewForAutomaticDetection() -> Bool {
-        if currentInputSourceLanguageCode() == "he" { return true }
-        return Locale.preferredLanguages.contains {
-            Locale(identifier: $0).language.languageCode?.identifier == "he"
-        }
+        currentInputSourceLanguageCode() == "he"
     }
 }
 
@@ -75,13 +74,38 @@ enum WhisperLanguageCandidateSelector {
         selectedLanguage: String,
         shouldConsiderHebrew: Bool,
         detectedLanguage: String?,
-        durationSeconds: Double
+        durationSeconds: Double,
+        primaryText: String = "",
+        primaryProbability: Float = 0
     ) -> Bool {
-        selectedLanguage == LanguagePreference.autoCode
-            && shouldConsiderHebrew
-            && detectedLanguage != "he"
-            && durationSeconds > 0.25
-            && durationSeconds <= 20
+        guard selectedLanguage == LanguagePreference.autoCode,
+              shouldConsiderHebrew,
+              detectedLanguage != "he",
+              durationSeconds > 0.25,
+              durationSeconds <= 6 else {
+            return false
+        }
+
+        // A confident non-English, non-Hebrew detection is already a language decision.
+        // Running forced-`he` on Russian (or Arabic, French, …) is how Hebrew leaked into
+        // speech that never contained it.
+        if isIdentifiedNonEnglishLanguage(detectedLanguage),
+           primaryProbability >= 0.70 {
+            return false
+        }
+
+        let trimmed = primaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+
+        // Confident multi-word English is not a Hebrew-transliteration miss.
+        if detectedLanguage == "en",
+           primaryProbability >= 0.88,
+           wordCount(in: trimmed) >= 8,
+           latinLetterRatio(in: trimmed) >= 0.90 {
+            return false
+        }
+
+        return looksLikeLatinLetterTranscript(trimmed)
     }
 
     static func choose(primary: Candidate, hebrew: Candidate) -> Candidate {
@@ -92,27 +116,80 @@ enum WhisperLanguageCandidateSelector {
 
         let primaryHebrewRatio = hebrewLetterRatio(in: primaryText)
         let fallbackHebrewRatio = hebrewLetterRatio(in: hebrewText)
-        let fallbackIsCredible = hebrew.averageTokenProbability + 0.04 >= primary.averageTokenProbability
+        guard fallbackHebrewRatio >= 0.35, primaryHebrewRatio < 0.10 else {
+            return primary
+        }
 
-        guard fallbackHebrewRatio >= 0.35,
-              primaryHebrewRatio < 0.10,
-              fallbackIsCredible else {
+        if isIdentifiedNonEnglishLanguage(primary.languageCode),
+           primary.averageTokenProbability >= 0.70 {
+            return primary
+        }
+
+        let primaryLooksLikeTransliteration = looksLikeLatinLetterTranscript(primaryText)
+            && primary.averageTokenProbability < 0.85
+            && wordCount(in: primaryText) <= 12
+
+        if primaryLooksLikeTransliteration {
+            // Short Latin output on a Hebrew keyboard is the recovery case
+            // ("shalom ma shlomcha" vs "שלום, מה שלומך?"). Hebrew may win on a
+            // near-tie; it must still be at least as probable.
+            return hebrew.averageTokenProbability + 0.01 >= primary.averageTokenProbability
+                ? hebrew
+                : primary
+        }
+
+        // Confident English / long Latin must be clearly beaten, not matched.
+        guard hebrew.averageTokenProbability >= primary.averageTokenProbability + 0.08 else {
             return primary
         }
         return hebrew
     }
 
+    private static func isIdentifiedNonEnglishLanguage(_ code: String?) -> Bool {
+        guard let code, !code.isEmpty else { return false }
+        return code != "he" && code != "en" && code != LanguagePreference.autoCode
+    }
+
+    private static func looksLikeLatinLetterTranscript(_ text: String) -> Bool {
+        latinLetterRatio(in: text) >= 0.80
+    }
+
+    private static func wordCount(in text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).count
+    }
+
     private static func hebrewLetterRatio(in text: String) -> Double {
+        letterRatio(in: text, matching: { (0x0590...0x05FF).contains($0.value) })
+    }
+
+    private static func latinLetterRatio(in text: String) -> Double {
+        letterRatio(in: text, matching: isLatinLetter)
+    }
+
+    private static func letterRatio(
+        in text: String,
+        matching isMatch: (Unicode.Scalar) -> Bool
+    ) -> Double {
         var letters = 0
-        var hebrewLetters = 0
+        var matched = 0
         for scalar in text.unicodeScalars where CharacterSet.letters.contains(scalar) {
             letters += 1
-            if (0x0590...0x05FF).contains(scalar.value) {
-                hebrewLetters += 1
+            if isMatch(scalar) {
+                matched += 1
             }
         }
         guard letters > 0 else { return 0 }
-        return Double(hebrewLetters) / Double(letters)
+        return Double(matched) / Double(letters)
+    }
+
+    private static func isLatinLetter(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        return (0x0041...0x005A).contains(value)
+            || (0x0061...0x007A).contains(value)
+            || (0x00C0...0x024F).contains(value)
+            || (0x1E00...0x1EFF).contains(value)
+            || (0x2C60...0x2C7F).contains(value)
+            || (0xA720...0xA7FF).contains(value)
     }
 }
 

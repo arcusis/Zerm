@@ -11,8 +11,10 @@ enum DictationOutputMode: String, CaseIterable, Identifiable {
     case instant
 
     /// Paste the raw transcript immediately, then replace it in place once the
-    /// enhancement returns. The paste path is byte-for-byte the `instant` path;
-    /// the enhancement runs afterwards and never blocks it.
+    /// enhancement returns — but only through a direct accessibility write.
+    /// The paste path is byte-for-byte the `instant` path; the enhancement runs
+    /// afterwards on the in-memory string and never blocks it, copies it, or
+    /// pastes a second time.
     case instantRefine
 
     /// Wait for the enhancement, then paste once. Slowest, but the pasted text is
@@ -40,7 +42,7 @@ enum DictationOutputMode: String, CaseIterable, Identifiable {
         case .instant:
             return String(localized: "Paste immediately. No AI.")
         case .instantRefine:
-            return String(localized: "Paste immediately, then improve the text in place. In apps that do not expose an exact editable text range to macOS, Zerm waits and pastes the refined text once.")
+            return String(localized: "Paste immediately, then improve the text in place when the app allows a direct edit. Otherwise the raw text stays and the refinement is kept in History.")
         case .enhanced:
             return String(localized: "Wait for the AI, then paste once.")
         }
@@ -53,16 +55,16 @@ enum DictationOutputMode: String, CaseIterable, Identifiable {
     var usesEnhancement: Bool { self != .instant }
 
     /// Resolves features that cannot coexist safely before the pipeline commits to a paste mode.
-    /// Auto-send removes the text before a later rewrite can land, while an opaque editor gives
-    /// Zerm no exact range to rewrite. Both cases keep enhancement enabled and paste the final
-    /// result once instead of failing after raw text has already been inserted.
+    /// Auto-send submits the field about half a second after paste, so a later rewrite has
+    /// nothing to land on — that case waits and pastes the enhanced text once. Opaque editors
+    /// no longer degrade to a wait: Instant + Refine always pastes raw immediately and treats
+    /// in-place replacement as best-effort.
     static func effective(
         configured: DictationOutputMode,
-        autoSendEnabled: Bool,
-        canReplaceAfterPaste: Bool
+        autoSendEnabled: Bool
     ) -> DictationOutputMode {
         guard configured == .instantRefine else { return configured }
-        return autoSendEnabled || !canReplaceAfterPaste ? .enhanced : .instantRefine
+        return autoSendEnabled ? .enhanced : .instantRefine
     }
 
     static var current: DictationOutputMode {

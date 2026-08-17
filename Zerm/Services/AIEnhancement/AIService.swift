@@ -81,7 +81,7 @@ enum AIProvider: String, CaseIterable {
         case .localCLI:
             return "local-cli"
         case .localLLM:
-            return LocalLLMModelManager.package.displayName
+            return LocalLLMModelManager.package(for: .enhancement).displayName
         case .custom:
             return UserDefaults.standard.string(forKey: "customProviderModel") ?? ""
         case .openRouter:

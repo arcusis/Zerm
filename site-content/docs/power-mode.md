@@ -87,8 +87,11 @@ They are ordinary modes. Rename them, retrigger them, or delete them.
 **Transcription model.** Each mode can pin its own model. A mode used for quick replies
 can run a small local model while a mode used for long-form dictation runs a large one.
 
-**Language.** Pinned per mode too, so a mode for one language does not force you to
-change the global setting every time you switch.
+**Language.** Pinned per mode so a mode for one language does not force you to
+change the global setting every time you switch. Pin the language you will actually
+speak in that app. Auto is for modes where you switch. Pinning Hebrew and then
+speaking English produces broken Hebrew — that is the speech model doing what it
+was told.
 
 **AI enhancement.** A mode can turn enhancement on or off, and select which prompt,
 which provider, and which model to use when it is on. This is the most common reason to

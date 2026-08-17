@@ -137,27 +137,28 @@ struct RefineInPlaceTests {
         #expect(DictationOutputMode.enhanced.pastesImmediately == false)
     }
 
-    @Test func instantRefineWaitsAndPastesOnceForOpaqueEditors() {
+    @Test func instantRefineStaysImmediateWhenTheEditorCannotBeRewritten() {
         #expect(DictationOutputMode.effective(
             configured: .instantRefine,
-            autoSendEnabled: false,
-            canReplaceAfterPaste: false
-        ) == .enhanced)
-    }
-
-    @Test func instantRefineRemainsImmediateForAccessibleEditors() {
-        #expect(DictationOutputMode.effective(
-            configured: .instantRefine,
-            autoSendEnabled: false,
-            canReplaceAfterPaste: true
+            autoSendEnabled: false
         ) == .instantRefine)
     }
 
     @Test func autoSendWaitsForEnhancementBeforeSubmitting() {
         #expect(DictationOutputMode.effective(
             configured: .instantRefine,
-            autoSendEnabled: true,
-            canReplaceAfterPaste: true
+            autoSendEnabled: true
+        ) == .enhanced)
+    }
+
+    @Test func explicitModesAreUnchangedByAutoSend() {
+        #expect(DictationOutputMode.effective(
+            configured: .instant,
+            autoSendEnabled: true
+        ) == .instant)
+        #expect(DictationOutputMode.effective(
+            configured: .enhanced,
+            autoSendEnabled: false
         ) == .enhanced)
     }
 

@@ -98,10 +98,22 @@ enhancement off when a key fails rather than erroring on every recording.</li>
 <li>The active <a href="power-mode.html">Power Mode</a> has enhancement switched off for this app<br>
 or website.</li>
 </ol>
+<h2>The text came out in the wrong language</h2>
+<p><strong>Everything became Hebrew, or Hebrew appeared in English or Russian speech.</strong> Set<br>
+the dictation language to the language you are actually speaking. Auto plus a Hebrew<br>
+keyboard will try a Hebrew recovery pass on short phrases; a Power Mode pinned to<br>
+Hebrew will force Hebrew on every utterance, including English.</p>
+<p>Enhancement is not allowed to translate. Mixed Hebrew and English stays mixed. If a<br>
+model still returns a different writing system, Zerm keeps the raw transcript.</p>
+<p><strong>A Power Mode is not English and the result is broken.</strong> That mode's language setting<br>
+is what Whisper hears. Pin <code class="notranslate">en</code> for English-only apps, <code class="notranslate">he</code> only when you will speak<br>
+Hebrew there, and Auto only when you actually switch languages in that app.</p>
 <h2>Enhancement is slow, or times out</h2>
 <p>Raise the <strong>timeout duration</strong> in enhancement settings — 15 seconds is the default and a<br>
 large cloud model on a slow connection can need more. Set <strong>On timeout</strong> to <em>Retry</em>.</p>
 <p>A timeout never costs you the words: you get the raw transcript.</p>
+<p>Instant + Refine pastes the raw text first, so a slow model cannot block the<br>
+cursor. If you are in Enhanced mode, you are waiting on purpose.</p>
 <p>For consistently low latency, use the on-device provider or a small hosted model.</p>
 <h2>Power Mode is not switching</h2>
 <p><strong>Application triggers</strong> match on bundle identifier, exactly. A different build of the<br>

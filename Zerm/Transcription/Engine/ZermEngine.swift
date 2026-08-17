@@ -95,13 +95,27 @@ class ZermEngine: NSObject, ObservableObject {
             cancelAutoStopMonitor()
             partialTranscript = ""
             setState(.transcribing)
-            recorder.stopRecording()
+            await recorder.stopRecordingAndWaitUntilFinalized()
 
             if let recordedFile {
-                if !shouldCancelRecording {
+                let inspection = RecordingAudioStore.inspect(recordedFile)
+                if shouldCancelRecording {
+                    invalidatePipelineRun()
+                    currentSession?.cancel()
+                    currentSession = nil
+                    if let inspection, inspection.hasAudio {
+                        persistPreservedRecording(
+                            file: recordedFile,
+                            duration: inspection.duration,
+                            message: "Recording saved — transcription was cancelled. Retry from History."
+                        )
+                    }
+                    setState(.idle)
+                    await cleanupResources()
+                } else if let inspection, inspection.hasAudio {
                     let transcription = Transcription(
                         text: "",
-                        duration: 0,
+                        duration: inspection.duration,
                         audioFileURL: recordedFile.absoluteString,
                         transcriptionStatus: .pending
                     )
@@ -111,10 +125,13 @@ class ZermEngine: NSObject, ObservableObject {
 
                     await runPipeline(on: transcription, audioURL: recordedFile)
                 } else {
-                    invalidatePipelineRun()
-                    currentSession?.cancel()
-                    currentSession = nil
-                    try? FileManager.default.removeItem(at: recordedFile)
+                    let fileBytes = inspection?.byteCount ?? 0
+                    logger.error("Recording finalized with no audio bytes path=\(recordedFile.lastPathComponent, privacy: .public) size=\(fileBytes, privacy: .public)")
+                    NotificationManager.shared.showNotification(
+                        title: "Recording produced no audio — the microphone may have dropped. Try again.",
+                        type: .error,
+                        duration: 5.0
+                    )
                     setState(.idle)
                     await cleanupResources()
                 }
@@ -217,8 +234,16 @@ class ZermEngine: NSObject, ObservableObject {
                                     self.cancelAutoStopMonitor()
                                     MediaController.shared.cancelPendingMute()
                                     await MediaController.shared.unmuteSystemAudio()
-                                    self.recorder.stopRecording()
-                                    self.recordedFile = nil
+                                    await self.recorder.stopRecordingAndWaitUntilFinalized()
+                                    if let recordedFile,
+                                       let inspection = RecordingAudioStore.inspect(recordedFile),
+                                       inspection.hasAudio {
+                                        self.persistPreservedRecording(
+                                            file: recordedFile,
+                                            duration: inspection.duration,
+                                            message: "Recording saved — the recorder closed before transcription. Retry from History."
+                                        )
+                                    }
                                     self.setState(.idle)
                                     return
                                 }
@@ -294,11 +319,11 @@ class ZermEngine: NSObject, ObservableObject {
                                             )
                                         }
 
-                                        // Refine has a few seconds in total, so the on-device model must
-                                        // already be resident by the time transcription finishes — a cold
-                                        // Gemma load alone would exhaust the whole budget.
+                                        // Refine has a few seconds in total, so the enhancement model
+                                        // must already be resident — a cold Gemma load used to exhaust
+                                        // the whole budget. Qwen 0.6B warms in well under a second.
                                         if captureSettings.mode == .instantRefine, captureSettings.enabled {
-                                            await LocalLLMModelManager.shared.prewarm()
+                                            await LocalLLMModelManager.shared.prewarm(role: .enhancement)
                                         }
 
                                         if captureSettings.mode.usesEnhancement && captureSettings.enabled {
@@ -526,6 +551,26 @@ class ZermEngine: NSObject, ObservableObject {
     }
 
     // MARK: - Pipeline Dispatch
+
+    /// History row for a take that must survive even though AI did not run.
+    @discardableResult
+    private func persistPreservedRecording(
+        file: URL,
+        duration: TimeInterval,
+        message: String
+    ) -> Transcription {
+        let transcription = Transcription(
+            text: message,
+            duration: duration,
+            audioFileURL: file.absoluteString,
+            transcriptionStatus: .failed
+        )
+        modelContext.insert(transcription)
+        try? modelContext.save()
+        NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
+        logger.notice("Preserved recording \(file.lastPathComponent, privacy: .public) duration=\(duration, privacy: .public)s")
+        return transcription
+    }
 
     private func runPipeline(on transcription: Transcription, audioURL: URL) async {
         guard let model = transcriptionModelManager.currentTranscriptionModel else {

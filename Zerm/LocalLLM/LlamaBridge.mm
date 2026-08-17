@@ -181,7 +181,8 @@
         for (const char *stop : {
                  "<end_of_turn>", "</end_of_turn>",
                  "<start_of_turn>", "</start_of_turn>",
-                 "<eos>", "</eos>", "<|im_end|>", "<|endoftext|>"}) {
+                 "<eos>", "</eos>", "<|im_end|>", "<|endoftext|>",
+                 "<think>", "</think>"}) {
             size_t pos = out.find(stop);
             if (pos != std::string::npos) firstStop = std::min(firstStop, pos);
         }

@@ -61,7 +61,7 @@ struct EnhancementSettingsView: View {
                     HStack(spacing: 4) {
                         Text("Output")
                         InfoTip(
-                            String(localized: "Instant pastes the raw transcript straight away and never uses AI. Instant + Refine improves it in place when the app exposes an exact text range to macOS; in opaque editors Zerm waits and pastes the refined result once. Enhanced always waits for the AI and pastes once."),
+                            String(localized: "Instant pastes the raw transcript straight away and never uses AI. Instant + Refine pastes immediately, then improves the text in place only when the app allows a direct edit. Enhanced always waits for the AI and pastes once."),
                             learnMoreURL: Links.docString(.outputModes)
                         )
                     }

@@ -189,18 +189,35 @@ class RecorderUIManager: ObservableObject {
             return
         }
 
+        if engine.recordingState == .starting {
+            // Hardware is still coming up. Mark cancel so the start callback
+            // finalizes and keeps the WAV instead of walking away from an open file.
+            engine.shouldCancelRecording = true
+            var waited = 0
+            while engine.recordingState == .starting, waited < 50 {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                waited += 1
+            }
+        }
+
         let wasRecording = engine.recordingState == .recording
 
+        if wasRecording {
+            // Stop through the engine so the WAV is finalized and kept in History
+            // even if this dismiss is a cancel. Never close the file and walk away.
+            await engine.toggleRecord()
+        }
+
         await MainActor.run {
-            engine.recordingState = .busy
+            if engine.recordingState == .recording {
+                engine.recordingState = .busy
+            }
         }
 
         // Cancel and release any active streaming session to prevent resource leaks.
-        engine.currentSession?.cancel()
-        engine.currentSession = nil
-
-        if wasRecording {
-            recorder.stopRecording()
+        if !wasRecording {
+            engine.currentSession?.cancel()
+            engine.currentSession = nil
         }
 
         hideRecorderPanel()
@@ -234,7 +251,7 @@ class RecorderUIManager: ObservableObject {
     func resetOnLaunch() async {
         guard let engine = engine, let recorder = recorder else { return }
         logger.notice("Resetting recording state on launch")
-        recorder.stopRecording()
+        await recorder.stopRecordingAndWaitUntilFinalized()
         hideRecorderPanel()
         await MainActor.run {
             isMiniRecorderVisible = false
@@ -280,7 +297,7 @@ class RecorderUIManager: ObservableObject {
     @objc public func handleDismissMiniRecorder() {
         logger.notice("handleDismissMiniRecorder: .dismissMiniRecorder notification received")
         Task {
-            await dismissMiniRecorder()
+            await cancelRecording()
         }
     }
 }

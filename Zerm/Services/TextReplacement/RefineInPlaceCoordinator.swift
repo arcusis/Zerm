@@ -149,14 +149,13 @@ final class RefineInPlaceCoordinator {
 
         let strategy = await TargetAppCapabilities.shared.verdict(for: anchor)
 
-        if strategy == .clipboardPaste {
-            let result = await CursorPaster.replaceVerifiedSelectionByPasting(enhanced, anchor: anchor)
-            if result.didPostPasteCommand { return }
-            logger.notice("Refine declined: clipboardPasteFailed")
+        // Clipboard-paste replacement is a second copy. Instant + Refine may only
+        // rewrite through a direct accessibility write; everything else leaves the
+        // raw paste alone.
+        guard strategy == .directAccessibility else {
+            logger.notice("Refine declined: \(String(describing: strategy), privacy: .public)")
             return offerWithoutReplacing(enhanced)
         }
-
-        guard strategy == .directAccessibility else { return offerWithoutReplacing(enhanced) }
 
         // Gate checks and the write are both synchronous IPC into the target process.
         // Bounded by the 150 ms messaging timeout, but that is still far too long to spend

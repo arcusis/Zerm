@@ -164,24 +164,35 @@ class Recorder: NSObject, ObservableObject {
     }
 
     func stopRecording() {
+        Task { await stopRecordingAndWaitUntilFinalized() }
+    }
+
+    /// Stops capture and waits until ExtAudioFile has been disposed. Transcribe
+    /// must not open the WAV until this returns — a long take is still flushing
+    /// on `audioSetupQueue`, and reading it early is how History got
+    /// "The operation could not be completed" with a missing file.
+    func stopRecordingAndWaitUntilFinalized() async {
         logger.notice("stopRecording called")
         audioMeterUpdateTimer?.cancel()
         audioMeterUpdateTimer = nil
 
-        // Capture current recorder to stop it on the serial hardware queue
         let currentRecorder = self.recorder
-        audioSetupQueue.async {
-            currentRecorder?.stopRecording()
-        }
         recorder = nil
         onAudioChunk = nil
 
-        smoothedValuesLock.lock()
-        smoothedAverage = 0
-        smoothedPeak = 0
-        smoothedValuesLock.unlock()
+        smoothedValuesLock.withLock {
+            smoothedAverage = 0
+            smoothedPeak = 0
+        }
 
         audioMeter = AudioMeter(averagePower: 0, peakPower: 0)
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            audioSetupQueue.async {
+                currentRecorder?.stopRecording()
+                continuation.resume()
+            }
+        }
 
         audioRestorationTask = Task {
             await mediaController.unmuteSystemAudio()
@@ -193,8 +204,7 @@ class Recorder: NSObject, ObservableObject {
     private func handleRecordingError(_ error: Error) async {
         logger.error("❌ Recording error occurred: \(error.localizedDescription, privacy: .public)")
 
-        // Stop the recording
-        stopRecording()
+        await stopRecordingAndWaitUntilFinalized()
 
         // Notify the user about the recording failure
         await MainActor.run {

@@ -95,6 +95,28 @@ In order, and all locally:
 5. The result is inserted — and, depending on your
    [output mode](output-modes.html), may then be improved by a language model.
 
+The shipped default is Instant + Refine: the raw transcript lands immediately, and
+the model may then rewrite it in place in apps that allow a direct edit. In Cursor,
+Slack, VS Code, and browsers the raw text stays; the cleaned version is kept in
+History.
+
+## Language
+
+The language setting is what the speech model is allowed to hear.
+
+- **Pin a language** when you will speak that language. English in a code editor,
+  Hebrew in a Hebrew chat.
+- **Auto** is for recordings where you actually switch languages.
+- Do not pin Hebrew if you are about to speak English or Russian. Whisper will try
+  to hear Hebrew and the transcript will be wrong.
+
+A Hebrew keyboard can still recover a short Hebrew phrase that Auto first guessed as
+English. Having Hebrew as a macOS preferred language, or using the Hebrew UI, is not
+enough to force that pass.
+
+Enhancement never translates. Mixed sentences stay mixed. See
+[AI enhancement](enhancement.html).
+
 ## While recording
 
 - **Pause media** — playing audio is paused when recording starts and resumed
