@@ -26,6 +26,27 @@ final class Transcription {
     var powerModeEmoji: String?
     var transcriptionStatus: String?
 
+    /// What History and the list previews should show.
+    ///
+    /// `enhancedText` is optional, but a stored empty string is not the same as "no
+    /// enhancement" — and `enhancedText ?? text` treats it as one, drawing a blank row over a
+    /// perfectly good transcript. Records written by 2.8.3 are full of exactly that. Every
+    /// reader goes through here so an empty enhancement can only ever fall back to the words
+    /// the user actually said.
+    var displayText: String {
+        guard let enhancedText, !enhancedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return text
+        }
+        return enhancedText
+    }
+
+    /// True only when a real rewrite was stored, so an empty legacy value never shows an
+    /// empty "Enhanced" tab or card.
+    var hasEnhancement: Bool {
+        guard let enhancedText else { return false }
+        return !enhancedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     init(text: String,
          duration: TimeInterval,
          enhancedText: String? = nil,

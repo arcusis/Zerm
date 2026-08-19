@@ -19,8 +19,9 @@ struct LocalLLMPackage: Identifiable, Hashable, Sendable {
     /// `fileName` is the stable identity/key (also the on-disk name).
     var id: String { fileName }
 
-    /// Qwen3 ships a thinking mode that would burn the Instant + Refine budget
-    /// on hidden chain-of-thought. The caller appends `/no_think` for these.
+    /// Qwen3 ships a thinking mode that would burn the Instant + Refine budget on hidden
+    /// chain-of-thought. `LlamaBridge` pre-fills an empty `<think></think>` block into the
+    /// assistant turn for these, which is the only mechanism the model's template honours.
     var disablesThinking: Bool { fileName.lowercased().hasPrefix("qwen3") }
 }
 
@@ -434,11 +435,10 @@ final class LocalLLMModelManager: ObservableObject {
         beginOperation()
         defer { endOperation() }
         let engine = ensureEngine(for: package, role: role)
-        var userText = user
-        if package.disablesThinking {
-            userText += "\n/no_think"
-        }
-        return try await engine.generate(system: system, user: userText, maxNewTokens: maxNewTokens, isCancelled: isCancelled)
+        // Thinking is suppressed in the prompt template by `LlamaBridge`, not by appending the
+        // `/no_think` soft switch to the user turn. The soft switch still let Qwen3 open a
+        // `<think>` block, and it put a stray token inside the text the model was asked to clean.
+        return try await engine.generate(system: system, user: user, maxNewTokens: maxNewTokens, isCancelled: isCancelled)
     }
 
     /// Pre-loads the current model in the background so the first natural read is fast.
@@ -470,7 +470,8 @@ final class LocalLLMModelManager: ObservableObject {
         let engine = LlamaEngine(
             modelPath: path(for: package).path,
             contextSize: contextSize,
-            threadCount: HardwareCapability.inferenceThreadCount
+            threadCount: HardwareCapability.inferenceThreadCount,
+            disablesThinking: package.disablesThinking
         )
         engines[package.fileName] = engine
         return engine

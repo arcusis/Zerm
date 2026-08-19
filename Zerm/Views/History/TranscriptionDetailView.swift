@@ -21,12 +21,7 @@ struct TranscriptionDetailView: View {
         return false
     }
 
-    private var displayText: String {
-        if let enhanced = transcription.enhancedText, !enhanced.isEmpty {
-            return enhanced
-        }
-        return transcription.text
-    }
+    private var displayText: String { transcription.displayText }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -68,7 +63,7 @@ struct TranscriptionDetailView: View {
                             isEnhanced: false
                         )
 
-                        if let enhancedText = transcription.enhancedText {
+                        if transcription.hasEnhancement, let enhancedText = transcription.enhancedText {
                             MessageBubble(
                                 label: "Enhanced",
                                 text: enhancedText,
