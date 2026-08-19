@@ -11,18 +11,20 @@ struct LocalLLMPackage: Identifiable, Hashable, Sendable {
     let downloadURL: URL
     /// Pinned SHA-256 of the GGUF at the revision in `downloadURL`, verified after download.
     let sha256: String
-    /// Which jobs this package is offered for. Gemma 4 is a Read Aloud model;
-    /// it introduces itself when asked to clean a transcript.
+    /// Which jobs this package is offered for.
     let jobs: Set<LocalLLMRole>
     let blurb: String
 
+    /// Set only for models whose chat template actually carries an `enable_thinking` switch.
+    ///
+    /// `LlamaBridge` then pre-fills an empty `<think></think>` block into the assistant turn,
+    /// which is the only mechanism those templates honour. This is deliberately not inferred
+    /// from the file name: Qwen3-4B-Instruct-2507 is a Qwen3 build with no thinking mode, and
+    /// prefilling one would push tokens its template never expects.
+    var disablesThinking: Bool = false
+
     /// `fileName` is the stable identity/key (also the on-disk name).
     var id: String { fileName }
-
-    /// Qwen3 ships a thinking mode that would burn the Instant + Refine budget on hidden
-    /// chain-of-thought. `LlamaBridge` pre-fills an empty `<think></think>` block into the
-    /// assistant turn for these, which is the only mechanism the model's template honours.
-    var disablesThinking: Bool { fileName.lowercased().hasPrefix("qwen3") }
 }
 
 /// On-device jobs that used to share one weights file. Enhancement is a 20-word
@@ -70,6 +72,16 @@ final class LocalLLMModelManager: ObservableObject {
             sha256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634",
             jobs: [.enhancement, .reading],
             blurb: "Default for both jobs. The only catalogue model that leaves mixed-language dictation in its original script."
+        ),
+        LocalLLMPackage(
+            fileName: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            displayName: "Qwen3 4B Instruct",
+            approxSize: "~2.5 GB",
+            estimatedRAMGB: 3.2,
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")!,
+            sha256: "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+            jobs: [.enhancement],
+            blurb: "Smaller opt-in. Matches the default on English cleanup, but translates mixed-language dictation instead of preserving it."
         ),
         LocalLLMPackage(
             fileName: "gemma-3-1b-it-Q4_K_M.gguf",

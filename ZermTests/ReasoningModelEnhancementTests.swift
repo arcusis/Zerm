@@ -75,14 +75,19 @@ struct ReasoningModelEnhancementTests {
 
     // MARK: - Reasoning handling stays live even with no reasoning model shipped
 
-    /// The Qwen3 family is off the catalogue, so nothing shipped sets this today. The flag and
-    /// the bridge's reasoning-skip must keep working regardless: a future catalogue entry, or a
-    /// user's own Ollama/Local-CLI model, can still open a `<think>` block.
-    @Test func thinkingSuppressionIsScopedToTheQwen3Family() {
+    /// Nothing shipped sets this today: the catalogue's only Qwen3 build is the 2507 *Instruct*
+    /// release, whose template has no `enable_thinking` switch, so prefilling one would push
+    /// tokens it never expects. The flag must never be inferred from the file name.
+    @Test func noCatalogueModelPrefillsAReasoningBlockItsTemplateDoesNotSupport() {
         for package in LocalLLMModelManager.packages {
-            let expected = package.fileName.lowercased().hasPrefix("qwen3")
-            #expect(package.disablesThinking == expected, "\(package.fileName)")
+            #expect(!package.disablesThinking, "\(package.fileName)")
         }
+    }
+
+    /// The bridge's reasoning-skip must keep working regardless of the catalogue: a user's own
+    /// Ollama or Local-CLI model can still open a `<think>` block.
+    @Test func reasoningSkipStaysLiveIndependentOfTheCatalog() {
+        #expect(AIEnhancementOutputFilter.filter("<think>weigh it</think>Ship on Friday.") == "Ship on Friday.")
     }
 
     // MARK: - An empty enhancement must never hide the transcript
