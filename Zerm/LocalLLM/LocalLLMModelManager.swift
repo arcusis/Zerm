@@ -52,8 +52,8 @@ enum LocalLLMRole: String, Sendable, Hashable {
 /// alongside Whisper (speech-to-text) and Kokoro (text-to-speech). Same UX as both: pick a
 /// model, download it with a progress bar, then everything runs offline.
 ///
-/// Enhancement and Read Aloud each pick their own package. Enhancement defaults to
-/// Qwen3 1.7B so Instant + Refine stays fast and does not chat. Read Aloud keeps Gemma.
+/// Enhancement and Read Aloud each pick their own package. Both default to Gemma 4 E2B: it is
+/// the only catalogue model measured to leave mixed-language dictation in its original script.
 @MainActor
 final class LocalLLMModelManager: ObservableObject {
     static let shared = LocalLLMModelManager()
@@ -62,34 +62,14 @@ final class LocalLLMModelManager: ObservableObject {
     /// larger and legacy community quantizations remain explicit user choices.
     nonisolated static let packages: [LocalLLMPackage] = [
         LocalLLMPackage(
-            fileName: "Qwen3-1.7B-Q4_K_M.gguf",
-            displayName: "Qwen3 1.7B",
-            approxSize: "~1.11 GB",
-            estimatedRAMGB: 1.8,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/bd59ef4c1c7af8b7ade0d473f3ab0d48b9f1d338/Qwen3-1.7B-Q4_K_M.gguf")!,
-            sha256: "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
+            fileName: "gemma-4-E2B_q4_0-it.gguf",
+            displayName: "Gemma 4 E2B",
+            approxSize: "~3.35 GB",
+            estimatedRAMGB: 4.0,
+            downloadURL: URL(string: "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf")!,
+            sha256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634",
             jobs: [.enhancement, .reading],
-            blurb: "Default for Instant + Refine. Cleans the line and stays multilingual."
-        ),
-        LocalLLMPackage(
-            fileName: "Qwen3-0.6B-Q4_K_M.gguf",
-            displayName: "Qwen3 0.6B",
-            approxSize: "~397 MB",
-            estimatedRAMGB: 0.8,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/f2d6f9ca53a254cc379437c49e4b2eb447f779df/Qwen3-0.6B-Q4_K_M.gguf")!,
-            sha256: "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
-            jobs: [.enhancement],
-            blurb: "Fastest enhancement. Weaker cleanup than 1.7B."
-        ),
-        LocalLLMPackage(
-            fileName: "Qwen3-4B-Q4_K_M.gguf",
-            displayName: "Qwen3 4B",
-            approxSize: "~2.5 GB",
-            estimatedRAMGB: 3.2,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf")!,
-            sha256: "f6f851777709861056efcdad3af01da38b31223a3ba26e61a4f8bf3a2195813a",
-            jobs: [.enhancement, .reading],
-            blurb: "Higher-quality cleanup. Still not a chatbot. Slower than 1.7B."
+            blurb: "Default for both jobs. The only catalogue model that leaves mixed-language dictation in its original script."
         ),
         LocalLLMPackage(
             fileName: "gemma-3-1b-it-Q4_K_M.gguf",
@@ -100,26 +80,6 @@ final class LocalLLMModelManager: ObservableObject {
             sha256: "8270790f3ab69fdfe860b7b64008d9a19986d8df7e407bb018184caa08798ebd",
             jobs: [.reading],
             blurb: "Small Read Aloud fallback. Do not use for enhancement."
-        ),
-        LocalLLMPackage(
-            fileName: "gemma-4-E2B_q4_0-it.gguf",
-            displayName: "Gemma 4 E2B",
-            approxSize: "~3.35 GB",
-            estimatedRAMGB: 4.0,
-            downloadURL: URL(string: "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf")!,
-            sha256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634",
-            jobs: [.reading],
-            blurb: "Default for Read Aloud. Introduces itself if used to enhance dictation."
-        ),
-        LocalLLMPackage(
-            fileName: "gemma-4-E2B-it-Q4_K_M.gguf",
-            displayName: "Gemma 4 E2B (legacy)",
-            approxSize: "~3.1 GB",
-            estimatedRAMGB: 4.0,
-            downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/0314792d7f1f7e229411f620751375812bb9faf2/gemma-4-E2B-it-Q4_K_M.gguf")!,
-            sha256: "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
-            jobs: [.reading],
-            blurb: "Previous E2B quant. Keep if you already downloaded it."
         ),
         LocalLLMPackage(
             fileName: "gemma-4-E4B-it-Q4_K_M.gguf",
@@ -160,13 +120,18 @@ final class LocalLLMModelManager: ObservableObject {
     /// The shipped default for Read Aloud and any caller that still asks for "the" model.
     nonisolated static let defaultPackage = packages.first {
         $0.fileName == "gemma-4-E2B_q4_0-it.gguf"
-    } ?? packages[1]
+    } ?? packages[0]
 
-    /// Instant + Refine default. 1.7B follows “clean the transcript, do not chat”
-    /// reliably. 0.6B remains the speed opt-in. Gemma is the wrong tool here —
-    /// it introduces itself as Google DeepMind instead of rewriting the line.
+    /// Instant + Refine default.
+    ///
+    /// Chosen on measurement, not on size. Against the shipped system prompt over a 20-case
+    /// dictation set, Gemma 4 E2B was the only model that kept mixed Hebrew/English in its
+    /// original script (2/2 on every run); every smaller candidate translated it (0/2 on every
+    /// run), which `EnhancementLanguageGuard` then rejects — leaving those lines unenhanced.
+    /// The self-introduction that kept Gemma off this job in 2.8.3 is handled by the hardened
+    /// prompt and by `EnhancementLanguageGuard.looksLikeSelfIntroduction`.
     nonisolated static let enhancementDefaultPackage = packages.first {
-        $0.fileName == "Qwen3-1.7B-Q4_K_M.gguf"
+        $0.fileName == "gemma-4-E2B_q4_0-it.gguf"
     } ?? packages[0]
 
     /// Best quality/performance balance for this Mac. Displayed as guidance; it never silently
@@ -187,18 +152,15 @@ final class LocalLLMModelManager: ObservableObject {
         }
 
         // Preserve installations that predate explicit model selection, but never infer that the
-        // largest model found on disk is the desired one. Prefer the memory-efficient default,
-        // then the legacy E2B, then the smallest installed catalogue entry.
+        // largest model found on disk is the desired one. Prefer the default, then the smallest
+        // installed catalogue entry.
         let modelDirectory = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         )[0]
             .appendingPathComponent("com.arcusis.zerm")
             .appendingPathComponent("LLMModels")
-        let compatibilityOrder = [
-            defaultPackage.fileName,
-            "gemma-4-E2B-it-Q4_K_M.gguf"
-        ] + packages.map(\.fileName)
+        let compatibilityOrder = [defaultPackage.fileName] + packages.map(\.fileName)
         if let installedFile = compatibilityOrder.first(where: {
             FileManager.default.fileExists(
                 atPath: modelDirectory.appendingPathComponent($0).path

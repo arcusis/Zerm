@@ -73,18 +73,16 @@ struct ReasoningModelEnhancementTests {
         #expect(AIEnhancementOutputFilter.filter(input) == "Set the header to <div> and ship it.")
     }
 
-    // MARK: - Qwen3 packages must disable thinking at the template level
+    // MARK: - Reasoning handling stays live even with no reasoning model shipped
 
-    @Test func qwenPackagesDisableThinkingAndOtherPackagesDoNot() {
+    /// The Qwen3 family is off the catalogue, so nothing shipped sets this today. The flag and
+    /// the bridge's reasoning-skip must keep working regardless: a future catalogue entry, or a
+    /// user's own Ollama/Local-CLI model, can still open a `<think>` block.
+    @Test func thinkingSuppressionIsScopedToTheQwen3Family() {
         for package in LocalLLMModelManager.packages {
             let expected = package.fileName.lowercased().hasPrefix("qwen3")
             #expect(package.disablesThinking == expected, "\(package.fileName)")
         }
-    }
-
-    @Test func theDefaultEnhancementModelIsAReasoningModel() {
-        // If this ever stops being true the prefill is dead code, not a live guard.
-        #expect(LocalLLMModelManager.enhancementDefaultPackage.disablesThinking)
     }
 
     // MARK: - An empty enhancement must never hide the transcript
