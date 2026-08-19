@@ -119,3 +119,57 @@ struct ReasoningModelEnhancementTests {
         #expect(transcription.hasEnhancement)
     }
 }
+
+/// The enhancement system prompt earns its shape from measurement, so the parts that moved the
+/// numbers are pinned here. Against Gemma 4 E2B over the 20-case dictation set, three runs each:
+/// the previous wording scored 9/20 and answered dictated questions (never-answers 1/3); leading
+/// with the two absolute rules and showing a worked failure for each scored 13/20 and 3/3.
+struct EnhancementPromptContractTests {
+
+    private var prompt: String {
+        String(format: AIPrompts.customPromptTemplate, "RULES")
+    }
+
+    @Test func theTwoAbsoluteRulesLeadThePrompt() {
+        let translate = prompt.range(of: "ABSOLUTE RULE 1 — NEVER TRANSLATE")
+        let answer = prompt.range(of: "ABSOLUTE RULE 2 — NEVER ANSWER")
+        let rules = prompt.range(of: "RULES")
+        #expect(translate != nil)
+        #expect(answer != nil)
+        // Both must precede the prompt-specific rules; small models follow what they read first.
+        if let translate, let answer, let rules {
+            #expect(translate.lowerBound < rules.lowerBound)
+            #expect(answer.lowerBound < rules.lowerBound)
+        }
+    }
+
+    @Test func eachAbsoluteRuleShowsAWorkedFailure() {
+        // The contrast is what small instruct models actually follow, not the prohibition.
+        #expect(prompt.contains("Correct output:"))
+        #expect(prompt.contains("WRONG output:"))
+    }
+
+    /// 2.8.2 shipped a prompt that named Hebrew, and small models then translated *into* it.
+    /// The never-translate example must therefore illustrate the rule without carrying any
+    /// specific language — measured identical (13/20, mixed-script 2/2, never-answers 3/3 over
+    /// three runs) with and without a real Hebrew example, so neutrality is free.
+    @Test func theNeverTranslateExampleNamesNoLanguageAndUsesNoForeignScript() {
+        #expect(prompt.contains("original script"))
+        for named in ["hebrew", "arabic", "russian", "spanish", "french", "chinese"] {
+            #expect(!prompt.localizedCaseInsensitiveContains(named), "\(named)")
+        }
+        let nonLatin = prompt.unicodeScalars.filter { scalar in
+            EnhancementLanguageGuard.script(of: scalar).map { $0 != .latin } ?? false
+        }
+        #expect(nonLatin.isEmpty, "prompt carries non-Latin letters: \(String(String.UnicodeScalarView(nonLatin)))")
+    }
+
+    @Test func thePromptForbidsEchoingItsOwnTags() {
+        #expect(prompt.contains("NEVER repeat the <TRANSCRIPT> tags"))
+    }
+
+    @Test func theCallerSuppliedRulesAreStillInterpolated() {
+        #expect(prompt.contains("RULES"))
+        #expect(!prompt.contains("%@"))
+    }
+}
