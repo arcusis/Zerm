@@ -2,14 +2,19 @@ import AVFoundation
 import Testing
 @testable import Zerm
 
-/// Regression cover for #309: the meeting call track was written at exactly half rate.
+/// Layout-independence cover for the tap frame count.
 ///
-/// `enqueueRealtimeInput` counted frames from the first buffer's byte size divided by
-/// `mBytesPerFrame`. For a deinterleaved stereo tap — which is what
-/// `CATapDescription(stereoMixdownOfProcesses:)` produces — the list holds one buffer per
-/// channel of `frames * bytesPerSample`, while `mBytesPerFrame` covers both channels. Every
-/// callback therefore reported half the frames, so a 94-second meeting produced a 46.9-second
-/// call track that drifted a full 47 seconds out of sync with the microphone.
+/// This is **not** a fix for #309. That defect — the call track written at exactly half the
+/// meeting's duration — was originally diagnosed here and the diagnosis was wrong. Probing the
+/// real Core Audio tap shows it delivers a single interleaved buffer (`mNumberBuffers=1`,
+/// `mNumberChannels=2`, `mBytesPerFrame=8`), for which the previous `bytes / mBytesPerFrame`
+/// and the current `bytes / (bytesPerSample * mNumberChannels)` agree exactly. Both return 512
+/// for a real 512-frame delivery.
+///
+/// The counting is kept because it is correct for any layout rather than only the one this Mac
+/// happens to report, and a tap that ever hands over deinterleaved buffers would silently halve
+/// under the old form. The real cause of #309 is still open; `SystemAudioTrackWriter` now logs
+/// the capture accounting needed to identify it from a real recording.
 struct SystemAudioFrameCountTests {
 
     private func format(
@@ -25,7 +30,7 @@ struct SystemAudioFrameCountTests {
         AudioBuffer(mNumberChannels: channels, mDataByteSize: UInt32(bytes), mData: nil)
     }
 
-    /// The exact shape that shipped broken: 2-channel float32 tap, deinterleaved.
+    /// A deinterleaved 2-channel tap, where the two formulas would disagree.
     @Test func deinterleavedStereoTapCountsWholeFramesNotHalf() {
         let tap = format(.pcmFormatFloat32, rate: 48_000, channels: 2, interleaved: false)
         // One buffer per channel: 1024 frames x 4 bytes.
@@ -52,7 +57,8 @@ struct SystemAudioFrameCountTests {
         #expect(SystemAudioTrackWriter.frameCount(inFirstBuffer: first, format: tap) == 512)
     }
 
-    /// The defect as a duration assertion, which is how it actually presented.
+    /// Duration accounting for a deinterleaved tap. Note this does not reproduce #309: the
+    /// real tap on this platform is interleaved, where the old formula was already correct.
     @Test func aFullMeetingOfDeliveriesYieldsAFullLengthTrack() {
         let tap = format(.pcmFormatFloat32, rate: 48_000, channels: 2, interleaved: false)
         let framesPerDelivery = 1024
@@ -65,13 +71,23 @@ struct SystemAudioFrameCountTests {
         }
 
         let capturedSeconds = Double(counted) / 48_000
-        // The broken math produced 0.499 of the real duration; anything below 0.99 is that bug.
         #expect(capturedSeconds / meetingSeconds > 0.99)
     }
 
+    /// The observed tap delivers 512 frames per callback, but the ring slot must survive a much
+    /// larger IO buffer: anything above capacity is dropped outright, not truncated.
     @Test func theRingBufferCanHoldARealisticIOBuffer() {
-        // With the count corrected, a delivery larger than the old 4096-frame capacity would be
-        // dropped outright rather than silently half-written.
         #expect(SystemAudioTrackWriter.realtimeBufferCapacity >= 8192)
+    }
+
+    /// Pins the layout the real tap reports, so a future platform change that breaks the
+    /// assumption shows up here rather than as silently halved audio.
+    @Test func theInterleavedTapLayoutAgreesWithBothFormulas() {
+        let tap = format(.pcmFormatFloat32, rate: 48_000, channels: 2, interleaved: true)
+        let first = buffer(bytes: 4096, channels: 2)   // exactly what the probe observed
+        let declaredBytesPerFrame = Int(tap.streamDescription.pointee.mBytesPerFrame)
+        #expect(declaredBytesPerFrame == 8)
+        #expect(4096 / declaredBytesPerFrame == 512)
+        #expect(SystemAudioTrackWriter.frameCount(inFirstBuffer: first, format: tap) == 512)
     }
 }

@@ -61,6 +61,14 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
     var onDroppedFrames: ((Int64, ChunkTimestamp) -> Void)?
 
     private(set) var framesWritten: AVAudioFramePosition = 0
+
+    /// Capture accounting for #309. The call track came out at exactly half the meeting's
+    /// duration and neither the frame count nor the sample-rate converter explains it — both
+    /// were measured correct against the real tap. These are the numbers that will identify the
+    /// missing half on the next real recording, written to the debug log on close.
+    private var deliveryCount: Int = 0
+    private var inputFramesSeen: Int64 = 0
+    private var declaredSampleRate: Double = 0
     private var level: Float = 0
     private var sawSignal = false
     private var openedAtUptimeNanos = DispatchTime.now().uptimeNanoseconds
@@ -115,6 +123,8 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
                 interleaved: true
             )
             framesWritten = 0
+            deliveryCount = 0
+            inputFramesSeen = 0
             level = -160
             sawSignal = false
             openedAtUptimeNanos = DispatchTime.now().uptimeNanoseconds
@@ -126,6 +136,7 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
 
     func close() {
         stopRealtimeInput()
+        reportCaptureAccounting()
         queue.sync {
             file = nil
             converter = nil
@@ -137,6 +148,7 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
 
     func prepareRealtimeInput(format: AVAudioFormat) {
         stopRealtimeInput()
+        declaredSampleRate = format.sampleRate
         let capacity = Self.realtimeBufferCapacity
         let buffers = (0..<Int(Self.realtimeSlotCount)).compactMap { _ in
             AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity)
@@ -188,6 +200,8 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
         guard let first = source.first else { return }
         let format = realtimeBuffers[0].format
         let frames = Self.frameCount(inFirstBuffer: first, format: format)
+        deliveryCount &+= 1
+        inputFramesSeen &+= Int64(frames)
         guard frames > 0, frames <= Int(realtimeBuffers[0].frameCapacity) else {
             accumulateRealtimeDrop(frames: max(0, frames), timestamp: timestamp)
             realtimeSemaphore.signal()
@@ -319,6 +333,27 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
             ),
             droppedInputFrames: dropped
         ))
+    }
+
+    /// Writes the ratio that identifies #309: how much audio reached the file per second of
+    /// wall clock. A healthy capture is ~1.0; the reported meeting measured 0.499.
+    private func reportCaptureAccounting() {
+        guard deliveryCount > 0, openedAtUptimeNanos > 0 else { return }
+        let wallSeconds = Double(DispatchTime.now().uptimeNanoseconds &- openedAtUptimeNanos) / 1_000_000_000
+        guard wallSeconds > 0.5 else { return }
+        let writtenSeconds = Double(framesWritten) / Self.targetFormat.sampleRate
+        let inputSeconds = declaredSampleRate > 0 ? Double(inputFramesSeen) / declaredSampleRate : 0
+        let averageFrames = Double(inputFramesSeen) / Double(deliveryCount)
+        let message = String(
+            format: "system-audio capture: wall=%.2fs written=%.2fs input=%.2fs ratio=%.3f "
+                + "deliveries=%d avgFrames=%.1f declaredRate=%.0f deliveriesPerSecond=%.1f",
+            wallSeconds, writtenSeconds, inputSeconds,
+            wallSeconds > 0 ? writtenSeconds / wallSeconds : 0,
+            deliveryCount, averageFrames, declaredSampleRate,
+            Double(deliveryCount) / wallSeconds
+        )
+        logger.notice("\(message, privacy: .public)")
+        DebugLogger.shared.log("SystemAudioTrackWriter", message)
     }
 
     private func stopRealtimeInput() {
