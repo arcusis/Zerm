@@ -27,6 +27,9 @@ const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
     int _contextSize;
     int _threadCount;
     BOOL _disablesThinking;
+    /// Prompt tokens still resident in the KV cache from the previous request, so an identical
+    /// system prefix is not recomputed on every dictation. See `generateWithSystem:`.
+    std::vector<llama_token> _cachedPrompt;
 }
 
 @synthesize disablesThinking = _disablesThinking;
@@ -121,8 +124,6 @@ const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
                               isCancelled:(BOOL (^)(void))isCancelled {
     if (![self load]) return nil;
 
-    // Fresh state for every request (we reuse one context).
-    llama_memory_clear(llama_get_memory(_ctx), true);
     llama_sampler_reset(_sampler);
 
     std::string systemStr = system.UTF8String ? system.UTF8String : "";
@@ -180,7 +181,34 @@ const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
     // decoder error so Swift can fall back to the original transcript.
     const int nBatch = (int)llama_n_batch(_ctx);
     if (nBatch <= 0) return nil;
-    for (int offset = 0; offset < (int)tokens.size(); offset += nBatch) {
+
+    // Reuse the KV cache for the prompt prefix this request shares with the last one.
+    //
+    // The system prompt is identical on every dictation — roughly 850 tokens of instructions —
+    // and clearing the whole cache each time meant re-prefilling all of it before a single new
+    // token could be sampled. Measured on Gemma 4 E2B over a 22-case dictation set, that
+    // prefill was 65% of end-to-end latency: 0.452 s with the real prompt against 0.157 s with
+    // a 58-character one.
+    //
+    // Only the tail after the shared prefix is evicted and recomputed. At least one token is
+    // always decoded, because the sampler needs logits from a fresh `llama_decode`.
+    llama_memory_t memory = llama_get_memory(_ctx);
+    size_t reusable = 0;
+    const size_t maxReusable = tokens.size() - 1;
+    while (reusable < maxReusable && reusable < _cachedPrompt.size()
+           && _cachedPrompt[reusable] == tokens[reusable]) {
+        reusable++;
+    }
+    if (reusable == 0) {
+        llama_memory_clear(memory, true);
+    } else {
+        // Drops the previous request's uncommon tail *and* its generated tokens, which sit
+        // after the prompt in the same sequence.
+        llama_memory_seq_rm(memory, 0, (llama_pos)reusable, -1);
+    }
+    _cachedPrompt.clear();
+
+    for (int offset = (int)reusable; offset < (int)tokens.size(); offset += nBatch) {
         if (isCancelled && isCancelled()) return @"";
         const int chunkCount = std::min(nBatch, (int)tokens.size() - offset);
         llama_batch batch = llama_batch_get_one(tokens.data() + offset, (int32_t)chunkCount);
@@ -189,9 +217,12 @@ const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
             os_log_error(OS_LOG_DEFAULT,
                          "Zerm local model rejected prompt batch (result=%{public}d, tokens=%{public}d)",
                          decodeResult, chunkCount);
+            llama_memory_clear(memory, true);
             return nil;
         }
     }
+    // Only now is the cache known to match these tokens exactly.
+    _cachedPrompt = tokens;
 
     std::string out;
     int generated = 0;
@@ -268,6 +299,9 @@ const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
             os_log_error(OS_LOG_DEFAULT,
                          "Zerm local model rejected generated token (result=%{public}d)",
                          decodeResult);
+            // The cache can no longer be trusted to match `_cachedPrompt`; start clean next time.
+            llama_memory_clear(llama_get_memory(_ctx), true);
+            _cachedPrompt.clear();
             return nil;
         }
     }
