@@ -68,6 +68,11 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
     private var lastSignalUptimeNanos: UInt64?
     private var reportedProcessingFailure = false
     private static let realtimeSlotCount: UInt64 = 32
+
+    /// Headroom for the largest IO buffer the aggregate device is likely to hand over. This was
+    /// 4096, which only ever fit because the frame count was being halved (#309); with the count
+    /// correct, a large delivery would otherwise be dropped outright.
+    static let realtimeBufferCapacity: AVAudioFrameCount = 16_384
     private let realtimeWriteIndex = ManagedAtomic<UInt64>(0)
     private let realtimeReadIndex = ManagedAtomic<UInt64>(0)
     private let realtimeRunning = ManagedAtomic<Bool>(false)
@@ -132,7 +137,7 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
 
     func prepareRealtimeInput(format: AVAudioFormat) {
         stopRealtimeInput()
-        let capacity: AVAudioFrameCount = 4096
+        let capacity = Self.realtimeBufferCapacity
         let buffers = (0..<Int(Self.realtimeSlotCount)).compactMap { _ in
             AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity)
         }
@@ -155,6 +160,24 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
         realtimeWorker.async { [weak self] in self?.runRealtimeInputWorker() }
     }
 
+    /// Frames carried by one Core Audio delivery, counted from the buffer's OWN channel count
+    /// rather than the whole-frame stride.
+    ///
+    /// `CATapDescription(stereoMixdownOfProcesses:)` is a two-channel tap, and Core Audio hands
+    /// it over deinterleaved: one buffer per channel, each holding `frames * bytesPerSample`,
+    /// while `mBytesPerFrame` covers both channels. Dividing the first buffer's byte count by
+    /// `mBytesPerFrame` reported exactly half the frames on every callback — a 94-second meeting
+    /// produced a 46.9-second call track whose clock anchors sat at a dead-constant 0.499 ratio,
+    /// drifting further out of sync with the microphone every second.
+    ///
+    /// `mNumberChannels` is 1 per buffer when deinterleaved and the full count when interleaved,
+    /// so this is correct for both layouts.
+    static func frameCount(inFirstBuffer buffer: AudioBuffer, format: AVAudioFormat) -> Int {
+        let bytesPerSample = max(1, Int(format.streamDescription.pointee.mBitsPerChannel / 8))
+        let channels = max(1, Int(buffer.mNumberChannels))
+        return Int(buffer.mDataByteSize) / (bytesPerSample * channels)
+    }
+
     /// Realtime producer. Slots, PCM storage and metadata were allocated by `prepareRealtimeInput`.
     func enqueueRealtimeInput(
         _ input: UnsafePointer<AudioBufferList>,
@@ -164,8 +187,7 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
         let source = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         guard let first = source.first else { return }
         let format = realtimeBuffers[0].format
-        let bytesPerFrame = max(1, Int(format.streamDescription.pointee.mBytesPerFrame))
-        let frames = Int(first.mDataByteSize) / bytesPerFrame
+        let frames = Self.frameCount(inFirstBuffer: first, format: format)
         guard frames > 0, frames <= Int(realtimeBuffers[0].frameCapacity) else {
             accumulateRealtimeDrop(frames: max(0, frames), timestamp: timestamp)
             realtimeSemaphore.signal()
