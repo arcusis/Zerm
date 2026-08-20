@@ -350,7 +350,6 @@ struct MeetingPreflightView: View {
     @Binding var captureSystemAudio: Bool
     @Binding var usesAllSystemAudio: Bool
     @Binding var selectedApplicationBundleID: String
-    @Binding var liveTranscript: Bool
     @Binding var identifySpeakers: Bool
     @Binding var summariseAfterMeeting: Bool
 
@@ -431,8 +430,6 @@ struct MeetingPreflightView: View {
 
             DisclosureGroup(isExpanded: $showsOptions) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Show transcript while recording", isOn: $liveTranscript)
-                        .accessibilityIdentifier("meeting-live-transcript")
                     Toggle("Identify speakers", isOn: $identifySpeakers)
                         .accessibilityIdentifier("meeting-identify-speakers")
                     Toggle("Create a summary when processing finishes", isOn: $summariseAfterMeeting)
@@ -880,7 +877,6 @@ private struct MeetingPreflightPreview: View {
     @State private var capturesMicrophone = true
     @State private var capturesCall = true
     @State private var allSystemAudio = false
-    @State private var liveTranscript = true
     @State private var identifiesSpeakers = true
     @State private var createsSummary = true
 
@@ -891,7 +887,6 @@ private struct MeetingPreflightPreview: View {
                 captureSystemAudio: $capturesCall,
                 usesAllSystemAudio: $allSystemAudio,
                 selectedApplicationBundleID: .constant("com.apple.FaceTime"),
-                liveTranscript: $liveTranscript,
                 identifySpeakers: $identifiesSpeakers,
                 summariseAfterMeeting: $createsSummary,
                 applications: [

@@ -13,7 +13,11 @@ final class MeetingRecordingController: ObservableObject {
     @Published private(set) var segments: [MeetingTranscriber.Segment] = []
     @Published private(set) var lastRecording: MeetingRecordingSession.Recording?
     @Published private(set) var errorMessage: String?
-    @Published private(set) var isTranscribing = false
+    /// True while the post-meeting transcription pass is running.
+    ///
+    /// Capture itself no longer transcribes (#310), so this tracks the `processing` phase — the
+    /// one place model work happens — rather than a live pass competing with the audio thread.
+    var isTranscribing: Bool { lifecycle.phase == .processing }
     @Published private(set) var lifecycle: MeetingRecordingLifecycle = .idle
     @Published private(set) var transcriptionSnapshot: MeetingTranscriptionSnapshot?
     @Published private(set) var sourceHealth: [MeetingAudioSource: MeetingSourceHealth] = [:]
@@ -46,14 +50,11 @@ final class MeetingRecordingController: ObservableObject {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "MeetingRecordingController")
     private weak var engine: ZermEngine?
     private var cancellables = Set<AnyCancellable>()
-    private var liveTranscribers: [MeetingAudioSource: MeetingTranscriber] = [:]
     private var diarizers: [MeetingAudioSource: MeetingDiarizer] = [:]
     private var turnsBySource: [MeetingAudioSource: [MeetingDiarizer.Turn]] = [:]
     private var activeModel: (any TranscriptionModel)?
     private var activeRequest: MeetingRecordingRequest?
     private var processingIssues: [MeetingRecordingIssue] = []
-    private var liveGaps: [MeetingAudioSource: [MeetingTranscriber.Gap]] = [:]
-    private var liveCoverage: [MeetingAudioSource: [ClosedRange<TimeInterval>]] = [:]
     private var unresolvedGaps: [MeetingTranscriber.Gap] = []
     private var transcriptionCoverageStrategy: MeetingRecordingStore.Manifest.TranscriptionCoverageStrategy?
     private var stopTask: Task<Void, Never>?
@@ -107,13 +108,11 @@ final class MeetingRecordingController: ObservableObject {
     /// Compatibility adapter. New UI should pass an explicit capture target in a request.
     func start(
         sources: MeetingRecordingSession.Sources = .all,
-        transcribeLive: Bool = true,
         identifySpeakers: Bool = true
     ) {
         start(request: .init(
             sources: sources,
             target: .allSystemAudio,
-            transcribeLive: transcribeLive,
             identifySpeakers: identifySpeakers
         ))
     }
@@ -133,14 +132,9 @@ final class MeetingRecordingController: ObservableObject {
         activeRequest = request
         transition(to: .init(phase: .preflighting, sessionID: sessionID, pendingJobs: 0, issues: []))
 
+        // A model is needed to transcribe after Stop, not to capture. Refusing to start without
+        // one would throw away audio the user cannot re-record.
         let model = engine?.transcriptionModelManager.currentTranscriptionModel
-        if request.transcribeLive, model == nil {
-            fail(
-                sessionID: sessionID,
-                message: String(localized: "Choose a dictation model before recording a live transcript.")
-            )
-            return
-        }
         activeModel = model
         if let model {
             let requestedLanguageCode = LanguagePreference.selectedCode()
@@ -175,13 +169,13 @@ final class MeetingRecordingController: ObservableObject {
         guard activeSessionID == sessionID else { return }
 
         prepareDiarizers(for: request, sessionID: sessionID)
-        prepareLiveTranscribers(for: request, sessionID: sessionID)
 
-        let transcribers = liveTranscribers
+        // Capture runs no model work. Transcription happens once, after Stop, over the saved
+        // tracks — see `beginProcessing`. Running it live competed with the audio thread for CPU
+        // and, on the local path, was thrown away by the canonical pass anyway.
         let diarizers = diarizers
         session.onAudioChunk = { chunk in
             guard chunk.sessionID == sessionID else { return }
-            transcribers[chunk.source]?.append(chunk)
             diarizers[chunk.source]?.append(chunk)
         }
         session.onSourceHealth = { [weak self] source, health in
@@ -258,64 +252,8 @@ final class MeetingRecordingController: ObservableObject {
         transcriptionSnapshot = nil
         processingProgress = 0
         processingIssues = []
-        liveGaps = [:]
-        liveCoverage = [:]
         unresolvedGaps = []
         transcriptionCoverageStrategy = nil
-    }
-
-    private func prepareLiveTranscribers(for request: MeetingRecordingRequest, sessionID: UUID) {
-        guard request.transcribeLive, activeModel != nil, let snapshot = transcriptionSnapshot else {
-            isTranscribing = false
-            return
-        }
-
-        for source in sources(in: request.sources) {
-            let engine = self.engine
-            let model = activeModel
-            let transcriber = MeetingTranscriber(source: source) { url in
-                try await Self.transcribe(
-                    url: url,
-                    engine: engine,
-                    model: model,
-                    languageCode: snapshot.languageCode
-                )
-            }
-            transcriber.onSegment = { [weak self] segment in
-                guard let self, self.activeSessionID == sessionID else { return }
-                self.segments.append(segment)
-                self.sortSegments()
-                if let folder = self.session.folder {
-                    let journalled = MeetingRecordingStore.appendToJournal(
-                        in: folder,
-                        line: .init(
-                            source: segment.source,
-                            start: segment.start,
-                            end: segment.end,
-                            text: segment.text,
-                            speaker: self.speakerLabel(for: segment)
-                        )
-                    )
-                    if !journalled {
-                        self.session.reportPersistenceIssue(
-                            code: "transcript-journal-write-failed",
-                            message: String(localized: "Live transcript recovery could not be journalled. Audio capture continues.")
-                        )
-                    }
-                }
-            }
-            transcriber.onGap = { [weak self] gap in
-                guard self?.activeSessionID == sessionID else { return }
-                self?.liveGaps[gap.source, default: []].append(gap)
-            }
-            transcriber.onCoverage = { [weak self] range in
-                guard self?.activeSessionID == sessionID else { return }
-                self?.liveCoverage[source, default: []].append(range)
-            }
-            transcriber.start()
-            liveTranscribers[source] = transcriber
-        }
-        isTranscribing = !liveTranscribers.isEmpty
     }
 
     private func prepareDiarizers(for request: MeetingRecordingRequest, sessionID: UUID) {
@@ -381,11 +319,6 @@ final class MeetingRecordingController: ObservableObject {
         session.onSourceHealth = nil
         lastRecording = recording
 
-        let live = Array(liveTranscribers.values)
-        for transcriber in live { await transcriber.finish() }
-        liveTranscribers = [:]
-        isTranscribing = false
-
         let activeDiarizers = Array(diarizers.values)
         for diarizer in activeDiarizers {
             if !(await diarizer.finishAndWait()) {
@@ -416,33 +349,14 @@ final class MeetingRecordingController: ObservableObject {
         ))
 
         if let model = activeModel, let snapshot = transcriptionSnapshot {
-            let reuseLiveCloudCoverage = snapshot.route == .cloud
-                && activeRequest?.transcribeLive == true
+            // One pass over each saved track, whatever the route. There is no live coverage to
+            // reconcile any more: capture records audio only.
             transcriptionCoverageStrategy = snapshot.route == .local
                 ? .canonicalLocalTracks
-                : (reuseLiveCloudCoverage
-                    ? .liveCloudCoverageWithGapRetry
-                    : .canonicalCloudTracks)
-            // Local inference is deterministic and free of upload cost, so every saved track gets
-            // a true canonical pass. Cloud live windows are already paid durable results; retain
-            // them and request only ranges not proven covered by a successful live response.
-            var canonical = reuseLiveCloudCoverage ? segments : []
+                : .canonicalCloudTracks
+            var canonical: [MeetingTranscriber.Segment] = []
             for (index, track) in tracks.enumerated() {
-                let retryRanges: [ClosedRange<TimeInterval>]?
-                if reuseLiveCloudCoverage {
-                    let fullRange = track.startOffset...(track.startOffset + track.duration)
-                    let missing = Self.uncoveredRanges(
-                        within: fullRange,
-                        coveredBy: liveCoverage[track.source] ?? []
-                    )
-                    guard !missing.isEmpty else {
-                        processingProgress = Double(index + 1) / Double(max(1, tracks.count))
-                        continue
-                    }
-                    retryRanges = missing
-                } else {
-                    retryRanges = nil
-                }
+                let retryRanges: [ClosedRange<TimeInterval>]? = nil
                 let engine = self.engine
                 let transcriber = MeetingTranscriber(source: track.source) { url in
                     try await Self.transcribe(
@@ -610,7 +524,6 @@ final class MeetingRecordingController: ObservableObject {
         activeRequest = .init(
             sources: [.microphone, .systemAudio],
             target: manifest?.captureTarget ?? .allSystemAudio,
-            transcribeLive: false,
             identifySpeakers: identifySpeakers
         )
         var jobs: [TrackJob] = []
@@ -808,9 +721,7 @@ final class MeetingRecordingController: ObservableObject {
         let id = activeSessionID
         stopTask?.cancel()
         summaryTask?.cancel()
-        liveTranscribers.values.forEach { $0.cancel() }
         diarizers.values.forEach { $0.finish() }
-        liveTranscribers = [:]
         diarizers = [:]
         session.onAudioChunk = nil
         session.onSourceHealth = nil
@@ -1183,11 +1094,8 @@ final class MeetingRecordingController: ObservableObject {
     }
 
     private func tearDownPipelines(cancel: Bool) {
-        if cancel { liveTranscribers.values.forEach { $0.cancel() } }
         diarizers.values.forEach { $0.finish() }
-        liveTranscribers = [:]
         diarizers = [:]
-        isTranscribing = false
         isPreparingDiarizer = false
         session.onAudioChunk = nil
         session.onSourceHealth = nil

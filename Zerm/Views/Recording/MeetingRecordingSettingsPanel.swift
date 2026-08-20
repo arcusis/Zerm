@@ -46,7 +46,6 @@ struct MeetingSettingsForm: View {
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
     @AppStorage("meetingCaptureMicrophone") private var captureMicrophone = true
     @AppStorage("meetingCaptureSystemAudio") private var captureSystemAudio = true
-    @AppStorage("meetingLiveTranscript") private var liveTranscript = true
     @AppStorage("meetingIdentifySpeakers") private var identifySpeakers = true
     @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
     @AppStorage("SelectedLanguage") private var selectedLanguage = "auto"
@@ -99,14 +98,6 @@ struct MeetingSettingsForm: View {
             }
 
             Section {
-                Toggle(isOn: $liveTranscript) {
-                    HStack(spacing: 4) {
-                        Text("Show Transcript While Recording")
-                        InfoTip(String(localized: "Shows transcript lines during the meeting. Zerm still completes processing after recording ends."))
-                    }
-                }
-                .disabled(isRecording)
-
                 Toggle(isOn: $identifySpeakers) {
                     HStack(spacing: 4) {
                         Text("Identify Speakers")
