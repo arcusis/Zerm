@@ -22,7 +22,7 @@ import os
 ///
 /// Safe to delete once all users have updated past this version.
 enum RetiredLocalLLMMigration {
-    private static let completionKey = "retired-local-llm-migration-completed"
+    static let completionKey = "retired-local-llm-migration-completed"
 
     /// Exact file names only — never a prefix or pattern, so a future catalogue entry that
     /// happens to share a name fragment can never be swept up by this.
@@ -33,8 +33,9 @@ enum RetiredLocalLLMMigration {
         "gemma-4-E2B-it-Q4_K_M.gguf"
     ]
 
-    static func run() {
-        let defaults = UserDefaults.standard
+    /// `defaults` and `modelsDirectory` are injectable so tests never mark the real install as
+    /// migrated, and never delete the user's actual model files.
+    static func run(defaults: UserDefaults = .standard, modelsDirectory: URL? = nil) {
         guard !defaults.bool(forKey: completionKey) else { return }
 
         let logger = Logger(subsystem: "com.arcusis.zerm", category: "RetiredLocalLLMMigration")
@@ -47,7 +48,7 @@ enum RetiredLocalLLMMigration {
             }
         }
 
-        let modelsDirectory = FileManager.default
+        let modelsDirectory = modelsDirectory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("com.arcusis.zerm")
             .appendingPathComponent("LLMModels")

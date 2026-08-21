@@ -15,10 +15,11 @@ import os
 ///
 /// Safe to delete once all users have updated past this version.
 enum EmptyEnhancementRepair {
-    private static let completionKey = "empty-enhancement-repair-completed"
+    static let completionKey = "empty-enhancement-repair-completed"
 
-    static func run(modelContext: ModelContext) {
-        let defaults = UserDefaults.standard
+    /// `defaults` is injectable so tests never mark the real install as already repaired —
+    /// which would silently skip the repair on the machine the defect actually happened on.
+    static func run(modelContext: ModelContext, defaults: UserDefaults = .standard) {
         guard !defaults.bool(forKey: completionKey) else { return }
 
         let logger = Logger(subsystem: "com.arcusis.zerm", category: "EmptyEnhancementRepair")
