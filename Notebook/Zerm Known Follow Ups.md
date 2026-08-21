@@ -2,13 +2,22 @@
 
 Open work is tracked in `arcusis/Zerm` GitHub Issues. Issue counts and tracker status change independently of this notebook; verify GitHub before using them as a current release gate.
 
+## Held before the 2.8.4 release
+
+- **Browser meeting capture (Google Meet in Chrome) has never been recorded on this build.** It uses the same `.application` tap scope that reproduced #309, so the padding fix should cover it, but "should" is not "does". `SystemAudioTrackWriter` prints the capture ratio on close — one recording settles it.
+- **No signed/notarized build has been produced from this tree**, so the branded DMG window and the update-from-public-build path are unproven.
+- Nothing in the 2.8.4 tree has run in a real meeting end to end.
+
 ## Active P1 Bugs (open in GitHub)
 
 | Issue | Title | Notes |
 |-------|-------|-------|
 | #300 | Hebrew takes over mixed-language dictation after 2.8.2 | Fixed in v2.8.3 tree. Close after the signed build ships. See [[Zerm Enhancement Language Fidelity]]. |
 | #301 | Instant+Refine copies, waits, then copies again | Fixed in v2.8.3 tree. Close after ship. See [[Zerm Refine In Place]]. |
-| #302 | Instant enhancement model — split Qwen3 0.6B from Gemma | Fixed in v2.8.3 tree. Close after ship. |
+| #302 | Instant enhancement model — split Qwen3 0.6B from Gemma | Shipped in 2.8.3 and **reversed in the 2.8.4 tree**: Qwen3 was measured worse and is retired. See [[Zerm On-Device LLM]]. |
+| #307 | On-device enhancement always returns an empty string, blanking History | Fixed in the 2.8.4 tree and verified against real weights. Close after ship. |
+| #309 | Meeting call track written at half length | Fixed in the 2.8.4 tree; reproduced and verified outside the app. **Browser capture still unconfirmed on hardware.** See [[Zerm Meeting Recording]]. |
+| #310 | Transcribe meetings after they end, not live | Done in the 2.8.4 tree. Not yet run in a real meeting. |
 | #303 | Long dictation can fail with a generic error and lose the WAV | Fixed in v2.8.3 tree. Close after ship. See [[Zerm Lost Recording 2026-08-17]]. |
 | #278 | CI / clean checkout missing llama target | Still real. |
 | #173 | Parakeet V3 hang after FluidAudio migration | Still real. |

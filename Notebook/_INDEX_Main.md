@@ -1,6 +1,6 @@
 # Zerm Notebook
 
-Last updated: 2026-08-17
+Last updated: 2026-08-21
 
 This notebook captures durable project context for Zerm. Start here, then follow the linked notes relevant to the task.
 
@@ -27,18 +27,21 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Enhancement Language Fidelity]] — why 2.8.2 let Hebrew take over, and the script-fidelity guard
 - [[Zerm Lost Recording 2026-08-17]] — why 14155 and 14161 have no WAV, and the stop-before-transcribe guard
 - [[Zerm Usage Statistics]] — the durable `usage.store` behind the Dashboard, and why it is a separate store
+- [[Zerm Measuring Model And Audio Claims]] — how model and capture claims get proved, and the two wrong diagnoses that motivated it
 - [[Zerm Known Follow Ups]]
 - [[Zerm Verification Workflow]] — Office Mac build, install, and behavioral release gate
 
-## Current State (2026-08-17)
+## Current State (2026-08-21)
 
-- **Published baseline:** `Production` is still the installed v2.8.2 app. The working tree is stamped **v2.8.3 (build 283)** and is not packaged or installed over the production app yet.
-- **2.8.3 contents:** language-neutral enhancement + script-fidelity guard (#300); Instant + Refine never second-pastes, Enhanced does not ⌘C after transcribe (#301); Qwen3 enhancement vs Gemma Read Aloud (#302); WAV finalized and kept on any AI failure (#303); Unicode word-boundary replacements and AudioBufferList byte-size allocate from VoiceInk. See [[Zerm Enhancement Language Fidelity]], [[Zerm Refine In Place]], [[Zerm On-Device LLM]], [[Zerm Lost Recording 2026-08-17]].
-- **Repo is flat:** the Xcode project lives at the **repository root** (`Zerm.xcodeproj`), matching VoiceInk. The old `native-macos/` nesting (a Tauri-era vestige) is gone.
-- **Speech workspace:** Recording owns live capture and its History/Enhancements views; Read Aloud and Power Modes remain separate; Permissions, Audio Input, Dictionary and app-wide Settings are shared destinations.
-- **Models remain user-selected:** Whisper/FluidAudio/Apple and configured cloud providers serve Dictation and recording transcription; Kokoro/system/cloud voices serve Read Aloud; local and cloud enhancement providers remain explicit choices.
-- **Audio-route policy:** Dictation and meeting capture continue when headphones disconnect. Read Aloud only starts on a confirmed wired, Bluetooth/AirPods or USB-headset route and stops with a notification when that safe route is lost; built-in and external speakers are unsafe by default.
-- **Verification status:** CI compiles the Debug app, runs unit tests and compiles/links `ZermUITests`. UI execution, real microphone/headset behavior, Developer ID signing/notarization, installation and update-from-public-build remain runtime release gates; see [[Zerm Verification Workflow]].
+- **Published baseline:** `Production` is v2.8.3. Branch `fix/local-llm-thinking-empty-enhancement` (PR #308, draft) carries the 2.8.4 work and is **not released** — held deliberately until browser meeting capture is confirmed on real hardware.
+- **2.8.4 contents, measured:** on-device enhancement no longer returns an empty string (#307); History rows blanked by that defect are repaired on launch; the model catalogue is rebuilt on benchmark evidence; the enhancement prompt is rewritten on measurement; enhancement is **3.6x faster** via prompt prefix caching; meeting audio gaps are padded so the call track matches the meeting (#309); meetings transcribe after Stop instead of during capture (#310); the release DMG has a branded installer window.
+- **2.8.4 contents, unverified:** browser-based meeting capture, and a real signed/notarized release build. Both need hardware this branch has not had.
+- **Enhancement defaults to Gemma 4 E2B** for both jobs — the only model measured that preserves mixed Hebrew/English/Russian. See [[Zerm On-Device LLM]].
+- **Repo is flat:** the Xcode project lives at the **repository root** (`Zerm.xcodeproj`), matching VoiceInk.
+- **Speech workspace:** Recording owns capture and its History/Enhancements views; Read Aloud and Power Modes remain separate; Permissions, Audio Input, Dictionary and app-wide Settings are shared destinations.
+- **Models remain user-selected:** Whisper/FluidAudio/Apple and configured cloud providers serve Dictation and recording transcription; Kokoro/system/cloud voices serve Read Aloud. Enhancement offers 8 cloud providers plus Ollama, Local CLI, On-Device and Custom, over `LLMkit` and a native Anthropic client — not vendor SDKs.
+- **Audio-route policy:** Dictation and meeting capture continue when headphones disconnect. Read Aloud only starts on a confirmed wired, Bluetooth/AirPods or USB-headset route and stops with a notification when that safe route is lost.
+- **Verification status:** CI compiles the Debug app, runs unit tests and compiles/links `ZermUITests`. UI execution, real microphone/headset behavior, Developer ID signing/notarization, installation and update-from-public-build remain runtime release gates; see [[Zerm Verification Workflow]] and [[Zerm Measuring Model And Audio Claims]].
 
 ## Quick Build Reference
 
