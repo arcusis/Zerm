@@ -40,16 +40,47 @@
 
     <main id="main" class="page">
       <section class="page-hero">
-        <p class="eyebrow">31 releases</p>
+        <p class="eyebrow">32 releases</p>
         <h1>Changelog</h1>
         <p class="lede">Every published release, in full. Newest first.</p>
       </section>
       <section class="rel-list">
+        <article class="rel" id="v2.8.4">
+          <div class="rel-meta">
+            <a class="rel-tag" href="#v2.8.4">v2.8.4</a>
+            <time>21 August 2026</time>
+            <span class="rel-badge now">Latest</span>
+            <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.8.4/Zerm_2.8.4_aarch64.dmg">Download .dmg <span>24.2 MB</span></a>
+          </div>
+          <div class="rel-body">
+            <h2>2.8.4</h2>
+            <div class="prose">
+<p dir="auto">Enhancement was completely broken in 2.8.3 and this release fixes it, along with meeting recording.</p>
+<h2 dir="auto">Fixed</h2>
+<ul dir="auto">
+<li><strong>AI enhancement works again.</strong> On-device enhancement was returning nothing at all and pasting the raw transcript instead.</li>
+<li><strong>History rows that appeared blank now show their text.</strong> No transcript was ever lost — the words were always there, the row just drew the empty enhancement over them. Affected rows are repaired when you launch this version.</li>
+<li><strong>Enhancement is about 3.5x faster.</strong> Short dictation now finishes in roughly a tenth of a second.</li>
+<li><strong>Mixed-language dictation keeps every word in the language it was spoken in.</strong> English, Hebrew and Russian in one sentence stay that way.</li>
+<li><strong>Enhancement no longer answers a question you dictated</strong>, and no longer pastes stray markup into your document.</li>
+<li><strong>The on-device model list has been rebuilt on measurement.</strong> Models that produced empty or unusable output are gone, and are removed from your Mac to reclaim the space.</li>
+<li><strong>Meeting recordings capture the call correctly.</strong> The call track could previously end up half its real length and drift out of sync with your microphone.</li>
+<li><strong>Meetings transcribe after you stop</strong> instead of during the call, so recording no longer competes with everything else for CPU.</li>
+<li><strong>The installer window is properly branded.</strong></li>
+</ul>
+<h2 dir="auto">Compatibility</h2>
+<ul dir="auto">
+<li>macOS 14.4 or later</li>
+<li>Apple silicon (arm64)</li>
+</ul>
+<p dir="auto">Zerm remains local-first. Audio leaves the Mac only when you choose a cloud provider.</p>
+            </div>
+          </div>
+        </article>
         <article class="rel" id="v2.8.3">
           <div class="rel-meta">
             <a class="rel-tag" href="#v2.8.3">v2.8.3</a>
             <time>17 August 2026</time>
-            <span class="rel-badge now">Latest</span>
             <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.8.3/Zerm_2.8.3_aarch64.dmg">Download .dmg <span>28.2 MB</span></a>
           </div>
           <div class="rel-body">
