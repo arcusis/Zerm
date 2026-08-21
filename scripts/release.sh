@@ -291,7 +291,12 @@ if [ "$BRANDED_DMG" = "1" ]; then
     hdiutil attach "$RW_DMG" -noverify -noautoopen
     sleep 2
 
-    osascript <<APPLESCRIPT || echo "    could not style the installer window; shipping it unstyled"
+    # Written to a file and run by path rather than piped through a heredoc. A heredoc here
+    # failed in the 2.8.4 release run with `line 294: tell: command not found` — the body was
+    # executed as shell instead of reaching osascript, and the DMG shipped unstyled while every
+    # other step reported success. A file has no such ambiguity, and can be inspected on failure.
+    STYLE_SCRIPT="$WORK_DIR/style-installer-window.applescript"
+    cat > "$STYLE_SCRIPT" <<APPLESCRIPT
 tell application "Finder"
     tell disk "$VOLUME_NAME"
         open
@@ -306,26 +311,50 @@ tell application "Finder"
         set arrangement of theOptions to not arranged
         set icon size of theOptions to 128
         -- Resolve the background against the disk, not the view options: nesting this inside a
-        -- `tell the icon view options` block makes Finder look for the file there and fail.
+        -- \`tell the icon view options\` block makes Finder look for the file there and fail.
         set background picture of theOptions to file ".background:background.png"
         set position of item "Zerm.app" of theWindow to {170, 218}
         set position of item "Applications" of theWindow to {490, 218}
         delay 1
         update without registering applications
         delay 2
-        close
+        -- Deliberately not closed. Closing the window makes Finder rewrite .DS_Store without
+        -- the background alias, and the styling then vanishes during hdiutil convert. Measured
+        -- over three variants: with `close` the shipped DMG carries 0 background references,
+        -- without it 5. Detaching the volume closes the window anyway.
     end tell
 end tell
 APPLESCRIPT
 
-    sleep 2
-    # The window settings only reach the image once Finder has flushed .DS_Store.
-    if ! strings "/Volumes/$VOLUME_NAME/.DS_Store" 2>/dev/null | grep -q "background.png"; then
-        echo "    warning: installer background was not recorded in .DS_Store"
+    if ! osascript "$STYLE_SCRIPT"; then
+        echo "    could not style the installer window; shipping it unstyled"
     fi
+
+    sleep 3
+    sync
     hdiutil detach "/Volumes/$VOLUME_NAME" -force || true
     hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG_PATH"
     rm -f "$RW_DMG"
+
+    # Verify the DMG that actually ships, not the read-write volume it was built from. An
+    # earlier version checked the staging volume, reported success, and shipped an unstyled DMG
+    # anyway: the reference was present there and gone after convert.
+    VERIFY_MOUNT="$WORK_DIR/verify-mount"
+    rm -rf "$VERIFY_MOUNT"; mkdir -p "$VERIFY_MOUNT"
+    BACKGROUND_REFS=0
+    if hdiutil attach "$DMG_PATH" -nobrowse -noverify -mountpoint "$VERIFY_MOUNT" >/dev/null 2>&1; then
+        BACKGROUND_REFS=$(strings "$VERIFY_MOUNT/.DS_Store" 2>/dev/null | grep -c "background.png" || true)
+        hdiutil detach "$VERIFY_MOUNT" -force >/dev/null 2>&1 || true
+    fi
+    rm -rf "$VERIFY_MOUNT"
+
+    if [ "${BACKGROUND_REFS:-0}" -gt 0 ]; then
+        echo "    installer window styled (verified in the shipped DMG)"
+    else
+        echo "error: the shipped DMG has no installer background."
+        echo "  Set SKIP_DMG_BRANDING=1 to ship it unstyled."
+        [ "${SKIP_DMG_BRANDING:-0}" = "1" ] || exit 1
+    fi
 else
     hdiutil create -volname "$VOLUME_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
 fi

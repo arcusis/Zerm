@@ -3,22 +3,26 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.3</title>
+            <title>2.8.4</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.3</h3>
+                <h3>What's New in v2.8.4</h3>
                 <ul>
-                    <li>Recordings are saved even if transcription or AI fails. Retry from History.</li>
-                    <li>English and mixed dictation no longer collapse to Hebrew. Enhancement keeps the original script.</li>
-                    <li>Instant + Refine pastes once. Enhanced no longer copies the selection after you finish speaking.</li>
-                    <li>Enhancement defaults to Qwen3. Gemma stays on Read Aloud.</li>
-                    <li>Word replacements respect Unicode word boundaries. Microphone detection no longer under-allocates the Core Audio buffer list.</li>
+                    <li>AI enhancement works again. On-device enhancement was returning nothing at all and pasting the raw transcript instead.</li>
+                    <li>History rows that appeared blank now show their text. No transcript was ever lost — the words were always there, the row just drew the empty enhancement over them. Affected rows are repaired when you launch this version.</li>
+                    <li>Enhancement is about 3.5x faster. Short dictation now finishes in roughly a tenth of a second.</li>
+                    <li>Mixed-language dictation keeps every word in the language it was spoken in. English, Hebrew and Russian in one sentence stay that way.</li>
+                    <li>Enhancement no longer answers a question you dictated, and no longer pastes stray markup into your document.</li>
+                    <li>The on-device model list has been rebuilt on measurement. Models that produced empty or unusable output are gone, and the ones that did not work are removed from your Mac to reclaim the space.</li>
+                    <li>Meeting recordings capture the call correctly. The call track could previously end up half its real length and drift out of sync with your microphone.</li>
+                    <li>Meetings transcribe after you stop instead of during the call, so recording no longer competes with everything else for CPU.</li>
+                    <li>The installer window is properly branded.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 17 Aug 2026 10:28:37 +0000</pubDate>
-            <sparkle:version>283</sparkle:version>
-            <sparkle:shortVersionString>2.8.3</sparkle:shortVersionString>
+            <pubDate>Fri, 21 Aug 2026 19:16:36 +0000</pubDate>
+            <sparkle:version>284</sparkle:version>
+            <sparkle:shortVersionString>2.8.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.3/Zerm-2.8.3-macos.zip" length="25297705" type="application/octet-stream" sparkle:edSignature="MwMBLFxoAwkzXjCjf0FeZVlChh9cCWWFagr+cWzbA7xbleTNz03J5zpGXWflqcYavoINme1FXEtthVi1u02FAA=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.4/Zerm-2.8.4-macos.zip" length="25280486" type="application/octet-stream" sparkle:edSignature="f0GYq09pd2dFk7CVKLjqONGCfWITAFrht/gq9kFHeLnllKtCBo0LWQjERW/lY1AURArfTvtNTbzwtezhh9ABDQ=="/>
         </item>
     </channel>
 </rss>
