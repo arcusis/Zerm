@@ -219,13 +219,8 @@ struct MeetingRecordingView: View {
                         microphoneLevel: controller.session.microphoneLevelDb,
                         systemAudioLevel: controller.session.systemAudioLevelDb,
                         configuration: configurationSummary,
-                        transcriptItems: transcriptItems,
-                        isTranscribing: controller.isTranscribing,
-                        isPreparingSpeakers: controller.isPreparingDiarizer,
-                        speakerCount: controller.speakerCount,
                         sourceHealth: controller.sourceHealth,
-                        stop: stopRecording,
-                        copyTranscript: copyTranscript
+                        stop: stopRecording
                     )
                 case .processing:
                     MeetingProcessingView(

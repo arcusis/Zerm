@@ -232,7 +232,7 @@ final class MeetingTranscriber: @unchecked Sendable {
                 source: source,
                 start: dropped.start,
                 end: dropped.start + duration,
-                reason: String(localized: "Live transcription fell behind; the completed track will be processed after Stop.")
+                reason: String(localized: "A window was dropped because transcription fell behind. Re-transcribe from Library to fill this gap.")
             ))
         case .terminated:
             try? FileManager.default.removeItem(at: url)
