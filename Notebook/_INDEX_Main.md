@@ -27,13 +27,14 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Enhancement Language Fidelity]] — why 2.8.2 let Hebrew take over, and the script-fidelity guard
 - [[Zerm Lost Recording 2026-08-17]] — why 14155 and 14161 have no WAV, and the stop-before-transcribe guard
 - [[Zerm Usage Statistics]] — the durable `usage.store` behind the Dashboard, and why it is a separate store
+- [[Zerm Release 2.8.4 Handoff]] — what is left to ship 2.8.4, and the one gate that must not be skipped
 - [[Zerm Measuring Model And Audio Claims]] — how model and capture claims get proved, and the two wrong diagnoses that motivated it
 - [[Zerm Known Follow Ups]]
 - [[Zerm Verification Workflow]] — Office Mac build, install, and behavioral release gate
 
 ## Current State (2026-08-21)
 
-- **Published baseline:** `Production` is v2.8.3. Branch `fix/local-llm-thinking-empty-enhancement` (PR #308, draft) carries the 2.8.4 work and is **not released** — held deliberately until browser meeting capture is confirmed on real hardware.
+- **Published baseline:** `Production` is v2.8.3. Branch `fix/local-llm-thinking-empty-enhancement` (PR #308, draft) carries the 2.8.4 work, is stamped **2.8.4 / 284**, and is **not released** — held deliberately until browser meeting capture is confirmed on real hardware.
 - **2.8.4 contents, measured:** on-device enhancement no longer returns an empty string (#307); History rows blanked by that defect are repaired on launch; the model catalogue is rebuilt on benchmark evidence; the enhancement prompt is rewritten on measurement; enhancement is **3.6x faster** via prompt prefix caching; meeting audio gaps are padded so the call track matches the meeting (#309); meetings transcribe after Stop instead of during capture (#310); the release DMG has a branded installer window.
 - **2.8.4 contents, unverified:** browser-based meeting capture, and a real signed/notarized release build. Both need hardware this branch has not had.
 - **Enhancement defaults to Gemma 4 E2B** for both jobs — the only model measured that preserves mixed Hebrew/English/Russian. See [[Zerm On-Device LLM]].
