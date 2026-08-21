@@ -161,17 +161,16 @@ enum AppDefaults {
         }
 
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 6 {
-            // Enhancement now has its own tiny default. Do not write the key if the
-            // user already chose one; package(for: .enhancement) falls back to an
-            // installed Gemma until Qwen is downloaded.
+            // Enhancement has its own default key. Do not write it if the user already chose
+            // one; package(for: .enhancement) resolves an installed model on its own.
             if defaults.string(forKey: LocalLLMModelManager.enhancementModelKey) == nil {
-                let qwen = LocalLLMModelManager.enhancementDefaultPackage.fileName
-                let qwenPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                let preferred = LocalLLMModelManager.enhancementDefaultPackage.fileName
+                let path = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("com.arcusis.zerm")
                     .appendingPathComponent("LLMModels")
-                    .appendingPathComponent(qwen).path
-                if FileManager.default.fileExists(atPath: qwenPath) {
-                    defaults.set(qwen, forKey: LocalLLMModelManager.enhancementModelKey)
+                    .appendingPathComponent(preferred).path
+                if FileManager.default.fileExists(atPath: path) {
+                    defaults.set(preferred, forKey: LocalLLMModelManager.enhancementModelKey)
                 }
             }
             defaults.set(6, forKey: "ZermFastDefaultsVersion")

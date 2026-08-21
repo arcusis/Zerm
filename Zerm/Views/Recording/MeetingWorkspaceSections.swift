@@ -350,7 +350,6 @@ struct MeetingPreflightView: View {
     @Binding var captureSystemAudio: Bool
     @Binding var usesAllSystemAudio: Bool
     @Binding var selectedApplicationBundleID: String
-    @Binding var liveTranscript: Bool
     @Binding var identifySpeakers: Bool
     @Binding var summariseAfterMeeting: Bool
 
@@ -381,9 +380,10 @@ struct MeetingPreflightView: View {
                 VStack(spacing: 6) {
                     Text("Record a meeting")
                         .font(.title2.weight(.semibold))
-                    Text("Choose Room, a meeting application, or all system audio when you start.")
+                    Text("Capture your microphone, a meeting application, or all system audio. The transcript is created after you stop.")
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Button(action: start) {
@@ -431,11 +431,9 @@ struct MeetingPreflightView: View {
 
             DisclosureGroup(isExpanded: $showsOptions) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Show transcript while recording", isOn: $liveTranscript)
-                        .accessibilityIdentifier("meeting-live-transcript")
                     Toggle("Identify speakers", isOn: $identifySpeakers)
                         .accessibilityIdentifier("meeting-identify-speakers")
-                    Toggle("Create a summary when processing finishes", isOn: $summariseAfterMeeting)
+                    Toggle("Create a summary after transcription", isOn: $summariseAfterMeeting)
                         .accessibilityIdentifier("meeting-create-summary")
 
                     if summariseAfterMeeting {
@@ -478,6 +476,12 @@ struct MeetingPreflightView: View {
     }
 }
 
+/// While recording, the only things that matter are that audio is arriving and how to stop.
+///
+/// This used to show a transcript panel captioned "Listening — transcript lines appear as audio
+/// is processed". Transcription now runs after Stop, so that panel could only ever sit empty and
+/// promise something that was not coming. What replaces it is the one question a person actually
+/// has mid-meeting: is it hearing me, and is it hearing the call.
 struct MeetingLiveView: View {
     let elapsed: TimeInterval
     let capturesMicrophone: Bool
@@ -485,66 +489,66 @@ struct MeetingLiveView: View {
     let microphoneLevel: Float
     let systemAudioLevel: Float
     let configuration: MeetingConfigurationSummary
-    let transcriptItems: [MeetingTranscriptItem]
-    let isTranscribing: Bool
-    let isPreparingSpeakers: Bool
-    let speakerCount: Int
     let sourceHealth: [MeetingAudioSource: MeetingSourceHealth]
     let stop: () -> Void
-    let copyTranscript: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox {
-                HStack(spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Label("Recording", systemImage: "record.circle.fill")
                             .font(.headline)
                             .foregroundStyle(.red)
+                            .labelStyle(.titleAndIcon)
+                        Spacer()
                         Text(MeetingRecordingView.clock(elapsed))
                             .font(.system(.largeTitle, design: .monospaced).weight(.light))
+                            .monospacedDigit()
                             .accessibilityLabel("Elapsed time")
                             .accessibilityValue(Text(MeetingRecordingView.clock(elapsed)))
                     }
 
-                    Spacer()
-
-                    if capturesMicrophone {
-                        MeetingLevelMeter(label: String(localized: "Microphone"), decibels: microphoneLevel)
-                    }
-                    if capturesSystemAudio {
-                        MeetingLevelMeter(label: String(localized: "Call audio"), decibels: systemAudioLevel)
+                    // Full-width meters: catching a dead source mid-meeting is the whole point of
+                    // this screen, and a thin meter tucked beside the timer was easy to miss.
+                    VStack(spacing: 10) {
+                        if capturesMicrophone {
+                            MeetingLevelMeter(label: String(localized: "Microphone"), decibels: microphoneLevel)
+                        }
+                        if capturesSystemAudio {
+                            MeetingLevelMeter(label: String(localized: "Call audio"), decibels: systemAudioLevel)
+                        }
                     }
 
                     Button(action: stop) {
                         Label("Stop Recording", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
                     .controlSize(.large)
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .accessibilityIdentifier("meeting-stop-recording")
-                }
 
-                Divider().padding(.vertical, 8)
-                configuration
-
-                if !sourceHealth.isEmpty {
-                    Divider().padding(.vertical, 8)
-                    MeetingSourceHealthSummary(health: sourceHealth)
+                    Label(
+                        "The transcript is created after you stop, so recording stays light on the CPU.",
+                        systemImage: "text.append"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .labelStyle(.titleAndIcon)
                 }
             }
 
             AnalogHeadphoneConfirmationControl()
 
-            MeetingTranscriptPanel(
-                items: transcriptItems,
-                isWorking: isTranscribing,
-                isPreparingSpeakers: isPreparingSpeakers,
-                speakerCount: speakerCount,
-                emptyMessage: "Listening — transcript lines appear as audio is processed.",
-                copyTranscript: copyTranscript
-            )
+            if !sourceHealth.isEmpty {
+                GroupBox {
+                    MeetingSourceHealthSummary(health: sourceHealth)
+                }
+            }
+
+            configuration
         }
     }
 }
@@ -592,20 +596,21 @@ struct MeetingProcessingView: View {
                 isWorking: true,
                 isPreparingSpeakers: false,
                 speakerCount: speakerCount,
-                emptyMessage: "The transcript is still being prepared.",
+                emptyMessage: "Transcribing — lines appear as each track is processed.",
                 copyTranscript: copyTranscript
             )
         }
     }
 
     private var statusText: LocalizedStringKey {
-        if isTranscribing { return "Completing transcription and speaker alignment…" }
+        // Transcription begins here rather than finishing here: capture records audio only.
         if isSummarising { return "Creating the meeting summary…" }
+        if isTranscribing { return "Transcribing the recording and aligning speakers…" }
         return "Saving the recording…"
     }
 }
 
-private struct MeetingSourceHealthSummary: View {
+struct MeetingSourceHealthSummary: View {
     let health: [MeetingAudioSource: MeetingSourceHealth]
 
     var body: some View {
@@ -880,7 +885,6 @@ private struct MeetingPreflightPreview: View {
     @State private var capturesMicrophone = true
     @State private var capturesCall = true
     @State private var allSystemAudio = false
-    @State private var liveTranscript = true
     @State private var identifiesSpeakers = true
     @State private var createsSummary = true
 
@@ -891,7 +895,6 @@ private struct MeetingPreflightPreview: View {
                 captureSystemAudio: $capturesCall,
                 usesAllSystemAudio: $allSystemAudio,
                 selectedApplicationBundleID: .constant("com.apple.FaceTime"),
-                liveTranscript: $liveTranscript,
                 identifySpeakers: $identifiesSpeakers,
                 summariseAfterMeeting: $createsSummary,
                 applications: [

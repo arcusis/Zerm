@@ -216,22 +216,17 @@ class TranscriptionPipeline {
                     transcription.enhancementDuration = enhancementDuration
                     transcription.aiRequestSystemMessage = enhancementService.lastSystemMessageSent
                     transcription.aiRequestUserMessage = enhancementService.lastUserMessageSent
-                    // An empty enhancement must never replace a good transcript. The on-device
-                    // path can return "" without throwing (a failed llama_decode breaks out of
-                    // the token loop and still yields a valid empty string), which silently
-                    // pasted nothing at all — worst on long dictations, where losing the text
-                    // hurts most. Fall back to the raw transcript for every provider.
-                    if enhancedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        logger.error("AI enhancement returned empty text — pasting the raw transcript instead")
-                    } else {
-                        finalPastedText = enhancedText
-                    }
+                    finalPastedText = enhancedText
                 } catch {
                     // A cancelled enhancement is not a failure — let it propagate to
                     // the outer cancellation handler instead of relabelling it.
                     if error is CancellationError { throw error }
                     let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    transcription.enhancedText = "Enhancement failed: \(errorDescription)"
+                    // The failure text must not be written into `enhancedText`. History shows
+                    // the enhancement in preference to the transcript, so storing an error there
+                    // replaces the user's words with a diagnostic in the one place they go to
+                    // find them. The notification below is where a failure belongs.
+                    logger.error("AI enhancement failed: \(errorDescription, privacy: .public)")
                     let shortReason = String(errorDescription.prefix(80))
                     await MainActor.run {
                         NotificationManager.shared.showNotification(

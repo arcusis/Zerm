@@ -10,6 +10,14 @@
 #include <string>
 #include <vector>
 
+namespace {
+/// Reasoning-block markers shared by the Qwen3 family. `kReasoningPrefill` reproduces exactly
+/// what the model's own chat template emits for `enable_thinking=false`.
+const std::string kReasoningOpen = "<think>";
+const std::string kReasoningClose = "</think>";
+const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
+}
+
 @implementation LlamaBridge {
     std::string _modelPath;
     llama_model   * _model;
@@ -18,11 +26,27 @@
     llama_sampler * _sampler;
     int _contextSize;
     int _threadCount;
+    BOOL _disablesThinking;
+    /// Prompt tokens still resident in the KV cache from the previous request, so an identical
+    /// system prefix is not recomputed on every dictation. See `generateWithSystem:`.
+    std::vector<llama_token> _cachedPrompt;
 }
+
+@synthesize disablesThinking = _disablesThinking;
 
 - (instancetype)initWithModelPath:(NSString *)modelPath
                        contextSize:(int)contextSize
                        threadCount:(int)threadCount {
+    return [self initWithModelPath:modelPath
+                       contextSize:contextSize
+                       threadCount:threadCount
+                  disablesThinking:NO];
+}
+
+- (instancetype)initWithModelPath:(NSString *)modelPath
+                       contextSize:(int)contextSize
+                       threadCount:(int)threadCount
+                  disablesThinking:(BOOL)disablesThinking {
     if ((self = [super init])) {
         _modelPath = std::string(modelPath.UTF8String);
         _model = nullptr;
@@ -31,6 +55,7 @@
         _sampler = nullptr;
         _contextSize = std::max(2048, contextSize);
         _threadCount = std::max(1, threadCount);
+        _disablesThinking = disablesThinking;
     }
     return self;
 }
@@ -99,13 +124,19 @@
                               isCancelled:(BOOL (^)(void))isCancelled {
     if (![self load]) return nil;
 
-    // Fresh state for every request (we reuse one context).
-    llama_memory_clear(llama_get_memory(_ctx), true);
     llama_sampler_reset(_sampler);
 
     std::string systemStr = system.UTF8String ? system.UTF8String : "";
     std::string userStr = user.UTF8String ? user.UTF8String : "";
     std::string prompt = [self buildPromptWithSystem:systemStr user:userStr];
+    if (_disablesThinking) {
+        // Qwen3's own template turns reasoning off by pre-filling an empty block into the
+        // assistant turn (`enable_thinking=false`). `llama_chat_apply_template` is a pattern
+        // matcher, not a Jinja evaluator, and has no such parameter — so the prefill is
+        // appended here. The `/no_think` soft switch cannot substitute: the model still opens
+        // a `<think>` block, which is what has to be avoided.
+        prompt += kReasoningPrefill;
+    }
 
     std::vector<llama_token> tokens = [self tokenize:prompt addSpecial:true];
     if (tokens.empty()) return nil;
@@ -150,7 +181,34 @@
     // decoder error so Swift can fall back to the original transcript.
     const int nBatch = (int)llama_n_batch(_ctx);
     if (nBatch <= 0) return nil;
-    for (int offset = 0; offset < (int)tokens.size(); offset += nBatch) {
+
+    // Reuse the KV cache for the prompt prefix this request shares with the last one.
+    //
+    // The system prompt is identical on every dictation — roughly 850 tokens of instructions —
+    // and clearing the whole cache each time meant re-prefilling all of it before a single new
+    // token could be sampled. Measured on Gemma 4 E2B over a 22-case dictation set, that
+    // prefill was 65% of end-to-end latency: 0.452 s with the real prompt against 0.157 s with
+    // a 58-character one.
+    //
+    // Only the tail after the shared prefix is evicted and recomputed. At least one token is
+    // always decoded, because the sampler needs logits from a fresh `llama_decode`.
+    llama_memory_t memory = llama_get_memory(_ctx);
+    size_t reusable = 0;
+    const size_t maxReusable = tokens.size() - 1;
+    while (reusable < maxReusable && reusable < _cachedPrompt.size()
+           && _cachedPrompt[reusable] == tokens[reusable]) {
+        reusable++;
+    }
+    if (reusable == 0) {
+        llama_memory_clear(memory, true);
+    } else {
+        // Drops the previous request's uncommon tail *and* its generated tokens, which sit
+        // after the prompt in the same sequence.
+        llama_memory_seq_rm(memory, 0, (llama_pos)reusable, -1);
+    }
+    _cachedPrompt.clear();
+
+    for (int offset = (int)reusable; offset < (int)tokens.size(); offset += nBatch) {
         if (isCancelled && isCancelled()) return @"";
         const int chunkCount = std::min(nBatch, (int)tokens.size() - offset);
         llama_batch batch = llama_batch_get_one(tokens.data() + offset, (int32_t)chunkCount);
@@ -159,40 +217,81 @@
             os_log_error(OS_LOG_DEFAULT,
                          "Zerm local model rejected prompt batch (result=%{public}d, tokens=%{public}d)",
                          decodeResult, chunkCount);
+            llama_memory_clear(memory, true);
             return nil;
         }
     }
+    // Only now is the cache known to match these tokens exactly.
+    _cachedPrompt = tokens;
 
     std::string out;
     int generated = 0;
+    int decoded = 0;
+    bool inReasoning = false;
+    bool reasoningResolved = false;
+    int reasoningTokens = 0;
+    // Skipped reasoning still occupies the KV cache even though it never reaches the user, so
+    // the hard ceiling is the real headroom left after the prompt — not `outputBudget`, which
+    // only counts tokens kept as answer. Overrunning the cache is a process-level abort in
+    // llama.cpp, not a recoverable error.
+    const int headroom = std::max(1, nCtx - (int)tokens.size() - 8);
+    // Within that ceiling, reasoning is budgeted separately so it cannot quietly eat the
+    // answer's allowance. A block that never closes means no answer is coming, so the request
+    // fails closed and Swift keeps the raw transcript.
+    const int reasoningBudget = std::min(headroom, std::max(512, outputBudget * 4));
 
-    while (generated < outputBudget) {
+    while (generated < outputBudget && decoded < headroom) {
         if (isCancelled && isCancelled()) break;
 
         llama_token id = llama_sampler_sample(_sampler, _ctx, -1);
         if (llama_vocab_is_eog(_vocab, id)) break;
 
+        decoded++;
         out += [self pieceFor:id];
 
-        // Some small/quantized models emit chat-template delimiters as literal text instead of
-        // special token IDs. Stop at the earliest one. Gemma 4 can emit the closing
-        // `</start_of_turn>` spelling, which previously leaked into the user's pasted text.
-        size_t firstStop = std::string::npos;
-        for (const char *stop : {
-                 "<end_of_turn>", "</end_of_turn>",
-                 "<start_of_turn>", "</start_of_turn>",
-                 "<eos>", "</eos>", "<|im_end|>", "<|endoftext|>",
-                 "<think>", "</think>"}) {
-            size_t pos = out.find(stop);
-            if (pos != std::string::npos) firstStop = std::min(firstStop, pos);
-        }
-        if (firstStop != std::string::npos) {
-            out.erase(firstStop);
-            break;
+        // A hybrid-reasoning model (Qwen3) opens its turn with `<think>` whenever the prefill
+        // above did not take. Reasoning is not an answer and it is not a stop delimiter: it is
+        // skipped, and the answer that follows `</think>` is kept. Treating `<think>` as a stop
+        // truncated the buffer at offset 0 and returned an empty string for every single
+        // request, which is what shipped in 2.8.3.
+        if (!reasoningResolved) {
+            size_t closePos = out.find(kReasoningClose);
+            if (closePos != std::string::npos) {
+                out.erase(0, closePos + kReasoningClose.size());
+                inReasoning = false;
+                reasoningResolved = true;
+                generated = 0;
+            } else if (inReasoning || out.find(kReasoningOpen) != std::string::npos) {
+                inReasoning = true;
+                if (++reasoningTokens > reasoningBudget) {
+                    os_log_error(OS_LOG_DEFAULT,
+                                 "Zerm local model never closed its reasoning block (tokens=%{public}d)",
+                                 reasoningTokens);
+                    return nil;
+                }
+            }
         }
 
-        generated++;
-        if (generated >= outputBudget) break;
+        if (!inReasoning) {
+            // Some small/quantized models emit chat-template delimiters as literal text instead
+            // of special token IDs. Stop at the earliest one. Gemma 4 can emit the closing
+            // `</start_of_turn>` spelling, which previously leaked into the user's pasted text.
+            size_t firstStop = std::string::npos;
+            for (const char *stop : {
+                     "<end_of_turn>", "</end_of_turn>",
+                     "<start_of_turn>", "</start_of_turn>",
+                     "<eos>", "</eos>", "<|im_end|>", "<|endoftext|>"}) {
+                size_t pos = out.find(stop);
+                if (pos != std::string::npos) firstStop = std::min(firstStop, pos);
+            }
+            if (firstStop != std::string::npos) {
+                out.erase(firstStop);
+                break;
+            }
+
+            generated++;
+            if (generated >= outputBudget) break;
+        }
 
         llama_batch batch = llama_batch_get_one(&id, 1);
         const int32_t decodeResult = llama_decode(_ctx, batch);
@@ -200,6 +299,9 @@
             os_log_error(OS_LOG_DEFAULT,
                          "Zerm local model rejected generated token (result=%{public}d)",
                          decodeResult);
+            // The cache can no longer be trusted to match `_cachedPrompt`; start clean next time.
+            llama_memory_clear(llama_get_memory(_ctx), true);
+            _cachedPrompt.clear();
             return nil;
         }
     }

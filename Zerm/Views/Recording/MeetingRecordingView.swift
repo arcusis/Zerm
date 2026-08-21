@@ -13,7 +13,6 @@ struct MeetingRecordingView: View {
     @AppStorage("meetingCaptureSystemAudio") private var captureSystemAudio = true
     @AppStorage("meetingCaptureTargetMode") private var captureTargetMode = "detectedApplication"
     @AppStorage("meetingCaptureApplicationBundleID") private var selectedApplicationBundleID = ""
-    @AppStorage("meetingLiveTranscript") private var liveTranscript = true
     @AppStorage("meetingIdentifySpeakers") private var identifySpeakers = true
     @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
     @AppStorage("ollamaSelectedModel") private var ollamaSummaryModel = "mistral"
@@ -195,7 +194,6 @@ struct MeetingRecordingView: View {
                         captureSystemAudio: $captureSystemAudio,
                         usesAllSystemAudio: usesAllSystemAudio,
                         selectedApplicationBundleID: $selectedApplicationBundleID,
-                        liveTranscript: $liveTranscript,
                         identifySpeakers: $identifySpeakers,
                         summariseAfterMeeting: $summariseAfterMeeting,
                         applications: applicationSource.applications,
@@ -221,13 +219,8 @@ struct MeetingRecordingView: View {
                         microphoneLevel: controller.session.microphoneLevelDb,
                         systemAudioLevel: controller.session.systemAudioLevelDb,
                         configuration: configurationSummary,
-                        transcriptItems: transcriptItems,
-                        isTranscribing: controller.isTranscribing,
-                        isPreparingSpeakers: controller.isPreparingDiarizer,
-                        speakerCount: controller.speakerCount,
                         sourceHealth: controller.sourceHealth,
-                        stop: stopRecording,
-                        copyTranscript: copyTranscript
+                        stop: stopRecording
                     )
                 case .processing:
                     MeetingProcessingView(
@@ -361,7 +354,6 @@ struct MeetingRecordingView: View {
         controller.start(request: MeetingRecordingRequest(
             sources: sources,
             target: target,
-            transcribeLive: liveTranscript,
             identifySpeakers: identifySpeakers
         ))
     }

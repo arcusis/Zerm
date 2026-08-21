@@ -468,18 +468,15 @@ struct MeetingRecordingLifecycle: Equatable, Sendable {
 struct MeetingRecordingRequest {
     let sources: MeetingRecordingSession.Sources
     let target: MeetingCaptureTarget
-    let transcribeLive: Bool
     let identifySpeakers: Bool
 
     init(
         sources: MeetingRecordingSession.Sources = .all,
         target: MeetingCaptureTarget = .allSystemAudio,
-        transcribeLive: Bool = true,
         identifySpeakers: Bool = true
     ) {
         self.sources = sources
         self.target = target
-        self.transcribeLive = transcribeLive
         self.identifySpeakers = identifySpeakers
     }
 }

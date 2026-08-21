@@ -258,7 +258,77 @@ rm -rf "$STAGING" "$DMG_PATH"
 mkdir -p "$STAGING"
 ditto "$APP_PATH" "$STAGING/Zerm.app"
 ln -s /Applications "$STAGING/Applications"
-hdiutil create -volname "Zerm $RELEASE_LABEL" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
+
+# Branded installer window. Best effort: if anything here fails the release still ships, it
+# just falls back to Finder's default plain listing.
+VOLUME_NAME="Zerm $RELEASE_LABEL"
+BRANDED_DMG=0
+mkdir -p "$STAGING/.background"
+if swift "$REPO_ROOT/scripts/make-dmg-background.swift" \
+        "$REPO_ROOT/assets/logo.png" \
+        "$STAGING/.background/background.png" \
+        "$RELEASE_LABEL"; then
+    BRANDED_DMG=1
+else
+    echo "    background render failed; falling back to an unstyled DMG"
+    rm -rf "$STAGING/.background"
+fi
+
+if [ "$BRANDED_DMG" = "1" ]; then
+    # Give the volume the app's own icon.
+    if [ -f "$APP_PATH/Contents/Resources/AppIcon.icns" ]; then
+        cp "$APP_PATH/Contents/Resources/AppIcon.icns" "$STAGING/.VolumeIcon.icns"
+        SetFile -a C "$STAGING" 2>/dev/null || true
+    fi
+
+    RW_DMG="$WORK_DIR/zerm-rw.dmg"
+    rm -f "$RW_DMG"
+    # Read-write first: Finder can only record window geometry on a mounted writable volume.
+    hdiutil create -volname "$VOLUME_NAME" -srcfolder "$STAGING" -ov -format UDRW "$RW_DMG"
+    # Must mount at the default /Volumes path. With `-mountpoint` pointing elsewhere Finder
+    # cannot address the volume by name and every styling command fails with -1728.
+    hdiutil detach "/Volumes/$VOLUME_NAME" -force >/dev/null 2>&1 || true
+    hdiutil attach "$RW_DMG" -noverify -noautoopen
+    sleep 2
+
+    osascript <<APPLESCRIPT || echo "    could not style the installer window; shipping it unstyled"
+tell application "Finder"
+    tell disk "$VOLUME_NAME"
+        open
+        delay 1
+        set theWindow to container window
+        set current view of theWindow to icon view
+        set toolbar visible of theWindow to false
+        set statusbar visible of theWindow to false
+        -- Matches the canvas in make-dmg-background.swift.
+        set the bounds of theWindow to {200, 140, 860, 560}
+        set theOptions to the icon view options of theWindow
+        set arrangement of theOptions to not arranged
+        set icon size of theOptions to 128
+        -- Resolve the background against the disk, not the view options: nesting this inside a
+        -- `tell the icon view options` block makes Finder look for the file there and fail.
+        set background picture of theOptions to file ".background:background.png"
+        set position of item "Zerm.app" of theWindow to {170, 218}
+        set position of item "Applications" of theWindow to {490, 218}
+        delay 1
+        update without registering applications
+        delay 2
+        close
+    end tell
+end tell
+APPLESCRIPT
+
+    sleep 2
+    # The window settings only reach the image once Finder has flushed .DS_Store.
+    if ! strings "/Volumes/$VOLUME_NAME/.DS_Store" 2>/dev/null | grep -q "background.png"; then
+        echo "    warning: installer background was not recorded in .DS_Store"
+    fi
+    hdiutil detach "/Volumes/$VOLUME_NAME" -force || true
+    hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG_PATH"
+    rm -f "$RW_DMG"
+else
+    hdiutil create -volname "$VOLUME_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
+fi
 codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
 
 if [ "${SKIP_NOTARIZE:-0}" != "1" ]; then

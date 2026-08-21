@@ -51,8 +51,9 @@ final class UsageStatsService {
             recordedSeconds: transcription.duration,
             transcribeSeconds: transcription.transcriptionDuration ?? 0,
             enhanceSeconds: transcription.enhancementDuration ?? 0,
-            // `enhancedText` is also set to the failure message when enhancement throws;
-            // only a recorded duration means the model actually produced a rewrite.
+            // A failed enhancement leaves `enhancedText` alone, and the language guard can
+            // store the original transcript as the "enhancement". Only a recorded duration
+            // means the model actually ran to completion.
             wasEnhanced: transcription.enhancementDuration != nil
         )
     }

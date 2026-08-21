@@ -17,11 +17,12 @@ actor LlamaEngine {
 
     private let bridge: LlamaBridge
 
-    init(modelPath: String, contextSize: Int, threadCount: Int) {
+    init(modelPath: String, contextSize: Int, threadCount: Int, disablesThinking: Bool = false) {
         bridge = LlamaBridge(
             modelPath: modelPath,
             contextSize: Int32(contextSize),
-            threadCount: Int32(threadCount)
+            threadCount: Int32(threadCount),
+            disablesThinking: disablesThinking
         )
     }
 

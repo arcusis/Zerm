@@ -521,6 +521,13 @@ class AIEnhancementService: ObservableObject {
             if isCancelled() || Task.isCancelled { throw CancellationError() }
             let endTime = Date()
             let duration = endTime.timeIntervalSince(startTime)
+            // A provider that returns nothing has failed, and saying so is the only honest
+            // outcome. Returning "" as a success let callers persist an empty enhancement over
+            // a perfectly good transcript, which is what blanked every History row in 2.8.3.
+            guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                logger.error("Enhancement provider returned no text — treating as a failure")
+                throw EnhancementError.enhancementFailed
+            }
             if skipScriptGuard || EnhancementLanguageGuard.isUsable(original: text, enhanced: result) {
                 return (result, duration, promptName)
             }

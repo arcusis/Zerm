@@ -373,7 +373,6 @@ struct MeetingRecordingArchitectureTests {
         controller.start(request: .init(
             sources: .all,
             target: .allSystemAudio,
-            transcribeLive: false,
             identifySpeakers: false
         ))
         #expect(controller.lifecycle.phase == .capturing)

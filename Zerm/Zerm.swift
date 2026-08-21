@@ -148,6 +148,11 @@ struct ZermApp: App {
         // Migration and refreshAllAvailableModels must run before loadCurrentTranscriptionModel so renamed keys are remapped and imported models are present when restoring the saved selection.
         if !uiTestConfiguration.isEnabled {
             StreamingKeysMigration.run()
+            RetiredLocalLLMMigration.run()
+            // Restores History rows blanked by 2.8.3's empty on-device enhancements.
+            if !containerInitializationFailed {
+                EmptyEnhancementRepair.run(modelContext: container.mainContext)
+            }
         }
         whisperModelManager.createModelsDirectoryIfNeeded()
         whisperModelManager.loadAvailableModels()

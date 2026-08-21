@@ -530,7 +530,7 @@ private struct HistoryCardRow: View {
                         .foregroundColor(.secondary)
 
                     if !isExpanded {
-                        Text(transcription.enhancedText ?? transcription.text)
+                        Text(transcription.displayText)
                             .font(.system(size: 13))
                             .lineLimit(2)
                             .foregroundColor(.primary)
@@ -560,7 +560,7 @@ private struct HistoryCardRow: View {
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Tabs
-            if transcription.enhancedText != nil {
+            if transcription.hasEnhancement {
                 HStack(spacing: 4) {
                     ForEach(TranscriptionTab.allCases, id: \.self) { tab in
                         Button {

@@ -61,6 +61,20 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
     var onDroppedFrames: ((Int64, ChunkTimestamp) -> Void)?
 
     private(set) var framesWritten: AVAudioFramePosition = 0
+
+    /// Capture accounting for #309. The call track came out at exactly half the meeting's
+    /// duration and neither the frame count nor the sample-rate converter explains it — both
+    /// were measured correct against the real tap. These are the numbers that will identify the
+    /// missing half on the next real recording, written to the debug log on close.
+    private var deliveryCount: Int = 0
+    private var inputFramesSeen: Int64 = 0
+    private var declaredSampleRate: Double = 0
+
+    /// Uptime of the first delivery, the origin the written track is aligned against.
+    private var firstDeliveryUptimeNanos: UInt64?
+    /// Silence written to cover callback gaps, reported in the capture accounting.
+    private var paddedFrames: Int64 = 0
+    private var hostTimedDeliveries: Int = 0
     private var level: Float = 0
     private var sawSignal = false
     private var openedAtUptimeNanos = DispatchTime.now().uptimeNanoseconds
@@ -68,6 +82,14 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
     private var lastSignalUptimeNanos: UInt64?
     private var reportedProcessingFailure = false
     private static let realtimeSlotCount: UInt64 = 32
+
+    /// Headroom for the largest IO buffer the aggregate device is likely to hand over. This was
+    /// 4096, which only ever fit because the frame count was being halved (#309); with the count
+    /// correct, a large delivery would otherwise be dropped outright.
+    static let realtimeBufferCapacity: AVAudioFrameCount = 16_384
+
+    /// Callback jitter below this is not treated as a gap worth padding. 50 ms at 16 kHz.
+    static let silenceToleranceFrames: AVAudioFrameCount = 800
     private let realtimeWriteIndex = ManagedAtomic<UInt64>(0)
     private let realtimeReadIndex = ManagedAtomic<UInt64>(0)
     private let realtimeRunning = ManagedAtomic<Bool>(false)
@@ -110,6 +132,11 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
                 interleaved: true
             )
             framesWritten = 0
+            deliveryCount = 0
+            inputFramesSeen = 0
+            firstDeliveryUptimeNanos = nil
+            paddedFrames = 0
+            hostTimedDeliveries = 0
             level = -160
             sawSignal = false
             openedAtUptimeNanos = DispatchTime.now().uptimeNanoseconds
@@ -121,6 +148,12 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
 
     func close() {
         stopRealtimeInput()
+        // A gap that runs to the end of the meeting produces no further callbacks, so the last
+        // stretch of silence has to be filled here rather than on the next delivery.
+        queue.sync {
+            if let file { padSilenceIfCallbackGapped(in: file) }
+        }
+        reportCaptureAccounting()
         queue.sync {
             file = nil
             converter = nil
@@ -132,7 +165,8 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
 
     func prepareRealtimeInput(format: AVAudioFormat) {
         stopRealtimeInput()
-        let capacity: AVAudioFrameCount = 4096
+        declaredSampleRate = format.sampleRate
+        let capacity = Self.realtimeBufferCapacity
         let buffers = (0..<Int(Self.realtimeSlotCount)).compactMap { _ in
             AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity)
         }
@@ -155,6 +189,24 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
         realtimeWorker.async { [weak self] in self?.runRealtimeInputWorker() }
     }
 
+    /// Frames carried by one Core Audio delivery, counted from the buffer's OWN channel count
+    /// rather than the whole-frame stride.
+    ///
+    /// `CATapDescription(stereoMixdownOfProcesses:)` is a two-channel tap, and Core Audio hands
+    /// it over deinterleaved: one buffer per channel, each holding `frames * bytesPerSample`,
+    /// while `mBytesPerFrame` covers both channels. Dividing the first buffer's byte count by
+    /// `mBytesPerFrame` reported exactly half the frames on every callback — a 94-second meeting
+    /// produced a 46.9-second call track whose clock anchors sat at a dead-constant 0.499 ratio,
+    /// drifting further out of sync with the microphone every second.
+    ///
+    /// `mNumberChannels` is 1 per buffer when deinterleaved and the full count when interleaved,
+    /// so this is correct for both layouts.
+    static func frameCount(inFirstBuffer buffer: AudioBuffer, format: AVAudioFormat) -> Int {
+        let bytesPerSample = max(1, Int(format.streamDescription.pointee.mBitsPerChannel / 8))
+        let channels = max(1, Int(buffer.mNumberChannels))
+        return Int(buffer.mDataByteSize) / (bytesPerSample * channels)
+    }
+
     /// Realtime producer. Slots, PCM storage and metadata were allocated by `prepareRealtimeInput`.
     func enqueueRealtimeInput(
         _ input: UnsafePointer<AudioBufferList>,
@@ -164,8 +216,9 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
         let source = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         guard let first = source.first else { return }
         let format = realtimeBuffers[0].format
-        let bytesPerFrame = max(1, Int(format.streamDescription.pointee.mBytesPerFrame))
-        let frames = Int(first.mDataByteSize) / bytesPerFrame
+        let frames = Self.frameCount(inFirstBuffer: first, format: format)
+        deliveryCount &+= 1
+        inputFramesSeen &+= Int64(frames)
         guard frames > 0, frames <= Int(realtimeBuffers[0].frameCapacity) else {
             accumulateRealtimeDrop(frames: max(0, frames), timestamp: timestamp)
             realtimeSemaphore.signal()
@@ -299,6 +352,77 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
         ))
     }
 
+    /// Fills callback gaps with silence so the track's duration matches the meeting's.
+    ///
+    /// A process tap only fires while the captured app is actually emitting audio — measured at
+    /// 10.5 deliveries/second against 91.6 for a whole-system tap, with the same 512 frames per
+    /// delivery. Silence produces no callbacks at all, so writing only what arrives produced a
+    /// *time-compressed* track: a 94-second meeting became a 46.9-second file that drifted
+    /// further from the microphone every second, because the app happened to be audible about
+    /// half the time. Gaps have to be real silence in the file, not missing samples.
+    private func padSilenceIfCallbackGapped(in file: AVAudioFile) {
+        // Deliberately a wall clock, not the delivery's own timestamp. The IOProc input time is
+        // derived from the device sample clock, which simply stops while the tap is idle and
+        // resumes where it left off — so it measures audio time, not elapsed time, and a gap is
+        // invisible in it. Measured: with the app timestamp the shortfall never appeared at all.
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard let origin = firstDeliveryUptimeNanos else {
+            firstDeliveryUptimeNanos = now
+            return
+        }
+        guard now > origin else { return }
+        hostTimedDeliveries &+= 1
+
+        let elapsed = Double(now &- origin) / 1_000_000_000
+        let expected = AVAudioFramePosition((elapsed * Self.targetFormat.sampleRate).rounded())
+        // Ordinary jitter between callbacks is not a gap. Only pad once the shortfall is large
+        // enough to be audible drift.
+        let shortfall = expected - framesWritten
+        guard shortfall > Int64(Self.silenceToleranceFrames) else { return }
+
+        var remaining = shortfall
+        let chunk = AVAudioFrameCount(Self.targetFormat.sampleRate)   // 1s at a time
+        while remaining > 0 {
+            let count = AVAudioFrameCount(min(Int64(chunk), remaining))
+            guard let silence = AVAudioPCMBuffer(pcmFormat: Self.targetFormat, frameCapacity: count) else { return }
+            silence.frameLength = count
+            if let channel = silence.int16ChannelData {
+                memset(channel[0], 0, Int(count) * MemoryLayout<Int16>.size)
+            }
+            do {
+                try file.write(from: silence)
+            } catch {
+                logger.error("Could not pad system-audio gap: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            framesWritten += AVAudioFramePosition(count)
+            paddedFrames += Int64(count)
+            remaining -= Int64(count)
+        }
+    }
+
+    /// Writes the ratio that identifies #309: how much audio reached the file per second of
+    /// wall clock. A healthy capture is ~1.0; the reported meeting measured 0.499.
+    private func reportCaptureAccounting() {
+        guard deliveryCount > 0, openedAtUptimeNanos > 0 else { return }
+        let wallSeconds = Double(DispatchTime.now().uptimeNanoseconds &- openedAtUptimeNanos) / 1_000_000_000
+        guard wallSeconds > 0.5 else { return }
+        let writtenSeconds = Double(framesWritten) / Self.targetFormat.sampleRate
+        let inputSeconds = declaredSampleRate > 0 ? Double(inputFramesSeen) / declaredSampleRate : 0
+        let averageFrames = Double(inputFramesSeen) / Double(deliveryCount)
+        let message = String(
+            format: "system-audio capture: wall=%.2fs written=%.2fs input=%.2fs padded=%.2fs "
+                + "ratio=%.3f deliveries=%d hostTimed=%d avgFrames=%.1f declaredRate=%.0f deliveriesPerSecond=%.1f",
+            wallSeconds, writtenSeconds, inputSeconds,
+            Double(paddedFrames) / Self.targetFormat.sampleRate,
+            wallSeconds > 0 ? writtenSeconds / wallSeconds : 0,
+            deliveryCount, hostTimedDeliveries, averageFrames, declaredSampleRate,
+            Double(deliveryCount) / wallSeconds
+        )
+        logger.notice("\(message, privacy: .public)")
+        DebugLogger.shared.log("SystemAudioTrackWriter", message)
+    }
+
     private func stopRealtimeInput() {
         guard realtimeRunning.exchange(false, ordering: .acquiringAndReleasing) else {
             realtimeBuffers = []
@@ -364,6 +488,8 @@ final class SystemAudioTrackWriter: SystemAudioRealtimeSink, @unchecked Sendable
             reportProcessingFailure(.conversionFailed)
             return
         }
+
+        padSilenceIfCallbackGapped(in: file)
 
         do {
             try file.write(from: output)

@@ -5,9 +5,18 @@ Meeting recording is an application-scoped workflow, separate from short-form Di
 ## Capture contract
 
 - The user explicitly selects microphone, a running call application, or the warned all-system-audio fallback. Process capture can include audio from other tabs/helpers belonging to the selected browser.
+- **A process tap only fires while the captured app is emitting audio.** Measured against the shipped tap: 91.6 deliveries/second for a whole-system tap against 10.5 for an application tap, at the same 512 frames per delivery. Silence produces no callbacks at all, so gaps must be written as real silence or the track becomes time-compressed rather than gapped — see the 2.8.4 entry below.
 - Room and Call audio remain separate PCM tracks. Core Audio host/sample timestamps and persisted clock anchors map both tracks onto one monotonic meeting timeline; discontinuities remain gaps rather than compressed time.
 - Capture callbacks cross preallocated bounded handoffs before file I/O or model work. Source health, dropped frames, silence, app/helper churn and persistence failures are durable issues.
 - Each meeting folder under `~/Library/Application Support/Zerm/Recordings/` is the recovery unit: audio tracks, atomic manifest, transcript journal and sidecar stay together.
+
+## Transcription happens after Stop
+
+Capture records audio only. Nothing runs a model while `capturing`, so a meeting stays light on the CPU — the previous design ran a `MeetingTranscriber` per source over 30-second windows *during* capture, competing with the audio thread, and on the local path threw that work away afterwards because the canonical pass re-ran the same audio. A 94-second meeting produced a transcript journal of two lines.
+
+The `processing` phase does one pass per saved track, for every route. Removing the live path removed the whole coverage-reconciliation layer with it: `liveTranscribers`, `liveGaps`, `liveCoverage`, uncovered-range retry, and the live-vs-canonical strategy split. `liveCloudCoverageWithGapRetry` remains only in the persisted enum so older manifests still decode.
+
+Starting a meeting no longer refuses without a Dictation model: a model is needed to transcribe *after* Stop, not to capture, and refusing would throw away audio that cannot be re-recorded.
 
 ## Model and privacy contract
 
