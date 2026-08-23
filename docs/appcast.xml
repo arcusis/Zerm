@@ -3,26 +3,21 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.4</title>
+            <title>2.8.5</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.4</h3>
+                <h3>What's New in v2.8.5</h3>
                 <ul>
-                    <li>AI enhancement works again. On-device enhancement was returning nothing at all and pasting the raw transcript instead.</li>
-                    <li>History rows that appeared blank now show their text. No transcript was ever lost — the words were always there, the row just drew the empty enhancement over them. Affected rows are repaired when you launch this version.</li>
-                    <li>Enhancement is about 3.5x faster. Short dictation now finishes in roughly a tenth of a second.</li>
-                    <li>Mixed-language dictation keeps every word in the language it was spoken in. English, Hebrew and Russian in one sentence stay that way.</li>
-                    <li>Enhancement no longer answers a question you dictated, and no longer pastes stray markup into your document.</li>
-                    <li>The on-device model list has been rebuilt on measurement. Models that produced empty or unusable output are gone, and the ones that did not work are removed from your Mac to reclaim the space.</li>
-                    <li>Meeting recordings capture the call correctly. The call track could previously end up half its real length and drift out of sync with your microphone.</li>
-                    <li>Meetings transcribe after you stop instead of during the call, so recording no longer competes with everything else for CPU.</li>
-                    <li>The installer window is properly branded.</li>
+                    <li>Read Aloud works again. Selecting text and pressing the hotkey now always speaks: if the on-device AI rewrite cannot produce a trustworthy version, Zerm reads the selection exactly and tells you why instead of failing silently.</li>
+                    <li>Read Aloud speaks every language you have a voice for. Hebrew, Russian, Spanish and any other text is detected and routed to a matching installed Apple voice automatically — even when Kokoro or Deepgram, which are English-only, is your chosen provider.</li>
+                    <li>"Read exactly" is now the default reading mode. The AI modes (Retell, Summarize, Explain, Simplify) remain available in Read Aloud settings, and selected text is treated strictly as content to be spoken, never as instructions.</li>
+                    <li>Longer selections no longer lose their reading instructions when Enhancement and Read Aloud share the same on-device model.</li>
                 </ul>
             ]]></description>
-            <pubDate>Fri, 21 Aug 2026 19:16:36 +0000</pubDate>
-            <sparkle:version>284</sparkle:version>
-            <sparkle:shortVersionString>2.8.4</sparkle:shortVersionString>
+            <pubDate>Sun, 23 Aug 2026 06:05:22 +0000</pubDate>
+            <sparkle:version>285</sparkle:version>
+            <sparkle:shortVersionString>2.8.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.4/Zerm-2.8.4-macos.zip" length="25280486" type="application/octet-stream" sparkle:edSignature="f0GYq09pd2dFk7CVKLjqONGCfWITAFrht/gq9kFHeLnllKtCBo0LWQjERW/lY1AURArfTvtNTbzwtezhh9ABDQ=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.5/Zerm-2.8.5-macos.zip" length="25293689" type="application/octet-stream" sparkle:edSignature="gDSs5Ajl+FG/qB/cGbLzFBAJbo5hZE/ODEdqT1Zb+D+R0DOjGjZiZhIMaPY6BlOUIOnfQRNIe2dl0WXaKjFiDg=="/>
         </item>
     </channel>
 </rss>
