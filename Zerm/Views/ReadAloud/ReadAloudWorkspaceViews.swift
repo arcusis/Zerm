@@ -4,10 +4,10 @@ import SwiftUI
 struct ReadAloudSpeakView: View {
     @EnvironmentObject private var controller: TTSController
     @ObservedObject private var localLLM = LocalLLMModelManager.shared
-    @AppStorage(TTSSettings.Keys.readingMode) private var modeRaw = ReadAloudMode.retell.rawValue
+    @AppStorage(TTSSettings.Keys.readingMode) private var modeRaw = ReadAloudMode.exact.rawValue
 
     private var mode: ReadAloudMode {
-        ReadAloudMode(rawValue: modeRaw) ?? .retell
+        ReadAloudMode(rawValue: modeRaw) ?? .exact
     }
 
     var body: some View {

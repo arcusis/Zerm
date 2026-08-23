@@ -158,30 +158,21 @@ final class TTSController: ObservableObject {
             }
         }
 
-        guard let voice = TTSSettings.resolvedVoice(for: provider) else {
+        guard let configuredVoice = TTSSettings.resolvedVoice(for: provider) else {
             let format = String(localized: "No voice available for %@")
             endSession(String.localizedStringWithFormat(format, provider.displayName), beep: true); return
         }
 
-        if provider.kind == .kokoro, Self.containsHebrew(text) {
-            endSession(
-                String(localized: "Kokoro currently supports English only. Choose an installed Hebrew Apple System Voice in Models & Voices."),
-                beep: true
-            )
-            MenuBarManager.shared?.openMainWindowAndNavigate(to: "Read Aloud Models")
-            return
-        }
-
         let speed = TTSSettings.speed
-        let spokenText: String
-        do {
-            if mode.usesLocalAI {
-                guard naturalizer.isModelInstalled else {
-                    endSession(String(localized: "Download an on-device language model before using AI Read Aloud modes."), beep: true)
-                    MenuBarManager.shared?.openMainWindowAndNavigate(to: "Read Aloud Models")
-                    return
-                }
-                recorderUIManager?.beginGenerating()
+        var spokenMode = mode
+        var spokenText: String
+        // The AI modes are best-effort. When the on-device model is missing, rejects the
+        // selection, or produces something the guard will not trust, Read Aloud still speaks —
+        // it reads the selection exactly and says why. A silent failure is the one outcome the
+        // feature must never have.
+        if mode.usesLocalAI, naturalizer.isModelInstalled {
+            recorderUIManager?.beginGenerating()
+            do {
                 spokenText = try await naturalizer.transform(
                     // Let the model analyze the original complete selection. Pre-normalizing here
                     // destroys structure (lists, URLs, code and tables) that Retell/Explain need
@@ -190,36 +181,60 @@ final class TTSController: ObservableObject {
                     mode: mode,
                     isCancelled: { Task.isCancelled }
                 )
+            } catch is CancellationError {
+                return
+            } catch {
                 guard generation == sessionGeneration else { return }
-                recorderUIManager?.endGenerating()
-            } else {
-                // Exact mode skips semantic rewriting but retains the user's deterministic
-                // Smart Cleanup preference for pronounceable URLs, code and symbols.
+                logger.error("AI Read Aloud mode \(mode.rawValue, privacy: .public) fell back to exact reading: \(error.localizedDescription, privacy: .public)")
+                notify(String(localized: "AI rewrite unavailable — reading the selection exactly"))
+                spokenMode = .exact
                 spokenText = prepareInstantText(from: text)
             }
-        } catch is CancellationError {
-            return
-        } catch {
             guard generation == sessionGeneration else { return }
-            let format = String(localized: "Read Aloud failed: %@")
-            endSession(String.localizedStringWithFormat(format, error.localizedDescription), beep: true)
+            recorderUIManager?.endGenerating()
+        } else {
+            if mode.usesLocalAI {
+                notify(String(localized: "No on-device model downloaded — reading the selection exactly"))
+                spokenMode = .exact
+            }
+            // Exact mode skips semantic rewriting but retains the user's deterministic
+            // Smart Cleanup preference for pronounceable URLs, code and symbols.
+            spokenText = prepareInstantText(from: text)
+        }
+        let finalText = spokenText.isEmpty ? text : spokenText
+        let finalMode = spokenMode
+        guard !Task.isCancelled, generation == sessionGeneration else { return }
+
+        // Route to a voice that can pronounce this language (Kokoro/Deepgram are English-only).
+        let route: TTSLanguageRouter.Resolution
+        do {
+            route = try TTSLanguageRouter.resolve(provider: provider, voice: configuredVoice, text: finalText)
+        } catch {
+            endSession(error.localizedDescription, beep: true)
+            MenuBarManager.shared?.openMainWindowAndNavigate(to: "Read Aloud Models")
             return
         }
-        guard !Task.isCancelled, generation == sessionGeneration, !spokenText.isEmpty else { return }
-        lastPreparedText = spokenText
-        let chunks = Self.splitIntoChunks(spokenText)
+        let spokenProvider = route.provider
+        let voice = route.voice
+        if let rerouteNotice = route.rerouteNotice { notify(rerouteNotice) }
+        if spokenProvider.kind != provider.kind, let providerID = spokenProvider.apiKeyProviderID {
+            apiKey = APIKeyManager.shared.getAPIKey(forProvider: providerID) ?? ""
+        }
+
+        lastPreparedText = finalText
+        let chunks = Self.splitIntoChunks(finalText)
 
         player.startStreaming { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.sessionGeneration == generation else { return }
-                TTSSettings.recordReadAloud(of: spokenText)
+                TTSSettings.recordReadAloud(of: finalText)
                 ReadAloudHistoryStore.shared.record(
                     sourceText: text,
-                    spokenText: spokenText,
-                    mode: mode,
-                    providerName: provider.displayName,
+                    spokenText: finalText,
+                    mode: finalMode,
+                    providerName: spokenProvider.displayName,
                     voiceName: voice.displayName,
-                    localModelName: mode.usesLocalAI ? LocalLLMModelManager.current.displayName : nil
+                    localModelName: finalMode.usesLocalAI ? LocalLLMModelManager.current.displayName : nil
                 )
                 self.isSpeaking = false
                 self.recorderUIManager?.endSpeaking()
@@ -231,7 +246,7 @@ final class TTSController: ObservableObject {
         do {
             for chunk in chunks {
                 try Task.checkCancellation()
-                let audio = try await provider.synthesize(text: chunk, voice: voice, speed: speed, apiKey: apiKey)
+                let audio = try await spokenProvider.synthesize(text: chunk, voice: voice, speed: speed, apiKey: apiKey)
                 try Task.checkCancellation()
                 guard generation == sessionGeneration else { return }
                 try await player.enqueue(audio)
@@ -276,10 +291,6 @@ final class TTSController: ObservableObject {
             chunks.append(current)
         }
         return chunks.isEmpty ? [text] : chunks
-    }
-
-    private static func containsHebrew(_ text: String) -> Bool {
-        text.unicodeScalars.contains { (0x0590...0x05FF).contains($0.value) }
     }
 
     private func notify(_ message: String) {

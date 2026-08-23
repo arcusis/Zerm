@@ -66,10 +66,11 @@ enum AppDefaults {
             "EnhancementTimeoutSeconds": 15,
             "EnhancementRetryOnTimeout": true,
 
-            // Read Aloud understands and retells the complete selection by default. Voice/model
-            // setup remains explicit; registering a mode never downloads or enables a provider.
-            TTSSettings.Keys.readingMode: ReadAloudMode.retell.rawValue,
-            TTSSettings.Keys.naturalReadingAI: true,
+            // Read Aloud speaks the selection exactly by default: deterministic, needs no
+            // downloaded model, and never hands the selection to a language model. The AI
+            // modes (Retell, Summarize, …) are an explicit choice in Read Aloud settings.
+            TTSSettings.Keys.readingMode: ReadAloudMode.exact.rawValue,
+            TTSSettings.Keys.naturalReadingAI: false,
 
             // Model
             "PrewarmModelOnWake": true,
@@ -150,13 +151,8 @@ enum AppDefaults {
                 defaults.set(true, forKey: "isAIEnhancementEnabled")
             }
 
-            // Preserve an explicit new-mode choice if a newer build already wrote it. Legacy
-            // installs otherwise move to the confirmed Retell behavior.
-            let bundleID = Bundle.main.bundleIdentifier ?? "com.arcusis.zerm"
-            let persisted = defaults.persistentDomain(forName: bundleID) ?? [:]
-            if persisted[TTSSettings.Keys.readingMode] == nil {
-                TTSSettings.readingMode = .retell
-            }
+            // Reading mode is no longer migrated here: the registered default (Read exactly)
+            // applies unless the user picked a mode themselves.
             defaults.set(5, forKey: "ZermFastDefaultsVersion")
         }
 

@@ -437,10 +437,13 @@ final class LocalLLMModelManager: ObservableObject {
 
     private func ensureEngine(for package: LocalLLMPackage, role: LocalLLMRole) -> LlamaEngine {
         cancelIdleUnload()
-        if let engine = engines[package.fileName] { return engine }
         let contextSize = role == .enhancement
             ? min(2_048, HardwareCapability.localLLMContextSize)
             : HardwareCapability.localLLMContextSize
+        // Enhancement and Read Aloud can share one weights file. An engine built for the
+        // enhancement's 2K window silently truncates Read Aloud's instructions on longer
+        // selections, so a smaller cached engine is replaced rather than reused.
+        if let engine = engines[package.fileName], engine.contextSize >= contextSize { return engine }
         let engine = LlamaEngine(
             modelPath: path(for: package).path,
             contextSize: contextSize,
