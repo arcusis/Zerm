@@ -40,16 +40,42 @@
 
     <main id="main" class="page">
       <section class="page-hero">
-        <p class="eyebrow">32 releases</p>
+        <p class="eyebrow">33 releases</p>
         <h1>Changelog</h1>
         <p class="lede">Every published release, in full. Newest first.</p>
       </section>
       <section class="rel-list">
+        <article class="rel" id="v2.8.5">
+          <div class="rel-meta">
+            <a class="rel-tag" href="#v2.8.5">v2.8.5</a>
+            <time>23 August 2026</time>
+            <span class="rel-badge now">Latest</span>
+            <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.8.5/Zerm_2.8.5_aarch64.dmg">Download .dmg <span>24.2 MB</span></a>
+          </div>
+          <div class="rel-body">
+            <h2>2.8.5</h2>
+            <div class="prose">
+<p dir="auto">Read Aloud was failing on its most common path. This release makes it always speak, and speak every language you have a voice for.</p>
+<h2 dir="auto">Fixed</h2>
+<ul dir="auto">
+<li><strong>Read Aloud works again.</strong> Selecting text and pressing the hotkey now always speaks: if the on-device AI rewrite cannot produce a trustworthy version, Zerm reads the selection exactly and tells you why instead of failing silently.</li>
+<li><strong>Read Aloud speaks every language you have a voice for.</strong> Hebrew, Russian, Spanish and any other text is detected and routed to a matching installed Apple voice automatically — even when Kokoro or Deepgram, which are English-only, is your chosen provider.</li>
+<li><strong>"Read exactly" is the default reading mode.</strong> The AI modes (Retell, Summarize, Explain, Simplify) remain available in Read Aloud settings, and selected text is treated strictly as content to be spoken, never as instructions.</li>
+<li><strong>Longer selections keep their reading instructions</strong> when Enhancement and Read Aloud share the same on-device model.</li>
+</ul>
+<h2 dir="auto">Compatibility</h2>
+<ul dir="auto">
+<li>macOS 14.4 or later</li>
+<li>Apple silicon (arm64)</li>
+</ul>
+<p dir="auto">Zerm remains local-first. Audio leaves the Mac only when you choose a cloud provider.</p>
+            </div>
+          </div>
+        </article>
         <article class="rel" id="v2.8.4">
           <div class="rel-meta">
             <a class="rel-tag" href="#v2.8.4">v2.8.4</a>
             <time>21 August 2026</time>
-            <span class="rel-badge now">Latest</span>
             <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.8.4/Zerm_2.8.4_aarch64.dmg">Download .dmg <span>24.2 MB</span></a>
           </div>
           <div class="rel-body">
