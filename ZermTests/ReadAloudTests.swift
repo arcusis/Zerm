@@ -277,3 +277,74 @@ struct OfficeKokoroRuntimeIntegrationTests {
         player.stop()
     }
 }
+
+struct ReadAloudLanguageRoutingTests {
+    private let hebrewVoice = TTSVoice(id: "he", displayName: "Carmit (Hebrew)", provider: .appleSystem, language: "he-IL")
+    private let russianVoice = TTSVoice(id: "ru", displayName: "Milena (Russian)", provider: .appleSystem, language: "ru-RU")
+    private let englishApple = TTSVoice(id: "en", displayName: "Samantha (English)", provider: .appleSystem, language: "en-US")
+
+    @Test func detectsDominantLanguage() {
+        #expect(TTSLanguageRouter.dominantLanguage(of: "צוות המוצר השלים את השינוי החשוב היום") == "he")
+        #expect(TTSLanguageRouter.dominantLanguage(of: "Команда завершила важное изменение сегодня утром") == "ru")
+        #expect(TTSLanguageRouter.dominantLanguage(of: "The product team shipped the important change today.") == "en")
+        #expect(TTSLanguageRouter.dominantLanguage(of: "┌───┐ 42 ✓") == nil)
+    }
+
+    @Test func englishTextKeepsTheConfiguredKokoroVoice() throws {
+        let kokoro = KokoroTTSProvider()
+        let voice = try #require(kokoro.voices.first)
+        let route = try TTSLanguageRouter.resolve(
+            provider: kokoro, voice: voice, text: "Please read this English sentence.", appleVoices: [hebrewVoice]
+        )
+        #expect(route.provider.kind == .kokoro)
+        #expect(route.voice == voice)
+        #expect(route.rerouteNotice == nil)
+    }
+
+    @Test func nonEnglishTextReroutesKokoroToAnInstalledAppleVoice() throws {
+        let kokoro = KokoroTTSProvider()
+        let voice = try #require(kokoro.voices.first)
+        let route = try TTSLanguageRouter.resolve(
+            provider: kokoro, voice: voice, text: "Команда завершила важное изменение сегодня утром",
+            appleVoices: [hebrewVoice, russianVoice, englishApple]
+        )
+        #expect(route.provider.kind == .appleSystem)
+        #expect(route.voice == russianVoice)
+        #expect(route.rerouteNotice != nil)
+    }
+
+    @Test func nonEnglishTextWithoutAnInstalledVoiceFailsWithGuidance() throws {
+        let kokoro = KokoroTTSProvider()
+        let voice = try #require(kokoro.voices.first)
+        #expect(throws: TTSLanguageRouter.RoutingError.self) {
+            try TTSLanguageRouter.resolve(
+                provider: kokoro, voice: voice, text: "צוות המוצר השלים את השינוי החשוב היום",
+                appleVoices: [englishApple]
+            )
+        }
+    }
+
+    @Test func appleProviderSwitchesToTheVoiceForTheTextLanguage() throws {
+        let apple = AppleSystemTTSProvider()
+        let installed = apple.voices
+        guard installed.contains(where: { TTSLanguageRouter.languageCode($0.language) == "he" }),
+              let english = installed.first(where: { TTSLanguageRouter.languageCode($0.language) == "en" }) else {
+            return // needs both voices installed on this Mac
+        }
+        let route = try TTSLanguageRouter.resolve(
+            provider: apple, voice: english, text: "צוות המוצר השלים את השינוי החשוב היום"
+        )
+        #expect(TTSLanguageRouter.languageCode(route.voice.language) == "he")
+        #expect(route.rerouteNotice == nil)
+    }
+
+    @Test func multilingualCloudProvidersKeepTheUsersVoice() throws {
+        let provider = try #require(TTSProviderRegistry.provider(for: .openai))
+        let voice = try #require(provider.voices.first)
+        let route = try TTSLanguageRouter.resolve(
+            provider: provider, voice: voice, text: "צוות המוצר השלים את השינוי החשוב היום", appleVoices: []
+        )
+        #expect(route.provider.kind == .openai)
+        #expect(route.voice == voice)
+    }
+}

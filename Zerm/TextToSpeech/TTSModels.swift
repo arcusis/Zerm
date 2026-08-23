@@ -58,6 +58,10 @@ enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
     }
 
     var isLocal: Bool { self == .kokoro || self == .appleSystem }
+
+    /// Engines whose voice catalogue cannot pronounce anything but English. Read Aloud reroutes
+    /// other languages to an installed Apple system voice (see `TTSLanguageRouter`).
+    var speaksEnglishOnly: Bool { self == .kokoro || self == .deepgram }
 }
 
 /// A selectable voice for a given provider.
@@ -151,9 +155,9 @@ enum TTSSettings {
         set { readingMode = newValue ? .retell : .exact }
     }
 
-    /// The transformation applied before synthesis. Retell is the product default: selecting
-    /// content asks Zerm to understand it and speak a natural rendition, not merely pronounce
-    /// every glyph. Existing installs that explicitly disabled the legacy AI toggle retain Exact.
+    /// The transformation applied before synthesis. Read exactly is the default: it is
+    /// deterministic, works without a downloaded model, and never hands the selection to a
+    /// language model that could follow instructions embedded in it. The AI modes are opt-in.
     static var readingMode: ReadAloudMode {
         get {
             if let raw = defaults.string(forKey: Keys.readingMode),
@@ -163,7 +167,7 @@ enum TTSSettings {
             if defaults.object(forKey: Keys.naturalReadingAI) != nil {
                 return defaults.bool(forKey: Keys.naturalReadingAI) ? .retell : .exact
             }
-            return .retell
+            return .exact
         }
         set {
             defaults.set(newValue.rawValue, forKey: Keys.readingMode)

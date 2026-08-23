@@ -22,6 +22,14 @@ flowchart TB
 - `TTSPlayer` — one `AVAudioEngine`/`AVAudioPlayerNode` pipeline with a **streaming queue** (`startStreaming`/`enqueue`/`finishEnqueueing`).
 - `KokoroModelManager` / `KokoroEngine` — on-device download + `sherpa-onnx` synthesis.
 
+## Reading modes and fallback (2.8.5)
+
+`Read exactly` is the registered default; the AI modes are opt-in. AI modes are best-effort: if the model is missing, rejects the selection, or the output guard refuses the rewrite, `TTSController` notifies and speaks the exact text instead of ending the session with an error. The naturalizer prompt states that everything after `TEXT:` is content, never instructions. Enhancement and Read Aloud share Gemma weights but not a 2K-context engine — `LocalLLMModelManager.ensureEngine` replaces a cached engine whose `contextSize` is smaller than the role needs.
+
+## Language routing (2.8.5)
+
+`TTSLanguageRouter` detects the dominant language (`NLLanguageRecognizer`) of the text about to be spoken. Kokoro and Deepgram are English-only (`TTSProviderKind.speaksEnglishOnly`); other languages are rerouted to the best installed Apple voice for that language (region match, then quality), with a notice. Apple-voice users get the matching-language voice automatically. Multilingual cloud engines keep the user's voice. No installed voice for the language → actionable error pointing at System Settings › Accessibility › Spoken Content.
+
 ## Instant feel
 
 First sentence plays while the rest synthesizes (first chunk = 1 sentence, rest ≈220 chars). Kokoro pre-warmed on launch.

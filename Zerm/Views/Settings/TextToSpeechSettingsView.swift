@@ -7,7 +7,7 @@ struct TextToSpeechSettingsView: View {
     @AppStorage(TTSSettings.Keys.provider) private var providerRaw = TTSProviderKind.deepgram.rawValue
     @AppStorage(TTSSettings.Keys.speed) private var speed = 1.0
     @AppStorage(TTSSettings.Keys.smartCleanup) private var smartCleanup = true
-    @AppStorage(TTSSettings.Keys.readingMode) private var readingModeRaw = ReadAloudMode.retell.rawValue
+    @AppStorage(TTSSettings.Keys.readingMode) private var readingModeRaw = ReadAloudMode.exact.rawValue
 
     @State private var voiceID: String = ""
     @State private var apiKey: String = ""
@@ -31,7 +31,7 @@ struct TextToSpeechSettingsView: View {
     }
 
     private var readingMode: ReadAloudMode {
-        ReadAloudMode(rawValue: readingModeRaw) ?? .retell
+        ReadAloudMode(rawValue: readingModeRaw) ?? .exact
     }
 
     private var provider: any TTSProvider {
@@ -259,7 +259,7 @@ struct TextToSpeechSettingsView: View {
             .padding(8)
         }
         .onChange(of: readingModeRaw) { _, raw in
-            let mode = ReadAloudMode(rawValue: raw) ?? .retell
+            let mode = ReadAloudMode(rawValue: raw) ?? .exact
             TTSSettings.readingMode = mode
             if mode.usesLocalAI { Task { await localLLM.prewarmIfNeeded() } }
         }

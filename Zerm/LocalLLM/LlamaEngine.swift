@@ -16,8 +16,11 @@ actor LlamaEngine {
     }
 
     private let bridge: LlamaBridge
+    /// Requested KV-cache size. Callers that need a larger window must not reuse this engine.
+    nonisolated let contextSize: Int
 
     init(modelPath: String, contextSize: Int, threadCount: Int, disablesThinking: Bool = false) {
+        self.contextSize = contextSize
         bridge = LlamaBridge(
             modelPath: modelPath,
             contextSize: Int32(contextSize),
