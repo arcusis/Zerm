@@ -109,7 +109,10 @@ struct ZermApp: App {
         let aiService = AIService()
         _aiService = StateObject(wrappedValue: aiService)
 
-        let updaterViewModel = UpdaterViewModel(startsUpdater: !uiTestConfiguration.isEnabled)
+        // A development bundle must never update itself into the released app.
+        let updaterViewModel = UpdaterViewModel(
+            startsUpdater: !uiTestConfiguration.isEnabled && AppStoragePaths.isProductionBundle
+        )
         _updaterViewModel = StateObject(wrappedValue: updaterViewModel)
 
         let enhancementService = AIEnhancementService(aiService: aiService, modelContext: container.mainContext)
@@ -117,8 +120,7 @@ struct ZermApp: App {
 
         // 1. Create modelsDirectory URL
         let appSupportDirectory = uiTestConfiguration.storageRoot
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.arcusis.zerm")
+            ?? AppStoragePaths.root
         let modelsDirectory = appSupportDirectory.appendingPathComponent("WhisperModels")
 
         // 2. Create model managers
@@ -258,8 +260,7 @@ struct ZermApp: App {
     private static func createPersistentContainer(schema: Schema, logger: Logger) -> ModelContainer? {
         do {
             // Create app-specific Application Support directory URL
-            let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.arcusis.zerm", isDirectory: true)
+            let appSupportURL = AppStoragePaths.root
 
             // Create the directory if it doesn't exist
             try? FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true)

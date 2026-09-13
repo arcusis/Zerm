@@ -984,10 +984,7 @@ final class MeetingRecordingSession: ObservableObject {
     }
 
     static func recordingsRoot() throws -> URL {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
-        )
-        let root = base.appendingPathComponent("Zerm/Recordings", isDirectory: true)
+        let root = AppStoragePaths.legacyRoot.appendingPathComponent("Recordings", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }

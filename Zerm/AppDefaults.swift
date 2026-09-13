@@ -161,8 +161,7 @@ enum AppDefaults {
             // one; package(for: .enhancement) resolves an installed model on its own.
             if defaults.string(forKey: LocalLLMModelManager.enhancementModelKey) == nil {
                 let preferred = LocalLLMModelManager.enhancementDefaultPackage.fileName
-                let path = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("com.arcusis.zerm")
+                let path = AppStoragePaths.root
                     .appendingPathComponent("LLMModels")
                     .appendingPathComponent(preferred).path
                 if FileManager.default.fileExists(atPath: path) {

@@ -29,8 +29,7 @@ final class ReadAloudHistoryStore: ObservableObject {
         if let fileURL {
             self.fileURL = fileURL
         } else {
-            let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.arcusis.zerm", isDirectory: true)
+            let directory = AppStoragePaths.root
             self.fileURL = directory.appendingPathComponent("ReadAloudHistory.json")
         }
         load()

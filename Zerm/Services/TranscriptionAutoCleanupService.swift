@@ -22,8 +22,7 @@ final class TranscriptionAutoCleanupService {
     }
 
     private var recordingsDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        AppStoragePaths.root
             .appendingPathComponent("Recordings")
     }
 

@@ -48,9 +48,7 @@ enum RetiredLocalLLMMigration {
             }
         }
 
-        let modelsDirectory = modelsDirectory ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let modelsDirectory = modelsDirectory ?? AppStoragePaths.root
             .appendingPathComponent("LLMModels")
 
         var reclaimedBytes: Int64 = 0

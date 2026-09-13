@@ -166,11 +166,7 @@ final class LocalLLMModelManager: ObservableObject {
         // Preserve installations that predate explicit model selection, but never infer that the
         // largest model found on disk is the desired one. Prefer the default, then the smallest
         // installed catalogue entry.
-        let modelDirectory = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        )[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let modelDirectory = AppStoragePaths.root
             .appendingPathComponent("LLMModels")
         let compatibilityOrder = [defaultPackage.fileName] + packages.map(\.fileName)
         if let installedFile = compatibilityOrder.first(where: {
@@ -207,8 +203,7 @@ final class LocalLLMModelManager: ObservableObject {
     }
 
     nonisolated private static func isDownloadedOnDisk(_ package: LocalLLMPackage) -> Bool {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let appSupport = AppStoragePaths.root
         let path = appSupport.appendingPathComponent("LLMModels").appendingPathComponent(package.fileName).path
         return FileManager.default.fileExists(atPath: path)
     }
@@ -235,8 +230,7 @@ final class LocalLLMModelManager: ObservableObject {
     private var progressObservations: [String: NSKeyValueObservation] = [:]
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let appSupport = AppStoragePaths.root
         modelsDirectory = appSupport.appendingPathComponent("LLMModels")
         try? FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         refreshInstalled()

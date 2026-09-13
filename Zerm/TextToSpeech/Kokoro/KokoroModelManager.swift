@@ -42,8 +42,7 @@ final class KokoroModelManager: ObservableObject {
     private var progressObservation: NSKeyValueObservation?
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let appSupport = AppStoragePaths.root
         modelsDirectory = appSupport.appendingPathComponent("TTSModels")
         try? FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         refreshInstalled()

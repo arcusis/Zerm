@@ -50,10 +50,7 @@ class CustomSoundManager: ObservableObject {
     }
 
     private func customSoundsDirectory() -> URL? {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return appSupport.appendingPathComponent("Zerm/CustomSounds")
+        return AppStoragePaths.legacyRoot.appendingPathComponent("CustomSounds")
     }
 
     private func createCustomSoundsDirectoryIfNeeded() {
