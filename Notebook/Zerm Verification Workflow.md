@@ -46,16 +46,13 @@ This runs:
 5. Toggle "Hide Dock Icon" → window hides; click Settings from menu bar → window reappears
 6. Power Mode → configure a browser URL trigger → open that URL → verify prompt applies
 
-## Meeting Recording Gate
+## Runtime Gate
 
-1. Start with microphone-only, selected-app-only and dual-source deterministic backends; verify persisted track identity, host-clock gaps, delayed/lost chunks and app/helper PID churn.
-2. Start a meeting, navigate through every sidebar destination, close/reopen the main window, and stop from both toolbar and menu bar. The same session must remain visible and produce one durable result.
-3. Exercise local and cloud Dictation models in explicit languages. Verify the preflight disclosure and persisted provider/model/language snapshot match the actual job.
-4. Verify canonical retry, speaker-attribution confidence, partial/failure recovery, imported/interrupted Process/Retry/Re-transcribe, summary isolation and simulated disk/persistence failure.
-5. Play a dual-track fixture as synchronized Room + Call; test seek, mute and solo across a persisted discontinuity.
-6. Simulate built-in speaker, wired, Bluetooth/AirPods, USB headset, unknown and disconnect routes. Dictation must continue; Read Aloud must fail closed or stop with a notification unless the route is confirmed safe.
-7. Run keyboard-only, VoiceOver/accessibility, Reduce Motion, dark/high-contrast, narrow/full-screen, English, Hebrew and RTL UI flows.
-8. Install the resulting app on the Office Mac and repeat the no-microphone-safe flows plus injected/simulated capture. Record the exact build and test artifacts before release.
+1. Simulate built-in speaker, wired, Bluetooth/AirPods, USB headset, unknown and disconnect routes. Dictation must continue, and "skip mute with headphones" must follow the confirmed route.
+2. Run keyboard-only, VoiceOver/accessibility, Reduce Motion, dark/high-contrast, narrow/full-screen, English, Hebrew and RTL UI flows.
+3. Install the resulting app on the Office Mac and repeat the no-microphone-safe flows. Record the exact build and test artifacts before release.
+
+The Meeting Recording gate was retired with the Meetings module in 2.8.6.
 
 An Office Mac `build-for-testing` success proves that the UI-test bundle links; it does not prove that UI tests executed. XCTest automation requires an unlocked Aqua session and the user-granted automation permission for Xcode's test runner. Record the `.xcresult` from an executed run. The no-microphone Office Mac can cover injected capture, deterministic fixtures and failure paths, but final release acceptance still needs real microphone input plus wired, AirPods/Bluetooth and USB-headset route/disconnect checks. VoiceOver, keyboard-only, Reduce Motion, contrast, English/Hebrew and RTL remain runtime gates rather than compile-time claims.
 
@@ -80,4 +77,4 @@ GitHub Actions `ci.yml` runs on every push to `Production`:
 
 GitGuardian secret detection and CodeQL are separate required repository checks; `ci.yml` does not run Gitleaks because repository Actions policy only permits selected, SHA-pinned actions. CI does not prove Developer ID signing/notarization, UI-test execution, installation, audio hardware behavior or an end-to-end update from a previous public build.
 
-Related: [[Zerm Meeting Recording]], [[Zerm Overview]], [[Zerm Setup And Permissions]]
+Related: [[Zerm Overview]], [[Zerm Setup And Permissions]]

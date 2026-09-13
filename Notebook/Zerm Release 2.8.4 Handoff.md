@@ -74,4 +74,4 @@ Not measured:
 - A real meeting end to end.
 - A signed, notarized build, and the DMG window inside it.
 
-Related: [[Zerm Measuring Model And Audio Claims]], [[Zerm Meeting Recording]], [[Zerm On-Device LLM]], [[Zerm Release Signing]], [[Zerm Verification Workflow]]
+Related: [[Zerm Measuring Model And Audio Claims]], [[Zerm On-Device LLM]], [[Zerm Release Signing]], [[Zerm Verification Workflow]]

@@ -8,7 +8,6 @@ This notebook captures durable project context for Zerm. Start here, then follow
 
 - [[Zerm Overview]]
 - [[Zerm Architecture]]
-- [[Zerm Meeting Recording]] — durable, source-aware meeting capture and processing
 - [[Zerm Three Model Platform]] — the STT + TTS + LLM design
 - [[Zerm Read Aloud]] — text-to-speech subsystem
 - [[Zerm On-Device LLM]] — Gemma via llama.cpp
@@ -41,7 +40,7 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - **Repo is flat:** the Xcode project lives at the **repository root** (`Zerm.xcodeproj`), matching VoiceInk.
 - **Speech workspace:** Recording owns capture and its History/Enhancements views; Read Aloud and Power Modes remain separate; Permissions, Audio Input, Dictionary and app-wide Settings are shared destinations.
 - **Models remain user-selected:** Whisper/FluidAudio/Apple and configured cloud providers serve Dictation and recording transcription; Kokoro/system/cloud voices serve Read Aloud. Enhancement offers 8 cloud providers plus Ollama, Local CLI, On-Device and Custom, over `LLMkit` and a native Anthropic client — not vendor SDKs.
-- **Audio-route policy:** Dictation and meeting capture continue when headphones disconnect. Read Aloud only starts on a confirmed wired, Bluetooth/AirPods or USB-headset route and stops with a notification when that safe route is lost.
+- **Meetings removed in 2.8.6 (#324):** the module, its UI, the System Audio Recording permission and all meeting data are gone; a one-time launch migration deletes `Application Support/Zerm/Recordings` and the meeting preferences. File transcription with speaker diarization (#325) replaces it and reuses `Zerm/Transcription/FileTranscription/`.
 - **Verification status:** CI compiles the Debug app, runs unit tests and compiles/links `ZermUITests`. UI execution, real microphone/headset behavior, Developer ID signing/notarization, installation and update-from-public-build remain runtime release gates; see [[Zerm Verification Workflow]] and [[Zerm Measuring Model And Audio Claims]].
 
 ## Quick Build Reference

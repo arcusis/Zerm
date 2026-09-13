@@ -38,9 +38,9 @@ First sentence plays while the rest synthesizes (first chunk = 1 sentence, rest 
 
 Reuses the dictation notch/mini widget + live audio bars (TTS output level → `recorder.audioMeter`). Widget label follows `RecordingState`: **Thinking…** (`generatingSpeech`, AI rewrite) → **Preparing…** (`preparingSpeech`, synth) → **bars** (`speaking`). Double-Escape cancels.
 
-## Meeting coexistence
+## Output route
 
-Dictation remains available during a meeting. Read Aloud is allowed only when `AudioOutputRouteMonitor` confirms a wired, Bluetooth/AirPods or USB headset route. Starting a meeting synchronously stops active Read Aloud on speakers before capture opens. If the safe route disconnects mid-meeting, Read Aloud stops immediately and posts a notification while meeting capture and Dictation continue. The analog output jack is inherently ambiguous, so Settings provides a persisted per-device “treat as speakers” safety override.
+Read Aloud plays on any output. The meeting-coexistence rules (headset-only Read Aloud during a meeting) were removed with Meetings in 2.8.6. `AudioOutputRouteMonitor` still tracks the route, and the analog output jack stays treated as speakers until the user confirms wired headphones; ending a Read Aloud attempt clears that confirmation.
 
 ## Gotchas (fixed)
 
@@ -49,4 +49,4 @@ Dictation remains available during a meeting. Read Aloud is allowed only when `A
 
 - **Hebrew-only Retell** is only used when the source is ≥65% Hebrew letters. Mixed HE+EN does not take that path, and a script-flipped rewrite is rejected. See [[Zerm Enhancement Language Fidelity]].
 
-Related: [[Zerm Meeting Recording]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]], [[Zerm Three Model Platform]], [[Zerm Enhancement Language Fidelity]]
+Related: [[Zerm Smart Reading]], [[Zerm On-Device LLM]], [[Zerm Three Model Platform]], [[Zerm Enhancement Language Fidelity]]
