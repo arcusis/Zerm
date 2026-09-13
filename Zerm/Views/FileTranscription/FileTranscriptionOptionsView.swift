@@ -72,6 +72,10 @@ struct FileTranscriptionOptionsView: View {
             }
         }
 
+        if let selectedModel {
+            ModelBadgesRow(model: selectedModel)
+        }
+
         HStack(spacing: 6) {
             Text("Only downloaded models and cloud models with an API key are listed.")
                 .font(.caption)
@@ -125,9 +129,9 @@ struct FileTranscriptionOptionsView: View {
         queue.options = options
     }
 
-    /// Models whose provider always detects the language itself, as in Dictation's settings.
+    /// Multilingual models that detect the language themselves, as in Dictation's settings.
     static func detectsLanguageAutomatically(_ model: any TranscriptionModel) -> Bool {
-        model.provider == .fluidAudio || model.provider == .gemini
+        (model.provider == .fluidAudio || model.provider == .gemini) && model.isMultilingualModel
     }
 
     static func languageName(_ code: String, for model: any TranscriptionModel) -> String {
