@@ -43,6 +43,7 @@ struct CloudModelCardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     headerSection
                     metadataSection
+                    ModelBadgesRow(model: model)
                     descriptionSection
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

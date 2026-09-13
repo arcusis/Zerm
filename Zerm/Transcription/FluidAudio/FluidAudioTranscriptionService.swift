@@ -68,6 +68,12 @@ class FluidAudioTranscriptionService: TranscriptionService {
                 self.loadingTask = nil
             }
             if error is CancellationError { throw error }
+            // A pre-2.8.6 V3 cache loads once FluidAudio fetches the file it added. If that fetch
+            // failed (offline), say what is needed instead of a generic load failure.
+            if version == .v3, FluidAudioModelManager.cacheState(forModelNamed: "parakeet-tdt-0.6b-v3") == .needsUpdate {
+                logger.error("❌ Parakeet update download failed: \(error.localizedDescription, privacy: .public)")
+                throw FluidAudioModelError.updateDownloadRequired
+            }
             // Missing or partially migrated model files (#173) must reach the user as a load
             // failure with a re-download hint, not as an opaque CoreML error or a silent fallback.
             logger.error("❌ Parakeet model load failed: \(error.localizedDescription, privacy: .public)")
@@ -76,6 +82,8 @@ class FluidAudioTranscriptionService: TranscriptionService {
     }
 
     func loadModel(for model: FluidAudioModel) async throws {
+        // Parakeet Unified has its own service; don't warm TDT v3 through the version fallback.
+        guard FluidAudioModelManager.modelVersionMap[model.name] != nil else { return }
         try await ensureModelsLoaded(for: version(for: model))
     }
 

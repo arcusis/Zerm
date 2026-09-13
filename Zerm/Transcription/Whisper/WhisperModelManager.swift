@@ -13,10 +13,6 @@ struct WhisperModelFile: Identifiable {
     var coreMLEncoderURL: URL? // Path to the unzipped .mlmodelc directory
     var isCoreMLDownloaded: Bool { coreMLEncoderURL != nil }
 
-    var downloadURL: String {
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(filename)"
-    }
-
     var filename: String {
         "\(name).bin"
     }
@@ -26,11 +22,16 @@ struct WhisperModelFile: Identifiable {
         ModelIntegrity.whisperSHA256[name]
     }
 
+    /// Only non-quantized whisper.cpp releases ship a Core ML encoder; fine-tunes from other
+    /// repositories (ivrit.ai) run on Metal alone.
+    static func hasCoreMLEncoder(modelName: String) -> Bool {
+        modelName.hasPrefix("ggml-") && !modelName.contains("q5") && !modelName.contains("q8")
+    }
+
     // Core ML related properties
     var coreMLZipDownloadURL: String? {
-        // Only non-quantized models have Core ML versions
-        guard !name.contains("q5") && !name.contains("q8") else { return nil }
-        return "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(name)-encoder.mlmodelc.zip"
+        guard Self.hasCoreMLEncoder(modelName: name) else { return nil }
+        return ModelIntegrity.PinnedFile.whisperCpp(fileName: "\(name)-encoder.mlmodelc.zip").downloadURL
     }
 
     var coreMLEncoderDirectoryName: String? {
@@ -62,6 +63,8 @@ private class TaskDelegate: NSObject, URLSessionTaskDelegate {
 class WhisperModelManager: ObservableObject {
     @Published var availableModels: [WhisperModelFile] = []
     @Published var downloadProgress: [String: Double] = [:]
+    /// Last download failure per model name, shown on the model card with a retry.
+    @Published var downloadErrors: [String: String] = [:]
     @Published var whisperContext: WhisperContext?
     @Published var isModelLoaded = false
     @Published var loadedWhisperModel: WhisperModelFile?
@@ -272,7 +275,16 @@ class WhisperModelManager: ObservableObject {
         await performModelDownload(model, url)
     }
 
+    private enum DownloadError: LocalizedError {
+        case checksumMismatch
+
+        var errorDescription: String? {
+            String(localized: "The downloaded file did not match its published checksum and was discarded. Try again.")
+        }
+    }
+
     private func performModelDownload(_ model: WhisperModel, _ url: URL) async {
+        downloadErrors[model.name] = nil
         do {
             var whisperModel = try await downloadMainModel(model, from: url)
 
@@ -305,7 +317,7 @@ class WhisperModelManager: ObservableObject {
         if !ModelIntegrity.verify(fileURL: destinationURL, expectedSHA256: ModelIntegrity.whisperSHA256[model.name]) {
             try? FileManager.default.removeItem(at: destinationURL)
             logger.error("Checksum mismatch for model \(model.name, privacy: .public); download rejected")
-            throw ZermEngineError.modelLoadFailed
+            throw DownloadError.checksumMismatch
         }
 
         return WhisperModelFile(name: model.name, url: destinationURL)
@@ -404,6 +416,8 @@ class WhisperModelManager: ObservableObject {
     private func handleModelDownloadError(_ model: WhisperModel, _ error: Error) {
         self.downloadProgress.removeValue(forKey: model.name + "_main")
         self.downloadProgress.removeValue(forKey: model.name + "_coreml")
+        downloadErrors[model.name] = error.localizedDescription
+        logError("Download failed for \(model.name)", error)
     }
 
     func deleteModel(_ model: WhisperModelFile) async {
@@ -528,7 +542,7 @@ struct DownloadProgressView: View {
     }
 
     private var supportsCoreML: Bool {
-        !modelName.contains("q5") && !modelName.contains("q8")
+        WhisperModelFile.hasCoreMLEncoder(modelName: modelName)
     }
 
     private var totalProgress: Double {

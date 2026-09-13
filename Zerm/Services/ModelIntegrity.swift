@@ -15,21 +15,46 @@ import CryptoKit
 /// via app updates.
 enum ModelIntegrity {
 
+    /// A file at an immutable Hugging Face revision.
+    struct PinnedFile: Hashable {
+        let repository: String
+        let commit: String
+        let fileName: String
+
+        var downloadURL: String {
+            "https://huggingface.co/\(repository)/resolve/\(commit)/\(fileName)"
+        }
+
+        static func whisperCpp(fileName: String) -> PinnedFile {
+            PinnedFile(repository: "ggerganov/whisper.cpp", commit: whisperRepoCommit, fileName: fileName)
+        }
+    }
+
     // MARK: - Whisper (ggerganov/whisper.cpp)
 
     /// Repo revision the whisper hashes below correspond to. Also used to build download URLs.
     static let whisperRepoCommit = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
+    // MARK: - ivrit.ai Hebrew fine-tunes (whisper.cpp ggml conversions by ivrit.ai)
+
+    static let ivritLargeV3Turbo = PinnedFile(
+        repository: "ivrit-ai/whisper-large-v3-turbo-ggml",
+        commit: "2130c78e4a9cb4914cc4df91a1c3031407789705",
+        fileName: "ggml-model.bin"
+    )
+
+    static let ivritLargeV3 = PinnedFile(
+        repository: "ivrit-ai/whisper-large-v3-ggml",
+        commit: "9ead614052ce13dfe5f8d0f6cd3e36787a9cf60c",
+        fileName: "ggml-model.bin"
+    )
+
     /// SHA-256 of each pinned `<name>.bin`, keyed by model name.
     static let whisperSHA256: [String: String] = [
-        "ggml-tiny": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
-        "ggml-tiny.en": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
-        "ggml-base": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
-        "ggml-base.en": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
-        "ggml-small": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
-        "ggml-small.en": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
         "ggml-large-v3-turbo": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
-        "ggml-large-v3-turbo-q5_0": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+        "ggml-large-v3-turbo-q5_0": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        "ivrit-large-v3-turbo": "c8090411113357097bfafc2b8e228ec1639fa7f5fe4ecb5d054ac0ccef8641b1",
+        "ivrit-large-v3": "09e66ec67b2e00c6933afab6684cbf78fe023e8ad153c1848f62000e4335a07f"
     ]
 
     // MARK: - Verification

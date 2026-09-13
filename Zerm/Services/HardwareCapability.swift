@@ -25,14 +25,35 @@ enum HardwareCapability {
         return name.isEmpty ? SystemArchitecture.current : name
     }()
 
-    static let tier: Tier = {
-        if SystemArchitecture.isIntelMac { return .limited }
-        switch physicalMemoryGB {
+    /// What recommendations are derived from. Deliberately no chip names: RAM and architecture
+    /// describe every generation, including ones released after this build.
+    struct Profile: Equatable {
+        let isAppleSilicon: Bool
+        let physicalMemoryGB: Double
+        /// macOS 26 or later, where Apple Speech (SpeechAnalyzer) exists.
+        let hasAppleSpeech: Bool
+
+        static let current: Profile = {
+            let hasAppleSpeech: Bool
+            if #available(macOS 26, *) { hasAppleSpeech = true } else { hasAppleSpeech = false }
+            return Profile(
+                isAppleSilicon: SystemArchitecture.isAppleSilicon,
+                physicalMemoryGB: HardwareCapability.physicalMemoryGB,
+                hasAppleSpeech: hasAppleSpeech
+            )
+        }()
+    }
+
+    static let tier: Tier = tier(for: .current)
+
+    static func tier(for profile: Profile) -> Tier {
+        guard profile.isAppleSilicon else { return .limited }
+        switch profile.physicalMemoryGB {
         case ..<12: return .limited
         case ..<24: return .capable
         default: return .powerful
         }
-    }()
+    }
 
     /// Human-readable summary, e.g. "Apple M1 · 8 GB RAM".
     static var summary: String {
@@ -98,13 +119,72 @@ enum HardwareCapability {
         return .good
     }
 
-    /// Transcription model names recommended for this Mac, in display order.
-    static var recommendedTranscriptionModelNames: [String] {
-        switch tier {
-        case .limited:
-            return ["ggml-base.en", "parakeet-tdt-0.6b-v2", "whisper-large-v3-turbo"]
-        case .capable, .powerful:
-            return ["ggml-base.en", "parakeet-tdt-0.6b-v2", "ggml-large-v3-turbo-q5_0", "whisper-large-v3-turbo"]
+    // MARK: - Transcription recommendations
+
+    enum RecommendationNeed: CaseIterable {
+        case english
+        case multilingual
+        case hebrew
+    }
+
+    static func canRun(_ model: any LocalTranscriptionModel, on profile: Profile) -> Bool {
+        switch model.runtime {
+        case .whisperCpp: return true
+        case .fluidAudio: return profile.isAppleSilicon
+        case .appleSpeech: return profile.isAppleSilicon && profile.hasAppleSpeech
+        }
+    }
+
+    /// Memory a recommended speech model may take without crowding the on-device LLM (about
+    /// 4 GB on every Apple Silicon Mac) and the user's other apps.
+    static func comfortableSpeechModelMemoryGB(for profile: Profile) -> Double {
+        switch tier(for: profile) {
+        case .limited: return 1.0
+        case .capable: return 4.0
+        case .powerful: return profile.physicalMemoryGB * 0.35
+        }
+    }
+
+    /// The best local model for one language need that this Mac runs comfortably, derived from
+    /// catalog metadata. Within the comfortable memory budget the most accurate model wins
+    /// (then the faster, then the lighter); when nothing fits the budget, the lightest model
+    /// that still fits this Mac does.
+    static func recommendedLocalModel(
+        for need: RecommendationNeed,
+        among models: [any TranscriptionModel],
+        profile: Profile = .current
+    ) -> (any LocalTranscriptionModel)? {
+        let runnable = models
+            .compactMap { $0 as? any LocalTranscriptionModel }
+            .filter { model in
+                guard canRun(model, on: profile) else { return false }
+                if case .good = fit(forEstimatedRAMGB: model.estimatedRAMGB, physicalMemoryGB: profile.physicalMemoryGB) {
+                    return true
+                }
+                return false
+            }
+
+        let candidates: [any LocalTranscriptionModel]
+        switch need {
+        case .english:
+            // Intel Macs have no English-only engine; the general multilingual models cover English.
+            let englishOnly = runnable.filter { $0.languageGroup == .englishOnly }
+            candidates = englishOnly.isEmpty ? runnable.filter { !$0.isHebrewOptimized } : englishOnly
+        case .multilingual:
+            candidates = runnable.filter { $0.languageGroup == .multilingual && !$0.isHebrewOptimized }
+        case .hebrew:
+            candidates = runnable.filter(\.isHebrewOptimized)
+        }
+
+        let budget = comfortableSpeechModelMemoryGB(for: profile)
+        let comfortable = candidates.filter { $0.estimatedRAMGB <= budget }
+        guard !comfortable.isEmpty else {
+            return candidates.min { $0.estimatedRAMGB < $1.estimatedRAMGB }
+        }
+        return comfortable.max { lhs, rhs in
+            if lhs.accuracy != rhs.accuracy { return lhs.accuracy < rhs.accuracy }
+            if lhs.speed != rhs.speed { return lhs.speed < rhs.speed }
+            return lhs.estimatedRAMGB > rhs.estimatedRAMGB
         }
     }
 
