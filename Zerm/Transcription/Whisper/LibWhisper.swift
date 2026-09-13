@@ -16,7 +16,8 @@ actor WhisperContext {
     private var vadModelPath: String?
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperContext")
 
-    private init() {}
+    /// An empty context with no model; transcription on it fails. Used by tests.
+    init() {}
 
     init(context: OpaquePointer) {
         self.context = context

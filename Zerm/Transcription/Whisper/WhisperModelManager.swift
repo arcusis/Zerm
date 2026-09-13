@@ -80,8 +80,16 @@ class WhisperModelManager: ObservableObject {
 
     let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperModelManager")
 
-    init(modelsDirectory: URL) {
+    private let contextLoader: (URL) async throws -> WhisperContext
+    /// The load in flight, so concurrent requests for the same model share one context.
+    private var pendingLoad: (name: String, task: Task<WhisperContext, Error>)?
+
+    init(
+        modelsDirectory: URL,
+        contextLoader: @escaping (URL) async throws -> WhisperContext = { try await WhisperContext.createContext(path: $0.path) }
+    ) {
         self.modelsDirectory = modelsDirectory
+        self.contextLoader = contextLoader
     }
 
     // MARK: - Model Directory Management
@@ -108,23 +116,82 @@ class WhisperModelManager: ObservableObject {
 
     // MARK: - Model Loading
 
-    func loadModel(_ model: WhisperModelFile) async throws {
-        guard whisperContext == nil else { return }
+    /// Returns the resident context for `model`, loading it once if needed. A different
+    /// resident model is released first so only one Whisper context is ever held.
+    @discardableResult
+    func loadModel(_ model: WhisperModelFile) async throws -> WhisperContext {
+        if let whisperContext, loadedWhisperModel?.name == model.name {
+            return whisperContext
+        }
+        if let pendingLoad, pendingLoad.name == model.name {
+            return try await pendingLoad.task.value
+        }
 
+        let previousContext = whisperContext
+        resetLoadedState()
+
+        let loader = contextLoader
+        let url = model.url
+        let task = Task { try await loader(url) }
+        pendingLoad = (model.name, task)
         isModelLoading = true
-        defer { isModelLoading = false }
 
+        await previousContext?.releaseResources()
+
+        let context: WhisperContext
         do {
-            whisperContext = try await WhisperContext.createContext(path: model.url.path)
-
-            let currentPrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? whisperPrompt.transcriptionPrompt
-            await whisperContext?.setPrompt(currentPrompt)
-
-            isModelLoaded = true
-            loadedWhisperModel = model
+            context = try await task.value
         } catch {
+            if pendingLoad?.task == task {
+                pendingLoad = nil
+                isModelLoading = false
+            }
+            logger.error("❌ Failed to load model \(model.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             throw ZermEngineError.modelLoadFailed
         }
+
+        // The model was switched or released while loading; don't resurrect it.
+        guard pendingLoad?.task == task else {
+            await context.releaseResources()
+            throw CancellationError()
+        }
+
+        let currentPrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? whisperPrompt.transcriptionPrompt
+        await context.setPrompt(currentPrompt)
+
+        pendingLoad = nil
+        isModelLoading = false
+        whisperContext = context
+        loadedWhisperModel = model
+        isModelLoaded = true
+        return context
+    }
+
+    /// Returns the resident context for the model named `name`, loading it once if needed.
+    func loadModel(named name: String) async throws -> WhisperContext {
+        if let whisperContext, loadedWhisperModel?.name == name {
+            return whisperContext
+        }
+        guard let model = availableModels.first(where: { $0.name == name }),
+              FileManager.default.fileExists(atPath: model.url.path) else {
+            logger.error("❌ Model file not found for: \(name, privacy: .public)")
+            throw ZermEngineError.modelLoadFailed
+        }
+        return try await loadModel(model)
+    }
+
+    /// Releases the resident or loading model unless it is the one named `name`.
+    func releaseModel(otherThan name: String) {
+        guard let current = loadedWhisperModel?.name ?? pendingLoad?.name, current != name else { return }
+        unloadModel()
+    }
+
+    private func resetLoadedState() {
+        whisperContext = nil
+        loadedWhisperModel = nil
+        isModelLoaded = false
+        pendingLoad = nil
+        isModelLoading = false
     }
 
     // MARK: - Model Download & Management
@@ -362,10 +429,10 @@ class WhisperModelManager: ObservableObject {
     }
 
     func unloadModel() {
+        let context = whisperContext
+        resetLoadedState()
         Task {
-            await whisperContext?.releaseResources()
-            whisperContext = nil
-            isModelLoaded = false
+            await context?.releaseResources()
         }
     }
 
@@ -386,9 +453,9 @@ class WhisperModelManager: ObservableObject {
     /// Does NOT call serviceRegistry.cleanup() — that is ZermEngine's responsibility.
     func cleanupResources() async {
         logger.notice("WhisperModelManager.cleanupResources: releasing whisper context")
-        await whisperContext?.releaseResources()
-        whisperContext = nil
-        isModelLoaded = false
+        let context = whisperContext
+        resetLoadedState()
+        await context?.releaseResources()
         logger.notice("WhisperModelManager.cleanupResources: completed")
     }
 
