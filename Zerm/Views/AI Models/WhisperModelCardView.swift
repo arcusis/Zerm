@@ -8,6 +8,7 @@ struct WhisperModelCardView: View {
     let downloadProgress: [String: Double]
     let modelURL: URL?
     let isWarming: Bool
+    let downloadError: String?
     
     // Actions
     var deleteAction: () -> Void
@@ -24,9 +25,13 @@ struct WhisperModelCardView: View {
             VStack(alignment: .leading, spacing: 6) {
                 headerSection
                 metadataSection
+                ModelBadgesRow(model: model)
                 descriptionSection
                 if !isDownloaded {
                     HardwareFitNotice(fit: model.hardwareFit)
+                }
+                if let downloadError, !isDownloading {
+                    DownloadErrorNotice(message: downloadError)
                 }
                 progressSection
             }
@@ -142,7 +147,7 @@ struct WhisperModelCardView: View {
             } else {
                 Button(action: downloadAction) {
                     HStack(spacing: 4) {
-                        Text(isDownloading ? "Downloading..." : "Download")
+                        Text(isDownloading ? "Downloading..." : (downloadError == nil ? "Download" : "Retry Download"))
                             .font(.system(size: 12, weight: .medium))
                         Image(systemName: "arrow.down.circle")
                             .font(.system(size: 12, weight: .medium))

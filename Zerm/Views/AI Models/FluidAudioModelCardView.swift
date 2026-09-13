@@ -41,6 +41,9 @@ struct FluidAudioModelCardView: View {
                 if !isDownloaded {
                     HardwareFitNotice(fit: model.hardwareFit)
                 }
+                if let downloadError = fluidAudioModelManager.downloadErrors[model.name], !isDownloading {
+                    DownloadErrorNotice(message: downloadError)
+                }
                 progressSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,7 +154,7 @@ struct FluidAudioModelCardView: View {
                     }
                 }) {
                     HStack(spacing: 4) {
-                        Text(isDownloading ? "Downloading..." : "Download")
+                        Text(isDownloading ? "Downloading..." : (fluidAudioModelManager.downloadErrors[model.name] == nil ? "Download" : "Retry Download"))
                         Image(systemName: "arrow.down.circle")
                     }
                     .font(.system(size: 12, weight: .medium))

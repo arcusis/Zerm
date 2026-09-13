@@ -56,12 +56,16 @@ struct LanguageSelectionView: View {
     }
 
     var body: some View {
-        switch displayMode {
-        case .full:
-            fullView
-        case .menuItem:
-            menuItemView
+        Group {
+            switch displayMode {
+            case .full:
+                fullView
+            case .menuItem:
+                menuItemView
+            }
         }
+        // Lets Apple Speech offer Hebrew once the Speech framework reports it.
+        .task { await AppleSpeechLanguageSupport.refresh() }
     }
 
     // The original full view layout for settings page
@@ -123,11 +127,17 @@ struct LanguageSelectionView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
-                        Text(
-                            "This model supports multiple languages. Select a specific language or auto-detect(if available)"
-                        )
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        if currentModel.isHebrewOptimized {
+                            Text("Tuned for Hebrew: Auto-detect transcribes Hebrew and keeps English words. Choose English only for English-only dictation.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text(
+                                "This model supports multiple languages. Select a specific language or auto-detect(if available)"
+                            )
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
                     }
                 } else {
                     // For English-only models, force set language to English
