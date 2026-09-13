@@ -11,7 +11,8 @@ extension Notification.Name {
     static let licenseStatusChanged = Notification.Name("licenseStatusChanged")
     static let navigateToDestination = Notification.Name("navigateToDestination")
     static let promptSelectionChanged = Notification.Name("promptSelectionChanged")
-    static let powerModeConfigurationApplied = Notification.Name("powerModeConfigurationApplied")
+    /// A Power Mode picked in the recorder; the object is the `PowerModeConfig`.
+    static let powerModeSelectedInRecorder = Notification.Name("powerModeSelectedInRecorder")
     static let transcriptionCreated = Notification.Name("transcriptionCreated")
     static let transcriptionCompleted = Notification.Name("transcriptionCompleted")
     static let transcriptionDeleted = Notification.Name("transcriptionDeleted")

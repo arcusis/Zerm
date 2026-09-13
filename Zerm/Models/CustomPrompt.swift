@@ -79,37 +79,51 @@ struct CustomPrompt: Identifiable, Codable, Equatable {
     let id: UUID
     let title: String
     let promptText: String
-    var isActive: Bool
     let icon: PromptIcon
     let description: String?
     let isPredefined: Bool
     let triggerWords: [String]
     let useSystemInstructions: Bool
-    
+    /// Enhancement provider for this prompt; nil uses the global provider. A Power Mode's
+    /// provider still wins.
+    let providerOverride: String?
+    /// Only used together with `providerOverride`; nil uses that provider's selected model.
+    let modelOverride: String?
+    /// For prompts meant to translate, answer or expand, whose output may change script and
+    /// length. Cleanup prompts keep the language guard.
+    let allowsLanguageChange: Bool
+
     init(
         id: UUID = UUID(),
         title: String,
         promptText: String,
-        isActive: Bool = false,
         icon: PromptIcon = "doc.text.fill",
         description: String? = nil,
         isPredefined: Bool = false,
         triggerWords: [String] = [],
-        useSystemInstructions: Bool = true
+        useSystemInstructions: Bool = true,
+        providerOverride: String? = nil,
+        modelOverride: String? = nil,
+        allowsLanguageChange: Bool = false
     ) {
         self.id = id
         self.title = title
         self.promptText = promptText
-        self.isActive = isActive
         self.icon = icon
         self.description = description
         self.isPredefined = isPredefined
         self.triggerWords = triggerWords
         self.useSystemInstructions = useSystemInstructions
+        self.providerOverride = providerOverride
+        self.modelOverride = providerOverride == nil ? nil : modelOverride
+        self.allowsLanguageChange = allowsLanguageChange
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, promptText, isActive, icon, description, isPredefined, triggerWords, useSystemInstructions
+        case id, title, promptText, icon, description, isPredefined, triggerWords, useSystemInstructions
+        case providerOverride, modelOverride, allowsLanguageChange
+        /// Never read; still written because 2.8.5 decodes it as required.
+        case isActive
     }
 
     init(from decoder: Decoder) throws {
@@ -117,14 +131,32 @@ struct CustomPrompt: Identifiable, Codable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         promptText = try container.decode(String.self, forKey: .promptText)
-        isActive = try container.decode(Bool.self, forKey: .isActive)
         icon = try container.decode(PromptIcon.self, forKey: .icon)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         isPredefined = try container.decode(Bool.self, forKey: .isPredefined)
         triggerWords = try container.decode([String].self, forKey: .triggerWords)
         useSystemInstructions = try container.decodeIfPresent(Bool.self, forKey: .useSystemInstructions) ?? true
+        providerOverride = try container.decodeIfPresent(String.self, forKey: .providerOverride)
+        modelOverride = try container.decodeIfPresent(String.self, forKey: .modelOverride)
+        allowsLanguageChange = try container.decodeIfPresent(Bool.self, forKey: .allowsLanguageChange) ?? false
     }
-    
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(promptText, forKey: .promptText)
+        try container.encode(false, forKey: .isActive)
+        try container.encode(icon, forKey: .icon)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encode(isPredefined, forKey: .isPredefined)
+        try container.encode(triggerWords, forKey: .triggerWords)
+        try container.encode(useSystemInstructions, forKey: .useSystemInstructions)
+        try container.encodeIfPresent(providerOverride, forKey: .providerOverride)
+        try container.encodeIfPresent(modelOverride, forKey: .modelOverride)
+        try container.encode(allowsLanguageChange, forKey: .allowsLanguageChange)
+    }
+
     var finalPromptText: String {
         if useSystemInstructions {
             return String(format: AIPrompts.customPromptTemplate, self.promptText)

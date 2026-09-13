@@ -77,18 +77,23 @@ final class LocalCLIService {
         commandTemplate = template.commandTemplate
     }
 
-    func enhance(systemPrompt: String, userPrompt: String) async throws -> String {
-        guard isConfigured else {
+    /// Runs a command captured into an enhancement request, independent of the current settings.
+    static func run(
+        commandTemplate: String,
+        timeout: Double,
+        systemPrompt: String,
+        userPrompt: String
+    ) async throws -> String {
+        guard !commandTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LocalCLIError.commandNotConfigured
         }
 
-        let fullPrompt = Self.makeFullPrompt(systemPrompt: systemPrompt, userPrompt: userPrompt)
         return try await executeCommand(
             commandTemplate: commandTemplate,
             systemPrompt: systemPrompt,
             userPrompt: userPrompt,
-            fullPrompt: fullPrompt,
-            timeout: timeoutSeconds
+            fullPrompt: makeFullPrompt(systemPrompt: systemPrompt, userPrompt: userPrompt),
+            timeout: timeout
         )
     }
 
@@ -104,84 +109,140 @@ final class LocalCLIService {
         """
     }
 
-    private func executeCommand(
+    /// The process behind one command, so a cancelled request can stop it.
+    private final class RunningCommand: @unchecked Sendable {
+        private let lock = NSLock()
+        private var process: Process?
+        private var cancelled = false
+
+        var isCancelled: Bool {
+            lock.withLock { cancelled }
+        }
+
+        /// Returns false when the command was cancelled before it could start.
+        func attach(_ process: Process) -> Bool {
+            lock.withLock {
+                self.process = process
+                return !cancelled
+            }
+        }
+
+        /// SIGTERM first; a CLI that ignores it is killed after a short grace period.
+        func cancel() {
+            let process = lock.withLock { () -> Process? in
+                cancelled = true
+                return self.process
+            }
+            guard let process, process.isRunning else { return }
+            process.terminate()
+            let pid = process.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                if process.isRunning {
+                    kill(pid, SIGKILL)
+                }
+            }
+        }
+    }
+
+    private static func executeCommand(
         commandTemplate: String,
         systemPrompt: String,
         userPrompt: String,
         fullPrompt: String,
         timeout: Double
     ) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-lc", commandTemplate]
+        let running = RunningCommand()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                    process.arguments = ["-lc", commandTemplate]
 
-                var environment = ProcessInfo.processInfo.environment
-                environment["PATH"] = Self.preferredPATH(fallback: environment["PATH"])
-                environment["VOICEINK_SYSTEM_PROMPT"] = systemPrompt
-                environment["VOICEINK_USER_PROMPT"] = userPrompt
-                environment["VOICEINK_FULL_PROMPT"] = fullPrompt
-                process.environment = environment
+                    var environment = ProcessInfo.processInfo.environment
+                    environment["PATH"] = Self.preferredPATH(fallback: environment["PATH"])
+                    environment["VOICEINK_SYSTEM_PROMPT"] = systemPrompt
+                    environment["VOICEINK_USER_PROMPT"] = userPrompt
+                    environment["VOICEINK_FULL_PROMPT"] = fullPrompt
+                    process.environment = environment
 
-                let inputPipe = Pipe()
-                let outputPipe = Pipe()
-                let errorPipe = Pipe()
-                process.standardInput = inputPipe
-                process.standardOutput = outputPipe
-                process.standardError = errorPipe
+                    let inputPipe = Pipe()
+                    let outputPipe = Pipe()
+                    let errorPipe = Pipe()
+                    process.standardInput = inputPipe
+                    process.standardOutput = outputPipe
+                    process.standardError = errorPipe
 
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(throwing: LocalCLIError.executionFailed(error.localizedDescription))
-                    return
-                }
-
-                if let inputData = fullPrompt.data(using: .utf8) {
-                    inputPipe.fileHandleForWriting.write(inputData)
-                }
-                try? inputPipe.fileHandleForWriting.close()
-
-                let semaphore = DispatchSemaphore(value: 0)
-                process.terminationHandler = { _ in
-                    semaphore.signal()
-                }
-
-                let waitResult = semaphore.wait(timeout: .now() + timeout)
-                if waitResult == .timedOut {
-                    if process.isRunning {
-                        process.terminate()
-                        _ = semaphore.wait(timeout: .now() + 2)
+                    let semaphore = DispatchSemaphore(value: 0)
+                    process.terminationHandler = { _ in
+                        semaphore.signal()
                     }
-                    continuation.resume(throwing: LocalCLIError.timeout(seconds: timeout))
-                    return
-                }
 
-                let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-                let stdout = Self.cleanOutput(String(data: stdoutData, encoding: .utf8) ?? "")
-                let stderr = Self.cleanOutput(String(data: stderrData, encoding: .utf8) ?? "")
-
-                if process.terminationStatus != 0 {
-                    let looksLikeCommandNotFound = process.terminationStatus == 127 ||
-                        stderr.lowercased().contains("command not found")
-                    if looksLikeCommandNotFound {
-                        continuation.resume(throwing: LocalCLIError.commandNotFound(stderr.isEmpty ? commandTemplate : stderr))
-                    } else {
-                        continuation.resume(throwing: LocalCLIError.nonZeroExit(status: Int(process.terminationStatus), stderr: stderr))
+                    guard running.attach(process) else {
+                        continuation.resume(throwing: CancellationError())
+                        return
                     }
-                    return
-                }
 
-                guard !stdout.isEmpty else {
-                    continuation.resume(throwing: LocalCLIError.emptyOutput)
-                    return
-                }
+                    do {
+                        try process.run()
+                    } catch {
+                        continuation.resume(throwing: LocalCLIError.executionFailed(error.localizedDescription))
+                        return
+                    }
+                    // A cancel that raced `run()` found no running process to stop.
+                    if running.isCancelled {
+                        running.cancel()
+                    }
 
-                continuation.resume(returning: stdout)
+                    // A command that exited or was stopped before reading stdin must produce a
+                    // write error, not a SIGPIPE that terminates Zerm.
+                    _ = fcntl(inputPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+                    if let inputData = fullPrompt.data(using: .utf8) {
+                        try? inputPipe.fileHandleForWriting.write(contentsOf: inputData)
+                    }
+                    try? inputPipe.fileHandleForWriting.close()
+
+                    let waitResult = semaphore.wait(timeout: .now() + timeout)
+                    if waitResult == .timedOut {
+                        if process.isRunning {
+                            process.terminate()
+                            _ = semaphore.wait(timeout: .now() + 2)
+                        }
+                        continuation.resume(throwing: LocalCLIError.timeout(seconds: timeout))
+                        return
+                    }
+                    if running.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+
+                    let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+                    let stdout = Self.cleanOutput(String(data: stdoutData, encoding: .utf8) ?? "")
+                    let stderr = Self.cleanOutput(String(data: stderrData, encoding: .utf8) ?? "")
+
+                    if process.terminationStatus != 0 {
+                        let looksLikeCommandNotFound = process.terminationStatus == 127 ||
+                            stderr.lowercased().contains("command not found")
+                        if looksLikeCommandNotFound {
+                            continuation.resume(throwing: LocalCLIError.commandNotFound(stderr.isEmpty ? commandTemplate : stderr))
+                        } else {
+                            continuation.resume(throwing: LocalCLIError.nonZeroExit(status: Int(process.terminationStatus), stderr: stderr))
+                        }
+                        return
+                    }
+
+                    guard !stdout.isEmpty else {
+                        continuation.resume(throwing: LocalCLIError.emptyOutput)
+                        return
+                    }
+
+                    continuation.resume(returning: stdout)
+                }
             }
+        } onCancel: {
+            running.cancel()
         }
     }
 

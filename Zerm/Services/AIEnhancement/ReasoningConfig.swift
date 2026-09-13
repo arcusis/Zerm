@@ -10,13 +10,16 @@ struct ReasoningConfig {
     // These can't fully disable thinking — "minimal" is as low as they go
     static let geminiMinimalReasoningModels: Set<String> = [
         "gemini-2.5-pro",
+        "gemini-3.5-flash",
         "gemini-3.1-pro-preview",
         "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite",
         "gemini-3.1-flash-lite-preview"
     ]
 
-    // 5.4 and 5.2 models already default to "none", but we set it explicitly
+    // 5.5, 5.4 and 5.2 models already default to "none", but we set it explicitly
     static let openAINoneReasoningModels: Set<String> = [
+        "gpt-5.5",
         "gpt-5.4",
         "gpt-5.4-mini",
         "gpt-5.4-nano",

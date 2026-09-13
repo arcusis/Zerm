@@ -5,85 +5,79 @@ import os
 class ActiveWindowService: ObservableObject {
     static let shared = ActiveWindowService()
     @Published var currentApplication: NSRunningApplication?
-    private var enhancementService: AIEnhancementService?
     private let browserURLService = BrowserURLService.shared
-    private var browserURLTask: Task<Void, Never>?
 
-    private let logger = Logger(
+    /// How long a recording start waits for the browser to report its URL. AppleScript can hang
+    /// on an unresponsive browser or an Automation permission prompt, and this sits on the path
+    /// that starts dictation. Audio is already being captured and buffered meanwhile.
+    static let browserURLWaitLimit: TimeInterval = 0.5
+
+    private static let logger = Logger(
         subsystem: "com.arcusis.zerm",
         category: "browser.detection"
     )
 
     private init() {}
 
-    func configure(with enhancementService: AIEnhancementService) {
-        self.enhancementService = enhancementService
-    }
-    
-    /// Applies the Power Mode configuration for the frontmost context.
-    ///
-    /// The app-level (or default) match is resolved and awaited here, because a config
-    /// can swap the transcription model and that has to settle before the session is
-    /// built. Browser URL matching is deliberately *not* awaited: it shells out to
-    /// AppleScript, which can hang on an unresponsive browser or an Automation
-    /// permission prompt, and this sits on the path that starts dictation. The URL match
-    /// continues in the background and upgrades the active config if it lands in time,
-    /// gated on `shouldApplyURLMatch` so a finished recording is never reconfigured.
-    func applyConfiguration(
-        powerModeId: UUID? = nil,
-        shouldApplyURLMatch: @escaping @Sendable @MainActor () -> Bool = { true }
-    ) async {
-        if let powerModeId = powerModeId,
-           let config = PowerModeManager.shared.getConfiguration(with: powerModeId) {
-            await MainActor.run {
-                PowerModeManager.shared.setActiveConfiguration(config)
-            }
-            await PowerModeSessionManager.shared.beginSession(with: config)
-            return
+    /// The Power Mode for the recording that is starting: an explicitly requested one, else the
+    /// frontmost app's, else the default. In a browser a URL match wins if the browser answers in
+    /// time. A match that arrives later is ignored: it must not reconfigure a recording whose
+    /// transcription session was already built.
+    @MainActor
+    func resolveConfiguration(powerModeId: UUID? = nil) async -> PowerModeConfig? {
+        let appConfiguration = resolveConfigurationWithoutURL(powerModeId: powerModeId)
+        guard powerModeId == nil,
+              let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+              let browserType = BrowserType.allCases.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            return appConfiguration
         }
 
+        let browserURLService = browserURLService
+        return await Self.configuration(
+            appConfiguration: appConfiguration,
+            configurations: PowerModeManager.shared.configurations,
+            waitLimit: Self.browserURLWaitLimit,
+            lookupURL: { try await browserURLService.getCurrentURL(from: browserType) }
+        )
+    }
+
+    /// The requested, frontmost app's or default Power Mode, without asking a browser for its URL.
+    /// For a recording that stopped before its full resolution finished.
+    @MainActor
+    func resolveConfigurationWithoutURL(powerModeId: UUID? = nil) -> PowerModeConfig? {
+        let configurations = PowerModeManager.shared.configurations
+        if let powerModeId, let config = configurations.first(where: { $0.id == powerModeId }) {
+            return config
+        }
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
               let bundleIdentifier = frontmostApp.bundleIdentifier else {
-            return
+            return nil
         }
+        currentApplication = frontmostApp
+        return PowerModeManager.configuration(forApp: bundleIdentifier, in: configurations)
+            ?? PowerModeManager.defaultConfiguration(in: configurations)
+    }
 
-        await MainActor.run {
-            currentApplication = frontmostApp
-        }
-
-        if let config = PowerModeManager.shared.getConfigurationForApp(bundleIdentifier)
-            ?? PowerModeManager.shared.getDefaultConfiguration() {
-            await MainActor.run {
-                PowerModeManager.shared.setActiveConfiguration(config)
-            }
-            await PowerModeSessionManager.shared.beginSession(with: config)
-        }
-
-        guard let browserType = BrowserType.allCases.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
-            return
-        }
-
-        // Only one URL lookup may be in flight; a new recording supersedes the last.
-        browserURLTask?.cancel()
-        browserURLTask = Task { [weak self] in
-            guard let self else { return }
+    static func configuration(
+        appConfiguration: PowerModeConfig?,
+        configurations: [PowerModeConfig],
+        waitLimit: TimeInterval,
+        lookupURL: @escaping @Sendable () async throws -> String
+    ) async -> PowerModeConfig? {
+        let lookup = Task<String?, Never> {
             do {
-                let currentURL = try await self.browserURLService.getCurrentURL(from: browserType)
-                try Task.checkCancellation()
-
-                guard let config = PowerModeManager.shared.getConfigurationForURL(currentURL),
-                      await shouldApplyURLMatch() else {
-                    return
-                }
-                await MainActor.run {
-                    PowerModeManager.shared.setActiveConfiguration(config)
-                }
-                await PowerModeSessionManager.shared.beginSession(with: config)
-            } catch is CancellationError {
-                return
+                return try await lookupURL()
             } catch {
-                self.logger.error("❌ Failed to get URL from \(browserType.displayName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                logger.error("❌ Failed to get the browser URL: \(error.localizedDescription, privacy: .public)")
+                return nil
             }
         }
+
+        guard let answered = await BoundedWait.value(of: lookup, within: waitLimit) else {
+            logger.notice("Browser URL arrived too late for this recording; using the app's Power Mode")
+            return appConfiguration
+        }
+        return answered.flatMap { PowerModeManager.configuration(forURL: $0, in: configurations) }
+            ?? appConfiguration
     }
 }

@@ -20,6 +20,7 @@ class MiniWindowManager: ObservableObject {
                 MiniRecorderView(stateProvider: engine, recorder: recorder)
                     .environmentObject(manager)
                     .environmentObject(enhancementService)
+                    .environmentObject(engine.dictationSession)
             )
         }
         setupNotifications()

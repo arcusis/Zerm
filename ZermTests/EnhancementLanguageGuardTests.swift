@@ -51,9 +51,18 @@ struct EnhancementLanguageGuardTests {
         #expect(!EnhancementLanguageGuard.accept(original: original, enhanced: enhanced))
     }
 
-    @Test func dictationEnhancementDoesNotReadLiveSelection() {
-        #expect(!EnhancementContextPolicy.minimal.readsSelectedText)
-        #expect(!EnhancementContextPolicy.minimal.readsScreenCapture)
+    @Test func translationPromptsMayChangeTheScript() {
+        let original = "send the report today"
+        let translated = "שלח את הדוח היום"
+        #expect(EnhancementLanguageGuard.rejection(original: original, enhanced: translated, policy: .preserveScript) == .languageChanged)
+        #expect(EnhancementLanguageGuard.rejection(original: original, enhanced: translated, policy: .mayChangeLanguage) == nil)
+    }
+
+    @Test func expansionPromptsAreNotCappedAtFourTimesTheInput() {
+        let original = "email bob about friday"
+        let email = String(repeating: "Hi Bob, just a note about the Friday meeting and the agenda for it. ", count: 4)
+        #expect(EnhancementLanguageGuard.rejection(original: original, enhanced: email, policy: .preserveScript) == .tooLong)
+        #expect(EnhancementLanguageGuard.rejection(original: original, enhanced: email, policy: .mayChangeLanguage) == nil)
     }
 
     @Test func emptySidesAreAcceptedSoCallersCanHandleThem() {
@@ -65,16 +74,6 @@ struct EnhancementLanguageGuardTests {
         #expect(!AIPrompts.customPromptTemplate.localizedCaseInsensitiveContains("hebrew"))
         #expect(!AIPrompts.customPromptTemplate.localizedCaseInsensitiveContains("predominant"))
         #expect(AIPrompts.customPromptTemplate.contains("original script"))
-    }
-
-    @Test func dictationRefineDoesNotReadLiveSelectionOrScreen() {
-        #expect(!EnhancementContextPolicy.minimal.readsSelectedText)
-        #expect(!EnhancementContextPolicy.minimal.readsScreenCapture)
-    }
-
-    @Test func waitingEnhancedModeMayReadConfiguredContext() {
-        #expect(EnhancementContextPolicy.full.readsSelectedText)
-        #expect(EnhancementContextPolicy.full.readsScreenCapture)
     }
 
     @Test func gemmaSelfIntroductionIsNeverUsable() {

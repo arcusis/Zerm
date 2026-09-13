@@ -2,40 +2,42 @@ import Foundation
 import SwiftData
 import AppKit
 import os
-import LLMkit
 
-enum EnhancementPrompt {
-    case transcriptionEnhancement
-    case aiAssistant
+/// The decisions a dictation makes about enhancement once its text is known.
+struct EnhancementPlan: Equatable {
+    /// The mode after trigger words and auto-send are taken into account.
+    let outputMode: DictationOutputMode
+    /// What the LLM receives: the cleaned transcript, minus a trigger word.
+    let input: String
+    let overrides: EnhancementOverrides
+    /// True when the "Skip short transcriptions" setting applies to this text.
+    let skipsAsShort: Bool
 }
 
-/// How much surrounding context an enhancement request may gather.
-enum EnhancementContextPolicy {
-    /// Everything the user has enabled, including the selected-text and screen reads.
-    case full
-
-    /// Dictation default. The transcript is already in memory, and a live selected-text
-    /// read posts a synthetic ⌘C into whatever the user is doing. Screen capture plus OCR
-    /// is also far slower than the refine budget allows.
-    case minimal
-
-    var readsSelectedText: Bool { self == .full }
-    var readsScreenCapture: Bool { self == .full }
-}
-
+/// Owns the global enhancement settings and turns them into frozen `EnhancementRequest`s.
+///
+/// It keeps no per-request state: a request is built once, then run by `EnhancementExecutor`,
+/// so overlapping dictations, a refine that outlives its recorder, or a Power Mode switch can
+/// never change or clobber another request.
 @MainActor
 class AIEnhancementService: ObservableObject {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "AIEnhancementService")
 
-    @Published var isEnhancementEnabled: Bool {
+    /// The only switch that decides whether dictation is enhanced.
+    @Published var outputMode: DictationOutputMode {
         didSet {
-            UserDefaults.standard.set(isEnhancementEnabled, forKey: "isAIEnhancementEnabled")
-            if isEnhancementEnabled && selectedPromptId == nil {
-                selectedPromptId = customPrompts.first?.id
-            }
+            guard outputMode != oldValue else { return }
+            DictationOutputMode.setCurrent(outputMode)
             NotificationCenter.default.post(name: .AppSettingsDidChange, object: nil)
             NotificationCenter.default.post(name: .enhancementToggleChanged, object: nil)
         }
+    }
+
+    /// Derived from `outputMode`, for the on/off controls. Turning it on returns to the last AI
+    /// mode the user picked.
+    var isEnhancementEnabled: Bool {
+        get { outputMode.usesEnhancement }
+        set { outputMode = newValue ? DictationOutputMode.lastEnhancing() : .instant }
     }
 
     @Published var useClipboardContext: Bool {
@@ -44,6 +46,8 @@ class AIEnhancementService: ObservableObject {
         }
     }
 
+    /// On-screen text as context. Only Enhanced mode uses it: a capture plus OCR does not fit
+    /// the refine budget.
     @Published var useScreenCaptureContext: Bool {
         didSet {
             UserDefaults.standard.set(useScreenCaptureContext, forKey: "useScreenCaptureContext")
@@ -67,60 +71,30 @@ class AIEnhancementService: ObservableObject {
         }
     }
 
-    @Published var lastSystemMessageSent: String?
-    @Published var lastUserMessageSent: String?
-
     var activePrompt: CustomPrompt? {
-        allPrompts.first { $0.id == pinnedPromptId ?? selectedPromptId }
+        allPrompts.first { $0.id == selectedPromptId }
     }
-
-    /// Pins the prompt for the duration of one request.
-    ///
-    /// A deferred refine outlives the recorder: dismissing it ends the Power Mode session,
-    /// which restores the global prompt selection. Without pinning, a refine started under
-    /// an app-specific Power Mode would quietly finish using the user's default prompt.
-    private var pinnedPromptId: UUID?
 
     var allPrompts: [CustomPrompt] {
         return customPrompts
     }
 
     private let aiService: AIService
-    private let screenCaptureService: ScreenCaptureService
     private let customVocabularyService: CustomVocabularyService
-    private var baseTimeout: TimeInterval {
-        timeout(for: activeContextPolicy)
-    }
-
-    /// The refine budget is deliberately not user-configurable and deliberately short: a
-    /// refinement that lands after the user has moved on is worthless, and unlike the
-    /// Enhanced path nobody is sitting waiting for it.
-    private static let refineTimeout: TimeInterval = 4
-
-    private func timeout(for policy: EnhancementContextPolicy) -> TimeInterval {
-        switch policy {
-        case .minimal:
-            return Self.refineTimeout
-        case .full:
-            let stored = UserDefaults.standard.integer(forKey: "EnhancementTimeoutSeconds")
-            return stored > 0 ? TimeInterval(stored) : 15
-        }
-    }
-
-    private var activeContextPolicy: EnhancementContextPolicy = .minimal
-    private let rateLimitInterval: TimeInterval = 1.0
-    private var lastRequestTime: Date?
     private let modelContext: ModelContext
-    
-    @Published var lastCapturedClipboard: String?
+    private let executor: EnhancementExecutor
 
-    init(aiService: AIService = AIService(), modelContext: ModelContext) {
+    init(
+        aiService: AIService = AIService(),
+        modelContext: ModelContext,
+        client: EnhancementClient = LiveEnhancementClient()
+    ) {
         self.aiService = aiService
         self.modelContext = modelContext
-        self.screenCaptureService = ScreenCaptureService()
         self.customVocabularyService = CustomVocabularyService.shared
+        self.executor = EnhancementExecutor(client: client)
 
-        self.isEnhancementEnabled = UserDefaults.standard.bool(forKey: "isAIEnhancementEnabled")
+        self.outputMode = DictationOutputMode.current
         self.useClipboardContext = UserDefaults.standard.bool(forKey: "useClipboardContext")
         self.useScreenCaptureContext = UserDefaults.standard.bool(forKey: "useScreenCaptureContext")
         if let savedPromptsData = UserDefaults.standard.data(forKey: "customPrompts"),
@@ -134,7 +108,9 @@ class AIEnhancementService: ObservableObject {
             self.selectedPromptId = UUID(uuidString: savedPromptId)
         }
 
-        if isEnhancementEnabled && (selectedPromptId == nil || !allPrompts.contains(where: { $0.id == selectedPromptId })) {
+        initializePredefinedPrompts()
+
+        if selectedPromptId == nil || !allPrompts.contains(where: { $0.id == selectedPromptId }) {
             self.selectedPromptId = allPrompts.first?.id
         }
 
@@ -144,408 +120,169 @@ class AIEnhancementService: ObservableObject {
             name: .aiProviderKeyChanged,
             object: nil
         )
-
-        initializePredefinedPrompts()
-
-        // Instant mode genuinely never enhances, so reflecting that in the toggle is
-        // honest. The other two modes must not touch it: the previous code cleared the
-        // flag on every launch and persisted the change through `didSet`, which is why
-        // enhancement appeared to switch itself off between sessions.
-        switch DictationOutputMode.current {
-        case .instant:
-            isEnhancementEnabled = false
-            useClipboardContext = false
-            useScreenCaptureContext = false
-        case .instantRefine:
-            // Screen context needs a capture plus OCR, which cannot fit the refine budget.
-            useScreenCaptureContext = false
-        case .enhanced:
-            break
-        }
     }
 
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
 
+    /// Views that show `isConfigured` refresh. A removed key never switches enhancement off: the
+    /// next dictation reports that the provider needs a key instead.
     @objc private func handleAPIKeyChange() {
         DispatchQueue.main.async {
             self.objectWillChange.send()
-            if !self.aiService.isAPIKeyValid {
-                self.isEnhancementEnabled = false
-            }
         }
     }
 
-    func getAIService() -> AIService? {
-        return aiService
-    }
-
+    /// Whether the globally selected provider can enhance right now.
     var isConfigured: Bool {
-        switch aiService.selectedProvider {
-        case .localLLM:
-            return LocalLLMModelManager.isModelDownloaded(for: .enhancement)
-        case .localCLI:
-            return aiService.isAPIKeyValid
-        case .ollama:
-            return aiService.isAPIKeyValid && !aiService.currentModel.isEmpty
-        default:
-            return aiService.isAPIKeyValid
+        if case .success = aiService.endpoint(for: aiService.selectedProvider, model: aiService.currentModel) {
+            return true
+        }
+        return false
+    }
+
+    // MARK: - Requests
+
+    func settingsSnapshot() -> EnhancementSettingsSnapshot {
+        let stored = UserDefaults.standard.integer(forKey: "EnhancementTimeoutSeconds")
+        return EnhancementSettingsSnapshot(
+            prompts: allPrompts,
+            selectedPromptID: selectedPromptId,
+            provider: aiService.selectedProvider,
+            modelForProvider: aiService.model(for:),
+            endpointForProvider: aiService.endpoint(for:model:),
+            customVocabulary: customVocabularyService.getCustomVocabulary(from: modelContext),
+            timeoutSeconds: stored > 0 ? TimeInterval(stored) : EnhancementRequestBuilder.defaultTimeoutSeconds,
+            retriesOnTimeout: UserDefaults.standard.bool(forKey: "EnhancementRetryOnTimeout")
+        )
+    }
+
+    /// Builds the one request an enhancement will send. Everything it needs is read here.
+    func makeRequest(
+        input: String,
+        purpose: EnhancementPurpose,
+        overrides: EnhancementOverrides = EnhancementOverrides(),
+        clipboardContext: String? = nil,
+        screenContext: String? = nil
+    ) -> Result<EnhancementRequest, EnhancementUnavailableReason> {
+        EnhancementRequestBuilder.make(
+            input: input,
+            purpose: purpose,
+            overrides: overrides,
+            settings: settingsSnapshot(),
+            clipboardContext: clipboardContext,
+            screenContext: screenContext
+        )
+    }
+
+    func perform(
+        _ request: EnhancementRequest,
+        isCancelled: @escaping @MainActor @Sendable () -> Bool = { false }
+    ) async -> EnhancementOutcome {
+        await executor.run(request, isCancelled: isCancelled)
+    }
+
+    /// Resolves trigger words, auto-send and the short-transcription setting for one dictation.
+    func plan(
+        for cleanedText: String,
+        configuredMode: DictationOutputMode,
+        autoSendEnabled: Bool,
+        overrides: EnhancementOverrides
+    ) -> EnhancementPlan {
+        var mode = configuredMode
+        var input = cleanedText
+        var overrides = overrides
+        var triggered = false
+        if UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement"),
+           let detection = PromptDetectionService.detect(in: cleanedText, prompts: allPrompts) {
+            triggered = true
+            input = detection.processedText
+            overrides.promptID = detection.promptID
+            // A spoken trigger asks for AI on this dictation even when output is Instant, and
+            // waits for it: there is no raw paste to refine that would not contain the trigger.
+            if mode == .instant {
+                mode = .enhanced
+            }
+        }
+
+        let threshold = UserDefaults.standard.integer(forKey: "ShortEnhancementWordThreshold")
+        let skipsAsShort = !triggered
+            && UserDefaults.standard.bool(forKey: "SkipShortEnhancement")
+            && WordCounter.count(in: input) <= (threshold > 0 ? threshold : 3)
+
+        return EnhancementPlan(
+            outputMode: DictationOutputMode.effective(configured: mode, autoSendEnabled: autoSendEnabled),
+            input: input,
+            overrides: overrides,
+            skipsAsShort: skipsAsShort
+        )
+    }
+
+    /// History's "Re-enhance": the same request, filter and guard as dictation. The record is
+    /// only changed when a new enhancement succeeds, so a failed retry keeps the existing one.
+    func reenhance(_ transcription: Transcription) async -> EnhancementOutcome {
+        switch makeRequest(input: transcription.text, purpose: .manual) {
+        case .failure(let reason):
+            return .skipped(.notConfigured(reason))
+        case .success(let request):
+            let outcome = await perform(request)
+            if case .enhanced = outcome {
+                transcription.record(outcome, of: request, finalize: TextCleanupPreferences.global().applyPreferences(to:))
+                try? modelContext.save()
+            }
+            return outcome
         }
     }
 
-    private func waitForRateLimit() async throws {
-        if let lastRequest = lastRequestTime {
-            let timeSinceLastRequest = Date().timeIntervalSince(lastRequest)
-            if timeSinceLastRequest < rateLimitInterval {
-                try await Task.sleep(nanoseconds: UInt64((rateLimitInterval - timeSinceLastRequest) * 1_000_000_000))
-            }
+    /// The provider a dictation with these overrides would use, for deciding what to prewarm.
+    func resolvedProvider(for overrides: EnhancementOverrides) -> AIProvider {
+        guard let prompt = EnhancementRequestBuilder.resolvePrompt(overrides.promptID ?? selectedPromptId, in: allPrompts) else {
+            return aiService.selectedProvider
         }
-        lastRequestTime = Date()
+        return EnhancementRequestBuilder.resolveProviderAndModel(
+            overrides: overrides,
+            prompt: prompt,
+            globalProvider: aiService.selectedProvider,
+            modelForProvider: aiService.model(for:)
+        ).0
     }
 
-    private func getSystemMessage(for mode: EnhancementPrompt) async -> String {
-        let policy = activeContextPolicy
-        let selectedTextContext: String
-        if policy.readsSelectedText, AXIsProcessTrusted() {
-            if let selectedText = await SelectedTextService.fetchSelectedText(), !selectedText.isEmpty {
-                selectedTextContext = "\n\n<CURRENTLY_SELECTED_TEXT>\n\(selectedText)\n</CURRENTLY_SELECTED_TEXT>"
-            } else {
-                selectedTextContext = ""
-            }
-        } else {
-            selectedTextContext = ""
-        }
-
-        let clipboardContext = if useClipboardContext,
-                              let clipboardText = lastCapturedClipboard,
-                              !clipboardText.isEmpty {
-            "\n\n<CLIPBOARD_CONTEXT>\n\(clipboardText)\n</CLIPBOARD_CONTEXT>"
-        } else {
-            ""
-        }
-
-        let screenCaptureContext = if policy.readsScreenCapture,
-                                   useScreenCaptureContext,
-                                   let capturedText = screenCaptureService.lastCapturedText,
-                                   !capturedText.isEmpty {
-            "\n\n<CURRENT_WINDOW_CONTEXT>\n\(capturedText)\n</CURRENT_WINDOW_CONTEXT>"
-        } else {
-            ""
-        }
-
-        let customVocabulary = customVocabularyService.getCustomVocabulary(from: modelContext)
-        let usesTechnicalProfile = TechnicalTerminology.isCodingPrompt(activePrompt?.id)
-
-        let allContextSections = selectedTextContext + clipboardContext + screenCaptureContext
-
-        let customVocabularySection = if !customVocabulary.isEmpty {
-            """
-
-
-            The following are important vocabulary words, proper nouns, and technical terms. When these words or similar-sounding words appear in the <TRANSCRIPT>, ensure they are spelled EXACTLY as shown below:
-            <CUSTOM_VOCABULARY>
-            \(customVocabulary)
-            </CUSTOM_VOCABULARY>
-            """
-        } else {
-            ""
-        }
-
-        let technicalVocabularySection = if usesTechnicalProfile {
-            """
-
-
-            The Coding profile includes the following canonical terminology. Apply it only when
-            pronunciation and surrounding context support the correction; ordinary words with a
-            different meaning must remain ordinary words.
-            <BUILT_IN_TECHNICAL_VOCABULARY>
-            \(TechnicalTerminology.canonicalTerms.joined(separator: ", "))
-            </BUILT_IN_TECHNICAL_VOCABULARY>
-
-            \(TechnicalTerminology.phoneticGuidance)
-            """
-        } else {
-            ""
-        }
-
-        let finalContextSection = allContextSections + customVocabularySection + technicalVocabularySection
-
-        if let activePrompt = activePrompt {
-            if activePrompt.id == PredefinedPrompts.assistantPromptId {
-                return activePrompt.promptText + finalContextSection
-            } else {
-                return activePrompt.finalPromptText + finalContextSection
-            }
-        } else {
-            let defaultPrompt = allPrompts.first(where: { $0.id == PredefinedPrompts.defaultPromptId }) ?? allPrompts.first!
-            return defaultPrompt.finalPromptText + finalContextSection
-        }
+    /// Text visible in the frontmost window, or nil without Screen Recording permission.
+    static func captureScreenText() async -> String? {
+        guard CGPreflightScreenCaptureAccess() else { return nil }
+        return await ScreenCaptureService().captureAndExtractText()
     }
 
-    /// A rewrite is roughly the length of its input, so a twenty-word dictation should
-    /// never be allowed to run out to a flat 512 tokens — that alone can overrun the
-    /// refine budget on the on-device model.
     static func tokenBudget(forInput text: String) -> Int {
-        min(512, max(64, text.utf16.count / 3))
+        EnhancementRequestBuilder.tokenBudget(forInput: text)
     }
 
-    private func makeRequest(text: String, mode: EnhancementPrompt) async throws -> String {
-        guard isConfigured else {
-            throw EnhancementError.notConfigured
-        }
+    // MARK: - Prompts
 
-        guard !text.isEmpty else {
-            return ""
-        }
-
-        let formattedText = "\n<TRANSCRIPT>\n\(text)\n</TRANSCRIPT>"
-        let systemMessage = await getSystemMessage(for: mode)
-
-        await MainActor.run {
-            self.lastSystemMessageSent = systemMessage
-            self.lastUserMessageSent = formattedText
-        }
-
-        if aiService.selectedProvider == .ollama {
-            do {
-                let result = try await aiService.enhanceWithOllama(text: formattedText, systemPrompt: systemMessage)
-                return AIEnhancementOutputFilter.filter(result)
-            } catch {
-                if let localError = error as? LocalAIError {
-                    throw EnhancementError.customError(localError.errorDescription ?? "An unknown Ollama error occurred.")
-                } else {
-                    throw EnhancementError.customError(error.localizedDescription)
-                }
-            }
-        }
-
-        if aiService.selectedProvider == .localCLI {
-            do {
-                let result = try await aiService.enhanceWithLocalCLI(systemPrompt: systemMessage, userPrompt: formattedText)
-                return AIEnhancementOutputFilter.filter(result)
-            } catch {
-                if let localError = error as? LocalCLIError {
-                    throw EnhancementError.customError(localError.errorDescription ?? "An unknown Local CLI error occurred.")
-                } else {
-                    throw EnhancementError.customError(error.localizedDescription)
-                }
-            }
-        }
-
-        if aiService.selectedProvider == .localLLM {
-            do {
-                let cancelHook = cancellationCheck
-                let result = try await LocalLLMModelManager.shared.generate(
-                    system: systemMessage,
-                    user: formattedText,
-                    maxNewTokens: Self.tokenBudget(forInput: text),
-                    role: .enhancement,
-                    isCancelled: { Task.isCancelled || cancelHook() }
-                )
-                if Task.isCancelled || cancelHook() {
-                    throw CancellationError()
-                }
-                return AIEnhancementOutputFilter.filter(result)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                throw EnhancementError.customError(error.localizedDescription)
-            }
-        }
-
-        try await waitForRateLimit()
-
-        do {
-            let result: String
-            switch aiService.selectedProvider {
-            case .anthropic:
-                result = try await AnthropicLLMClient.chatCompletion(
-                    apiKey: aiService.apiKey,
-                    model: aiService.currentModel,
-                    messages: [.user(formattedText)],
-                    systemPrompt: systemMessage,
-                    timeout: baseTimeout
-                )
-            default:
-                guard let baseURL = URL(string: aiService.selectedProvider.baseURL) else {
-                    throw EnhancementError.customError("\(aiService.selectedProvider.rawValue) has an invalid API endpoint URL. Please update it in AI settings.")
-                }
-                let temperature = aiService.currentModel.lowercased().hasPrefix("gpt-5") ? 1.0 : 0.3
-                let reasoningEffort = ReasoningConfig.getReasoningParameter(for: aiService.currentModel)
-                let extraBody = ReasoningConfig.getExtraBodyParameters(for: aiService.currentModel)
-                result = try await OpenAILLMClient.chatCompletion(
-                    baseURL: baseURL,
-                    apiKey: aiService.apiKey,
-                    model: aiService.currentModel,
-                    messages: [.user(formattedText)],
-                    systemPrompt: systemMessage,
-                    temperature: temperature,
-                    reasoningEffort: reasoningEffort,
-                    extraBody: extraBody,
-                    timeout: baseTimeout
-                )
-            }
-            return AIEnhancementOutputFilter.filter(result.trimmingCharacters(in: .whitespacesAndNewlines))
-        } catch let error as LLMKitError {
-            throw mapLLMKitError(error)
-        } catch let error as EnhancementError {
-            throw error
-        } catch {
-            throw EnhancementError.customError(error.localizedDescription)
-        }
-    }
-
-    private func mapLLMKitError(_ error: LLMKitError) -> EnhancementError {
-        switch error {
-        case .missingAPIKey:
-            return .notConfigured
-        case .httpError(let statusCode, let message):
-            if statusCode == 429 { return .rateLimitExceeded }
-            if (500...599).contains(statusCode) { return .serverError }
-            return .customError("HTTP \(statusCode): \(message)")
-        case .noResultReturned:
-            return .enhancementFailed
-        case .networkError:
-            return .networkError
-        case .timeout:
-            return .timeout
-        case .invalidURL, .decodingError, .encodingError, .unsupportedModel:
-            return .customError(error.localizedDescription)
-        }
-    }
-
-    private var retryOnTimeout: Bool {
-        UserDefaults.standard.bool(forKey: "EnhancementRetryOnTimeout")
-    }
-
-    private func makeRequestWithRetry(text: String, mode: EnhancementPrompt, maxRetries: Int = 3, initialDelay: TimeInterval = 1.0) async throws -> String {
-        var retries = 0
-        var currentDelay = initialDelay
-
-        while retries < maxRetries {
-            do {
-                return try await makeRequest(text: text, mode: mode)
-            } catch let error as EnhancementError {
-                switch error {
-                case .networkError, .serverError, .rateLimitExceeded:
-                    retries += 1
-                    if retries < maxRetries {
-                        logger.warning("Request failed, retrying in \(currentDelay, privacy: .public)s... (Attempt \(retries, privacy: .public)/\(maxRetries, privacy: .public))")
-                        try await Task.sleep(nanoseconds: UInt64(currentDelay * 1_000_000_000))
-                        currentDelay *= 2
-                    } else {
-                        logger.error("Request failed after \(maxRetries, privacy: .public) retries.")
-                        throw error
-                    }
-                case .timeout:
-                    if retryOnTimeout {
-                        retries += 1
-                        if retries < maxRetries {
-                            logger.warning("Request timed out, retrying immediately... (Attempt \(retries, privacy: .public)/\(maxRetries, privacy: .public))")
-                        } else {
-                            logger.error("Request timed out after \(maxRetries, privacy: .public) retries.")
-                            throw error
-                        }
-                    } else {
-                        logger.error("Request timed out, failing immediately (retry disabled).")
-                        throw error
-                    }
-                default:
-                    throw error
-                }
-            } catch {
-                let nsError = error as NSError
-                if nsError.domain == NSURLErrorDomain && [NSURLErrorNotConnectedToInternet, NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost].contains(nsError.code) {
-                    retries += 1
-                    if retries < maxRetries {
-                        logger.warning("Request failed with network error, retrying in \(currentDelay, privacy: .public)s... (Attempt \(retries, privacy: .public)/\(maxRetries, privacy: .public))")
-                        try await Task.sleep(nanoseconds: UInt64(currentDelay * 1_000_000_000))
-                        currentDelay *= 2
-                    } else {
-                        logger.error("Request failed after \(maxRetries, privacy: .public) retries with network error.")
-                        throw EnhancementError.networkError
-                    }
-                } else {
-                    throw error
-                }
-            }
-        }
-
-        throw EnhancementError.enhancementFailed
-    }
-
-    /// External cancel hook set for the duration of a single enhance call.
-    private var cancellationCheck: () -> Bool = { false }
-
-    func enhance(
-        _ text: String,
-        isCancelled: @escaping () -> Bool = { false },
-        contextPolicy: EnhancementContextPolicy = .minimal,
-        usingPrompt pinnedPrompt: UUID? = nil
-    ) async throws -> (String, TimeInterval, String?) {
-        let startTime = Date()
-        let enhancementPrompt: EnhancementPrompt = .transcriptionEnhancement
-        cancellationCheck = isCancelled
-        activeContextPolicy = contextPolicy
-        pinnedPromptId = pinnedPrompt
-        let promptName = activePrompt?.title
-        let skipScriptGuard = activePrompt?.id == PredefinedPrompts.assistantPromptId
-        defer {
-            cancellationCheck = { false }
-            activeContextPolicy = .minimal
-            pinnedPromptId = nil
-        }
-
-        if isCancelled() { throw CancellationError() }
-
-        do {
-            let result = try await makeRequestWithRetry(text: text, mode: enhancementPrompt)
-            if isCancelled() || Task.isCancelled { throw CancellationError() }
-            let endTime = Date()
-            let duration = endTime.timeIntervalSince(startTime)
-            // A provider that returns nothing has failed, and saying so is the only honest
-            // outcome. Returning "" as a success let callers persist an empty enhancement over
-            // a perfectly good transcript, which is what blanked every History row in 2.8.3.
-            guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                logger.error("Enhancement provider returned no text — treating as a failure")
-                throw EnhancementError.enhancementFailed
-            }
-            if skipScriptGuard || EnhancementLanguageGuard.isUsable(original: text, enhanced: result) {
-                return (result, duration, promptName)
-            }
-            logger.notice("Enhancement discarded: model talked about itself or changed the writing system")
-            return (text, duration, promptName)
-        } catch {
-            throw error
-        }
-    }
-
-    func captureScreenContext() async {
-        guard CGPreflightScreenCaptureAccess() else {
-            return
-        }
-
-        // captureAndExtractText stores the OCR result on the service; the consumer
-        // reads it from there. Only the success/failure matters here.
-        if await screenCaptureService.captureAndExtractText() != nil {
-            await MainActor.run {
-                self.objectWillChange.send()
-            }
-        }
-    }
-
-    func captureClipboardContext() {
-        lastCapturedClipboard = NSPasteboard.general.string(forType: .string)
-    }
-    
-    func clearCapturedContexts() {
-        lastCapturedClipboard = nil
-        screenCaptureService.lastCapturedText = nil
-    }
-
-    func addPrompt(title: String, promptText: String, icon: PromptIcon = "doc.text.fill", description: String? = nil, triggerWords: [String] = [], useSystemInstructions: Bool = true) {
-        let newPrompt = CustomPrompt(title: title, promptText: promptText, icon: icon, description: description, isPredefined: false, triggerWords: triggerWords, useSystemInstructions: useSystemInstructions)
+    func addPrompt(
+        title: String,
+        promptText: String,
+        icon: PromptIcon = "doc.text.fill",
+        description: String? = nil,
+        triggerWords: [String] = [],
+        useSystemInstructions: Bool = true,
+        providerOverride: String? = nil,
+        modelOverride: String? = nil,
+        allowsLanguageChange: Bool = false
+    ) {
+        let newPrompt = CustomPrompt(
+            title: title,
+            promptText: promptText,
+            icon: icon,
+            description: description,
+            isPredefined: false,
+            triggerWords: triggerWords,
+            useSystemInstructions: useSystemInstructions,
+            providerOverride: providerOverride,
+            modelOverride: modelOverride,
+            allowsLanguageChange: allowsLanguageChange
+        )
         customPrompts.append(newPrompt)
         if customPrompts.count == 1 {
             selectedPromptId = newPrompt.id
@@ -574,56 +311,24 @@ class AIEnhancementService: ObservableObject {
 
         for template in predefinedTemplates {
             if let existingIndex = customPrompts.firstIndex(where: { $0.id == template.id }) {
-                var updatedPrompt = customPrompts[existingIndex]
-                updatedPrompt = CustomPrompt(
-                    id: updatedPrompt.id,
+                let existing = customPrompts[existingIndex]
+                // The text comes from the app; the user's trigger words and model choice stay.
+                customPrompts[existingIndex] = CustomPrompt(
+                    id: existing.id,
                     title: template.title,
                     promptText: template.promptText,
-                    isActive: updatedPrompt.isActive,
                     icon: template.icon,
                     description: template.description,
                     isPredefined: true,
-                    triggerWords: updatedPrompt.triggerWords,
-                    useSystemInstructions: template.useSystemInstructions
+                    triggerWords: existing.triggerWords,
+                    useSystemInstructions: template.useSystemInstructions,
+                    providerOverride: existing.providerOverride,
+                    modelOverride: existing.modelOverride,
+                    allowsLanguageChange: template.allowsLanguageChange
                 )
-                customPrompts[existingIndex] = updatedPrompt
             } else {
                 customPrompts.append(template)
             }
-        }
-    }
-}
-
-enum EnhancementError: Error {
-    case notConfigured
-    case invalidResponse
-    case enhancementFailed
-    case networkError
-    case serverError
-    case rateLimitExceeded
-    case timeout
-    case customError(String)
-}
-
-extension EnhancementError: LocalizedError {
-    var errorDescription: String? {
-        switch self {
-        case .notConfigured:
-            return "AI provider not configured. Please check your API key."
-        case .invalidResponse:
-            return "Invalid response from AI provider."
-        case .enhancementFailed:
-            return "AI enhancement failed to process the text."
-        case .networkError:
-            return "Network connection failed. Check your internet."
-        case .serverError:
-            return "The AI provider's server encountered an error. Please try again later."
-        case .rateLimitExceeded:
-            return "Rate limit exceeded. Please try again later."
-        case .timeout:
-            return "Enhancement request timed out. Check your connection or increase the timeout duration."
-        case .customError(let message):
-            return message
         }
     }
 }

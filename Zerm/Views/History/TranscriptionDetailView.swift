@@ -145,7 +145,7 @@ struct TranscriptionDetailView: View {
         Task { @MainActor in
             defer { isWorking = false }
             guard let model = transcriptionModelManager.currentTranscriptionModel else {
-                NotificationManager.shared.showNotification(title: "No model selected", type: .error)
+                NotificationManager.shared.showNotification(title: String(localized: "No model selected"), type: .error)
                 return
             }
             do {
@@ -157,11 +157,13 @@ struct TranscriptionDetailView: View {
                 let result = try await service.retranscribeAudio(from: url, using: model)
                 transcription.text = result.text
                 transcription.enhancedText = result.enhancedText
+                transcription.enhancementOutcome = result.enhancementOutcome
+                transcription.enhancementOutcomeReason = result.enhancementOutcomeReason
                 try? modelContext.save()
-                NotificationManager.shared.showNotification(title: "Re-transcribed", type: .success)
+                NotificationManager.shared.showNotification(title: String(localized: "Re-transcribed"), type: .success)
             } catch {
                 NotificationManager.shared.showNotification(
-                    title: "Re-transcribe failed: \(error.localizedDescription)",
+                    title: String(localized: "Re-transcribe failed: \(error.localizedDescription)"),
                     type: .error
                 )
             }
@@ -172,16 +174,11 @@ struct TranscriptionDetailView: View {
         isWorking = true
         Task { @MainActor in
             defer { isWorking = false }
-            do {
-                let (enhanced, _, _) = try await enhancementService.enhance(transcription.text)
-                transcription.enhancedText = enhanced
-                try? modelContext.save()
-                NotificationManager.shared.showNotification(title: "Enhanced", type: .success)
-            } catch {
-                NotificationManager.shared.showNotification(
-                    title: "Enhance failed: \(error.localizedDescription)",
-                    type: .error
-                )
+            let outcome = await enhancementService.reenhance(transcription)
+            if case .enhanced = outcome {
+                NotificationManager.shared.showNotification(title: String(localized: "Enhanced"), type: .success)
+            } else {
+                EnhancementNotifier.shared.report(outcome, purpose: .manual)
             }
         }
     }
@@ -197,24 +194,48 @@ struct TranscriptionDetailView: View {
             case .casual: return "Rewrite the transcript in a more casual, conversational tone. Reply with only the rewritten text."
             }
         }
+
+        /// Translation is supposed to change the language; the others must keep it.
+        var languagePolicy: EnhancementLanguagePolicy {
+            self == .translate ? .mayChangeLanguage : .preserveScript
+        }
     }
 
+    /// Quick actions go through the same output filter and language guard as dictation, so a
+    /// leaked control token or an unwanted translation never lands in History.
     private func runLocalAction(_ action: LocalAction) {
         isWorking = true
         Task { @MainActor in
             defer { isWorking = false }
+            let started = Date()
             do {
-                let result = try await LocalLLMModelManager.shared.generate(
+                let result = AIEnhancementOutputFilter.filter(try await LocalLLMModelManager.shared.generate(
                     system: action.system,
                     user: transcription.text,
                     maxNewTokens: 400
-                )
-                transcription.enhancedText = result
+                ))
+                let outcome: EnhancementOutcome
+                if result.isEmpty {
+                    outcome = .failed(.emptyResponse)
+                } else if let rejection = EnhancementLanguageGuard.rejection(
+                    original: transcription.text,
+                    enhanced: result,
+                    policy: action.languagePolicy
+                ) {
+                    outcome = .rejected(rejection)
+                } else {
+                    outcome = .enhanced(text: result, duration: Date().timeIntervalSince(started))
+                }
+                guard case .enhanced = outcome else {
+                    EnhancementNotifier.shared.report(outcome, purpose: .manual)
+                    return
+                }
+                transcription.record(outcome, of: nil)
                 try? modelContext.save()
-                NotificationManager.shared.showNotification(title: "Done", type: .success)
+                NotificationManager.shared.showNotification(title: String(localized: "Done"), type: .success)
             } catch {
                 NotificationManager.shared.showNotification(
-                    title: "Local AI failed: \(error.localizedDescription)",
+                    title: String(localized: "Local AI failed: \(error.localizedDescription)"),
                     type: .error
                 )
             }

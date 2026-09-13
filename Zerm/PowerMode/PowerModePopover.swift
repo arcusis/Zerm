@@ -37,9 +37,8 @@ struct PowerModePopover: View {
                                 config: config,
                                 isSelected: selectedConfig?.id == config.id,
                                 action: {
-                                    powerModeManager.setActiveConfiguration(config)
+                                    powerModeManager.selectInRecorder(config)
                                     selectedConfig = config
-                                    applySelectedConfiguration()
                                 }
                             )
                         }
@@ -58,14 +57,6 @@ struct PowerModePopover: View {
         }
         .onChange(of: powerModeManager.activeConfiguration) { _, newValue in
             selectedConfig = newValue
-        }
-    }
-    
-    private func applySelectedConfiguration() {
-        Task {
-            if let config = selectedConfig {
-                await PowerModeSessionManager.shared.beginSession(with: config)
-            }
         }
     }
 }

@@ -3,15 +3,27 @@ import AVFoundation
 import SwiftData
 import os
 
-/// Handles the full post-recording pipeline:
-/// transcribe → filter → format → word-replace → prompt-detect → AI enhance → save → paste → dismiss
+/// Handles the full post-recording pipeline, in this order:
+///
+/// 1. transcribe, with the recording's model and language
+/// 2. deterministic cleanup — output filter and fillers, formatting, word replacement, dictation
+///    commands ("new line", "scratch that")
+/// 3. the user's lowercase and punctuation preferences → the text pasted by Instant modes
+/// 4. enhancement of the cleaned text from step 2, identical for Enhanced and Instant + Refine
+/// 5. step 3's preferences again, on the enhancement → the text Enhanced pastes or Refine writes
+/// 6. save → paste → hand refine off → dismiss
+///
+/// Prompts must not repeat step 2: a model asked to remove fillers or "scratch that" a second time
+/// only gets another chance to damage the text.
 @MainActor
 class TranscriptionPipeline {
     private let modelContext: ModelContext
     private let serviceRegistry: TranscriptionServiceRegistry
     private let enhancementService: AIEnhancementService?
-    private let promptDetectionService = PromptDetectionService()
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionPipeline")
+
+    /// How long Enhanced output waits for on-screen text still being read.
+    static let screenContextWaitLimit: TimeInterval = 1
 
     var licenseViewModel: LicenseViewModel
 
@@ -30,8 +42,8 @@ class TranscriptionPipeline {
     /// - Parameters:
     ///   - transcription: The pending Transcription SwiftData object to populate and save.
     ///   - audioURL: The recorded audio file.
-    ///   - model: The transcription model to use.
-    ///   - session: An active streaming session if one was prepared, otherwise nil.
+    ///   - dictationSession: The configuration resolved when recording started.
+    ///   - transcriptionSession: An active streaming session if one was prepared, otherwise nil.
     ///   - onStateChange: Called when the pipeline moves to a new recording state (e.g. `.enhancing`).
     ///   - shouldCancel: Returns true if the user requested cancellation.
     ///   - isRunStillValid: Returns false when a newer pipeline run has superseded this one.
@@ -40,11 +52,11 @@ class TranscriptionPipeline {
     func run(
         transcription: Transcription,
         audioURL: URL,
-        model: any TranscriptionModel,
-        session: TranscriptionSession?,
+        dictationSession: DictationSessionConfiguration,
+        transcriptionSession: TranscriptionSession?,
         onStateChange: @escaping (RecordingState) -> Void,
-        shouldCancel: @escaping () -> Bool,
-        isRunStillValid: @escaping () -> Bool = { true },
+        shouldCancel: @escaping @MainActor @Sendable () -> Bool,
+        isRunStillValid: @escaping @MainActor @Sendable () -> Bool = { true },
         onCleanup: @escaping () async -> Void,
         onDismiss: @escaping () async -> Void
     ) async {
@@ -57,25 +69,26 @@ class TranscriptionPipeline {
             return
         }
 
+        let model = dictationSession.transcriptionModel
         var finalPastedText: String?
-        var promptDetectionResult: PromptDetectionService.PromptDetectionResult?
-        // Set once the mode and the enhancement preconditions are known, and read again
-        // after the paste, which happens outside this do/catch.
-        var shouldRefineAfterPaste = false
+        // Built before the paste and the recorder's dismissal, so nothing a dismissal resets can
+        // reach it. Read again after the paste, which happens outside this do/catch.
+        var refineRequest: EnhancementRequest?
 
         logger.notice("🔄 Starting transcription...")
 
         do {
             let transcriptionStart = Date()
-            var text: String
             // Hard timeout: if transcription hasn't returned within 120 seconds the
             // model/provider is hung.  Cancel it so the app returns to .idle rather than
             // staying stuck in the "Transcribing…" state indefinitely. (VoiceInk #338)
-            text = try await withTranscriptionTimeout(seconds: 120) { [serviceRegistry = self.serviceRegistry] in
-                if let session {
-                    return try await session.transcribe(audioURL: audioURL)
-                } else {
-                    return try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
+            let transcript = try await LanguagePreference.$operationOverrideCode.withValue(dictationSession.languageCode) {
+                try await withTranscriptionTimeout(seconds: 120) { [serviceRegistry = self.serviceRegistry] in
+                    if let transcriptionSession {
+                        return try await transcriptionSession.transcribe(audioURL: audioURL)
+                    } else {
+                        return try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
+                    }
                 }
             }
             // If this run was superseded while awaiting transcription, drop the result.
@@ -88,151 +101,119 @@ class TranscriptionPipeline {
                 await onCleanup()
                 return
             }
-            logger.notice("📝 Transcript: \(text.count, privacy: .public) characters")
-            text = TranscriptionOutputFilter.filter(text)
-            logger.notice("📝 Output filter result: \(text.count, privacy: .public) characters")
+            logger.notice("📝 Transcript: \(transcript.count, privacy: .public) characters")
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
 
-            let powerModeManager = PowerModeManager.shared
-            let activePowerModeConfig = powerModeManager.currentActiveConfiguration
-            let powerModeName = (activePowerModeConfig?.isEnabled == true) ? activePowerModeConfig?.name : nil
-            let powerModeEmoji = (activePowerModeConfig?.isEnabled == true) ? activePowerModeConfig?.emoji : nil
-
-            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if UserDefaults.standard.bool(forKey: "IsTextFormattingEnabled") {
-                text = WhisperTextFormatter.format(text)
-                logger.notice("📝 Formatted transcript: \(text.count, privacy: .public) characters")
+            let textCleanup = dictationSession.textCleanup
+            let cleanedText = DictationTextProcessing.clean(transcript, formatsText: textCleanup.formatsText) { [modelContext] text in
+                WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
             }
-
-            text = WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
-            logger.notice("📝 WordReplacement: \(text.count, privacy: .public) characters")
-
-            // Offline dictation commands ("new line", "scratch that", spoken punctuation)
-            // run as a deterministic post-processor so they work without the LLM prompt.
-            text = DictationCommandProcessor.process(text)
-
-            let cleanedText = TranscriptionOutputFilter.applyUserCleanupPreferences(text)
-            logger.notice("📝 Cleanup preferences result: \(cleanedText.count, privacy: .public) characters")
+            let pastedText = textCleanup.applyPreferences(to: cleanedText)
+            logger.notice("📝 Cleaned transcript: \(pastedText.count, privacy: .public) characters")
             let audioAsset = AVURLAsset(url: audioURL)
             let actualDuration = (try? CMTimeGetSeconds(await audioAsset.load(.duration))) ?? 0.0
 
             DebugLogger.shared.log(
                 "TranscriptionPipeline",
-                "transcription finished: chars=\(cleanedText.count) empty=\(cleanedText.isEmpty) model=\(model.displayName) provider=\(model.provider.rawValue) dur=\(String(format: "%.2f", actualDuration))s"
+                "transcription finished: chars=\(pastedText.count) empty=\(pastedText.isEmpty) model=\(model.displayName) provider=\(model.provider.rawValue) dur=\(String(format: "%.2f", actualDuration))s"
             )
 
             // Notify the user when the transcription returns nothing — typically a very
             // short phrase released before the model captures enough audio, or a fully
             // silent recording. Without feedback the user sees no paste and no error,
             // which is confusing. (VoiceInk #686)
-            if cleanedText.isEmpty {
+            if pastedText.isEmpty {
                 logger.notice("⚠️ Transcription returned empty result model=\(model.displayName, privacy: .public) dur=\(actualDuration, privacy: .public)s")
                 let shortClip = actualDuration < 0.8
                 let title = shortClip
                     ? "Nothing transcribed — hold a bit longer before releasing"
                     : "Nothing transcribed — try again or switch model in AI Models"
-                await MainActor.run {
-                    if shortClip {
-                        NotificationManager.shared.showNotification(
-                            title: title,
-                            type: .warning,
-                            duration: 4.0
-                        )
-                    } else {
-                        NotificationManager.shared.showNotification(
-                            title: title,
-                            type: .warning,
-                            duration: 4.0,
-                            actionButton: (label: "Open Models", action: {
-                                MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
-                            })
-                        )
-                    }
+                if shortClip {
+                    NotificationManager.shared.showNotification(
+                        title: title,
+                        type: .warning,
+                        duration: 4.0
+                    )
+                } else {
+                    NotificationManager.shared.showNotification(
+                        title: title,
+                        type: .warning,
+                        duration: 4.0,
+                        actionButton: (label: "Open Models", action: {
+                            MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
+                        })
+                    )
                 }
             }
 
-            transcription.text = cleanedText
+            transcription.text = pastedText
             transcription.duration = actualDuration
             transcription.transcriptionModelName = model.displayName
             transcription.transcriptionDuration = transcriptionDuration
-            transcription.powerModeName = powerModeName
-            transcription.powerModeEmoji = powerModeEmoji
-            finalPastedText = cleanedText
+            transcription.powerModeName = dictationSession.powerMode?.name
+            transcription.powerModeEmoji = dictationSession.powerMode?.emoji
+            finalPastedText = pastedText
 
-            let autoSendKey = activePowerModeConfig?.autoSendKey
-            // Auto-send submits the field about half a second after the paste, so there is
-            // nothing left to refine afterwards. Where both are configured the only
-            // coherent outcome is to enhance first and send the enhanced text, so this
-            // falls back to Enhanced rather than silently dropping the enhancement.
-            // Opaque editors no longer wait: Instant + Refine always pastes raw first.
-            let configuredOutputMode = DictationOutputMode.current
-            let outputMode = DictationOutputMode.effective(
-                configured: configuredOutputMode,
-                autoSendEnabled: autoSendKey?.isEnabled == true
-            )
-            if configuredOutputMode == .instantRefine, outputMode == .enhanced {
-                logger.notice("Instant + Refine will wait and paste once because auto-send would submit the raw field")
-            }
-            let blocksOnEnhancement = outputMode == .enhanced
-            let allowPromptTriggeredEnhancement = UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement")
+            if let enhancementService, !pastedText.isEmpty {
+                let configuredMode = dictationSession.configuredOutputMode(global: enhancementService.outputMode)
+                let plan = enhancementService.plan(
+                    for: cleanedText,
+                    configuredMode: configuredMode,
+                    autoSendEnabled: dictationSession.autoSendEnabled,
+                    overrides: dictationSession.enhancementOverrides
+                )
+                // Auto-send submits the field about half a second after the paste, so there is
+                // nothing left to refine afterwards: that case waits and pastes once.
+                if configuredMode == .instantRefine, plan.outputMode == .enhanced {
+                    logger.notice("Instant + Refine will wait and paste once because auto-send would submit the raw field")
+                }
 
-            if blocksOnEnhancement,
-               allowPromptTriggeredEnhancement,
-               let enhancementService,
-               enhancementService.isConfigured {
-                let detectionResult = promptDetectionService.analyzeText(text, with: enhancementService)
-                promptDetectionResult = detectionResult
-                await promptDetectionService.applyDetectionResult(detectionResult, to: enhancementService)
-            }
-
-            let isSkipShortEnhancementEnabled = UserDefaults.standard.bool(forKey: "SkipShortEnhancement")
-            let savedThreshold = UserDefaults.standard.integer(forKey: "ShortEnhancementWordThreshold")
-            let shortEnhancementWordThreshold = savedThreshold > 0 ? savedThreshold : 3
-            let shouldSkipEnhancement = isSkipShortEnhancementEnabled && WordCounter.count(in: text) <= shortEnhancementWordThreshold && !(promptDetectionResult?.shouldEnableAI == true)
-
-            let canEnhance = enhancementService?.isEnhancementEnabled == true
-                && enhancementService?.isConfigured == true
-                && !shouldSkipEnhancement
-            shouldRefineAfterPaste = outputMode == .instantRefine && canEnhance
-
-            if let enhancementService,
-               blocksOnEnhancement,
-               canEnhance,
-               !shouldCancel() {
-                onStateChange(.enhancing)
-                let textForAI = promptDetectionResult?.processedText ?? text
-
-                do {
-                    let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(
-                        textForAI,
-                        isCancelled: { shouldCancel() },
-                        contextPolicy: .minimal
-                    )
-                    logger.notice("📝 AI enhancement: \(enhancedText.count, privacy: .public) characters")
-                    transcription.enhancedText = enhancedText
-                    transcription.aiEnhancementModelName = enhancementService.getAIService()?.currentModel
-                    transcription.promptName = promptName
-                    transcription.enhancementDuration = enhancementDuration
-                    transcription.aiRequestSystemMessage = enhancementService.lastSystemMessageSent
-                    transcription.aiRequestUserMessage = enhancementService.lastUserMessageSent
-                    finalPastedText = enhancedText
-                } catch {
-                    // A cancelled enhancement is not a failure — let it propagate to
-                    // the outer cancellation handler instead of relabelling it.
-                    if error is CancellationError { throw error }
-                    let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    // The failure text must not be written into `enhancedText`. History shows
-                    // the enhancement in preference to the transcript, so storing an error there
-                    // replaces the user's words with a diagnostic in the one place they go to
-                    // find them. The notification below is where a failure belongs.
-                    logger.error("AI enhancement failed: \(errorDescription, privacy: .public)")
-                    let shortReason = String(errorDescription.prefix(80))
-                    await MainActor.run {
-                        NotificationManager.shared.showNotification(
-                            title: "Enhancement failed: \(shortReason)",
-                            type: .warning
-                        )
+                if plan.outputMode.usesEnhancement, !plan.input.isEmpty {
+                    if plan.skipsAsShort {
+                        transcription.record(.skipped(.shortTranscription), of: nil)
+                    } else {
+                        var screenContext: String?
+                        if plan.outputMode == .enhanced,
+                           dictationSession.usesScreenContext(global: enhancementService.useScreenCaptureContext),
+                           let capture = dictationSession.screenContext {
+                            // The capture started with the recording and is usually done. If OCR
+                            // is still running, enhance without it rather than make the paste wait.
+                            screenContext = await BoundedWait.value(
+                                of: capture,
+                                within: Self.screenContextWaitLimit,
+                                isCancelled: shouldCancel
+                            ) ?? nil
+                        }
+                        if shouldCancel() { throw CancellationError() }
+                        switch enhancementService.makeRequest(
+                            input: plan.input,
+                            purpose: plan.outputMode == .enhanced ? .enhanced : .refine,
+                            overrides: plan.overrides,
+                            clipboardContext: dictationSession.clipboardContext,
+                            screenContext: screenContext
+                        ) {
+                        case .failure(let reason):
+                            let outcome = EnhancementOutcome.skipped(.notConfigured(reason))
+                            logger.notice("Enhancement skipped: \(outcome.recordReason ?? "", privacy: .public)")
+                            transcription.record(outcome, of: nil)
+                            EnhancementNotifier.shared.report(outcome, purpose: .enhanced)
+                        case .success(let request) where plan.outputMode == .enhanced:
+                            if !shouldCancel() {
+                                onStateChange(.enhancing)
+                            }
+                            let outcome = await enhancementService.perform(request, isCancelled: shouldCancel)
+                            // A cancelled enhancement is not a failure — let it propagate to the
+                            // outer cancellation handler instead of relabelling it.
+                            if outcome == .cancelled { throw CancellationError() }
+                            transcription.record(outcome, of: request, finalize: textCleanup.applyPreferences(to:))
+                            if case .enhanced = outcome, let enhancedText = transcription.enhancedText {
+                                logger.notice("📝 AI enhancement: \(enhancedText.count, privacy: .public) characters")
+                                finalPastedText = enhancedText
+                            }
+                            EnhancementNotifier.shared.report(outcome, purpose: .enhanced)
+                        case .success(let request):
+                            refineRequest = request
+                        }
                     }
                 }
             }
@@ -254,13 +235,11 @@ class TranscriptionPipeline {
             markPreservedFailure(transcription, message: "Transcription Failed: \(fullErrorText)")
             finalPastedText = nil
             let shortReason = String(fullErrorText.prefix(100))
-            await MainActor.run {
-                NotificationManager.shared.showNotification(
-                    title: "Transcription failed: \(shortReason)",
-                    type: .error,
-                    duration: 5.0
-                )
-            }
+            NotificationManager.shared.showNotification(
+                title: "Transcription failed: \(shortReason)",
+                type: .error,
+                duration: 5.0
+            )
             logger.error("❌ Transcription failed: \(fullErrorText, privacy: .public)")
             DebugLogger.shared.log("TranscriptionPipeline", "transcription failed: \(shortReason)")
         }
@@ -303,40 +282,35 @@ class TranscriptionPipeline {
             let pastedText = textToPaste + (appendSpace ? " " : "")
 
             var anchorSnapshot: AXTextAnchorCapture.PrePasteSnapshot?
-            if shouldRefineAfterPaste {
+            if refineRequest != nil {
                 anchorSnapshot = await CursorPaster.pasteAtCursorCapturingAnchor(pastedText).snapshot
             } else {
                 _ = await CursorPaster.startPasteAtCursor(pastedText).value
             }
 
-            let autoSendKey = PowerModeManager.shared.currentActiveConfiguration?.autoSendKey
             SoundManager.shared.playStopSound()
 
             // Hand off before the recorder dismisses. Refinement runs entirely after this
             // point and never blocks the pipeline, so the pill goes away exactly as it
             // does in Instant mode.
-            if shouldRefineAfterPaste, let enhancementService {
+            if let refineRequest, let enhancementService {
                 RefineInPlaceCoordinator.shared.start(
                     snapshot: anchorSnapshot,
                     pastedText: pastedText,
+                    request: refineRequest,
+                    textCleanup: dictationSession.textCleanup,
                     transcription: transcription,
                     modelContext: modelContext,
                     enhancementService: enhancementService,
                     isSuperseded: { !isRunStillValid() }
                 )
             }
-            if let autoSendKey, autoSendKey.isEnabled {
+            if let autoSendKey = dictationSession.powerMode?.autoSendKey, autoSendKey.isEnabled {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     CursorPaster.performAutoSend(autoSendKey)
                 }
             }
-        }
-
-        if let result = promptDetectionResult,
-           let enhancementService,
-           result.shouldEnableAI {
-            await promptDetectionService.restoreOriginalSettings(result, to: enhancementService)
         }
 
         if isRunStillValid() {
@@ -358,6 +332,26 @@ class TranscriptionPipeline {
             transcription.duration = duration
         }
         try? modelContext.save()
+    }
+}
+
+/// Step 2 of the pipeline: the deterministic cleanup every output mode, and re-transcription
+/// from History, starts from. No user preferences and no LLM.
+enum DictationTextProcessing {
+    static func clean(
+        _ transcript: String,
+        formatsText: Bool,
+        replaceWords: (String) -> String
+    ) -> String {
+        var text = TranscriptionOutputFilter.filter(transcript)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if formatsText {
+            text = WhisperTextFormatter.format(text)
+        }
+        text = replaceWords(text)
+        // Offline dictation commands ("new line", "scratch that", spoken punctuation)
+        // run as a deterministic post-processor so they work without the LLM prompt.
+        return DictationCommandProcessor.process(text)
     }
 }
 

@@ -4,7 +4,7 @@ struct EnhancementSettingsPanel: View {
     @EnvironmentObject private var enhancementService: AIEnhancementService
     @AppStorage("SkipShortEnhancement") private var isSkipShortEnhancementEnabled = true
     @AppStorage("ShortEnhancementWordThreshold") private var shortEnhancementWordThreshold = 3
-    @AppStorage("EnhancementTimeoutSeconds") private var enhancementTimeoutSeconds = 7
+    @AppStorage("EnhancementTimeoutSeconds") private var enhancementTimeoutSeconds = 15
     @AppStorage("EnhancementRetryOnTimeout") private var retryOnTimeout = true
     @State private var isShortEnhancementExpanded = false
     @State private var isHandlingToggleChange = false
@@ -54,7 +54,7 @@ struct EnhancementSettingsPanel: View {
                     Toggle(isOn: $enhancementService.useScreenCaptureContext) {
                         HStack(spacing: 4) {
                             Text("Screen Context")
-                            InfoTip(String(localized: "Including on-screen text adds it to enhancement requests. Zerm does not save that captured text to disk, but the request can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac."))
+                            InfoTip(String(localized: "Used in Enhanced output only: Instant + Refine has no time to read the screen. Including on-screen text adds it to enhancement requests. Zerm does not save that captured text to disk, but the request can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac."))
                         }
                     }
                     .toggleStyle(.switch)
@@ -154,7 +154,7 @@ struct EnhancementSettingsPanel: View {
                 } header: {
                     HStack(spacing: 4) {
                         Text("Request Timeout")
-                        InfoTip("Set how long to wait for the AI provider to respond. If no response is received within this duration, you can either fail immediately and paste the original transcription, or retry the request (up to 3 attempts).")
+                        InfoTip(String(localized: "How long Enhanced output waits for the AI provider. If no response arrives in time, Zerm either pastes your original transcription or retries, up to 3 attempts. Instant + Refine uses its own short limit, because the text is already pasted."))
                     }
                 }
 

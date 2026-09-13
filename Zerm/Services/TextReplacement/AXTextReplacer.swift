@@ -38,48 +38,24 @@ enum AXTextReplacer {
         case writeFailed
     }
 
+    /// The text that goes where `pastedText` is: the refinement plus the trailing whitespace the
+    /// paste carried ("Append trailing space"), so the caret still sits after a space and the next
+    /// dictation does not run into this one. Nil when the refinement is what was already pasted.
+    ///
+    /// Comparing the refinement with the paste as-is could never match — the paste ends in a space
+    /// the model never returns — so identical text went through a replacement, and apps that
+    /// refuse the write showed a warning on nearly every dictation.
+    static func replacement(forPasted pastedText: String, refined: String) -> String? {
+        let trailingWhitespace = String(pastedText.reversed().prefix(while: \.isWhitespace).reversed())
+        let pastedCore = String(pastedText.dropLast(trailingWhitespace.count))
+        let refinedCore = refined.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !refinedCore.isEmpty, refinedCore != pastedCore else { return nil }
+        return refinedCore + trailingWhitespace
+    }
+
     /// Re-runs every check against live state. Cheap checks first, so an app switch costs
     /// no cross-process reads at all.
     static func canReplace(_ anchor: AXTextAnchor, with enhanced: String) -> Refusal? {
-        validate(anchor, with: enhanced, requiresSelectedTextSetter: true)
-    }
-
-    /// Validates the same fail-closed contract as direct AX replacement, then selects the exact
-    /// verified range for a standard Paste command. This supports simple Chromium/Electron text
-    /// fields without pretending their unreliable `AXSelectedText` setter works.
-    static func prepareSelectionForPaste(_ anchor: AXTextAnchor, with enhanced: String) -> Refusal? {
-        if let refusal = validate(anchor, with: enhanced, requiresSelectedTextSetter: false) {
-            return refusal
-        }
-
-        var range = anchor.insertedRange
-        guard let rangeValue = AXValueCreate(.cfRange, &range),
-              AXUIElementSetAttributeValue(
-                anchor.element,
-                kAXSelectedTextRangeAttribute as CFString,
-                rangeValue
-              ) == .success else { return .writeFailed }
-
-        guard let confirmed = AXTextAnchorCapture.copyRange(
-            anchor.element,
-            kAXSelectedTextRangeAttribute as String
-        ), confirmed.location == range.location, confirmed.length == range.length else {
-            return .writeFailed
-        }
-
-        // Selection itself must not have changed the field, and no edit may have landed between
-        // validation and selection. Cmd-V is posted only after this final byte-for-byte readback.
-        guard AXTextAnchorCapture.string(in: anchor.element, range: range) == anchor.pastedText else {
-            return .textEdited
-        }
-        return nil
-    }
-
-    private static func validate(
-        _ anchor: AXTextAnchor,
-        with enhanced: String,
-        requiresSelectedTextSetter: Bool
-    ) -> Refusal? {
         guard AXIsProcessTrusted() else { return .notTrusted }
         guard !IsSecureEventInputEnabled() else { return .secureInput }
 
@@ -109,16 +85,14 @@ enum AXTextReplacer {
             return .textEdited
         }
 
-        guard AXTextAnchorCapture.isSettable(anchor.element, kAXSelectedTextRangeAttribute as String) else {
-            return .notSettable
-        }
-        if requiresSelectedTextSetter,
-           !AXTextAnchorCapture.isSettable(anchor.element, kAXSelectedTextAttribute as String) {
+        guard AXTextAnchorCapture.isSettable(anchor.element, kAXSelectedTextRangeAttribute as String),
+              AXTextAnchorCapture.isSettable(anchor.element, kAXSelectedTextAttribute as String) else {
             return .notSettable
         }
 
         return nil
     }
+
 
     /// Selects the pasted range and writes the refined text over it.
     ///

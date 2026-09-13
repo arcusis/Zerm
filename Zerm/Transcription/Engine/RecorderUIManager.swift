@@ -176,7 +176,7 @@ class RecorderUIManager: ObservableObject {
     }
 
     func dismissMiniRecorder() async {
-        guard let engine = engine, let recorder = recorder else { return }
+        guard let engine = engine, recorder != nil else { return }
         logger.notice("dismissMiniRecorder called – state=\(String(describing: engine.recordingState), privacy: .public)")
 
         if isReadAloudActive {
@@ -222,25 +222,16 @@ class RecorderUIManager: ObservableObject {
 
         hideRecorderPanel()
 
-        // Clear captured context when the recorder is dismissed
-        if let enhancementService = engine.enhancementService {
-            await MainActor.run {
-                enhancementService.clearCapturedContexts()
-            }
-        }
+        // A Power Mode only ever configured the recording that just ended; there are no global
+        // settings to restore.
+        engine.dictationSession.end()
+        PowerModeManager.shared.setActiveConfiguration(nil)
 
         await MainActor.run {
             isMiniRecorderVisible = false
         }
 
         await engine.cleanupResources()
-
-        if !UserDefaults.standard.bool(forKey: "powerModePersistConfig") {
-            await PowerModeSessionManager.shared.endSession()
-            await MainActor.run {
-                PowerModeManager.shared.setActiveConfiguration(nil)
-            }
-        }
 
         await MainActor.run {
             engine.recordingState = .idle

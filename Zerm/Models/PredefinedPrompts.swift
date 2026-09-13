@@ -34,7 +34,8 @@ enum PredefinedPrompts {
                 icon: "bubble.left.and.bubble.right.fill",
                 description: "AI assistant that provides direct answers to queries",
                 isPredefined: true,
-                useSystemInstructions: false
+                useSystemInstructions: false,
+                allowsLanguageChange: true
             ),
 
             CustomPrompt(

@@ -45,7 +45,6 @@ enum AppDefaults {
 
             // UI & Behavior
             "IsMenuBarOnly": false,
-            "powerModePersistConfig": false,
             "powerModeUIFlag": true,
             // Hotkey
             "isMiddleClickToggleEnabled": false,
@@ -53,16 +52,14 @@ enum AppDefaults {
 
             // Enhancement
             DictationOutputMode.storageKey: DictationOutputMode.instantRefine.rawValue,
-            "InstantTranscriptionMode": true,
             "AllowPromptTriggeredEnhancement": false,
-            "isAIEnhancementEnabled": true,
             "useClipboardContext": false,
             "useScreenCaptureContext": false,
             "SkipShortEnhancement": true,
             "ShortEnhancementWordThreshold": 3,
             // Applies to Enhanced mode, where the user is waiting on the result. Refine
             // runs after the paste and uses its own, much shorter budget — see
-            // AIEnhancementService.timeout(for:).
+            // EnhancementRequestBuilder.refineTimeout.
             "EnhancementTimeoutSeconds": 15,
             "EnhancementRetryOnTimeout": true,
 
@@ -169,6 +166,22 @@ enum AppDefaults {
                 }
             }
             defaults.set(6, forKey: "ZermFastDefaultsVersion")
+        }
+
+        // Must run before PowerModeManager first loads its configurations, and before the
+        // enhancement toggle below is folded away: it reads that toggle.
+        PowerModeMigration.run(defaults: defaults)
+
+        if defaults.integer(forKey: "ZermFastDefaultsVersion") < 7 {
+            DictationOutputMode.migrateLegacyEnhancementToggle(
+                in: defaults,
+                onDeviceEnhancementInstalled: LocalLLMModelManager.packages(for: .enhancement)
+                    .contains(where: LocalLLMModelManager.isDownloaded)
+            )
+            AIService.migrateOllamaModelKey(in: defaults)
+            // Power Modes no longer change global settings, so nothing is left to persist.
+            defaults.removeObject(forKey: "powerModePersistConfig")
+            defaults.set(7, forKey: "ZermFastDefaultsVersion")
         }
 
         PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()

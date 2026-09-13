@@ -165,7 +165,8 @@ class MiniRecorderShortcutManager: ObservableObject {
                 guard let self = self,
                       self.recorderUIManager.isMiniRecorderVisible,
                       let enhancementService = self.engine.getEnhancementService() else { return }
-                enhancementService.isEnhancementEnabled.toggle()
+                // Applies to this recording only.
+                self.engine.dictationSession.toggleEnhancement(global: enhancementService.outputMode)
             }
         }
 
@@ -209,9 +210,7 @@ class MiniRecorderShortcutManager: ObservableObject {
                 if !powerModeManager.enabledConfigurations.isEmpty {
                     let availableConfigurations = powerModeManager.enabledConfigurations
                     if index < availableConfigurations.count {
-                        let selectedConfig = availableConfigurations[index]
-                        powerModeManager.setActiveConfiguration(selectedConfig)
-                        await PowerModeSessionManager.shared.beginSession(with: selectedConfig)
+                        powerModeManager.selectInRecorder(availableConfigurations[index])
                     }
                 }
             }
@@ -257,11 +256,10 @@ class MiniRecorderShortcutManager: ObservableObject {
                 
                 let availablePrompts = enhancementService.allPrompts
                 if index < availablePrompts.count {
-                    if !enhancementService.isEnhancementEnabled {
-                        enhancementService.isEnhancementEnabled = true
-                    }
-                    
-                    enhancementService.setActivePrompt(availablePrompts[index])
+                    self.engine.dictationSession.selectPrompt(
+                        availablePrompts[index].id,
+                        global: enhancementService.outputMode
+                    )
                 }
             }
         }
