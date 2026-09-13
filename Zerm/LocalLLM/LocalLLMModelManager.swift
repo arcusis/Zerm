@@ -270,11 +270,6 @@ final class LocalLLMModelManager: ObservableObject {
     /// True when the *current* model is downloaded (backward-compatible single-model check).
     var isInstalled: Bool { isDownloaded(currentPackage) }
 
-    /// Thread-safe install check for the current reading model, usable from non-main contexts (e.g. `AIService`).
-    nonisolated static var isModelDownloaded: Bool {
-        isDownloadedOnDisk(current)
-    }
-
     nonisolated static func isModelDownloaded(for role: LocalLLMRole) -> Bool {
         isDownloadedOnDisk(package(for: role))
     }

@@ -44,7 +44,6 @@ struct ModelManagementView: View {
     @EnvironmentObject private var fluidAudioModelManager: FluidAudioModelManager
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
     @State private var customModelToEdit: CustomCloudModel?
-    @StateObject private var aiService = AIService()
     @StateObject private var customModelManager = CustomCloudModelManager.shared
     @EnvironmentObject private var enhancementService: AIEnhancementService
     @Environment(\.modelContext) private var modelContext

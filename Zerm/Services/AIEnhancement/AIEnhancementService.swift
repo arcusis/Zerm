@@ -134,10 +134,6 @@ class AIEnhancementService: ObservableObject {
         }
     }
 
-    func getAIService() -> AIService? {
-        return aiService
-    }
-
     /// Whether the globally selected provider can enhance right now.
     var isConfigured: Bool {
         if case .success = aiService.endpoint(for: aiService.selectedProvider, model: aiService.currentModel) {
