@@ -1,6 +1,6 @@
 # Zerm Notebook
 
-Last updated: 2026-08-21
+Last updated: 2026-09-14
 
 This notebook captures durable project context for Zerm. Start here, then follow the linked notes relevant to the task.
 
@@ -28,20 +28,22 @@ This notebook captures durable project context for Zerm. Start here, then follow
 - [[Zerm Usage Statistics]] — the durable `usage.store` behind the Dashboard, and why it is a separate store
 - [[Zerm Release 2.8.4 Handoff]] — what is left to ship 2.8.4, and the one gate that must not be skipped
 - [[Zerm Measuring Model And Audio Claims]] — how model and capture claims get proved, and the two wrong diagnoses that motivated it
+- [[Zerm Power Mode Inheritance]] — why dictation switched models per app, and the inherit-by-default design (2.8.6)
+- [[Zerm Enhancement Pipeline]] — frozen per-dictation requests, pipeline order, honest outcomes (2.8.6 rebuild)
+- [[Zerm File Transcription]] — Transcribe File with speaker-by-speaker diarization; replaced Meetings in 2.8.6
+- [[Zerm Speech Model Catalog]] — local/cloud STT catalog, recommendations, dependency pins
+- [[Zerm Dev Build Isolation]] — `com.arcusis.zerm.dev` builds and tests never touch the installed app
+- [[Zerm Release 2.8.6 Handoff]] — what is left to ship 2.8.6
 - [[Zerm Known Follow Ups]]
 - [[Zerm Verification Workflow]] — Office Mac build, install, and behavioral release gate
 
-## Current State (2026-08-21)
+## Current State (2026-09-14)
 
-- **Published baseline:** `Production` is v2.8.3. Branch `fix/local-llm-thinking-empty-enhancement` (PR #308, draft) carries the 2.8.4 work, is stamped **2.8.4 / 284**, and is **not released** — held deliberately until browser meeting capture is confirmed on real hardware.
-- **2.8.4 contents, measured:** on-device enhancement no longer returns an empty string (#307); History rows blanked by that defect are repaired on launch; the model catalogue is rebuilt on benchmark evidence; the enhancement prompt is rewritten on measurement; enhancement is **3.6x faster** via prompt prefix caching; meeting audio gaps are padded so the call track matches the meeting (#309); meetings transcribe after Stop instead of during capture (#310); the release DMG has a branded installer window.
-- **2.8.4 contents, unverified:** browser-based meeting capture, and a real signed/notarized release build. Both need hardware this branch has not had.
-- **Enhancement defaults to Gemma 4 E2B** for both jobs — the only model measured that preserves mixed Hebrew/English/Russian. See [[Zerm On-Device LLM]].
+- **Published baseline:** `Production` is v2.8.5. Branch `release/2.8.6` carries the whole 2.8.6 release (tracking issue #327, PRs #328–#340), is stamped **2.8.6 / 286**, and is **not released**. See [[Zerm Release 2.8.6 Handoff]].
+- **2.8.6 contents:** Power Mode inherits instead of freezing (the model mix-up), enhancement rebuilt, Parakeet streaming keeps the last words, Meetings removed (data deleted on first launch), Transcribe File with speaker identification, new local/cloud model catalog, Dashboard range + History copy, Hebrew throughout the app, VoiceInk v2.11–v2.13 ports, FluidAudio 0.15.7 + LLMkit pinned.
+- **Verified by build and tests only:** 410 unit tests, UI-test build. Nothing in 2.8.6 has run on hardware yet.
+- **Development builds are isolated** (`com.arcusis.zerm.dev`), so building and testing on the owner's Mac no longer touches the installed app. See [[Zerm Dev Build Isolation]].
 - **Repo is flat:** the Xcode project lives at the **repository root** (`Zerm.xcodeproj`), matching VoiceInk.
-- **Speech workspace:** Recording owns capture and its History/Enhancements views; Read Aloud and Power Modes remain separate; Permissions, Audio Input, Dictionary and app-wide Settings are shared destinations.
-- **Models remain user-selected:** Whisper/FluidAudio/Apple and configured cloud providers serve Dictation and recording transcription; Kokoro/system/cloud voices serve Read Aloud. Enhancement offers 8 cloud providers plus Ollama, Local CLI, On-Device and Custom, over `LLMkit` and a native Anthropic client — not vendor SDKs.
-- **Meetings removed in 2.8.6 (#324):** the module, its UI, the System Audio Recording permission and all meeting data are gone; a one-time launch migration deletes `Application Support/Zerm/Recordings` and the meeting preferences. File transcription with speaker diarization (#325) replaces it and reuses `Zerm/Transcription/FileTranscription/`.
-- **Verification status:** CI compiles the Debug app, runs unit tests and compiles/links `ZermUITests`. UI execution, real microphone/headset behavior, Developer ID signing/notarization, installation and update-from-public-build remain runtime release gates; see [[Zerm Verification Workflow]] and [[Zerm Measuring Model And Audio Claims]].
 
 ## Quick Build Reference
 
