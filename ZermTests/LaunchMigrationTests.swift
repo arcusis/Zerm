@@ -3,8 +3,8 @@ import SwiftData
 import Testing
 @testable import Zerm
 
-/// Both launch migrations make destructive-sounding promises — one rewrites History rows, the
-/// other deletes multi-gigabyte model files. Neither had ever been executed before these tests.
+/// Launch migrations make destructive-sounding promises — rewriting History rows, deleting
+/// multi-gigabyte model files and meeting recordings — so each runs here against isolated state.
 @MainActor
 struct LaunchMigrationTests {
 
@@ -215,5 +215,72 @@ struct LaunchMigrationTests {
         let names = GeminiProvider().models.map(\.name)
         #expect(names == [GeminiProvider.transcribeModelName])
         #expect(!RetiredGeminiTranscriptionMigration.retiredModelNames.contains(GeminiProvider.transcribeModelName))
+    }
+
+    // MARK: - MeetingDataRemovalMigration
+
+    /// Runs the real deletion against a temporary Application Support layout: meeting sessions
+    /// and preferences go, custom sounds and dictation recordings stay, and a second run is a
+    /// no-op.
+    @Test func meetingRemovalDeletesOnlyMeetingData() throws {
+        let defaults = isolatedDefaults()
+        let applicationSupport = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("zerm-meeting-removal-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let legacyRoot = applicationSupport.appendingPathComponent("Zerm", isDirectory: true)
+        let root = applicationSupport.appendingPathComponent("com.arcusis.zerm", isDirectory: true)
+
+        let session = legacyRoot.appendingPathComponent("Recordings/2026-08-01 1000_ABCDEF12", isDirectory: true)
+        let customSounds = legacyRoot.appendingPathComponent("CustomSounds", isDirectory: true)
+        let dictationRecordings = root.appendingPathComponent("Recordings", isDirectory: true)
+        for directory in [session, customSounds, dictationRecordings] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        for name in ["microphone.wav", "system.wav", "manifest.json", "transcript.jsonl", "meeting.json"] {
+            try Data("meeting".utf8).write(to: session.appendingPathComponent(name))
+        }
+        let sound = customSounds.appendingPathComponent("start.m4a")
+        let dictation = dictationRecordings.appendingPathComponent("dictation.wav")
+        try Data("sound".utf8).write(to: sound)
+        try Data("dictation".utf8).write(to: dictation)
+
+        for key in MeetingDataRemovalMigration.removedDefaultsKeys {
+            defaults.set(true, forKey: key)
+        }
+        defaults.set("meetings", forKey: "selectedSettingsPane")
+        defaults.set("en", forKey: LanguagePreference.defaultsKey)
+
+        MeetingDataRemovalMigration.run(defaults: defaults, legacyRoot: legacyRoot)
+
+        #expect(!FileManager.default.fileExists(atPath: legacyRoot.appendingPathComponent("Recordings").path))
+        #expect(FileManager.default.fileExists(atPath: sound.path))
+        #expect(FileManager.default.fileExists(atPath: dictation.path))
+        for key in MeetingDataRemovalMigration.removedDefaultsKeys {
+            #expect(defaults.object(forKey: key) == nil, "\(key)")
+        }
+        #expect(defaults.object(forKey: "selectedSettingsPane") == nil)
+        #expect(defaults.string(forKey: LanguagePreference.defaultsKey) == "en")
+        #expect(defaults.bool(forKey: MeetingDataRemovalMigration.completionKey))
+
+        // A folder recreated after the migration ran must not be touched by a second launch.
+        let later = legacyRoot.appendingPathComponent("Recordings", isDirectory: true)
+        try FileManager.default.createDirectory(at: later, withIntermediateDirectories: true)
+        defaults.set("audio", forKey: "selectedSettingsPane")
+        MeetingDataRemovalMigration.run(defaults: defaults, legacyRoot: legacyRoot)
+        #expect(FileManager.default.fileExists(atPath: later.path))
+        #expect(defaults.string(forKey: "selectedSettingsPane") == "audio")
+    }
+
+    @Test func meetingRemovalKeepsAnotherSelectedSettingsPane() {
+        let defaults = isolatedDefaults()
+        let legacyRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("zerm-meeting-removal-empty-\(UUID().uuidString)")
+        defaults.set("audio", forKey: "selectedSettingsPane")
+
+        MeetingDataRemovalMigration.run(defaults: defaults, legacyRoot: legacyRoot)
+
+        #expect(defaults.string(forKey: "selectedSettingsPane") == "audio")
+        #expect(defaults.bool(forKey: MeetingDataRemovalMigration.completionKey))
+        #expect(!FileManager.default.fileExists(atPath: legacyRoot.path))
     }
 }

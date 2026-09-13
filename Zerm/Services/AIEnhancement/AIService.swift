@@ -429,15 +429,6 @@ class AIService: ObservableObject {
         return ollamaService.availableModels
     }
 
-    /// Meeting summaries have a stricter privacy contract than general enhancement: Ollama must
-    /// be reachable and the snapshotted local model must actually be installed before work starts.
-    func isLocalMeetingSummaryAvailable(model: String) async -> Bool {
-        await ollamaService.checkConnection()
-        guard ollamaService.isConnected else { return false }
-        await ollamaService.refreshModels()
-        return ollamaService.availableModels.contains { $0.name == model }
-    }
-    
     func enhanceWithOllama(text: String, systemPrompt: String) async throws -> String {
         do {
             let result = try await ollamaService.enhance(text, withSystemPrompt: systemPrompt)

@@ -43,20 +43,7 @@ final class MediaController: ObservableObject, @unchecked Sendable {
         didSet { UserDefaults.standard.set(skipMuteWithHeadphones, forKey: "SkipMuteWithHeadphones") }
     }
 
-    private var meetingStartObserver: NSObjectProtocol?
-
-    private init() {
-        _ = MeetingActivityMonitor.shared
-        meetingStartObserver = NotificationCenter.default.addObserver(
-            forName: .meetingRecordingDidStart,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            // A call must never remain muted because Dictation was already active when meeting
-            // capture began. Dictation continues; only Zerm-owned muting is released.
-            self?.restoreOutputForMeeting()
-        }
-    }
+    private init() {}
 
     /// Cancels any deferred mute so a quick cancel cannot leave the system muted
     /// after a late start-sound completion. Call from stop/cancel paths.
@@ -71,10 +58,6 @@ final class MediaController: ObservableObject, @unchecked Sendable {
     /// Mutes system audio immediately (decoupled from start-sound playback).
     func muteSystemAudio() async -> Bool {
         guard isSystemMuteEnabled else { return false }
-        guard !MeetingActivityMonitor.shared.isActive else {
-            restoreOutputForMeeting()
-            return false
-        }
 
         let myGeneration = state.withLock { state -> Int in
             state.unmuteTask?.cancel()
@@ -90,10 +73,6 @@ final class MediaController: ObservableObject, @unchecked Sendable {
     /// Schedules mute after `delay` seconds, cancellable via `cancelPendingMute` / `unmuteSystemAudio`.
     func scheduleMuteSystemAudio(after delay: TimeInterval = 0) {
         guard isSystemMuteEnabled else { return }
-        guard !MeetingActivityMonitor.shared.isActive else {
-            restoreOutputForMeeting()
-            return
-        }
 
         let myGeneration = state.withLock { state -> Int in
             state.unmuteTask?.cancel()
@@ -115,10 +94,6 @@ final class MediaController: ObservableObject, @unchecked Sendable {
 
     private func performMute(generation: Int) async -> Bool {
         guard state.withLock({ $0.generation == generation }) else { return false }
-        guard !MeetingActivityMonitor.shared.isActive else {
-            restoreOutputForMeeting()
-            return false
-        }
 
         // Headphones cannot bleed back into the microphone, so there is nothing to
         // protect the transcript from. Checked here rather than at scheduling time so
@@ -186,24 +161,6 @@ final class MediaController: ObservableObject, @unchecked Sendable {
 
         state.withLock { $0.unmuteTask = task }
         await task.value
-    }
-
-    /// Immediately releases only a mute owned by Zerm. User-initiated mute state is preserved.
-    private func restoreOutputForMeeting() {
-        let shouldUnmute = state.withLock { state -> Bool in
-            state.muteTask?.cancel()
-            state.muteTask = nil
-            state.unmuteTask?.cancel()
-            state.unmuteTask = nil
-            _ = state.nextGeneration()
-            let shouldUnmute = state.didMuteAudio && !state.wasAudioMutedBeforeRecording
-            state.didMuteAudio = false
-            state.wasAudioMutedBeforeRecording = false
-            return shouldUnmute
-        }
-        if shouldUnmute {
-            _ = setSystemMuted(false)
-        }
     }
 
     /// True when the current default output is Bluetooth, the built-in headphone jack, or a

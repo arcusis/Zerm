@@ -48,4 +48,4 @@ A defect that has not reproduced is a defect that has not been understood. For #
 
 Watch for reproductions that quietly do not reproduce anything. An early attempt tapped `afplay` in a loop — but each invocation is a new PID, so the tap died with the first one and the run proved nothing. Another played a file with embedded silence, which does not stop the audio stream and so produces no gap at all. The reproduction has to break the thing you claim is breaking.
 
-Related: [[Zerm Meeting Recording]], [[Zerm On-Device LLM]], [[Zerm Enhancement Language Fidelity]], [[Zerm Verification Workflow]]
+Related: [[Zerm On-Device LLM]], [[Zerm Enhancement Language Fidelity]], [[Zerm Verification Workflow]]

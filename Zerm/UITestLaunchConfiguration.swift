@@ -12,7 +12,6 @@ struct UITestLaunchConfiguration {
     enum Scenario: String {
         case standard
         case nativeApple
-        case activeMeeting
     }
 
     let isEnabled: Bool
@@ -41,13 +40,6 @@ struct UITestLaunchConfiguration {
             "hasCompletedOnboarding": true,
             "powerModeUIFlag": true,
             "sidebarDictationExpanded": true,
-            "meetingCaptureMicrophone": false,
-            "meetingCaptureSystemAudio": true,
-            "meetingCaptureTargetMode": "detectedApplication",
-            "meetingCaptureApplicationBundleID": "com.example.meeting",
-            "meetingLiveTranscript": true,
-            "meetingIdentifySpeakers": true,
-            "meetingSummarise": false,
             "SelectedLanguage": "auto"
         ])
 

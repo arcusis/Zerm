@@ -3,10 +3,6 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var menuBarManager: MenuBarManager?
-    /// Synchronous last-chance cleanup for capture sessions before native-runtime teardown is
-    /// skipped with `_exit`. Recording code must stop callbacks, close writers, and journal an
-    /// interrupted state here; lengthy inference and network work must already be cancelled.
-    var onWillTerminate: (() -> Void)?
 
     #if DEBUG
     private var uiTestWindowPresentationAttemptsRemaining = 40
@@ -76,11 +72,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Stop background prewarms from entering onnxruntime / llama.cpp session construction
         // while the process is shutting down. See ProcessLifecycle.
         ProcessLifecycle.isTerminating = true
-
-        // Capture owns open audio files that are not covered by SwiftData/defaults. Give the
-        // application-scoped recording coordinator a synchronous chance to finalize them before
-        // `_exit` intentionally bypasses Swift and C++ destructors.
-        onWillTerminate?()
 
         // Flush anything that genuinely needs writing, then leave via _exit().
         //

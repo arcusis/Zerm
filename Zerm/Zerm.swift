@@ -23,7 +23,6 @@ struct ZermApp: App {
     @StateObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var menuBarManager: MenuBarManager
     @StateObject private var ttsController: TTSController
-    @StateObject private var meetingRecordingController: MeetingRecordingController
     @StateObject private var aiService = AIService()
     @StateObject private var enhancementService: AIEnhancementService
     @StateObject private var activeWindowService = ActiveWindowService.shared
@@ -50,6 +49,8 @@ struct ZermApp: App {
 
         if !uiTestConfiguration.isEnabled {
             AppDefaults.registerDefaults()
+            // Meetings was removed in 2.8.6: delete its recordings and preferences once.
+            MeetingDataRemovalMigration.run()
         }
 
         if !uiTestConfiguration.isEnabled,
@@ -173,12 +174,6 @@ struct ZermApp: App {
         _recorderUIManager = StateObject(wrappedValue: recorderUIManager)
         _engine = StateObject(wrappedValue: engine)
 
-        // Meeting capture is application-scoped. Views only observe this coordinator so
-        // navigation, window closure, and menu-bar-only operation can never orphan an active
-        // recording or remove its only Stop action.
-        let meetingRecordingController = MeetingRecordingController(engine: engine)
-        _meetingRecordingController = StateObject(wrappedValue: meetingRecordingController)
-
         // 7. Create other services that depend on engine
         let hotkeyManager = HotkeyManager(engine: engine, recorderUIManager: recorderUIManager)
         _hotkeyManager = StateObject(wrappedValue: hotkeyManager)
@@ -195,9 +190,6 @@ struct ZermApp: App {
         let ttsController = TTSController(engine: engine, recorderUIManager: recorderUIManager)
         hotkeyManager.onReadAloudTriggered = { [weak ttsController] in ttsController?.toggle() }
         recorderUIManager.onCancelSpeaking = { [weak ttsController] in ttsController?.stop() }
-        meetingRecordingController.onWillStartCapture = { [weak ttsController] in
-            ttsController?.prepareForMeetingCapture()
-        }
         _ttsController = StateObject(wrappedValue: ttsController)
 
         let activeWindowService = ActiveWindowService.shared
@@ -213,9 +205,6 @@ struct ZermApp: App {
             )
 
         appDelegate.menuBarManager = menuBarManager
-        appDelegate.onWillTerminate = { [weak meetingRecordingController] in
-            meetingRecordingController?.prepareForTermination()
-        }
 
         // Ensure no lingering recording state from previous runs
         if !uiTestConfiguration.isEnabled {
@@ -388,7 +377,6 @@ struct ZermApp: App {
                     .environmentObject(updaterViewModel)
                     .environmentObject(menuBarManager)
                     .environmentObject(ttsController)
-                    .environmentObject(meetingRecordingController)
                     .environmentObject(aiService)
                     .environmentObject(enhancementService)
                     .modelContainer(container)
@@ -477,7 +465,6 @@ struct ZermApp: App {
                 .environmentObject(updaterViewModel)
                 .environmentObject(menuBarManager)
                 .environmentObject(ttsController)
-                .environmentObject(meetingRecordingController)
                 .environmentObject(enhancementService)
                 .modelContainer(container)
                 .uiTestEnvironment(uiTestConfiguration)
@@ -493,7 +480,6 @@ struct ZermApp: App {
                 .environmentObject(hotkeyManager)
                 .environmentObject(menuBarManager)
                 .environmentObject(updaterViewModel)
-                .environmentObject(meetingRecordingController)
                 .environmentObject(aiService)
                 .environmentObject(enhancementService)
                 .uiTestEnvironment(uiTestConfiguration)

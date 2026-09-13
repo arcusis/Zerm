@@ -56,32 +56,10 @@ struct MenuBarView: View {
     @EnvironmentObject var menuBarManager: MenuBarManager
     @EnvironmentObject var updaterViewModel: UpdaterViewModel
     @EnvironmentObject var enhancementService: AIEnhancementService
-    @EnvironmentObject var meetingRecordingController: MeetingRecordingController
-    @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
     @ObservedObject private var launchAtLogin = LaunchAtLoginStore.shared
     
     var body: some View {
         VStack {
-            if meetingRecordingController.lifecycle.phase == .capturing {
-                Button(action: stopMeetingRecording) {
-                    Label(
-                        "Stop Meeting — \(MeetingRecordingView.clock(meetingRecordingController.session.elapsed))",
-                        systemImage: "stop.circle.fill"
-                    )
-                }
-                .accessibilityIdentifier("menu-stop-meeting")
-
-                Button("Open Meetings") {
-                    menuBarManager.openMainWindowAndNavigate(to: "Meetings")
-                }
-
-                Divider()
-            } else if meetingRecordingController.lifecycle.phase == .stopping
-                        || meetingRecordingController.lifecycle.phase == .processing {
-                Label("Processing Meeting", systemImage: "hourglass")
-                Divider()
-            }
-
             Button("Toggle Recorder") {
                 recorderUIManager.handleToggleMiniRecorder()
             }
@@ -146,15 +124,6 @@ struct MenuBarView: View {
             Button("Quit Zerm") {
                 NSApplication.shared.terminate(nil)
             }
-        }
-    }
-
-    private func stopMeetingRecording() {
-        Task {
-            await meetingRecordingController.stopAndSummarise(
-                ifRequested: summariseAfterMeeting
-                    && meetingRecordingController.isLocalSummaryAvailable == true
-            )
         }
     }
 

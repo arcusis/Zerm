@@ -5,7 +5,6 @@
 | Permission | What needs it | How to grant |
 |------------|--------------|--------------|
 | Microphone | `CoreAudioRecorder` — audio capture | System Settings → Privacy → Microphone → Zerm |
-| System Audio Recording | `SystemAudioTap` — meeting Call track | System Settings → Privacy & Security → Screen & System Audio Recording |
 | Accessibility | `CursorPaster` — CGEvent Cmd+V injection | System Settings → Privacy → Accessibility → Zerm |
 | Screen Recording | `ScreenCaptureService` — Power Mode context capture | System Settings → Privacy → Screen Recording → Zerm |
 
@@ -46,7 +45,8 @@ whisper.cpp XCFramework: `$(HOME)/Zerm-Dependencies/whisper.cpp/build-apple/whis
 3. Grant Microphone when prompted
 4. Grant Accessibility (for auto-paste)
 5. Optionally grant Screen Recording (for Power Mode context)
-6. For Meetings, grant System Audio Recording and explicitly select the running call application (or acknowledge all-system capture)
-7. Press the configured hotkey (default: Right Command) to test
+6. Press the configured hotkey (default: Right Command) to test
 
-Related: [[Zerm Meeting Recording]], [[Zerm Auto Paste]], [[Zerm Runtime Privacy Model]]
+System Audio Recording is no longer requested: it served only Meetings, removed in 2.8.6.
+
+Related: [[Zerm Auto Paste]], [[Zerm Runtime Privacy Model]]

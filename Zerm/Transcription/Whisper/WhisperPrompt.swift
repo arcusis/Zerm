@@ -110,7 +110,7 @@ class WhisperPrompt: ObservableObject {
         }
 
         // Auto detection must remain language-neutral. An English initial prompt materially
-        // biases short meeting windows and made Hebrew and mixed-language meetings appear
+        // biases short audio and made Hebrew and mixed-language speech appear
         // English-only even though the model itself supports them.
         if language == LanguagePreference.autoCode {
             return languagePrompts["default"] ?? ""

@@ -454,7 +454,7 @@ struct AnalogHeadphoneConfirmationControl: View {
                     ))
                     .accessibilityIdentifier("confirm-analog-wired-headphones")
 
-                    Text("The analog jack is treated as speakers until you confirm wired headphones for this attempt. Zerm asks again for every meeting and Read Aloud attempt, and whenever the output changes.")
+                    Text("The analog jack is treated as speakers until you confirm wired headphones for this attempt. Zerm asks again for every Read Aloud attempt, and whenever the output changes.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

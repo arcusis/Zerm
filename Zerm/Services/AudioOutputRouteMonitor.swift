@@ -151,8 +151,8 @@ final class AudioOutputRouteMonitor: ObservableObject {
         refreshRoute()
     }
 
-    /// Invalidates an ambiguous-jack claim at a new safety boundary, such as starting a meeting
-    /// or ending a Read Aloud attempt. Known Bluetooth/USB/wired routes are unaffected.
+    /// Invalidates an ambiguous-jack claim at a new safety boundary, such as ending a Read Aloud
+    /// attempt. Known Bluetooth/USB/wired routes are unaffected.
     func clearAmbiguousAnalogHeadphoneConfirmation() {
         guard let device = monitoredDevice, isAmbiguousAnalogOutput else { return }
         AudioOutputRoute.setSessionHeadphoneConfirmation(false, for: device)
