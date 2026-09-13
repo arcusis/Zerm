@@ -2,6 +2,9 @@ import Foundation
 import SwiftData
 import LLMkit
 
+/// Speechmatics batch transcription through LLMkit (enhanced model). Dictionary terms go in
+/// `additional_vocab`; Speechmatics has no prompt field.
+/// https://docs.speechmatics.com/speech-to-text/batch/input
 struct SpeechmaticsProvider: CloudProvider {
     let modelProvider: ModelProvider = .speechmatics
     let providerKey: String = "Speechmatics"
@@ -14,28 +17,35 @@ struct SpeechmaticsProvider: CloudProvider {
         "zh"
     ]
     let includesAutoDetect: Bool = true
+    let documentationURL = URL(string: "https://docs.speechmatics.com/speech-to-text/models")!
+    let streamingCapabilities: TranscriptionCapabilities = [.vocabulary, .languageHint]
 
     var models: [CloudModel] {[
         CloudModel(
             name: "speechmatics-enhanced",
             displayName: "Speechmatics",
-            description: "Speechmatics enhanced accuracy transcription with real-time streaming and 50+ language support",
+            description: String(localized: "Speechmatics enhanced accuracy transcription with real-time streaming and 50+ language support"),
             provider: .speechmatics,
             speed: 0.99,
             accuracy: 0.98,
             isMultilingual: true,
             supportsStreaming: true,
-            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .speechmatics)
+            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .speechmatics),
+            capabilities: [.vocabulary, .languageHint, .diarization],
+            isRecommended: true
         )
     ]}
 
-    func transcribe(audioData: Data, fileName: String, apiKey: String, model: String, language: String?, prompt: String?, customVocabulary: [String]) async throws -> String {
-        return try await SpeechmaticsClient.transcribe(
-            audioData: audioData,
-            fileName: fileName,
-            apiKey: apiKey,
-            language: language,
-            customVocabulary: customVocabulary
+    func transcribe(_ request: CloudTranscriptionRequest) async throws -> String {
+        try await SpeechmaticsClient.transcribe(
+            audioData: request.audioData,
+            fileName: request.fileName,
+            apiKey: request.apiKey,
+            language: request.language,
+            operatingPoint: "enhanced",
+            customVocabulary: request.vocabulary,
+            maxWaitSeconds: request.timeout,
+            timeout: request.timeout
         )
     }
 
@@ -44,6 +54,6 @@ struct SpeechmaticsProvider: CloudProvider {
     }
 
     func verifyAPIKey(_ key: String) async -> (isValid: Bool, errorMessage: String?) {
-        return await SpeechmaticsClient.verifyAPIKey(key)
+        await SpeechmaticsClient.verifyAPIKey(key)
     }
 }

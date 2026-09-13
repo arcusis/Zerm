@@ -14,6 +14,7 @@ enum ModelProvider: String, Codable, Hashable, CaseIterable {
     case xai = "xAI"
     case openai = "OpenAI"
     case assemblyAI = "AssemblyAI"
+    case gladia = "Gladia"
     case custom = "Custom"
     case nativeApple = "Native Apple"
 
@@ -32,6 +33,23 @@ enum ModelProvider: String, Codable, Hashable, CaseIterable {
     }
 }
 
+/// Transcription-time features a model actually honours. Settings are shown only when the
+/// selected model declares the matching capability, so every visible control has an effect.
+struct TranscriptionCapabilities: OptionSet, Hashable {
+    let rawValue: Int
+
+    /// Accepts the per-language Output Format text as a style prompt or context.
+    static let prompt = TranscriptionCapabilities(rawValue: 1 << 0)
+    /// Biases recognition toward Dictionary terms (keyterms, context terms, prompt suffix).
+    static let vocabulary = TranscriptionCapabilities(rawValue: 1 << 1)
+    /// Accepts the selected language as a hint or constraint.
+    static let languageHint = TranscriptionCapabilities(rawValue: 1 << 2)
+    /// Can transcribe live while recording.
+    static let streaming = TranscriptionCapabilities(rawValue: 1 << 3)
+    /// Can label speakers (used for file transcription, not dictation).
+    static let diarization = TranscriptionCapabilities(rawValue: 1 << 4)
+}
+
 // A unified protocol for any transcription model
 protocol TranscriptionModel: Identifiable, Hashable {
     var id: UUID { get }
@@ -46,6 +64,7 @@ protocol TranscriptionModel: Identifiable, Hashable {
 
     var supportsStreaming: Bool { get }
 
+    var capabilities: TranscriptionCapabilities { get }
     var languageGroup: ModelLanguageGroup { get }
     /// Listed under "Great in Hebrew".
     var isHebrewOptimized: Bool { get }
@@ -73,9 +92,36 @@ extension TranscriptionModel {
         isMultilingualModel ? .multilingual : .englishOnly
     }
 
-    var isHebrewOptimized: Bool { false }
+    var capabilities: TranscriptionCapabilities {
+        var capabilities: TranscriptionCapabilities = supportsStreaming ? [.streaming] : []
+        switch provider {
+        case .whisper:
+            // whisper.cpp takes the Output Format plus Dictionary terms as its initial prompt.
+            capabilities.formUnion([.prompt, .vocabulary])
+            if isMultilingualModel { capabilities.insert(.languageHint) }
+        case .nativeApple:
+            capabilities.insert(.languageHint)
+        default:
+            break
+        }
+        return capabilities
+    }
 
+    var isHebrewOptimized: Bool { false }
     var isRecommended: Bool { false }
+
+    /// Capabilities of the path that will actually run. With real-time mode on, a cloud model
+    /// transcribes through its streaming client, which applies fewer settings than batch.
+    func activeCapabilities(defaults: UserDefaults = .standard) -> TranscriptionCapabilities {
+        guard supportsStreaming else { return capabilities }
+        guard defaults.object(forKey: "streaming-enabled-\(name)") as? Bool ?? true else {
+            return capabilities.subtracting(.streaming)
+        }
+        guard let cloudProvider = CloudProviderRegistry.provider(for: provider) else {
+            return capabilities
+        }
+        return capabilities.intersection(cloudProvider.streamingCapabilities.union([.streaming, .diarization]))
+    }
 }
 
 // A new struct for Apple's native models
@@ -146,8 +192,13 @@ struct CloudModel: TranscriptionModel {
     let isMultilingualModel: Bool
     let supportsStreaming: Bool
     let supportedLanguages: [String: String]
+    let capabilities: TranscriptionCapabilities
+    /// Strong on Hebrew and on Hebrew/English mixed speech.
+    let isHebrewOptimized: Bool
+    /// The best current model of its provider.
+    let isRecommended: Bool
 
-    init(id: UUID = UUID(), name: String, displayName: String, description: String, provider: ModelProvider, speed: Double, accuracy: Double, isMultilingual: Bool, supportsStreaming: Bool = false, supportedLanguages: [String: String]) {
+    init(id: UUID = UUID(), name: String, displayName: String, description: String, provider: ModelProvider, speed: Double, accuracy: Double, isMultilingual: Bool, supportsStreaming: Bool = false, supportedLanguages: [String: String], capabilities: TranscriptionCapabilities = [], isHebrewOptimized: Bool = false, isRecommended: Bool = false) {
         self.id = id
         self.name = name
         self.displayName = displayName
@@ -158,11 +209,23 @@ struct CloudModel: TranscriptionModel {
         self.isMultilingualModel = isMultilingual
         self.supportsStreaming = supportsStreaming
         self.supportedLanguages = supportedLanguages
+        self.capabilities = supportsStreaming ? capabilities.union(.streaming) : capabilities
+        self.isHebrewOptimized = isHebrewOptimized
+        self.isRecommended = isRecommended
     }
 }
 
 /// Custom cloud model with API key stored in Keychain.
 struct CustomCloudModel: TranscriptionModel, Codable {
+    /// Result of the last live test call against the endpoint.
+    enum VerificationStatus: String, Codable {
+        /// Saved before verification existed; kept usable until a verification fails.
+        case legacy
+        case unverified
+        case verified
+        case failed
+    }
+
     let id: UUID
     let name: String
     let displayName: String
@@ -172,13 +235,26 @@ struct CustomCloudModel: TranscriptionModel, Codable {
     let modelName: String
     let isMultilingualModel: Bool
     let supportedLanguages: [String: String]
+    var verificationStatus: VerificationStatus
+    var lastVerifiedAt: Date?
 
     /// API key retrieved from Keychain by model ID.
     var apiKey: String {
         APIKeyManager.shared.getCustomModelAPIKey(forModelId: id) ?? ""
     }
 
-    init(id: UUID = UUID(), name: String, displayName: String, description: String, apiEndpoint: String, modelName: String, isMultilingual: Bool = true, supportedLanguages: [String: String]? = nil) {
+    /// OpenAI-compatible endpoints take `prompt` (Output Format plus Dictionary terms) and, for
+    /// multilingual models, `language`.
+    var capabilities: TranscriptionCapabilities {
+        isMultilingualModel ? [.prompt, .vocabulary, .languageHint] : [.prompt, .vocabulary]
+    }
+
+    /// Only endpoints that answered a real transcription request can be selected.
+    var isUsable: Bool {
+        verificationStatus == .verified || verificationStatus == .legacy
+    }
+
+    init(id: UUID = UUID(), name: String, displayName: String, description: String, apiEndpoint: String, modelName: String, isMultilingual: Bool = true, supportedLanguages: [String: String]? = nil, verificationStatus: VerificationStatus = .unverified, lastVerifiedAt: Date? = nil) {
         self.id = id
         self.name = name
         self.displayName = displayName
@@ -187,11 +263,14 @@ struct CustomCloudModel: TranscriptionModel, Codable {
         self.modelName = modelName
         self.isMultilingualModel = isMultilingual
         self.supportedLanguages = supportedLanguages ?? LanguageDictionary.forProvider(isMultilingual: isMultilingual)
+        self.verificationStatus = verificationStatus
+        self.lastVerifiedAt = lastVerifiedAt
     }
 
     /// Custom Codable to migrate legacy apiKey from JSON to Keychain.
     private enum CodingKeys: String, CodingKey {
         case id, name, displayName, description, apiEndpoint, modelName, isMultilingualModel, supportedLanguages
+        case verificationStatus, lastVerifiedAt
         case apiKey
     }
 
@@ -205,6 +284,8 @@ struct CustomCloudModel: TranscriptionModel, Codable {
         modelName = try container.decode(String.self, forKey: .modelName)
         isMultilingualModel = try container.decode(Bool.self, forKey: .isMultilingualModel)
         supportedLanguages = try container.decode([String: String].self, forKey: .supportedLanguages)
+        verificationStatus = try container.decodeIfPresent(VerificationStatus.self, forKey: .verificationStatus) ?? .legacy
+        lastVerifiedAt = try container.decodeIfPresent(Date.self, forKey: .lastVerifiedAt)
 
         if let legacyApiKey = try container.decodeIfPresent(String.self, forKey: .apiKey), !legacyApiKey.isEmpty {
             APIKeyManager.shared.saveCustomModelAPIKey(legacyApiKey, forModelId: id)
@@ -221,8 +302,10 @@ struct CustomCloudModel: TranscriptionModel, Codable {
         try container.encode(modelName, forKey: .modelName)
         try container.encode(isMultilingualModel, forKey: .isMultilingualModel)
         try container.encode(supportedLanguages, forKey: .supportedLanguages)
+        try container.encode(verificationStatus, forKey: .verificationStatus)
+        try container.encodeIfPresent(lastVerifiedAt, forKey: .lastVerifiedAt)
     }
-} 
+}
 
 struct WhisperModel: TranscriptionModel {
     let id = UUID()

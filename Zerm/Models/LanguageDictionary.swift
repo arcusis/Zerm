@@ -11,7 +11,7 @@ enum LanguageDictionary {
             guard let codes = cloudProvider.languageCodes else {
                 return all
             }
-            var filtered = all.filter { codes.contains($0.key) }
+            var filtered = forCodes(codes)
             if cloudProvider.includesAutoDetect { filtered["auto"] = "Auto-detect" }
             return filtered
         }
@@ -36,6 +36,67 @@ enum LanguageDictionary {
             return all
         }
     }
+
+    /// Names for the given codes, including regional variants that only some providers accept.
+    static func forCodes(_ codes: [String]) -> [String: String] {
+        var languages: [String: String] = [:]
+        for code in codes {
+            languages[code] = all[code] ?? regional[code]
+        }
+        return languages
+    }
+
+    /// Regional variants offered by providers with locale-specific models (Deepgram Nova-3).
+    /// Kept apart from `all` so Whisper's language list stays one entry per language.
+    static let regional: [String: String] = [
+        "af-ZA": "Afrikaans (South Africa)",
+        "ar-AE": "Arabic (United Arab Emirates)",
+        "ar-DZ": "Arabic (Algeria)",
+        "ar-EG": "Arabic (Egypt)",
+        "ar-IQ": "Arabic (Iraq)",
+        "ar-IR": "Arabic (Iran)",
+        "ar-JO": "Arabic (Jordan)",
+        "ar-KW": "Arabic (Kuwait)",
+        "ar-LB": "Arabic (Lebanon)",
+        "ar-MA": "Arabic (Morocco)",
+        "ar-PS": "Arabic (Palestine)",
+        "ar-QA": "Arabic (Qatar)",
+        "ar-SA": "Arabic (Saudi Arabia)",
+        "ar-SD": "Arabic (Sudan)",
+        "ar-SY": "Arabic (Syria)",
+        "ar-TD": "Arabic (Chad)",
+        "ar-TN": "Arabic (Tunisia)",
+        "as-IN": "Assamese (India)",
+        "cs-CZ": "Czech (Czechia)",
+        "da-DK": "Danish (Denmark)",
+        "de-CH": "German (Switzerland)",
+        "en-AU": "English (Australia)",
+        "en-CA": "English (Canada)",
+        "en-GB": "English (United Kingdom)",
+        "en-IE": "English (Ireland)",
+        "en-IN": "English (India)",
+        "en-NZ": "English (New Zealand)",
+        "en-US": "English (United States)",
+        "es-419": "Spanish (Latin America)",
+        "fr-CA": "French (Canada)",
+        "gu-IN": "Gujarati (India)",
+        "ka-GE": "Georgian (Georgia)",
+        "kk-KZ": "Kazakh (Kazakhstan)",
+        "ko-KR": "Korean (South Korea)",
+        "nl-BE": "Flemish (Belgium)",
+        "pa-IN": "Punjabi (India)",
+        "ps-AF": "Pashto (Afghanistan)",
+        "pt-BR": "Portuguese (Brazil)",
+        "pt-PT": "Portuguese (Portugal)",
+        "sv-SE": "Swedish (Sweden)",
+        "th-TH": "Thai (Thailand)",
+        "tr-TR": "Turkish (Türkiye)",
+        "zh-CN": "Chinese (Simplified, China)",
+        "zh-HK": "Chinese (Cantonese, Hong Kong)",
+        "zh-Hans": "Chinese (Simplified script)",
+        "zh-Hant": "Chinese (Traditional script)",
+        "zh-TW": "Chinese (Traditional, Taiwan)"
+    ]
 
     // Apple Native Speech languages in BCP-47 format
     // Based on actual supported locales from SpeechTranscriber.supportedLocales

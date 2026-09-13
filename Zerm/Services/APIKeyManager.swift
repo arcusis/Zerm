@@ -24,7 +24,8 @@ final class APIKeyManager {
         "cartesia": "cartesiaAPIKey",
         "anthropic": "anthropicAPIKey",
         "openrouter": "openRouterAPIKey",
-        "assemblyai": "assemblyAIAPIKey"
+        "assemblyai": "assemblyAIAPIKey",
+        "gladia": "gladiaAPIKey"
     ]
 
     private init() {}

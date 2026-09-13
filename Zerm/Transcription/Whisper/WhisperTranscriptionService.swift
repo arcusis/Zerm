@@ -69,7 +69,7 @@ class WhisperTranscriptionService: TranscriptionService {
         }
 
         // Merge style prompt with custom dictionary so Whisper biases toward user terms.
-        let basePrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
+        let basePrompt = WhisperPrompt.resolvedPrompt(for: selectedLanguage)
         let dictionarySuffix: String
         if let modelContext {
             dictionarySuffix = VocabularyTerms.whisperPromptSuffix(from: modelContext)

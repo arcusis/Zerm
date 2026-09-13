@@ -10,9 +10,17 @@ struct ModelBadgesRow: View {
                 badge("Great in Hebrew", systemImage: "star.fill")
             } else if model.supportedLanguages["he"] != nil {
                 badge("Hebrew", systemImage: "character.bubble")
+            } else if model.isMultilingualModel {
+                badge("No Hebrew", systemImage: "slash.circle")
             }
             if model.supportsStreaming {
                 badge("Streaming", systemImage: "waveform")
+            }
+            if model.capabilities.contains(.vocabulary) {
+                badge("Uses Dictionary", systemImage: "character.book.closed")
+            }
+            if model.capabilities.contains(.diarization) {
+                badge("Speaker labels", systemImage: "person.2")
             }
         }
     }

@@ -206,7 +206,14 @@ struct CloudModelCardView: View {
             Text("API Key Configuration")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
-            
+
+            if let documentationURL = CloudProviderRegistry.provider(for: model.provider)?.documentationURL {
+                Link(destination: documentationURL) {
+                    Label("\(model.provider.rawValue) speech-to-text documentation", systemImage: "arrow.up.right.square")
+                        .font(.caption)
+                }
+            }
+
             HStack(spacing: 8) {
                 SecureField("Enter your \(model.provider.rawValue) API key", text: $apiKey)
                     .textFieldStyle(.roundedBorder)

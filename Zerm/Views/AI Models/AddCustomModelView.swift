@@ -4,18 +4,20 @@ struct AddCustomModelCardView: View {
     @ObservedObject var customModelManager: CustomCloudModelManager
     var onModelAdded: () -> Void
     var editingModel: CustomCloudModel? = nil
-    
+
     @State private var isExpanded = false
     @State private var displayName = ""
     @State private var apiEndpoint = ""
     @State private var apiKey = ""
     @State private var modelName = ""
     @State private var isMultilingual = true
-    
+    @State private var selectedPreset: CustomEndpointPreset?
+
     @State private var validationErrors: [String] = []
     @State private var showingAlert = false
     @State private var isSaving = false
-    
+    @State private var verificationError: String?
+
     var body: some View {
         VStack(spacing: 0) {
             // Simple Add Model Button
@@ -25,11 +27,7 @@ struct AddCustomModelCardView: View {
                         isExpanded = true
                         // Pre-fill values - either from editing model or defaults
                         if let editing = editingModel {
-                            displayName = editing.displayName
-                            apiEndpoint = editing.apiEndpoint
-                            apiKey = editing.apiKey
-                            modelName = editing.modelName
-                            isMultilingual = editing.isMultilingualModel
+                            fill(from: editing)
                         } else {
                             // Pre-fill some default values when adding new
                             if apiEndpoint.isEmpty {
@@ -56,7 +54,7 @@ struct AddCustomModelCardView: View {
                 .buttonStyle(.plain)
                 .shadow(color: Color.accentColor.opacity(0.3), radius: 8, y: 4)
             }
-            
+
             // Expandable Form Section
             if isExpanded {
                 VStack(alignment: .leading, spacing: 20) {
@@ -65,9 +63,9 @@ struct AddCustomModelCardView: View {
                         Text(editingModel != nil ? "Edit Custom Model" : "Add Custom Model")
                             .font(.headline)
                             .foregroundColor(.primary)
-                        
+
                         Spacer()
-                        
+
                         Button(action: {
                             withAnimation(.interpolatingSpring(stiffness: 170, damping: 20)) {
                                 isExpanded = false
@@ -80,13 +78,13 @@ struct AddCustomModelCardView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    
+
                     // Disclaimer
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
                             .font(.caption)
-                        Text("Only OpenAI-compatible transcription APIs are supported")
+                        Text("Only OpenAI-compatible transcription APIs are supported. Zerm sends a one-second test recording to verify the endpoint before saving.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -94,22 +92,41 @@ struct AddCustomModelCardView: View {
                     .padding(.vertical, 8)
                     .background(Color.orange.opacity(0.1))
                     .cornerRadius(8)
-                    
+
+                    presetSection
+
                     // Form fields
                     VStack(alignment: .leading, spacing: 16) {
                         FormField(title: "Display Name", text: $displayName, placeholder: "My Custom Model")
                         FormField(title: "API Endpoint", text: $apiEndpoint, placeholder: "https://api.example.com/v1/audio/transcriptions")
                         FormField(title: "API Key", text: $apiKey, placeholder: "your-api-key", isSecure: true)
-                        FormField(title: "Model Name", text: $modelName, placeholder: "whisper-1")
-                        
+                        HStack(alignment: .bottom, spacing: 8) {
+                            FormField(title: "Model Name", text: $modelName, placeholder: "whisper-1")
+                            if let selectedPreset, selectedPreset.modelNames.count > 1 {
+                                Menu("Suggested") {
+                                    ForEach(selectedPreset.modelNames, id: \.self) { name in
+                                        Button(name) { modelName = name }
+                                    }
+                                }
+                                .fixedSize()
+                            }
+                        }
+
                         Toggle(isOn: $isMultilingual) {
                             HStack(spacing: 4) {
                                 Text("Multilingual Model")
-                                InfoTip("Turn on if this endpoint transcribes languages other than English. It only controls whether Zerm offers you a language picker for the model — leave it off for English-only endpoints so the choice is not presented.")
+                                InfoTip(String(localized: "Turn on if this endpoint transcribes languages other than English. When on, Zerm offers a language picker and sends the selected language with each request; when off, no language is sent."))
                             }
                         }
                     }
-                    
+
+                    if let verificationError {
+                        Label(verificationError, systemImage: "exclamationmark.octagon.fill")
+                            .font(.caption)
+                            .foregroundColor(Color(.systemRed))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     // Action buttons
                     HStack(spacing: 12) {
                         Button(action: {
@@ -127,7 +144,7 @@ struct AddCustomModelCardView: View {
                                 .cornerRadius(8)
                         }
                         .buttonStyle(.plain)
-                        
+
                         Button(action: {
                             addModel()
                         }) {
@@ -140,7 +157,7 @@ struct AddCustomModelCardView: View {
                                     Image(systemName: editingModel != nil ? "checkmark.circle.fill" : "plus.circle.fill")
                                         .font(.system(size: 14))
                                 }
-                                Text(editingModel != nil ? "Update Model" : "Add Model")
+                                Text(saveButtonTitle)
                                     .font(.system(size: 13, weight: .medium))
                             }
                             .foregroundColor(.white)
@@ -178,41 +195,86 @@ struct AddCustomModelCardView: View {
                     isExpanded = true
                     // Pre-fill values from editing model
                     if let editing = newValue {
-                        displayName = editing.displayName
-                        apiEndpoint = editing.apiEndpoint
-                        apiKey = editing.apiKey
-                        modelName = editing.modelName
-                        isMultilingual = editing.isMultilingualModel
+                        fill(from: editing)
                     }
                 }
             }
         }
     }
-    
+
+    private var presetSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(selection: $selectedPreset) {
+                Text("Custom endpoint").tag(CustomEndpointPreset?.none)
+                ForEach(CustomEndpointPreset.all) { preset in
+                    Text(verbatim: preset.name).tag(Optional(preset))
+                }
+            } label: {
+                Text("Preset")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .pickerStyle(.menu)
+            .onChange(of: selectedPreset) { _, preset in
+                guard let preset else { return }
+                apiEndpoint = preset.endpoint
+                modelName = preset.modelNames.first ?? modelName
+                if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    displayName = preset.name
+                }
+                verificationError = nil
+            }
+
+            if let selectedPreset {
+                Link(destination: selectedPreset.documentationURL) {
+                    Label("Get an API key and model list from \(selectedPreset.name)", systemImage: "arrow.up.right.square")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private var saveButtonTitle: LocalizedStringKey {
+        if isSaving { return "Verifying..." }
+        return editingModel != nil ? "Verify and Update" : "Verify and Add"
+    }
+
     private var isFormValid: Bool {
         !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    
+
+    private func fill(from model: CustomCloudModel) {
+        displayName = model.displayName
+        apiEndpoint = model.apiEndpoint
+        apiKey = model.apiKey
+        modelName = model.modelName
+        isMultilingual = model.isMultilingualModel
+        selectedPreset = nil
+        verificationError = nil
+    }
+
     private func clearForm() {
         displayName = ""
         apiEndpoint = ""
         apiKey = ""
         modelName = ""
         isMultilingual = true
+        selectedPreset = nil
+        verificationError = nil
     }
-    
+
     private func addModel() {
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedApiEndpoint = apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // Generate a name from display name (lowercase, no spaces)
         let generatedName = trimmedDisplayName.lowercased().replacingOccurrences(of: " ", with: "-")
-        
+
         validationErrors = customModelManager.validateModel(
             name: generatedName,
             displayName: trimmedDisplayName,
@@ -221,52 +283,54 @@ struct AddCustomModelCardView: View {
             modelName: trimmedModelName,
             excludingId: editingModel?.id
         )
-        
+
         if !validationErrors.isEmpty {
             showingAlert = true
             return
         }
-        
-        isSaving = true
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let editing = editingModel {
-                let updatedModel = CustomCloudModel(
-                    id: editing.id,
-                    name: generatedName,
-                    displayName: trimmedDisplayName,
-                    description: "Custom transcription model",
-                    apiEndpoint: trimmedApiEndpoint,
+        isSaving = true
+        verificationError = nil
+        let multilingual = isMultilingual
+
+        Task { @MainActor in
+            do {
+                try await OpenAICompatibleTranscriptionService().verify(
+                    endpoint: trimmedApiEndpoint,
+                    apiKey: trimmedApiKey,
                     modelName: trimmedModelName,
-                    isMultilingual: isMultilingual
+                    isMultilingual: multilingual,
+                    language: LanguagePreference.apiLanguage()
                 )
-                
-                if APIKeyManager.shared.saveCustomModelAPIKey(trimmedApiKey, forModelId: editing.id) {
-                    customModelManager.updateCustomModel(updatedModel)
-                } else {
-                    validationErrors = ["Failed to securely save API Key to Keychain. Please check your system settings or try again."]
-                    showingAlert = true
-                    isSaving = false
-                    return
-                }
+            } catch {
+                verificationError = error.localizedDescription
+                isSaving = false
+                return
+            }
+
+            let model = CustomCloudModel(
+                id: editingModel?.id ?? UUID(),
+                name: generatedName,
+                displayName: trimmedDisplayName,
+                description: String(localized: "Custom transcription model"),
+                apiEndpoint: trimmedApiEndpoint,
+                modelName: trimmedModelName,
+                isMultilingual: multilingual,
+                verificationStatus: .verified,
+                lastVerifiedAt: Date()
+            )
+
+            guard APIKeyManager.shared.saveCustomModelAPIKey(trimmedApiKey, forModelId: model.id) else {
+                validationErrors = [String(localized: "Failed to securely save API Key to Keychain. Please check your system settings or try again.")]
+                showingAlert = true
+                isSaving = false
+                return
+            }
+
+            if editingModel != nil {
+                customModelManager.updateCustomModel(model)
             } else {
-                let customModel = CustomCloudModel(
-                    name: generatedName,
-                    displayName: trimmedDisplayName,
-                    description: "Custom transcription model",
-                    apiEndpoint: trimmedApiEndpoint,
-                    modelName: trimmedModelName,
-                    isMultilingual: isMultilingual
-                )
-                
-                if APIKeyManager.shared.saveCustomModelAPIKey(trimmedApiKey, forModelId: customModel.id) {
-                    customModelManager.addCustomModel(customModel)
-                } else {
-                    validationErrors = ["Failed to securely save API Key to Keychain. Please check your system settings or try again."]
-                    showingAlert = true
-                    isSaving = false
-                    return
-                }
+                customModelManager.addCustomModel(model)
             }
 
             onModelAdded()
@@ -281,18 +345,18 @@ struct AddCustomModelCardView: View {
 }
 
 struct FormField: View {
-    let title: String
+    let title: LocalizedStringKey
     @Binding var text: String
-    let placeholder: String
+    let placeholder: LocalizedStringKey
     var isSecure: Bool = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundColor(.primary)
-            
+
             if isSecure {
                 SecureField(placeholder, text: $text)
                     .textFieldStyle(.roundedBorder)
@@ -302,4 +366,4 @@ struct FormField: View {
             }
         }
     }
-} 
+}

@@ -45,7 +45,7 @@ class TranscriptionModelManager: ObservableObject {
             case .nativeApple:
                 if #available(macOS 26, *) { return true } else { return false }
             case .custom:
-                return true
+                return (model as? CustomCloudModel)?.isUsable ?? false
             default:
                 if let cloudProvider = CloudProviderRegistry.provider(for: model.provider) {
                     return APIKeyManager.shared.hasAPIKey(forProvider: cloudProvider.providerKey)
