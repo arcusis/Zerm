@@ -427,7 +427,7 @@ class AIEnhancementService: ObservableObject {
             return .networkError
         case .timeout:
             return .timeout
-        case .invalidURL, .decodingError, .encodingError:
+        case .invalidURL, .decodingError, .encodingError, .unsupportedModel:
             return .customError(error.localizedDescription)
         }
     }

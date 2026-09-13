@@ -382,7 +382,7 @@ class AIService: ObservableObject {
             case .speechmatics:
                 result = await SpeechmaticsClient.verifyAPIKey(key)
             case .openRouter:
-                result = await OpenRouterClient.verifyAPIKey(key, model: currentModel)
+                result = await OpenRouterClient.verifyAPIKey(key)
             case .gemini:
                 result = await GeminiTranscriptionClient.verifyAPIKey(key)
             default:

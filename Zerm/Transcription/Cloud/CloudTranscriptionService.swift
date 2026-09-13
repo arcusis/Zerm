@@ -122,6 +122,8 @@ class CloudTranscriptionService: TranscriptionService {
             return .noTranscriptionReturned
         case .encodingError:
             return .dataEncodingError
+        case .unsupportedModel:
+            return .unsupportedProvider
         case .networkError(let detail):
             return .networkError(NSError(domain: "LLMkit", code: -1, userInfo: [NSLocalizedDescriptionKey: detail]))
         case .invalidURL, .decodingError, .timeout:

@@ -732,7 +732,7 @@ struct DiarizerCapacityDiagnostic {
         #expect(modelRate == 8_000, "model rate changed to \(modelRate); MeetingDiarizer declares 16 kHz input and relies on the library resampling")
 
         // Capacity has to exceed a two-person call for the feature to mean anything.
-        let maxSpeakers = try #require(d.decodeMaxSpeakers)
+        let maxSpeakers = try #require(d.numSpeakers)
         #expect(maxSpeakers >= 2, "model decodes at most \(maxSpeakers) speaker(s)")
     }
 }
