@@ -497,6 +497,7 @@ private struct HistoryCardRow: View {
 
     @Environment(\.layoutDirection) private var layoutDirection
     @State private var selectedTab: TranscriptionTab
+    @State private var isFileTranscriptOpen = false
 
     init(
         transcription: Transcription,
@@ -578,6 +579,7 @@ private struct HistoryCardRow: View {
                 Button("Copy") {
                     _ = ClipboardManager.copyToClipboard(transcription.displayText)
                 }
+                OpenFileTranscriptButton(transcriptionID: transcription.id) { isFileTranscriptOpen = true }
             }
 
             if isExpanded {
@@ -585,6 +587,7 @@ private struct HistoryCardRow: View {
                     .padding(.top, 10)
             }
         }
+        .fileTranscriptSheet(for: transcription.id, isPresented: $isFileTranscriptOpen)
     }
 
     // MARK: - Expanded Content
@@ -627,6 +630,9 @@ private struct HistoryCardRow: View {
                 CopyIconButton(textToCopy: displayText)
                     .padding(8)
             }
+
+            OpenFileTranscriptButton(transcriptionID: transcription.id) { isFileTranscriptOpen = true }
+                .controlSize(.small)
 
             if hasAudioFile, let urlString = transcription.audioFileURL,
                let url = URL(string: urlString) {

@@ -7,6 +7,8 @@ struct TranscriptionListItem: View {
     let onSelect: () -> Void
     let onToggleCheck: () -> Void
 
+    @State private var isFileTranscriptOpen = false
+
     var body: some View {
         HStack(spacing: 8) {
             Toggle("", isOn: Binding(
@@ -62,7 +64,9 @@ struct TranscriptionListItem: View {
             Button("Copy") {
                 _ = ClipboardManager.copyToClipboard(transcription.displayText)
             }
+            OpenFileTranscriptButton(transcriptionID: transcription.id) { isFileTranscriptOpen = true }
         }
+        .fileTranscriptSheet(for: transcription.id, isPresented: $isFileTranscriptOpen)
     }
 }
 

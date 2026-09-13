@@ -12,10 +12,12 @@ struct FileTranscriptionOptions: Equatable, Sendable {
 
 /// Transcribes dropped audio and video files one at a time.
 ///
-/// Each job converts its file to a 16 kHz WAV in a private work folder, transcribes it in
-/// windows at background inference priority (Dictation always goes first, see
-/// `TranscriptionInferenceScheduler`), optionally identifies speakers, and saves the result to
-/// History. The steps are injected so the state machine is testable without models.
+/// Each job converts its file to a 16 kHz WAV in a private work folder. With speaker
+/// identification on it diarizes first and then transcribes speaker by speaker, so every line's
+/// speaker comes from diarization; otherwise, or when diarization fails, it transcribes in plain
+/// windows. Transcription runs at background inference priority (Dictation always goes first,
+/// see `TranscriptionInferenceScheduler`), and the result is saved to History. The steps are
+/// injected so the state machine is testable without models.
 @MainActor
 final class FileTranscriptionQueue: ObservableObject {
     struct Job: Identifiable, Equatable {
@@ -48,9 +50,11 @@ final class FileTranscriptionQueue: ObservableObject {
 
     struct Steps {
         var convert: @Sendable (_ source: URL, _ destination: URL) async throws -> TimeInterval
+        /// `turns` are the diarized speaker turns, or `nil` to transcribe without speakers.
         var transcribe: @Sendable (
             _ audio: URL,
             _ options: FileTranscriptionOptions,
+            _ turns: [SpeakerTurn]?,
             _ onProgress: @escaping @Sendable (Double) async -> Void
         ) async throws -> WindowedFileTranscriber.Transcript
         var diarize: @Sendable (
@@ -59,7 +63,6 @@ final class FileTranscriptionQueue: ObservableObject {
             _ onProgress: @escaping @Sendable (Double) async -> Void
         ) async throws -> [SpeakerTurn]
         var save: @MainActor (_ transcript: FileTranscript, _ audio: URL, _ transcriptionDuration: TimeInterval) throws -> Void
-        var update: @MainActor (_ transcript: FileTranscript) -> Void
     }
 
     @Published private(set) var jobs: [Job] = []
@@ -144,15 +147,6 @@ final class FileTranscriptionQueue: ObservableObject {
         jobs.removeAll { $0.state.isFinished }
     }
 
-    func renameSpeaker(_ speaker: Int, to name: String, inJob id: UUID) {
-        guard let index = jobs.firstIndex(where: { $0.id == id }),
-              var transcript = jobs[index].transcript else { return }
-        transcript.rename(speaker: speaker, to: name)
-        guard transcript != jobs[index].transcript else { return }
-        jobs[index].transcript = transcript
-        steps.update(transcript)
-    }
-
     // MARK: - Processing
 
     private func startNextJob() {
@@ -177,20 +171,16 @@ final class FileTranscriptionQueue: ObservableObject {
             let duration = try await steps.convert(job.sourceURL, audio)
             try Task.checkCancellation()
 
-            setState(.transcribing(progress: 0), for: job.id)
-            let transcribed = try await steps.transcribe(audio, job.options) { [weak self] progress in
-                await self?.setProgress(progress, for: job.id)
-            }
-            try Task.checkCancellation()
-
-            var turns: [SpeakerTurn] = []
+            var turns: [SpeakerTurn]?
             var speakerStatus = FileTranscript.SpeakerStatus.notRequested
             if job.options.identifySpeakers {
                 setState(.diarizing(progress: 0), for: job.id)
                 do {
-                    turns = try await steps.diarize(audio, job.options.speakerCount) { [weak self] progress in
+                    let found = try await steps.diarize(audio, job.options.speakerCount) { [weak self] progress in
                         await self?.setProgress(progress, for: job.id)
                     }
+                    // No diarized speech: transcribe the whole file anyway rather than nothing.
+                    turns = found.isEmpty ? nil : found
                     speakerStatus = .identified
                 } catch {
                     try Task.checkCancellation()
@@ -201,6 +191,12 @@ final class FileTranscriptionQueue: ObservableObject {
             }
             try Task.checkCancellation()
 
+            setState(.transcribing(progress: 0), for: job.id)
+            let transcribed = try await steps.transcribe(audio, job.options, turns) { [weak self] progress in
+                await self?.setProgress(progress, for: job.id)
+            }
+            try Task.checkCancellation()
+
             let transcript = FileTranscript(
                 sourceFileName: job.fileName,
                 duration: duration,
@@ -208,7 +204,6 @@ final class FileTranscriptionQueue: ObservableObject {
                 languageCode: job.options.languageCode,
                 speakerStatus: speakerStatus,
                 segments: transcribed.segments,
-                turns: turns,
                 gaps: transcribed.gaps
             )
             guard !transcript.isEmpty else { throw FileTranscriptionError.noSpeech }

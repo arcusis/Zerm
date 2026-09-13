@@ -11,7 +11,7 @@ struct TranscribeFileView: View {
     var body: some View {
         Group {
             if let job = queue.jobs.first(where: { $0.id == openJobID }), let transcript = job.transcript {
-                FileTranscriptView(jobID: job.id, transcript: transcript) { openJobID = nil }
+                FileTranscriptView(transcript: transcript, closeTitle: "Files") { openJobID = nil }
             } else {
                 queuePage
             }

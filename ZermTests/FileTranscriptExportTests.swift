@@ -14,27 +14,25 @@ struct FileTranscriptExportTests {
             modelName: "Model",
             languageCode: "en",
             speakerStatus: .identified,
-            segments: [TranscriptSegment(start: 0, end: 4, text: "one two three four five six")],
-            turns: [
-                SpeakerTurn(speakerIndex: 7, start: 0, end: 2),
-                SpeakerTurn(speakerIndex: 3, start: 2, end: 4)
+            segments: [
+                TranscriptSegment(start: 0, end: 2, text: "one two three", speakerIndex: 7),
+                TranscriptSegment(start: 2, end: 4, text: "four five six", speakerIndex: 3),
+                TranscriptSegment(start: 4, end: 6, text: "seven", speakerIndex: 7)
             ]
         )
 
-        #expect(transcript.segments.map(\.speakerIndex) == [0, 1])
-        #expect(transcript.segments.map(\.text).joined(separator: " ") == "one two three four five six")
+        #expect(transcript.segments.map(\.speakerIndex) == [0, 1, 0])
         #expect(transcript.speakers.map(\.index) == [0, 1])
     }
 
-    @Test func turnsAreIgnoredWhenSpeakersWereNotIdentified() {
+    @Test func segmentsWithoutSpeakersHaveNoLabels() {
         let transcript = FileTranscript(
             sourceFileName: "call.wav",
             duration: 4,
             modelName: "Model",
             languageCode: "en",
             speakerStatus: .failed,
-            segments: [TranscriptSegment(start: 0, end: 4, text: "hello there")],
-            turns: [SpeakerTurn(speakerIndex: 0, start: 0, end: 4)]
+            segments: [TranscriptSegment(start: 0, end: 4, text: "hello there")]
         )
 
         #expect(transcript.speakers.isEmpty)
@@ -49,18 +47,13 @@ struct FileTranscriptExportTests {
             languageCode: "en",
             speakerStatus: .identified,
             segments: [
-                TranscriptSegment(start: 0, end: 30, text: "first"),
-                TranscriptSegment(start: 30, end: 60, text: "second"),
-                TranscriptSegment(start: 60, end: 70, text: "reply"),
-                TranscriptSegment(start: 70, end: 100, text: "third"),
-                TranscriptSegment(start: 100, end: 130, text: "   "),
-                TranscriptSegment(start: 130, end: 165, text: "fourth"),
-                TranscriptSegment(start: 165, end: 195, text: "fifth")
-            ],
-            turns: [
-                SpeakerTurn(speakerIndex: 0, start: 0, end: 60),
-                SpeakerTurn(speakerIndex: 1, start: 60, end: 70),
-                SpeakerTurn(speakerIndex: 0, start: 70, end: 200)
+                TranscriptSegment(start: 0, end: 30, text: "first", speakerIndex: 0),
+                TranscriptSegment(start: 30, end: 60, text: "second", speakerIndex: 0),
+                TranscriptSegment(start: 60, end: 70, text: "reply", speakerIndex: 1),
+                TranscriptSegment(start: 70, end: 100, text: "third", speakerIndex: 0),
+                TranscriptSegment(start: 100, end: 130, text: "   ", speakerIndex: 0),
+                TranscriptSegment(start: 130, end: 165, text: "fourth", speakerIndex: 0),
+                TranscriptSegment(start: 165, end: 195, text: "fifth", speakerIndex: 0)
             ]
         )
 
@@ -246,8 +239,7 @@ struct FileTranscriptExportTests {
             modelName: "Model",
             languageCode: "en",
             speakerStatus: .identified,
-            segments: [TranscriptSegment(start: 0, end: 30, text: words.joined(separator: " "))],
-            turns: [SpeakerTurn(speakerIndex: 0, start: 0, end: 30)]
+            segments: [TranscriptSegment(start: 0, end: 30, text: words.joined(separator: " "), speakerIndex: 0)]
         )
         transcript.rename(speaker: 0, to: "Prof")
 
@@ -310,13 +302,9 @@ struct FileTranscriptExportTests {
             languageCode: "he",
             speakerStatus: .identified,
             segments: [
-                TranscriptSegment(start: 0, end: 4, text: "Hello and welcome to the show."),
-                TranscriptSegment(start: 4, end: 9.5, text: "שלום, תודה שהזמנת אותי."),
-                TranscriptSegment(start: 9.5, end: 12, text: "It is great to be here.")
-            ],
-            turns: [
-                SpeakerTurn(speakerIndex: 0, start: 0, end: 4),
-                SpeakerTurn(speakerIndex: 1, start: 4, end: 12)
+                TranscriptSegment(start: 0, end: 4, text: "Hello and welcome to the show.", speakerIndex: 0),
+                TranscriptSegment(start: 4, end: 9.5, text: "שלום, תודה שהזמנת אותי.", speakerIndex: 1),
+                TranscriptSegment(start: 9.5, end: 12, text: "It is great to be here.", speakerIndex: 1)
             ]
         )
         transcript.rename(speaker: 0, to: "Dana")

@@ -14,7 +14,7 @@ extension FileTranscriptionQueue {
             convert: { source, destination in
                 try await AudioFileConverter.convert(source, to: destination)
             },
-            transcribe: { audio, options, onProgress in
+            transcribe: { audio, options, turns, onProgress in
                 let model = try await MainActor.run { try usableModel(named: options.modelName, in: modelManager) }
                 let transcriber = WindowedFileTranscriber { window in
                     do {
@@ -29,7 +29,12 @@ extension FileTranscriptionQueue {
                         return ""
                     }
                 }
-                let transcript = try await transcriber.transcribeFile(audio, onProgress: onProgress)
+                let transcript = if let turns {
+                    try await SpeakerTurnTranscriber(windowed: transcriber)
+                        .transcribeFile(audio, turns: turns, onProgress: onProgress)
+                } else {
+                    try await transcriber.transcribeFile(audio, onProgress: onProgress)
+                }
                 let segments = await MainActor.run {
                     transcript.segments.map { segment in
                         TranscriptSegment(
@@ -49,9 +54,6 @@ extension FileTranscriptionQueue {
             },
             save: { transcript, audio, duration in
                 try history.save(transcript, audio: audio, transcriptionDuration: duration)
-            },
-            update: { transcript in
-                history.update(transcript)
             }
         )
 
