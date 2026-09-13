@@ -146,17 +146,16 @@ class PowerModeSessionManager {
             // Instant genuinely never enhances, whatever the config says.
             enhancementWanted = false
         case .instantRefine, .enhanced:
-            switch config.enhancementOverride {
-            case .inherit: enhancementWanted = enhancementService.isEnhancementEnabled
-            case .on: enhancementWanted = true
-            case .off: enhancementWanted = false
-            }
+            enhancementWanted = config.outputMode?.usesEnhancement ?? enhancementService.isEnhancementEnabled
         }
 
         enhancementService.isEnhancementEnabled = enhancementWanted
         // Screen context costs a capture plus OCR, which no refine budget can absorb.
-        enhancementService.useScreenCaptureContext =
-            (outputMode == .enhanced) ? config.useScreenCapture : false
+        if outputMode != .enhanced {
+            enhancementService.useScreenCaptureContext = false
+        } else if let contextAwareness = config.contextAwareness {
+            enhancementService.useScreenCaptureContext = contextAwareness
+        }
 
         if let promptId = config.selectedPrompt, let uuid = UUID(uuidString: promptId) {
             enhancementService.selectedPromptId = uuid
@@ -173,9 +172,15 @@ class PowerModeSessionManager {
             }
         }
 
-        UserDefaults.standard.set(config.isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
-        PunctuationCleanupMode.setCurrent(config.punctuationCleanupMode)
-        UserDefaults.standard.set(config.lowercaseTranscription, forKey: "LowercaseTranscription")
+        if let isTextFormattingEnabled = config.isTextFormattingEnabled {
+            UserDefaults.standard.set(isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
+        }
+        if let punctuationCleanupMode = config.punctuationCleanupMode {
+            PunctuationCleanupMode.setCurrent(punctuationCleanupMode)
+        }
+        if let lowercaseTranscription = config.lowercaseTranscription {
+            UserDefaults.standard.set(lowercaseTranscription, forKey: "LowercaseTranscription")
+        }
 
         if let language = config.selectedLanguage {
             UserDefaults.standard.set(language, forKey: "SelectedLanguage")

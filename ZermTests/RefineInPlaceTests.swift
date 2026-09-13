@@ -198,39 +198,4 @@ struct RefineInPlaceTests {
         let budget = AIEnhancementService.tokenBudget(forInput: medium)
         #expect(budget > 64 && budget < 512)
     }
-
-    // MARK: - Power Mode enhancement override
-
-    /// An explicit `true` was a deliberate choice and must survive. A `false` was almost
-    /// always just the seeded default, and treating it as an instruction to suppress
-    /// enhancement is what made the global toggle look broken.
-    @Test func legacyConfigsMigrateOffToInherit() throws {
-        let legacy = """
-        {"id":"\(UUID().uuidString)","name":"General","emoji":"💼",
-         "isAIEnhancementEnabled":false,"useScreenCapture":false}
-        """
-        let config = try JSONDecoder().decode(PowerModeConfig.self, from: Data(legacy.utf8))
-        #expect(config.enhancementOverride == .inherit)
-    }
-
-    @Test func legacyConfigsMigrateOnToOn() throws {
-        let legacy = """
-        {"id":"\(UUID().uuidString)","name":"Email","emoji":"✉️",
-         "isAIEnhancementEnabled":true,"useScreenCapture":false}
-        """
-        let config = try JSONDecoder().decode(PowerModeConfig.self, from: Data(legacy.utf8))
-        #expect(config.enhancementOverride == .on)
-    }
-
-    @Test func explicitOverrideSurvivesARoundTrip() throws {
-        let config = PowerModeConfig(
-            name: "Terminal",
-            emoji: "⌨️",
-            isAIEnhancementEnabled: false,
-            enhancementOverride: .off
-        )
-        let data = try JSONEncoder().encode(config)
-        let decoded = try JSONDecoder().decode(PowerModeConfig.self, from: data)
-        #expect(decoded.enhancementOverride == .off)
-    }
 }

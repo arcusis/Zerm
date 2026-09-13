@@ -169,9 +169,27 @@ enum AIProvider: String, CaseIterable {
             return true
         }
     }
+
+    /// Speech-to-text services that share this enum for their API keys but cannot rewrite text.
+    var isTranscriptionOnly: Bool {
+        switch self {
+        case .elevenLabs, .deepgram, .soniox, .speechmatics:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static var enhancementProviders: [AIProvider] {
+        allCases.filter { !$0.isTranscriptionOnly }
+    }
 }
 
 class AIService: ObservableObject {
+    /// The one Ollama model selection. `OllamaSelectedModel`, the generic per-provider key, is
+    /// migrated into it.
+    static let ollamaModelKey = "ollamaSelectedModel"
+
     @Published var apiKey: String = ""
     @Published var isAPIKeyValid: Bool = false
     @Published var customBaseURL: String = UserDefaults.standard.string(forKey: "customProviderBaseURL") ?? "" {
@@ -216,14 +234,14 @@ class AIService: ObservableObject {
     
     @Published private var openRouterModels: [String] = []
     
-    var connectedProviders: [AIProvider] {
-        AIProvider.allCases.filter { provider in
+    var connectedEnhancementProviders: [AIProvider] {
+        AIProvider.enhancementProviders.filter { provider in
             if provider == .ollama {
                 return ollamaService.isConnected
             } else if provider == .localCLI {
                 return localCLIService.isConfigured
             } else if provider == .localLLM {
-                return LocalLLMModelManager.isModelDownloaded
+                return LocalLLMModelManager.isModelDownloaded(for: .enhancement)
             } else if provider.requiresAPIKey {
                 return APIKeyManager.shared.hasAPIKey(forProvider: provider.rawValue)
             }

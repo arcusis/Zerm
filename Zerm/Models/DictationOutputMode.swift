@@ -6,7 +6,7 @@ import Foundation
 /// yet silently forced AI enhancement off at every launch, in the pipeline, and again on
 /// every Power Mode switch — so the enhancement toggle could read ON while enhancement
 /// never ran. The three cases make that trade-off explicit instead.
-enum DictationOutputMode: String, CaseIterable, Identifiable {
+enum DictationOutputMode: String, Codable, CaseIterable, Identifiable {
     /// Paste the raw transcript immediately. No LLM is involved at any point.
     case instant
 

@@ -171,6 +171,9 @@ enum AppDefaults {
             defaults.set(6, forKey: "ZermFastDefaultsVersion")
         }
 
+        // Must run before PowerModeManager first loads its configurations.
+        PowerModeMigration.run(defaults: defaults)
+
         PunctuationCleanupMode.migrateLegacyUserDefaultIfNeeded()
 
         // `integer(forKey:)` is 0 when the key is absent. Production 2.8.2 then

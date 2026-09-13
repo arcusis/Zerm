@@ -128,6 +128,12 @@ struct ConfigurationRow: View {
         return "Default"
     }
     
+    private var hasOverrideBadges: Bool {
+        config.selectedTranscriptionModelName != nil || config.selectedLanguage != nil
+            || config.outputMode != nil || config.selectedAIProvider != nil
+            || selectedPrompt != nil || config.contextAwareness == true || config.autoSendKey.isEnabled
+    }
+
     private var appCount: Int { return config.appConfigs?.count ?? 0 }
     private var websiteCount: Int { return config.urlConfigs?.count ?? 0 }
     
@@ -211,7 +217,7 @@ struct ConfigurationRow: View {
             .padding(.vertical, 12)
             .padding(.horizontal, 14)
             
-            if selectedModel != nil || selectedLanguage != nil || config.isAIEnhancementEnabled || config.autoSendKey.isEnabled {
+            if hasOverrideBadges {
                 Divider()
                 
                 HStack(spacing: 8) {
@@ -249,11 +255,28 @@ struct ConfigurationRow: View {
                         )
                     }
                     
-                    if config.isAIEnhancementEnabled, let modelName = config.selectedAIModel, !modelName.isEmpty {
+                    if let outputMode = config.outputMode {
+                        HStack(spacing: 4) {
+                            Image(systemName: outputMode.usesEnhancement ? "wand.and.stars" : "bolt")
+                                .font(.system(size: 10))
+                            Text(outputMode.title)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule()
+                            .fill(Color(NSColor.controlBackgroundColor)))
+                        .overlay(
+                            Capsule()
+                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
+                    }
+
+                    if let aiLabel = config.selectedAIModel ?? config.selectedAIProvider, !aiLabel.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "cpu")
                                 .font(.system(size: 10))
-                            Text(modelName.count > 20 ? String(modelName.prefix(18)) + "..." : modelName)
+                            Text(aiLabel.count > 20 ? String(aiLabel.prefix(18)) + "..." : aiLabel)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
@@ -282,28 +305,28 @@ struct ConfigurationRow: View {
                                 .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
                         )
                     }
-                    if config.isAIEnhancementEnabled {
-                        if config.useScreenCapture {
-                            HStack(spacing: 4) {
-                                Image(systemName: "camera.viewfinder")
-                                    .font(.system(size: 10))
-                                Text("Context Awareness")
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule()
-                                .fill(Color(NSColor.controlBackgroundColor)))
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
-                            )
+                    if config.contextAwareness == true {
+                        HStack(spacing: 4) {
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 10))
+                            Text("Context Awareness")
+                                .font(.caption)
                         }
-                        
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule()
+                            .fill(Color(NSColor.controlBackgroundColor)))
+                        .overlay(
+                            Capsule()
+                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
+                    }
+
+                    if let selectedPrompt {
                         HStack(spacing: 4) {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 10))
-                            Text(selectedPrompt?.title ?? "AI")
+                            Text(selectedPrompt.title)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
