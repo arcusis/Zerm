@@ -73,6 +73,17 @@ struct FileTranscriptionTests {
         #expect(transcript.gaps.first?.end == 70)
     }
 
+    @Test func everyWindowFailingThrowsInsteadOfReturningOnlyGaps() async throws {
+        let url = try Self.silentWAV(seconds: 40)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let transcriber = WindowedFileTranscriber { _ in throw URLError(.notConnectedToInternet) }
+
+        await #expect(throws: URLError.self) {
+            try await transcriber.transcribeFile(url)
+        }
+    }
+
     @Test func emptyFileProducesNoWindows() async throws {
         let url = try Self.silentWAV(seconds: 0)
         defer { try? FileManager.default.removeItem(at: url) }
@@ -129,9 +140,21 @@ struct FileTranscriptionTests {
         #expect(attributed[0].speakerIndex == nil)
     }
 
+    @Test func diarizerSpeakerIdsBecomeIndicesInOrderOfFirstAppearance() {
+        let turns = FileDiarizer.turns(from: [
+            (speakerID: "S3", start: 5, end: 8),
+            (speakerID: "S1", start: 0, end: 5),
+            (speakerID: "S3", start: 9, end: 9),
+            (speakerID: "S1", start: 8, end: 12)
+        ])
+
+        #expect(turns.map(\.speakerIndex) == [0, 1, 0])
+        #expect(turns.map(\.start) == [0, 5, 8])
+    }
+
     // MARK: - Conversion
 
-    @Test func conversionProducesSixteenKilohertzMonoWithTheAudioIntact() throws {
+    @Test func conversionProducesSixteenKilohertzMonoWithTheAudioIntact() async throws {
         let source = FileManager.default.temporaryDirectory
             .appendingPathComponent("zerm-convert-source-\(UUID().uuidString).wav")
         let destination = FileManager.default.temporaryDirectory
@@ -156,7 +179,7 @@ struct FileTranscriptionTests {
             try file.write(from: buffer)
         }()
 
-        let duration = try AudioFileConverter.convert(source, to: destination)
+        let duration = try await AudioFileConverter.convert(source, to: destination)
         #expect(abs(duration - 1.0) < 0.01)
 
         let converted = try AVAudioFile(forReading: destination)
@@ -178,7 +201,7 @@ struct FileTranscriptionTests {
         #expect((sum / Double(read.frameLength)).squareRoot() > 0.05, "converted audio is silent")
     }
 
-    @Test func conversionRejectsAnEmptyFile() throws {
+    @Test func conversionRejectsAnEmptyFile() async throws {
         let source = try Self.silentWAV(seconds: 0)
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("zerm-convert-empty-\(UUID().uuidString).wav")
@@ -187,9 +210,31 @@ struct FileTranscriptionTests {
             try? FileManager.default.removeItem(at: destination)
         }
 
-        #expect(throws: AudioFileConverter.ConversionError.self) {
-            try AudioFileConverter.convert(source, to: destination)
+        await #expect(throws: AudioFileConverter.ConversionError.self) {
+            try await AudioFileConverter.convert(source, to: destination)
         }
+    }
+
+    @Test func conversionRejectsAFileThatIsNotMedia() async throws {
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zerm-convert-notes-\(UUID().uuidString).mp3")
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zerm-convert-notes-\(UUID().uuidString).wav")
+        defer {
+            try? FileManager.default.removeItem(at: source)
+            try? FileManager.default.removeItem(at: destination)
+        }
+        try Data("not audio".utf8).write(to: source)
+
+        await #expect(throws: AudioFileConverter.ConversionError.self) {
+            try await AudioFileConverter.convert(source, to: destination)
+        }
+    }
+
+    @Test func supportedFilesAreRecognisedByExtension() {
+        #expect(AudioFileConverter.isSupported(URL(fileURLWithPath: "/tmp/interview.M4A")))
+        #expect(AudioFileConverter.isSupported(URL(fileURLWithPath: "/tmp/meeting.mov")))
+        #expect(!AudioFileConverter.isSupported(URL(fileURLWithPath: "/tmp/notes.txt")))
     }
 
     // MARK: - Helpers

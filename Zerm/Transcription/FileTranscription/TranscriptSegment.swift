@@ -1,10 +1,10 @@
 import Foundation
 
 /// One timed line of a file transcript, optionally attributed to a speaker.
-struct TranscriptSegment: Identifiable, Equatable, Sendable {
+struct TranscriptSegment: Identifiable, Equatable, Codable, Sendable {
     /// Speakers are estimated by spreading a window's words across diarized turns, never timed
     /// per word by the provider, so they must not be presented as exact.
-    enum SpeakerConfidence: Sendable {
+    enum SpeakerConfidence: String, Codable, Sendable {
         case estimatedFromWindow
         case unknown
     }

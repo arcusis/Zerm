@@ -9,7 +9,7 @@ import Foundation
 struct WindowedFileTranscriber: Sendable {
 
     /// A window whose transcription failed. The rest of the file is still transcribed.
-    struct Gap: Equatable, Sendable {
+    struct Gap: Equatable, Codable, Sendable {
         let start: TimeInterval
         let end: TimeInterval
         let reason: String
@@ -64,6 +64,7 @@ struct WindowedFileTranscriber: Sendable {
         var prior = ""
         var segments: [TranscriptSegment] = []
         var gaps: [Gap] = []
+        var lastError: Error?
 
         while position < totalFrames {
             try Task.checkCancellation()
@@ -108,12 +109,19 @@ struct WindowedFileTranscriber: Sendable {
                         text: reconciliation.text
                     ))
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                lastError = error
                 gaps.append(Gap(start: start, end: end, reason: error.localizedDescription))
             }
 
             position += min(advance, AVAudioFramePosition(buffer.frameLength))
             await onProgress?(min(1, Double(position) / Double(totalFrames)))
+        }
+        // Every window failing is a systemic problem (no network, a missing key), not gaps.
+        if segments.isEmpty, let lastError {
+            throw lastError
         }
         return Transcript(segments: segments, gaps: gaps)
     }
