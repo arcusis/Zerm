@@ -96,7 +96,7 @@ struct TranscriptionInfoPanel: View {
                         Text("System Prompt")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
-                        Text(systemMsg)
+                        Text(verbatim: systemMsg)
                             .font(.system(size: 11, weight: .regular, design: .monospaced))
                             .lineSpacing(2)
                             .textSelection(.enabled)
@@ -109,7 +109,7 @@ struct TranscriptionInfoPanel: View {
                         Text("User Message")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
-                        Text(userMsg)
+                        Text(verbatim: userMsg)
                             .font(.system(size: 11, weight: .regular, design: .monospaced))
                             .lineSpacing(2)
                             .textSelection(.enabled)
@@ -139,7 +139,7 @@ struct TranscriptionInfoPanel: View {
         return parts.joined(separator: "\n\n")
     }
 
-    private func metadataRow(icon: String, label: String, value: String) -> some View {
+    private func metadataRow(icon: String, label: LocalizedStringKey, value: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
@@ -152,7 +152,7 @@ struct TranscriptionInfoPanel: View {
 
             Spacer(minLength: 0)
 
-            Text(value)
+            Text(verbatim: value)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.primary)
                 .lineLimit(1)

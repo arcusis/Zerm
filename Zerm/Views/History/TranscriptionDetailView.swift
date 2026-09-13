@@ -255,7 +255,7 @@ enum DictionarySuggestion {
 }
 
 private struct MessageBubble: View {
-    let label: String
+    let label: LocalizedStringKey
     let text: String
     let isEnhanced: Bool
 
@@ -270,7 +270,7 @@ private struct MessageBubble: View {
                     .padding(.horizontal, 12)
 
                 ScrollView {
-                    Text(text)
+                    Text(verbatim: text)
                         .font(.system(size: 14, weight: .regular))
                         .lineSpacing(2)
                         .textSelection(.enabled)

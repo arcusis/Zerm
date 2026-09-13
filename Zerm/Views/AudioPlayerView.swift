@@ -2,16 +2,16 @@ import SwiftUI
 import AVFoundation
 
 extension TimeInterval {
+    /// Formatted for the app's language, so a Hebrew UI never shows English units.
     func formatTiming() -> String {
+        let duration = Duration.seconds(self)
         if self < 1 {
-            return String(format: "%.0fms", self * 1000)
+            return duration.formatted(.units(allowed: [.milliseconds], width: .abbreviated))
         }
         if self < 60 {
-            return String(format: "%.1fs", self)
+            return duration.formatted(.units(allowed: [.seconds], width: .abbreviated, fractionalPart: .show(length: 1)))
         }
-        let minutes = Int(self) / 60
-        let seconds = self.truncatingRemainder(dividingBy: 60)
-        return String(format: "%dm %.0fs", minutes, seconds)
+        return duration.formatted(.units(allowed: [.minutes, .seconds], width: .abbreviated))
     }
 }
 
