@@ -33,11 +33,13 @@ struct LanguageSelectionView: View {
         return currentModel.isMultilingualModel
     }
 
+    // Multilingual models that detect the language themselves. English-only models of the same
+    // providers fall through to the English-only presentation instead of "Autodetected".
     private func languageSelectionDisabled() -> Bool {
-        guard let provider = transcriptionModelManager.currentTranscriptionModel?.provider else {
+        guard let model = transcriptionModelManager.currentTranscriptionModel else {
             return false
         }
-        return provider == .fluidAudio || provider == .gemini
+        return (model.provider == .fluidAudio || model.provider == .gemini) && model.isMultilingualModel
     }
 
     // Function to get current model's supported languages
