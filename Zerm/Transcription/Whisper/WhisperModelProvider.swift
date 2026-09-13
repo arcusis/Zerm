@@ -5,8 +5,6 @@ import SwiftData
 /// and WhisperTranscriptionService from concrete manager types.
 @MainActor
 protocol WhisperModelProvider: AnyObject {
-    var isModelLoaded: Bool { get }
-    var whisperContext: WhisperContext? { get }
-    var loadedWhisperModel: WhisperModelFile? { get }
-    var availableModels: [WhisperModelFile] { get }
+    /// Returns the resident context for the model named `name`, loading it once if needed.
+    func loadModel(named name: String) async throws -> WhisperContext
 }

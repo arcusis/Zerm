@@ -22,10 +22,15 @@ enum LanguageDictionary {
             return all.filter { codes.contains($0.key) }
 
         case .fluidAudio:
-            // Parakeet V3 detects among its supported languages internally. FluidAudio exposes no
-            // inference option that constrains ASR to one selected language, so presenting those
-            // languages as enforceable choices would make the UI misleading.
-            return ["auto": "Auto-detect"]
+            // Parakeet V3 detects among its 25 European languages on its own; Zerm sends it no
+            // language hint, so the UI shows these as detected, not as a selectable choice.
+            let codes = [
+                "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it",
+                "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk"
+            ]
+            var languages = all.filter { codes.contains($0.key) }
+            languages["auto"] = "Auto-detect"
+            return languages
 
         default:
             return all

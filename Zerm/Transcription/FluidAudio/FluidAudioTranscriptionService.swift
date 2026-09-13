@@ -67,7 +67,11 @@ class FluidAudioTranscriptionService: TranscriptionService {
             if loadingTask?.version == version {
                 self.loadingTask = nil
             }
-            throw error
+            if error is CancellationError { throw error }
+            // Missing or partially migrated model files (#173) must reach the user as a load
+            // failure with a re-download hint, not as an opaque CoreML error or a silent fallback.
+            logger.error("❌ Parakeet model load failed: \(error.localizedDescription, privacy: .public)")
+            throw ZermEngineError.modelLoadFailed
         }
     }
 
@@ -76,14 +80,19 @@ class FluidAudioTranscriptionService: TranscriptionService {
     }
 
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
+        let audioSamples = try await AudioProcessor().processAudioToSamples(audioURL)
+        return try await transcribe(samples: audioSamples, model: model)
+    }
+
+    /// Transcribes 16 kHz mono samples. Streaming commits through here so its final text is the
+    /// same as a batch run over the recording.
+    func transcribe(samples audioSamples: [Float], model: any TranscriptionModel) async throws -> String {
         let targetVersion = version(for: model)
         try await ensureModelsLoaded(for: targetVersion)
 
         guard let asrManager = asrManager else {
             throw ASRError.notInitialized
         }
-
-        let audioSamples = try await AudioProcessor().processAudioToSamples(audioURL)
 
         let durationSeconds = Double(audioSamples.count) / 16000.0
         let isVADEnabled = UserDefaults.standard.bool(forKey: "IsVADEnabled")
@@ -128,7 +137,7 @@ class FluidAudioTranscriptionService: TranscriptionService {
             // The manager still reports as loaded, so a plain retry reuses the broken handles —
             // reload the models from disk and re-create the manager once, then retry. (VoiceInk #614)
             logger.notice("ASR prediction failed; reloading models and retrying once: \(error.localizedDescription, privacy: .public)")
-            await reloadModels(for: targetVersion)
+            try await reloadModels(for: targetVersion)
             guard let reloadedManager = self.asrManager else { throw error }
             var retryDecoderState = TdtDecoderState.make(decoderLayers: await reloadedManager.decoderLayerCount)
             let result = try await reloadedManager.transcribe(speechAudio, decoderState: &retryDecoderState)
@@ -137,14 +146,14 @@ class FluidAudioTranscriptionService: TranscriptionService {
     }
 
     /// Forces a fresh model reload from disk, discarding cached (possibly stale) CoreML handles. (VoiceInk #614)
-    private func reloadModels(for version: AsrModelVersion) async {
+    private func reloadModels(for version: AsrModelVersion) async throws {
         await asrManager?.cleanup()
         asrManager = nil
         vadManager = nil
         activeVersion = nil
         cachedModels = nil
         loadingTask = nil
-        try? await ensureModelsLoaded(for: version)
+        try await ensureModelsLoaded(for: version)
     }
 
     // Releases ASR/VAD resources but preserves cached models for reuse
