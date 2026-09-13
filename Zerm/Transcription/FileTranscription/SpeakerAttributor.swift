@@ -1,28 +1,22 @@
 import Foundation
 
-/// Converts coarse text windows into speaker-bounded utterances when the STT provider does not
-/// return word timestamps. Words are distributed proportionally across finalized diarization
-/// intervals and explicitly marked estimated; the UI/persistence must never present them as
-/// provider-timed truth.
-enum MeetingSpeakerAttributor {
+/// Converts coarse text windows into speaker-bounded segments when the STT provider does not
+/// return word timestamps. Words are distributed proportionally across diarization turns and
+/// explicitly marked estimated; they must never be presented as provider-timed truth.
+enum SpeakerAttributor {
     static func split(
-        _ segments: [MeetingTranscriber.Segment],
-        using turns: [MeetingDiarizer.Turn]
-    ) -> [MeetingTranscriber.Segment] {
-        segments.flatMap { split($0, using: turns) }.sorted {
-            if $0.start == $1.start { return $0.source.rawValue < $1.source.rawValue }
-            return $0.start < $1.start
-        }
+        _ segments: [TranscriptSegment],
+        using turns: [SpeakerTurn]
+    ) -> [TranscriptSegment] {
+        segments.flatMap { split($0, using: turns) }.sorted { $0.start < $1.start }
     }
 
     private static func split(
-        _ segment: MeetingTranscriber.Segment,
-        using allTurns: [MeetingDiarizer.Turn]
-    ) -> [MeetingTranscriber.Segment] {
+        _ segment: TranscriptSegment,
+        using allTurns: [SpeakerTurn]
+    ) -> [TranscriptSegment] {
         let turns = allTurns.filter {
-            $0.source == segment.source
-                && $0.isFinal
-                && min(segment.end, $0.end) > max(segment.start, $0.start)
+            min(segment.end, $0.end) > max(segment.start, $0.start)
         }
         guard !turns.isEmpty else { return [segment] }
 
@@ -30,11 +24,10 @@ enum MeetingSpeakerAttributor {
         if speakers.count == 1, let speaker = speakers.first {
             return [.init(
                 id: segment.id,
-                source: segment.source,
                 start: segment.start,
                 end: segment.end,
                 text: segment.text,
-                assignedSpeakerIndex: speaker,
+                speakerIndex: speaker,
                 speakerConfidence: .estimatedFromWindow
             )]
         }
@@ -65,7 +58,7 @@ enum MeetingSpeakerAttributor {
         guard !words.isEmpty else { return [segment] }
         let totalDuration = max(0.001, segment.end - segment.start)
         var consumed = 0
-        var result: [MeetingTranscriber.Segment] = []
+        var result: [TranscriptSegment] = []
 
         for (index, interval) in intervals.enumerated() {
             let upper: Int
@@ -77,11 +70,10 @@ enum MeetingSpeakerAttributor {
             }
             guard upper > consumed else { continue }
             result.append(.init(
-                source: segment.source,
                 start: interval.start,
                 end: interval.end,
                 text: words[consumed..<upper].joined(separator: " "),
-                assignedSpeakerIndex: interval.speaker,
+                speakerIndex: interval.speaker,
                 speakerConfidence: interval.speaker == nil ? .unknown : .estimatedFromWindow
             ))
             consumed = upper

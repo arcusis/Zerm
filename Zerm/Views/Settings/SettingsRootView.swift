@@ -94,13 +94,11 @@ struct SettingsRootView: View {
 }
 
 private struct AudioSettingsRootPane: View {
-    @EnvironmentObject private var meetingRecordingController: MeetingRecordingController
     @State private var section: Section = .input
 
     private enum Section: String, CaseIterable, Identifiable {
         case input
         case behavior
-        case meetings
         case readAloud
 
         var id: Self { self }
@@ -109,7 +107,6 @@ private struct AudioSettingsRootPane: View {
             switch self {
             case .input: "Input"
             case .behavior: "Behavior"
-            case .meetings: "Meetings"
             case .readAloud: "Read Aloud"
             }
         }
@@ -142,35 +139,11 @@ private struct AudioSettingsRootPane: View {
                     AudioInputSettingsView()
                 case .behavior:
                     SettingsView(pane: .audio)
-                case .meetings:
-                    MeetingSettingsForm(isRecording: meetingRecordingController.isRecording)
-                        .accessibilityIdentifier("settings-audio-meetings")
                 case .readAloud:
-                    VStack(spacing: 0) {
-                        ReadAloudMeetingSafetyNotice()
-                            .padding(.horizontal, 24)
-                            .padding(.top, 16)
-                        TextToSpeechSettingsView()
-                    }
-                    .accessibilityIdentifier("settings-audio-read-aloud")
+                    TextToSpeechSettingsView()
+                        .accessibilityIdentifier("settings-audio-read-aloud")
                 }
             }
-        }
-    }
-}
-
-private struct ReadAloudMeetingSafetyNotice: View {
-    var body: some View {
-        GroupBox {
-            Label(
-                "During a meeting, Read Aloud works with wired headphones, Bluetooth or AirPods headsets, and USB headsets. It is blocked on speakers to prevent feedback. If headphones disconnect, Read Aloud stops and Zerm notifies you; recording and Dictation continue.",
-                systemImage: "headphones"
-            )
-            .font(.callout)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            Text("Meeting Safety")
-                .font(.headline)
         }
     }
 }

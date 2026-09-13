@@ -1,12 +1,12 @@
 import Foundation
 
 /// Serializes mutable provider runtimes and gives interactive Dictation priority over background
-/// meeting work. A provider may run one inference at a time; queues are bounded by the meeting
-/// transcriber's window policy rather than by retaining audio here.
+/// work such as long-file transcription. A provider may run one inference at a time; callers
+/// bound their own queues rather than retaining audio here.
 actor TranscriptionInferenceScheduler {
     static let shared = TranscriptionInferenceScheduler()
 
-    enum Priority: Int { case meeting = 0, dictation = 1 }
+    enum Priority: Int { case background = 0, dictation = 1 }
 
     private struct Waiter {
         let id: UUID

@@ -39,7 +39,7 @@ class AudioProcessor {
             return try readUsingAudioFile(url)
         } catch {
             // AVAudioFile rejects container/codec combinations the rest of the media
-            // stack plays fine — notably avfaudio error -50 on Teams mp4/m4a meeting
+            // stack plays fine — notably avfaudio error -50 on Teams mp4/m4a call
             // recordings. AVAssetReader decodes those, and hands back target-format
             // LPCM directly, skipping the manual seek-and-convert loop above.
             logger.warning("AVAudioFile pipeline failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public). Falling back to AVAssetReader.")

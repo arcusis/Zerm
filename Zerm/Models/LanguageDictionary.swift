@@ -24,7 +24,7 @@ enum LanguageDictionary {
         case .fluidAudio:
             // Parakeet V3 detects among its supported languages internally. FluidAudio exposes no
             // inference option that constrains ASR to one selected language, so presenting those
-            // languages as enforceable choices would make the meeting snapshot and UI misleading.
+            // languages as enforceable choices would make the UI misleading.
             return ["auto": "Auto-detect"]
 
         default:

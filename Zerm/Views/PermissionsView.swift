@@ -170,7 +170,6 @@ struct PermissionCard: View {
     let checkPermission: () -> Void
     var infoTipMessage: String?
     var infoTipLink: String?
-    var statusDetail: String?
     @State private var isRefreshing = false
 
     var body: some View {
@@ -243,13 +242,6 @@ struct PermissionCard: View {
                 }
             }
 
-            if let statusDetail, !statusDetail.isEmpty {
-                Text(statusDetail)
-                    .font(.callout)
-                    .foregroundStyle(isGranted ? .green : .orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            
             if !isGranted {
                 Button(action: buttonAction) {
                     HStack {
@@ -283,7 +275,6 @@ struct PermissionCard: View {
 struct PermissionsView: View {
     @EnvironmentObject private var hotkeyManager: HotkeyManager
     @StateObject private var permissionManager = PermissionManager()
-    @StateObject private var systemAudioReadiness = SystemAudioCaptureReadiness.shared
     
     var body: some View {
         ScrollView {
@@ -337,19 +328,6 @@ struct PermissionsView: View {
                         infoTipLink: Links.docString(.permissions)
                     )
 
-                    PermissionCard(
-                        icon: "waveform.badge.mic",
-                        title: "System Audio Capture",
-                        description: systemAudioDescription,
-                        isGranted: isSystemAudioVerified,
-                        buttonTitle: systemAudioButtonTitle,
-                        buttonAction: systemAudioButtonAction,
-                        checkPermission: systemAudioReadiness.test,
-                        infoTipMessage: String(localized: "macOS does not publish a reliable authorization status for app-audio capture. Zerm verifies it by exercising the same Core Audio process-tap path used by Meetings. The brief test sound stays on this Mac."),
-                        infoTipLink: Links.docString(.permissions),
-                        statusDetail: systemAudioStatusDetail
-                    )
-                    
                     // Accessibility Permission
                     PermissionCard(
                         icon: "hand.raised",
@@ -399,57 +377,6 @@ struct PermissionsView: View {
         .onAppear {
             permissionManager.checkAllPermissions()
             permissionManager.pollPermissions(forSeconds: 2)
-        }
-    }
-
-    private var isSystemAudioVerified: Bool {
-        if case .verified = systemAudioReadiness.status { return true }
-        return false
-    }
-
-    private var systemAudioDescription: LocalizedStringKey {
-        switch systemAudioReadiness.status {
-        case .verified:
-            "System audio capture is working for Meetings on this Mac"
-        case .testing:
-            "Testing the same system-audio path used by Meetings"
-        case .notTested, .failed:
-            "Allow Zerm to record participants from a selected meeting application"
-        }
-    }
-
-    private var systemAudioButtonTitle: LocalizedStringKey {
-        switch systemAudioReadiness.status {
-        case .notTested:
-            "Test System Audio"
-        case .testing:
-            "Testing System Audio…"
-        case .failed:
-            "Open System Settings"
-        case .verified:
-            "Test Again"
-        }
-    }
-
-    private var systemAudioButtonAction: () -> Void {
-        switch systemAudioReadiness.status {
-        case .failed:
-            systemAudioReadiness.openSystemSettings
-        case .notTested, .testing, .verified:
-            systemAudioReadiness.test
-        }
-    }
-
-    private var systemAudioStatusDetail: String? {
-        switch systemAudioReadiness.status {
-        case .notTested:
-            return String(localized: "Use the refresh control after granting access to verify the complete capture path.")
-        case .testing:
-            return String(localized: "Zerm is playing and recapturing a brief test sound.")
-        case .verified:
-            return String(localized: "Verified for this Zerm build and macOS version.")
-        case .failed(let message):
-            return message
         }
     }
 }

@@ -111,7 +111,7 @@ struct AudioOutputRouteTests {
             hasRelatedInputDevice: true
         )) == .headphones)
 
-        // Output-only USB DACs and speakers remain unsafe during meetings.
+        // Output-only USB DACs and speakers are never treated as headphones.
         #expect(AudioOutputRoute.classify(.init(
             transportType: kAudioDeviceTransportTypeUSB,
             builtInDataSource: headphoneJack,

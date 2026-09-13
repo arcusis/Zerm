@@ -20,7 +20,6 @@ final class TTSController: ObservableObject {
     private let naturalizer = TTSNaturalizer()
     private var task: Task<Void, Never>?
     private var sessionGeneration = 0
-    private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TTSController")
 
     weak var engine: ZermEngine?
@@ -29,7 +28,6 @@ final class TTSController: ObservableObject {
     init(engine: ZermEngine? = nil, recorderUIManager: RecorderUIManager? = nil) {
         self.engine = engine
         self.recorderUIManager = recorderUIManager
-        _ = MeetingActivityMonitor.shared
 
         // Feed the TTS output level into the recorder's meter so the widget shows live
         // audio bars while speaking — the same visualizer dictation uses. Capture the
@@ -38,14 +36,6 @@ final class TTSController: ObservableObject {
         player.onLevel = { level in
             recorderRef?.audioMeter = AudioMeter(averagePower: level, peakPower: level)
         }
-
-        AudioOutputRouteMonitor.shared.$route
-            .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] route in
-                Task { @MainActor [weak self] in self?.outputRouteChanged(to: route) }
-            }
-            .store(in: &cancellables)
     }
 
     /// Hotkey action: start reading the selection, or stop if already speaking.
@@ -79,16 +69,6 @@ final class TTSController: ObservableObject {
 
     /// Reserves the recorder widget and shows the "Preparing…" state immediately.
     private func startSession() -> Int? {
-        let routeMonitor = AudioOutputRouteMonitor.shared
-        if MeetingActivityMonitor.shared.isActive,
-           routeMonitor.route != .headphones {
-            let message = routeMonitor.isAmbiguousAnalogOutput
-                ? String(localized: "Confirm wired headphones in Read Aloud settings before speaking during this meeting")
-                : String(localized: "Connect headphones to use Read Aloud during a meeting")
-            notify(message)
-            SoundManager.shared.playEscSound()
-            return nil
-        }
         if let rm = recorderUIManager, !rm.canStartSpeaking {
             notify(String(localized: "Finish or cancel dictation before using Read Aloud"))
             SoundManager.shared.playEscSound()
@@ -99,24 +79,6 @@ final class TTSController: ObservableObject {
         isSpeaking = true
         recorderUIManager?.beginSpeaking()
         return generation
-    }
-
-    /// Called synchronously by the application-scoped meeting coordinator before it starts
-    /// either capture source. A notification/task hop is too late: speaker audio could already
-    /// have reached the first microphone buffers by the time the MainActor handled it.
-    func prepareForMeetingCapture() {
-        // A new meeting is a new acoustic-safety boundary. The analog jack cannot distinguish
-        // headphones from powered speakers, so any prior confirmation must be made again.
-        AudioOutputRouteMonitor.shared.clearAmbiguousAnalogHeadphoneConfirmation()
-        guard isSpeaking, AudioOutputRouteMonitor.shared.route != .headphones else { return }
-        stop()
-        notify(String(localized: "Read Aloud stopped because the meeting is using speakers"))
-    }
-
-    private func outputRouteChanged(to route: AudioOutputRoute) {
-        guard MeetingActivityMonitor.shared.isActive, isSpeaking, route != .headphones else { return }
-        stop()
-        notify(String(localized: "Read Aloud stopped because headphones disconnected during the meeting"))
     }
 
     private func endSession(_ message: String? = nil, beep: Bool = false) {

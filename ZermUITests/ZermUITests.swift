@@ -21,7 +21,7 @@ final class ZermUITests: XCTestCase {
         assertExists("sidebar-group-system")
 
         for route in [
-            "dashboard", "dictationHistory", "meetingsRecord", "meetingsHistory",
+            "dashboard", "dictationHistory",
             "readAloudSpeak", "readAloudHistory", "enhancement", "powerModes", "permissions"
         ] {
             let link = element("sidebar-\(route)")
@@ -32,60 +32,18 @@ final class ZermUITests: XCTestCase {
 
         app.typeKey("s", modifierFlags: [.command, .control])
         XCTAssertTrue(
-            waitFor(element("sidebar-meetingsRecord"), predicate: "hittable == false"),
+            waitFor(element("sidebar-dictationHistory"), predicate: "hittable == false"),
             "Sidebar shortcut did not hide the sidebar"
         )
         app.typeKey("s", modifierFlags: [.command, .control])
         XCTAssertTrue(
-            waitFor(element("sidebar-meetingsRecord"), predicate: "hittable == true"),
+            waitFor(element("sidebar-dictationHistory"), predicate: "hittable == true"),
             "Sidebar shortcut did not restore the sidebar"
         )
     }
 
     @MainActor
-    func testMeetingPreflightUsesExplicitSelectedApplicationAndFixedNativeLanguage() {
-        app = launch(scenario: "nativeApple")
-        openSidebarRoute("meetingsRecord")
-
-        assertExists("meeting-prepare-title")
-        XCTAssertFalse(element("meeting-settings").exists)
-        XCTAssertFalse(app.segmentedControls["Meetings view"].exists)
-        let disclosure = element("meeting-language-disclosure")
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
-        XCTAssertFalse(disclosure.label.localizedCaseInsensitiveContains("auto-detect"))
-
-        element("meeting-start-recording").click()
-        let selectedApplication = element("meeting-source-app-com.example.meeting")
-        XCTAssertTrue(selectedApplication.waitForExistence(timeout: 3))
-        XCTAssertTrue(selectedApplication.isSelected)
-        let systemAudioIsReady = element("meeting-system-audio-ready").exists
-        XCTAssertTrue(
-            systemAudioIsReady || app.buttons["Test System Audio"].exists,
-            "System-audio capture must either be verified or offer its native end-to-end test"
-        )
-        XCTAssertEqual(element("meeting-confirm-recording").isEnabled, systemAudioIsReady)
-    }
-
-    @MainActor
-    func testMeetingPreflightRequiresExplicitAllSystemFallbackWarning() {
-        app = launch(scenario: "nativeApple")
-        openSidebarRoute("meetingsRecord")
-
-        element("meeting-start-recording").click()
-        let allSystemAudio = element("meeting-source-all-system")
-        XCTAssertTrue(allSystemAudio.waitForExistence(timeout: 3))
-        allSystemAudio.click()
-        assertExists("meeting-all-system-warning")
-        let systemAudioIsReady = element("meeting-system-audio-ready").exists
-        XCTAssertEqual(element("meeting-confirm-recording").isEnabled, systemAudioIsReady)
-
-        let room = element("meeting-source-room")
-        room.click()
-        XCTAssertTrue(element("meeting-confirm-recording").isEnabled)
-    }
-
-    @MainActor
-    func testNativeSettingsContainsMeetingsAndReadAloudControls() {
+    func testNativeSettingsContainsShortcutAndReadAloudControls() {
         app = launch(scenario: "nativeApple")
         app.typeKey(",", modifierFlags: .command)
 
@@ -100,21 +58,8 @@ final class ZermUITests: XCTestCase {
         click(identifier: "settings-tab-audio", fallbackLabel: "Audio")
         assertExists("settings-pane-audio")
 
-        click(identifier: "settings-audio-section-meetings", fallbackLabel: "Meetings")
-        XCTAssertTrue(
-            app.descendants(matching: .any)["Create Summary After Recording"]
-                .firstMatch
-                .waitForExistence(timeout: 3),
-            "Meetings settings did not expose the summary control"
-        )
-
         click(identifier: "settings-audio-section-readAloud", fallbackLabel: "Read Aloud")
-        XCTAssertTrue(
-            app.descendants(matching: .any)["Meeting Safety"]
-                .firstMatch
-                .waitForExistence(timeout: 3),
-            "Read Aloud settings did not expose meeting-safety guidance"
-        )
+        assertExists("settings-audio-read-aloud")
     }
 
     @MainActor
@@ -148,27 +93,13 @@ final class ZermUITests: XCTestCase {
     }
 
     @MainActor
-    func testPersistentMeetingStatusSurvivesNavigationWithAnimationsDisabledAndCanStop() {
-        app = launch(scenario: "activeMeeting", disablesAnimations: true)
-
-        let stop = element("global-stop-meeting")
-        XCTAssertTrue(stop.waitForExistence(timeout: 3))
-        openSidebarRoute("readAloudSpeak")
-        XCTAssertTrue(stop.exists && stop.isHittable)
-        stop.click()
-        XCTAssertTrue(waitFor(stop, predicate: "exists == false"))
-        assertMainWindowIsPresented()
-    }
-
-    @MainActor
     func testHebrewRightToLeftLaunchSmoke() {
         app = launch(scenario: "nativeApple", language: "he", rightToLeft: true)
 
         let sidebar = element("primary-sidebar")
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
-        openSidebarRoute("meetingsRecord")
-        assertExists("meeting-prepare-title")
-        XCTAssertTrue(app.descendants(matching: .any)["הקלטת פגישה"].exists)
+        openSidebarRoute("readAloudSpeak")
+        XCTAssertTrue(app.descendants(matching: .any)["הקראה בקול"].firstMatch.exists)
 
         app.typeKey(",", modifierFlags: .command)
         assertExists("settings-root", timeout: 5)

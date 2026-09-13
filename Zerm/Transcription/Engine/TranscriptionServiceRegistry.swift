@@ -49,8 +49,8 @@ class TranscriptionServiceRegistry {
         }
     }
 
-    /// Uses the language captured when a durable job was created, without changing the user's
-    /// current Dictation setting underneath concurrent work.
+    /// Background transcription with the language captured when the job was created, without
+    /// changing the user's current Dictation setting underneath concurrent work.
     func transcribe(
         audioURL: URL,
         model: any TranscriptionModel,
@@ -60,7 +60,7 @@ class TranscriptionServiceRegistry {
         logger.debug("Transcribing with snapshotted model \(model.displayName, privacy: .public) and language \(languageCode, privacy: .public)")
         return try await TranscriptionInferenceScheduler.shared.run(
             provider: model.provider,
-            priority: .meeting
+            priority: .background
         ) {
             try await LanguagePreference.$operationOverrideCode.withValue(languageCode) {
                 try await service.transcribe(audioURL: audioURL, model: model)

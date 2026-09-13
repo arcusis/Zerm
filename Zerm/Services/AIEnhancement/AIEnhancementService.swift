@@ -181,23 +181,6 @@ class AIEnhancementService: ObservableObject {
         return aiService
     }
 
-    /// A single completion against the configured provider, with a caller-supplied system prompt.
-    ///
-    /// `enhance(_:)` is bound to the transcription-enhancement prompt machinery — pinned prompts,
-    /// context policies, screen capture — none of which applies to summarising a finished meeting.
-    /// This is the plain path: one prompt, one body of text, one answer.
-    /// Routed to local Ollama on purpose: a meeting transcript is the most sensitive text Zerm
-    /// ever handles, and every comparable tool defaults the summary to a local model for that
-    /// reason. Cloud providers stay available through the normal enhancement settings.
-    func summariseMeeting(systemPrompt: String, text: String) async throws -> String {
-        try await aiService.enhanceWithOllama(text: text, systemPrompt: systemPrompt)
-    }
-
-    func isMeetingSummaryAvailable(snapshot: MeetingSummarySnapshot) async -> Bool {
-        guard snapshot.route == .local, snapshot.provider == "Ollama" else { return false }
-        return await aiService.isLocalMeetingSummaryAvailable(model: snapshot.model)
-    }
-
     var isConfigured: Bool {
         switch aiService.selectedProvider {
         case .localLLM:
