@@ -109,6 +109,19 @@ extension TranscriptionModel {
 
     var isHebrewOptimized: Bool { false }
     var isRecommended: Bool { false }
+
+    /// Capabilities of the path that will actually run. With real-time mode on, a cloud model
+    /// transcribes through its streaming client, which applies fewer settings than batch.
+    func activeCapabilities(defaults: UserDefaults = .standard) -> TranscriptionCapabilities {
+        guard supportsStreaming else { return capabilities }
+        guard defaults.object(forKey: "streaming-enabled-\(name)") as? Bool ?? true else {
+            return capabilities.subtracting(.streaming)
+        }
+        guard let cloudProvider = CloudProviderRegistry.provider(for: provider) else {
+            return capabilities
+        }
+        return capabilities.intersection(cloudProvider.streamingCapabilities.union([.streaming, .diarization]))
+    }
 }
 
 // A new struct for Apple's native models
