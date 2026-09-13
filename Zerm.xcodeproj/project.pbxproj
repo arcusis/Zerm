@@ -701,8 +701,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/FluidInference/FluidAudio";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = exactVersion;
+				version = 0.15.7;
 			};
 		};
 		E1342C1D2EB4844800CED8A2 /* XCRemoteSwiftPackageReference "swift-atomics" */ = {
@@ -717,8 +717,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/Beingpax/LLMkit.git";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = 1fc213b8e37ea8b8a755dd30eaf50fa090cd4241;
 			};
 		};
 		E1A261102CC143AC00B233D1 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {

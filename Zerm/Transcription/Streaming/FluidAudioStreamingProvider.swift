@@ -178,8 +178,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             let agreementResult = agreementEngine.processTranscriptionResult(words: words, resultConfidence: result.confidence)
 
             if !agreementResult.newlyConfirmedText.isEmpty {
-                let normalizedConfirmed = TextNormalizer.shared.normalizeSentence(agreementResult.newlyConfirmedText)
-                eventsContinuation?.yield(.committed(text: normalizedConfirmed))
+                eventsContinuation?.yield(.committed(text: agreementResult.newlyConfirmedText))
             }
             if !agreementResult.fullText.isEmpty {
                 eventsContinuation?.yield(.partial(text: agreementResult.fullText))
@@ -233,7 +232,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             let result = try await asrManager.transcribe(samples, decoderState: &state)
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
-            return TextNormalizer.shared.normalizeSentence(text)
+            return text
         } catch {
             logger.error("Final transcription failed: \(error.localizedDescription, privacy: .public)")
             return nil

@@ -151,6 +151,7 @@ struct ZermApp: App {
         if !uiTestConfiguration.isEnabled {
             StreamingKeysMigration.run()
             RetiredLocalLLMMigration.run()
+            RetiredGeminiTranscriptionMigration.run()
             // Restores History rows blanked by 2.8.3's empty on-device enhancements.
             if !containerInitializationFailed {
                 EmptyEnhancementRepair.run(modelContext: container.mainContext)

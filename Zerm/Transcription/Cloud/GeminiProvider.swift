@@ -8,34 +8,17 @@ struct GeminiProvider: CloudProvider {
     let languageCodes: [String]? = nil
     let includesAutoDetect: Bool = false
 
+    /// The only Gemini model LLMkit's dedicated transcription client accepts.
+    static let transcribeModelName = "gemini-3.5-transcribe"
+
     var models: [CloudModel] {[
         CloudModel(
-            name: "gemini-3.5-flash",
-            displayName: "Gemini 3.5 Flash",
-            description: "Google's latest fast model with high-quality transcription",
-            provider: .gemini,
-            speed: 0.92,
-            accuracy: 0.96,
-            isMultilingual: true,
-            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini)
-        ),
-        CloudModel(
-            name: "gemini-2.5-pro",
-            displayName: "Gemini 2.5 Pro",
-            description: "Google's advanced model with high-quality transcription capabilities",
-            provider: .gemini,
-            speed: 0.7,
-            accuracy: 0.97,
-            isMultilingual: true,
-            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini)
-        ),
-        CloudModel(
-            name: "gemini-2.5-flash",
-            displayName: "Gemini 2.5 Flash",
-            description: "Google's optimized model for low-latency transcription",
+            name: Self.transcribeModelName,
+            displayName: "Gemini 3.5 Transcribe",
+            description: String(localized: "Google's dedicated speech-to-text model with custom vocabulary support"),
             provider: .gemini,
             speed: 0.9,
-            accuracy: 0.95,
+            accuracy: 0.97,
             isMultilingual: true,
             supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini)
         )
@@ -45,7 +28,10 @@ struct GeminiProvider: CloudProvider {
         return try await GeminiTranscriptionClient.transcribe(
             audioData: audioData,
             apiKey: apiKey,
-            model: model
+            model: model,
+            fileName: fileName,
+            language: language,
+            customVocabulary: customVocabulary
         )
     }
 

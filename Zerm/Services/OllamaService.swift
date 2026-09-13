@@ -81,7 +81,7 @@ class OllamaService: ObservableObject {
                 model: selectedModel,
                 prompt: text,
                 systemPrompt: systemPrompt,
-                temperature: defaultTemperature
+                options: OllamaGenerationOptions(temperature: defaultTemperature)
             )
         } catch let error as LLMKitError {
             throw mapLLMKitError(error)
@@ -92,6 +92,8 @@ class OllamaService: ObservableObject {
         switch error {
         case .invalidURL:
             return .invalidURL
+        case .unsupportedModel:
+            return .modelNotFound
         case .httpError(let statusCode, _):
             if statusCode == 404 { return .modelNotFound }
             if statusCode == 500 { return .serverError }
