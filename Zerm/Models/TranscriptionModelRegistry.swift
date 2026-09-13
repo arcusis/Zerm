@@ -26,7 +26,6 @@ enum TranscriptionModelRegistry {
                 speed: 0.99,
                 accuracy: 0.98,
                 ramUsage: 0.8,
-                languageGroup: .englishOnly,
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: false, provider: .fluidAudio)
             ),
             FluidAudioModel(
@@ -37,7 +36,6 @@ enum TranscriptionModelRegistry {
                 speed: 1.0,
                 accuracy: 0.92,
                 ramUsage: 0.4,
-                languageGroup: .englishOnly,
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: false, provider: .fluidAudio)
             ),
             FluidAudioModel(
@@ -49,7 +47,6 @@ enum TranscriptionModelRegistry {
                 accuracy: 0.94,
                 ramUsage: 0.8,
                 supportsStreaming: true,
-                languageGroup: .multilingual,
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .fluidAudio)
             ),
 

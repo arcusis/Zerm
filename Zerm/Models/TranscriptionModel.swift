@@ -116,13 +116,12 @@ struct FluidAudioModel: TranscriptionModel {
     let accuracy: Double
     let ramUsage: Double
     let supportsStreaming: Bool
-    let languageGroup: ModelLanguageGroup
     var isMultilingualModel: Bool {
-        languageGroup == .multilingual
+        supportedLanguages.count > 1
     }
     let supportedLanguages: [String: String]
 
-    init(name: String, displayName: String, description: String, size: String, speed: Double, accuracy: Double, ramUsage: Double, supportsStreaming: Bool = false, languageGroup: ModelLanguageGroup, supportedLanguages: [String: String]) {
+    init(name: String, displayName: String, description: String, size: String, speed: Double, accuracy: Double, ramUsage: Double, supportsStreaming: Bool = false, supportedLanguages: [String: String]) {
         self.name = name
         self.displayName = displayName
         self.description = description
@@ -131,7 +130,6 @@ struct FluidAudioModel: TranscriptionModel {
         self.accuracy = accuracy
         self.ramUsage = ramUsage
         self.supportsStreaming = supportsStreaming
-        self.languageGroup = languageGroup
         self.supportedLanguages = supportedLanguages
     }
 }

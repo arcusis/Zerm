@@ -175,7 +175,7 @@ struct ParakeetLanguageTests {
         #expect(languages == ["en": "English"])
 
         let model = FluidAudioModel(
-            name: "parakeet-tdt-0.6b-v2", displayName: "Parakeet V2", description: "", size: "",
+            name: "parakeet-tdt-ctc-110m", displayName: "Parakeet 110M", description: "", size: "",
             speed: 1, accuracy: 1, ramUsage: 1, supportedLanguages: languages
         )
         #expect(!model.isMultilingualModel)
