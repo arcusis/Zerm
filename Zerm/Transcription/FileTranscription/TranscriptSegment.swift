@@ -2,9 +2,12 @@ import Foundation
 
 /// One timed line of a file transcript, optionally attributed to a speaker.
 struct TranscriptSegment: Identifiable, Equatable, Codable, Sendable {
-    /// Speakers are estimated by spreading a window's words across diarized turns, never timed
-    /// per word by the provider, so they must not be presented as exact.
+    /// How a segment's speaker was decided. Providers give no per-word timing, so a speaker is
+    /// exact only when the segment's audio held one diarized speaker.
     enum SpeakerConfidence: String, Codable, Sendable {
+        /// Transcribed from audio that belonged to a single diarized speaker.
+        case diarizedTurn
+        /// Estimated by spreading words across the diarized turns of a mixed stretch of audio.
         case estimatedFromWindow
         case unknown
     }

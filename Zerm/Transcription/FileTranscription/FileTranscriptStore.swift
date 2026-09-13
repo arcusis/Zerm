@@ -36,6 +36,11 @@ struct FileTranscriptStore: Sendable {
         try encoder.encode(transcript).write(to: url(for: transcript.transcriptionID), options: .atomic)
     }
 
+    /// Whether a History row came from Transcribe File and can open its full transcript.
+    func hasTranscript(for transcriptionID: UUID) -> Bool {
+        FileManager.default.fileExists(atPath: url(for: transcriptionID).path)
+    }
+
     func load(_ transcriptionID: UUID) -> FileTranscript? {
         guard let data = try? Data(contentsOf: url(for: transcriptionID)) else { return nil }
         return try? JSONDecoder().decode(FileTranscript.self, from: data)

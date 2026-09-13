@@ -41,8 +41,8 @@ struct FileTranscript: Codable, Equatable, Sendable {
     private(set) var speakers: [Speaker]
     let gaps: [WindowedFileTranscriber.Gap]
 
-    /// Attributes `segments` to `turns` (when diarization ran) and numbers speakers in the order
-    /// they first speak, so "Speaker 1" is always the first voice in the transcript.
+    /// Numbers the segments' speakers in the order they first speak, so "Speaker 1" is always the
+    /// first voice in the transcript.
     init(
         transcriptionID: UUID = UUID(),
         sourceFileName: String,
@@ -51,12 +51,10 @@ struct FileTranscript: Codable, Equatable, Sendable {
         languageCode: String,
         speakerStatus: SpeakerStatus,
         segments: [TranscriptSegment],
-        turns: [SpeakerTurn] = [],
         gaps: [WindowedFileTranscriber.Gap] = []
     ) {
-        let attributed = speakerStatus == .identified ? SpeakerAttributor.split(segments, using: turns) : segments
         var order: [Int: Int] = [:]
-        let numbered = attributed.map { segment -> TranscriptSegment in
+        let numbered = segments.map { segment -> TranscriptSegment in
             guard let original = segment.speakerIndex else { return segment }
             let index = order[original] ?? order.count
             order[original] = index

@@ -48,30 +48,57 @@ struct WindowedFileTranscriber: Sendable {
         self.transcribe = transcribe
     }
 
+    /// The outcome of transcribing one range. `lastError` is the most recent window failure,
+    /// so callers can tell a silent range from one that could not be transcribed at all.
+    struct Pass {
+        let transcript: Transcript
+        let lastError: Error?
+    }
+
     func transcribeFile(
         _ url: URL,
         onProgress: (@Sendable (Double) async -> Void)? = nil
     ) async throws -> Transcript {
         let input = try AVAudioFile(forReading: url)
-        let totalFrames = input.length
-        guard totalFrames > 0 else { return Transcript(segments: [], gaps: []) }
+        let duration = Double(input.length) / input.processingFormat.sampleRate
+        let pass = try await transcribe(input, from: 0, to: duration, onProgress: onProgress)
+        // Every window failing is a systemic problem (no network, a missing key), not gaps.
+        if pass.transcript.segments.isEmpty, let lastError = pass.lastError {
+            throw lastError
+        }
+        return pass.transcript
+    }
 
+    /// Transcribes `start..<end` of an open file, reconciling overlapping windows within the
+    /// range. Segment and gap times are positions in the file. `onProgress` receives the fraction
+    /// of the range done.
+    func transcribe(
+        _ input: AVAudioFile,
+        from start: TimeInterval,
+        to end: TimeInterval,
+        onProgress: (@Sendable (Double) async -> Void)? = nil
+    ) async throws -> Pass {
         let rate = input.processingFormat.sampleRate
+        let firstFrame = max(0, AVAudioFramePosition((start * rate).rounded()))
+        let endFrame = min(input.length, AVAudioFramePosition((end * rate).rounded()))
+        guard endFrame > firstFrame else {
+            return Pass(transcript: Transcript(segments: [], gaps: []), lastError: nil)
+        }
+
         let fullWindow = AVAudioFramePosition(windowSeconds * rate)
-        let overlap = AVAudioFramePosition(overlapSeconds * rate)
-        let advance = max(1, fullWindow - overlap)
-        var position: AVAudioFramePosition = 0
+        let advance = max(1, fullWindow - AVAudioFramePosition(overlapSeconds * rate))
+        var position = firstFrame
         var prior = ""
         var segments: [TranscriptSegment] = []
         var gaps: [Gap] = []
         var lastError: Error?
 
-        while position < totalFrames {
+        while position < endFrame {
             try Task.checkCancellation()
             input.framePosition = position
-            let requested = AVAudioFrameCount(min(fullWindow, totalFrames - position))
-            let start = Double(position) / rate
-            let end = Double(position + AVAudioFramePosition(requested)) / rate
+            let requested = AVAudioFrameCount(min(fullWindow, endFrame - position))
+            let windowStart = Double(position) / rate
+            let windowEnd = Double(position + AVAudioFramePosition(requested)) / rate
             guard requested > 0,
                   let buffer = AVAudioPCMBuffer(
                     pcmFormat: input.processingFormat,
@@ -101,11 +128,11 @@ struct WindowedFileTranscriber: Sendable {
                 if !reconciliation.text.isEmpty {
                     let trimmedSeconds = min(
                         overlapSeconds,
-                        max(0, end - start) * reconciliation.droppedFraction
+                        max(0, windowEnd - windowStart) * reconciliation.droppedFraction
                     )
                     segments.append(.init(
-                        start: min(end, start + trimmedSeconds),
-                        end: end,
+                        start: min(windowEnd, windowStart + trimmedSeconds),
+                        end: windowEnd,
                         text: reconciliation.text
                     ))
                 }
@@ -113,17 +140,13 @@ struct WindowedFileTranscriber: Sendable {
                 throw CancellationError()
             } catch {
                 lastError = error
-                gaps.append(Gap(start: start, end: end, reason: error.localizedDescription))
+                gaps.append(Gap(start: windowStart, end: windowEnd, reason: error.localizedDescription))
             }
 
             position += min(advance, AVAudioFramePosition(buffer.frameLength))
-            await onProgress?(min(1, Double(position) / Double(totalFrames)))
+            await onProgress?(min(1, Double(position - firstFrame) / Double(endFrame - firstFrame)))
         }
-        // Every window failing is a systemic problem (no network, a missing key), not gaps.
-        if segments.isEmpty, let lastError {
-            throw lastError
-        }
-        return Transcript(segments: segments, gaps: gaps)
+        return Pass(transcript: Transcript(segments: segments, gaps: gaps), lastError: lastError)
     }
 
     // MARK: - Reconciliation

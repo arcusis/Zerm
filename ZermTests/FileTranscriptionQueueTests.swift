@@ -18,11 +18,12 @@ struct FileTranscriptionQueueTests {
             FileManager.default.createFile(atPath: destination.path, contents: Data())
             return 12
         }
-        steps.transcribe = { _, _, onProgress in
+        steps.transcribe = { _, _, turns, onProgress in
+            #expect(turns == Self.twoSpeakerTurns)
             await probe.recordState()
             await onProgress(0.5)
             await probe.recordState()
-            return Self.twoSpeakerTranscript
+            return Self.labelledTranscript
         }
         steps.diarize = { _, speakers, onProgress in
             #expect(speakers == .fixed(2))
@@ -36,12 +37,13 @@ struct FileTranscriptionQueueTests {
         queue.add([Self.source("interview.m4a")])
         try await Self.waitUntilIdle(queue)
 
+        // Speakers first, so the transcription can follow them.
         #expect(probe.states == [
             .converting,
-            .transcribing(progress: 0),
-            .transcribing(progress: 0.5),
             .diarizing(progress: 0),
-            .diarizing(progress: 0.25)
+            .diarizing(progress: 0.25),
+            .transcribing(progress: 0),
+            .transcribing(progress: 0.5)
         ])
         let job = try #require(queue.jobs.first)
         #expect(job.state == .completed)
@@ -77,11 +79,11 @@ struct FileTranscriptionQueueTests {
     @Test func cancellingARunningJobStopsItAndTheNextOneRuns() async throws {
         let probe = Probe()
         var steps = Self.steps(probe)
-        steps.transcribe = { audio, _, _ in
+        steps.transcribe = { audio, _, _, _ in
             if await audio.lastPathComponent == probe.firstJobAudioName {
                 while true { try await Task.sleep(for: .milliseconds(5)) }
             }
-            return Self.twoSpeakerTranscript
+            return Self.labelledTranscript
         }
         let queue = Self.queue(steps, probe: probe)
         queue.add([Self.source("long.mp3"), Self.source("short.mp3")])
@@ -114,9 +116,9 @@ struct FileTranscriptionQueueTests {
     @Test func failedJobCanBeRetried() async throws {
         let probe = Probe()
         var steps = Self.steps(probe)
-        steps.transcribe = { _, _, _ in
+        steps.transcribe = { _, _, _, _ in
             if await probe.nextAttempt() == 0 { throw URLError(.notConnectedToInternet) }
-            return Self.twoSpeakerTranscript
+            return Self.labelledTranscript
         }
         let queue = Self.queue(steps, probe: probe)
 
@@ -149,6 +151,11 @@ struct FileTranscriptionQueueTests {
         let probe = Probe()
         var steps = Self.steps(probe)
         steps.diarize = { _, _, _ in throw FileDiarizer.ModelUnavailable(underlying: URLError(.timedOut)) }
+        steps.transcribe = { _, _, turns, _ in
+            // Without turns the file is transcribed in plain windows, as with speakers off.
+            #expect(turns == nil)
+            return Self.twoSpeakerTranscript
+        }
         let queue = Self.queue(steps, probe: probe)
 
         queue.add([Self.source("panel.wav")])
@@ -168,6 +175,10 @@ struct FileTranscriptionQueueTests {
             Issue.record("Diarization must not run when speakers are off")
             return []
         }
+        steps.transcribe = { _, _, turns, _ in
+            #expect(turns == nil)
+            return Self.twoSpeakerTranscript
+        }
         let queue = Self.queue(steps, probe: probe, identifySpeakers: false)
 
         queue.add([Self.source("lecture.wav")])
@@ -179,7 +190,7 @@ struct FileTranscriptionQueueTests {
     @Test func silentFileFailsWithNoSpeech() async throws {
         let probe = Probe()
         var steps = Self.steps(probe)
-        steps.transcribe = { _, _, _ in .init(segments: [TranscriptSegment(start: 0, end: 30, text: "  ")], gaps: []) }
+        steps.transcribe = { _, _, _, _ in .init(segments: [TranscriptSegment(start: 0, end: 30, text: "  ")], gaps: []) }
         let queue = Self.queue(steps, probe: probe)
 
         queue.add([Self.source("silence.wav")])
@@ -209,7 +220,7 @@ struct FileTranscriptionQueueTests {
     @Test func convertedAudioIsCleanedUpAfterEveryJob() async throws {
         let probe = Probe()
         var steps = Self.steps(probe)
-        steps.transcribe = { _, _, _ in throw URLError(.timedOut) }
+        steps.transcribe = { _, _, _, _ in throw URLError(.timedOut) }
         let queue = Self.queue(steps, probe: probe)
 
         queue.add([Self.source("a.wav")])
@@ -234,19 +245,21 @@ struct FileTranscriptionQueueTests {
         #expect(queue.jobs.isEmpty)
     }
 
-    @Test func renamingASpeakerUpdatesTheJobAndPersistsIt() async throws {
+    @Test func diarizationThatFindsNoSpeechStillTranscribesTheWholeFile() async throws {
         let probe = Probe()
-        let queue = Self.queue(Self.steps(probe), probe: probe)
-        queue.add([Self.source("interview.wav")])
+        var steps = Self.steps(probe)
+        steps.diarize = { _, _, _ in [] }
+        steps.transcribe = { _, _, turns, _ in
+            #expect(turns == nil)
+            return Self.twoSpeakerTranscript
+        }
+        let queue = Self.queue(steps, probe: probe)
+
+        queue.add([Self.source("music.wav")])
         try await Self.waitUntilIdle(queue)
-        let id = try #require(queue.jobs.first?.id)
 
-        queue.renameSpeaker(1, to: "  Noa ", inJob: id)
-        queue.renameSpeaker(1, to: "Noa", inJob: id)
-
-        #expect(queue.jobs.first?.transcript?.name(forSpeaker: 1) == "Noa")
-        #expect(probe.updated.count == 1)
-        #expect(probe.updated.first?.name(forSpeaker: 1) == "Noa")
+        #expect(queue.jobs.first?.state == .completed)
+        #expect(queue.jobs.first?.transcript?.speakers.isEmpty == true)
     }
 
     @Test func optionsFollowTheDefaultsUntilTheUserChangesThem() {
@@ -301,6 +314,20 @@ struct FileTranscriptionQueueTests {
         #expect(stored.name(forSpeaker: 0) == "Dr. Levi")
         let row = try #require(try fixture.context.fetch(FetchDescriptor<Transcription>()).first)
         #expect(row.text.hasPrefix("Dr. Levi: "))
+    }
+
+    @Test func onlyRowsWithASidecarCanOpenTheFullTranscript() throws {
+        let fixture = try HistoryFixture()
+        defer { fixture.cleanUp() }
+        let transcript = Self.namedTranscript()
+        #expect(!fixture.store.hasTranscript(for: transcript.transcriptionID))
+
+        try fixture.history.save(transcript, audio: fixture.makeAudio(), transcriptionDuration: 3)
+        #expect(fixture.store.hasTranscript(for: transcript.transcriptionID))
+        #expect(!fixture.store.hasTranscript(for: UUID()))
+
+        fixture.store.remove(transcript.transcriptionID)
+        #expect(!fixture.store.hasTranscript(for: transcript.transcriptionID))
     }
 
     @Test func sidecarIsDeletedWithTheHistoryRowAndNotRecreated() throws {
@@ -367,6 +394,15 @@ struct FileTranscriptionQueueTests {
         gaps: []
     )
 
+    /// What speaker-by-speaker transcription returns for `twoSpeakerTurns`.
+    nonisolated private static let labelledTranscript = WindowedFileTranscriber.Transcript(
+        segments: [
+            TranscriptSegment(start: 0, end: 5, text: "Welcome to the show", speakerIndex: 4, speakerConfidence: .diarizedTurn),
+            TranscriptSegment(start: 5, end: 10, text: "Thanks for having me", speakerIndex: 2, speakerConfidence: .diarizedTurn)
+        ],
+        gaps: []
+    )
+
     nonisolated private static let twoSpeakerTurns = [
         SpeakerTurn(speakerIndex: 4, start: 0, end: 5),
         SpeakerTurn(speakerIndex: 2, start: 5, end: 10)
@@ -379,8 +415,7 @@ struct FileTranscriptionQueueTests {
             modelName: "Parakeet V3",
             languageCode: "en",
             speakerStatus: .identified,
-            segments: twoSpeakerTranscript.segments,
-            turns: twoSpeakerTurns
+            segments: labelledTranscript.segments
         )
         transcript.rename(speaker: 0, to: "Dana")
         transcript.rename(speaker: 1, to: "Noa")
@@ -394,10 +429,9 @@ struct FileTranscriptionQueueTests {
     private static func steps(_ probe: Probe) -> FileTranscriptionQueue.Steps {
         FileTranscriptionQueue.Steps(
             convert: { _, _ in 12 },
-            transcribe: { _, _, _ in twoSpeakerTranscript },
+            transcribe: { _, _, turns, _ in turns == nil ? twoSpeakerTranscript : labelledTranscript },
             diarize: { _, _, _ in twoSpeakerTurns },
-            save: { transcript, _, _ in probe.saved.append(transcript) },
-            update: { transcript in probe.updated.append(transcript) }
+            save: { transcript, _, _ in probe.saved.append(transcript) }
         )
     }
 
@@ -443,7 +477,6 @@ private final class Probe {
         .appendingPathComponent("zerm-file-queue-\(UUID().uuidString)", isDirectory: true)
     var states: [FileTranscriptionQueue.Job.State] = []
     var saved: [FileTranscript] = []
-    var updated: [FileTranscript] = []
     var firstJobAudioName = ""
     private(set) var maximumConcurrent = 0
     private var concurrent = 0

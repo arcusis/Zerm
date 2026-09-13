@@ -2,18 +2,32 @@ import AppKit
 import SwiftUI
 
 /// A finished file transcript: speaker-coloured paragraphs with timestamps that play the audio
-/// from that point, inline speaker renaming, copy and export.
+/// from that point, inline speaker renaming, copy and export. Opened from Transcribe File and
+/// from History; speaker names are saved to the transcript's sidecar and its History row.
 struct FileTranscriptView: View {
-    @EnvironmentObject private var queue: FileTranscriptionQueue
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var player = AudioPlayerManager()
+    @State private var transcript: FileTranscript
     @State private var copied = false
     @State private var exportError: String?
     /// Resolved once: History's audio cleanup may have removed the recording.
     @State private var audioURL: URL?
 
-    let jobID: UUID
-    let transcript: FileTranscript
-    let onClose: () -> Void
+    private let closeTitle: LocalizedStringKey
+    private let closeSystemImage: String
+    private let onClose: () -> Void
+
+    init(
+        transcript: FileTranscript,
+        closeTitle: LocalizedStringKey,
+        closeSystemImage: String = "chevron.backward",
+        onClose: @escaping () -> Void
+    ) {
+        _transcript = State(initialValue: transcript)
+        self.closeTitle = closeTitle
+        self.closeSystemImage = closeSystemImage
+        self.onClose = onClose
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +57,10 @@ struct FileTranscriptView: View {
             }
         }
         .onAppear {
+            // The saved sidecar holds names renamed since the transcript was handed in.
+            if let saved = FileTranscriptStore.recordings.load(transcript.transcriptionID) {
+                transcript = saved
+            }
             let url = FileTranscriptStore.recordings.audioURL(for: transcript.transcriptionID)
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             audioURL = url
@@ -64,7 +82,7 @@ struct FileTranscriptView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Button(action: onClose) {
-                Label("Files", systemImage: "chevron.backward")
+                Label(closeTitle, systemImage: closeSystemImage)
             }
             .buttonStyle(.borderless)
 
@@ -162,7 +180,7 @@ struct FileTranscriptView: View {
                         defaultName: FileTranscript.defaultName(forSpeaker: speaker.index),
                         color: SpeakerPalette.color(for: speaker.index)
                     ) { name in
-                        queue.renameSpeaker(speaker.index, to: name, inJob: jobID)
+                        rename(speaker: speaker.index, to: name)
                     }
                 }
             }
@@ -216,6 +234,14 @@ struct FileTranscriptView: View {
     }
 
     // MARK: - Actions
+
+    private func rename(speaker: Int, to name: String) {
+        var renamed = transcript
+        renamed.rename(speaker: speaker, to: name)
+        guard renamed != transcript else { return }
+        transcript = renamed
+        FileTranscriptionHistory(modelContext: modelContext, store: .recordings).update(renamed)
+    }
 
     private func copy() {
         _ = ClipboardManager.copyToClipboard(transcript.plainText)
