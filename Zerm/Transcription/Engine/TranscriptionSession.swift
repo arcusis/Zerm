@@ -81,10 +81,14 @@ final class StreamingTranscriptionSession: TranscriptionSession {
             service?.sendAudioChunk(data)
         }
 
+        // A detached task does not inherit task-locals; carry the recording's language across.
+        let languageCode = LanguagePreference.operationOverrideCode
         Task.detached { [weak self] in
             guard let self = self else { return }
             do {
-                try await self.streamingService.startStreaming(model: model)
+                try await LanguagePreference.$operationOverrideCode.withValue(languageCode) {
+                    try await self.streamingService.startStreaming(model: model)
+                }
                 await MainActor.run {
                     self.logger.notice("Streaming connected for \(model.displayName, privacy: .public)")
                 }

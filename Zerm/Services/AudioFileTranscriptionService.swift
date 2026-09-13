@@ -11,7 +11,6 @@ class AudioTranscriptionService: ObservableObject {
 
     private let modelContext: ModelContext
     private let enhancementService: AIEnhancementService?
-    private let promptDetectionService = PromptDetectionService()
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "AudioTranscriptionService")
     private let serviceRegistry: TranscriptionServiceRegistry
 
@@ -33,160 +32,94 @@ class AudioTranscriptionService: ObservableObject {
         self.enhancementService = enhancementService
         self.serviceRegistry = serviceRegistry
     }
-    
+
+    /// Transcribes a saved recording again with the same text pipeline as dictation: deterministic
+    /// cleanup, the user's preferences, then enhancement of the cleaned text under the global
+    /// output mode. No Power Mode applies — the recording is not tied to a frontmost app anymore.
     func retranscribeAudio(from url: URL, using model: any TranscriptionModel) async throws -> Transcription {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw TranscriptionError.noAudioFile
         }
-        
+
         isTranscribing = true
-        
+        defer { isTranscribing = false }
+
         do {
             let transcriptionStart = Date()
-            var text = try await serviceRegistry.transcribe(audioURL: url, model: model)
+            let transcript = try await serviceRegistry.transcribe(audioURL: url, model: model)
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
-            text = TranscriptionOutputFilter.filter(text)
-            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let powerModeManager = PowerModeManager.shared
-            let activePowerModeConfig = powerModeManager.currentActiveConfiguration
-            let powerModeName = (activePowerModeConfig?.isEnabled == true) ? activePowerModeConfig?.name : nil
-            let powerModeEmoji = (activePowerModeConfig?.isEnabled == true) ? activePowerModeConfig?.emoji : nil
-
-            if UserDefaults.standard.bool(forKey: "IsTextFormattingEnabled") {
-                text = WhisperTextFormatter.format(text)
+            let textCleanup = TextCleanupPreferences.global()
+            let cleanedText = DictationTextProcessing.clean(transcript, formatsText: textCleanup.formatsText) { [modelContext] text in
+                WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
             }
-
-            text = WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
-            logger.notice("✅ Word replacements applied")
+            let text = textCleanup.applyPreferences(to: cleanedText)
 
             let audioAsset = AVURLAsset(url: url)
             let duration = CMTimeGetSeconds(try await audioAsset.load(.duration))
             let recordingsDirectory = AppStoragePaths.root
                 .appendingPathComponent("Recordings")
-            
+
             let fileName = "retranscribed_\(UUID().uuidString).wav"
             let permanentURL = recordingsDirectory.appendingPathComponent(fileName)
-            
+
             do {
                 try FileManager.default.copyItem(at: url, to: permanentURL)
             } catch {
                 logger.error("❌ Failed to create permanent copy of audio: \(error.localizedDescription, privacy: .public)")
-                isTranscribing = false
                 throw error
             }
-            
-            let permanentURLString = permanentURL.absoluteString
 
-            // Apply prompt detection for trigger words
-            let originalText = text
-            var promptDetectionResult: PromptDetectionService.PromptDetectionResult? = nil
+            // The transcription itself succeeded; an enhancement that does not is recorded on the
+            // same completed row, which belongs in the metrics either way.
+            let newTranscription = Transcription(
+                text: text,
+                duration: duration,
+                audioFileURL: permanentURL.absoluteString,
+                transcriptionModelName: model.displayName,
+                transcriptionDuration: transcriptionDuration,
+                transcriptionStatus: .completed
+            )
 
-            if let enhancementService = enhancementService, enhancementService.isConfigured {
-                let detectionResult = promptDetectionService.analyzeText(text, with: enhancementService)
-                promptDetectionResult = detectionResult
-                await promptDetectionService.applyDetectionResult(detectionResult, to: enhancementService)
-            }
-
-            // Apply AI enhancement if enabled
-            if let enhancementService = enhancementService,
-               enhancementService.isEnhancementEnabled,
-               enhancementService.isConfigured {
-                do {
-                    let textForAI = promptDetectionResult?.processedText ?? text
-                    let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(textForAI)
-                    let newTranscription = Transcription(
-                        text: originalText,
-                        duration: duration,
-                        enhancedText: enhancedText,
-                        audioFileURL: permanentURLString,
-                        transcriptionModelName: model.displayName,
-                        aiEnhancementModelName: enhancementService.getAIService()?.currentModel,
-                        promptName: promptName,
-                        transcriptionDuration: transcriptionDuration,
-                        enhancementDuration: enhancementDuration,
-                        aiRequestSystemMessage: enhancementService.lastSystemMessageSent,
-                        aiRequestUserMessage: enhancementService.lastUserMessageSent,
-                        powerModeName: powerModeName,
-                        powerModeEmoji: powerModeEmoji,
-                        transcriptionStatus: .completed
-                    )
-                    modelContext.insert(newTranscription)
-                    do {
-                        try modelContext.save()
-                        NotificationCenter.default.post(name: .transcriptionCreated, object: newTranscription)
-                        NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
-                    } catch {
-                        logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
-                    }
-                    UsageStatsService.shared.record(newTranscription)
-
-                    // Restore original prompt settings if AI was temporarily enabled
-                    if let result = promptDetectionResult,
-                       result.shouldEnableAI {
-                        await promptDetectionService.restoreOriginalSettings(result, to: enhancementService)
-                    }
-
-                    isTranscribing = false
-
-                    return newTranscription
-                } catch {
-                    let newTranscription = Transcription(
-                        text: originalText,
-                        duration: duration,
-                        audioFileURL: permanentURLString,
-                        transcriptionModelName: model.displayName,
-                        promptName: nil,
-                        transcriptionDuration: transcriptionDuration,
-                        powerModeName: powerModeName,
-                        powerModeEmoji: powerModeEmoji,
-                        // The transcription itself succeeded — only the optional enhancement
-                        // failed — so the record is complete and belongs in the metrics.
-                        transcriptionStatus: .completed
-                    )
-                    modelContext.insert(newTranscription)
-                    do {
-                        try modelContext.save()
-                        NotificationCenter.default.post(name: .transcriptionCreated, object: newTranscription)
-                        NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
-                    } catch {
-                        logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
-                    }
-                    UsageStatsService.shared.record(newTranscription)
-
-                    isTranscribing = false
-
-                    return newTranscription
-                }
-            } else {
-                let newTranscription = Transcription(
-                    text: originalText,
-                    duration: duration,
-                    audioFileURL: permanentURLString,
-                    transcriptionModelName: model.displayName,
-                    promptName: nil,
-                    transcriptionDuration: transcriptionDuration,
-                    powerModeName: powerModeName,
-                    powerModeEmoji: powerModeEmoji,
-                    transcriptionStatus: .completed
+            if let enhancementService, !text.isEmpty {
+                let plan = enhancementService.plan(
+                    for: cleanedText,
+                    configuredMode: enhancementService.outputMode,
+                    autoSendEnabled: false,
+                    overrides: EnhancementOverrides()
                 )
-                modelContext.insert(newTranscription)
-                do {
-                    try modelContext.save()
-                    NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
-                } catch {
-                    logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
+                if plan.outputMode.usesEnhancement, !plan.input.isEmpty {
+                    if plan.skipsAsShort {
+                        newTranscription.record(.skipped(.shortTranscription), of: nil)
+                    } else {
+                        switch enhancementService.makeRequest(input: plan.input, purpose: .enhanced, overrides: plan.overrides) {
+                        case .failure(let reason):
+                            let outcome = EnhancementOutcome.skipped(.notConfigured(reason))
+                            newTranscription.record(outcome, of: nil)
+                            EnhancementNotifier.shared.report(outcome, purpose: .manual)
+                        case .success(let request):
+                            let outcome = await enhancementService.perform(request)
+                            newTranscription.record(outcome, of: request, finalize: textCleanup.applyPreferences(to:))
+                            EnhancementNotifier.shared.report(outcome, purpose: .manual)
+                        }
+                    }
                 }
-                UsageStatsService.shared.record(newTranscription)
-
-                isTranscribing = false
-
-                return newTranscription
             }
+
+            modelContext.insert(newTranscription)
+            do {
+                try modelContext.save()
+                NotificationCenter.default.post(name: .transcriptionCreated, object: newTranscription)
+                NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
+            } catch {
+                logger.error("❌ Failed to save transcription: \(error.localizedDescription, privacy: .public)")
+            }
+            UsageStatsService.shared.record(newTranscription)
+
+            return newTranscription
         } catch {
             logger.error("❌ Transcription failed: \(error.localizedDescription, privacy: .public)")
             currentError = .transcriptionFailed
-            isTranscribing = false
             throw error
         }
     }

@@ -153,7 +153,7 @@ enum AIProvider: String, CaseIterable {
         case .localCLI:
             return []
         case .localLLM:
-            return [LocalLLMModelManager.package.displayName]
+            return LocalLLMModelManager.packages(for: .enhancement).map(\.displayName)
         case .custom:
             return []
         case .openRouter:
@@ -250,14 +250,68 @@ class AIService: ObservableObject {
     }
     
     var currentModel: String {
-        if let selectedModel = selectedModels[selectedProvider],
-           !selectedModel.isEmpty,
-           (selectedProvider == .ollama && !selectedModel.isEmpty) || availableModels.contains(selectedModel) {
-            return selectedModel
-        }
-        return selectedProvider.defaultModel
+        model(for: selectedProvider)
     }
-    
+
+    /// The model the global settings select for `provider`, whether or not it is the selected one.
+    func model(for provider: AIProvider) -> String {
+        switch provider {
+        case .custom:
+            return customModel
+        case .localLLM:
+            return LocalLLMModelManager.package(for: .enhancement).displayName
+        default:
+            // Ollama and OpenRouter lists are fetched at runtime and may not be loaded yet.
+            // `OllamaService` rewrites its key when a refresh no longer lists the saved model.
+            let saved = provider == .ollama ? userDefaults.string(forKey: Self.ollamaModelKey) : selectedModels[provider]
+            if let selectedModel = saved, !selectedModel.isEmpty,
+               provider == .ollama || provider == .openRouter || availableModels(for: provider).contains(selectedModel) {
+                return selectedModel
+            }
+            return provider.defaultModel
+        }
+    }
+
+    /// Everything needed to send an enhancement to `provider`, or why that is not possible yet.
+    func endpoint(for provider: AIProvider, model: String) -> Result<EnhancementEndpoint, EnhancementUnavailableReason> {
+        switch provider {
+        case .localLLM:
+            guard let package = LocalLLMModelManager.enhancementPackage(named: model) else {
+                return .failure(.onDeviceModelMissing(modelName: model))
+            }
+            guard LocalLLMModelManager.isDownloaded(package) else {
+                return .failure(.onDeviceModelMissing(modelName: package.displayName))
+            }
+            return .success(.onDevice(packageFileName: package.fileName))
+        case .ollama:
+            guard !model.isEmpty else { return .failure(.modelMissing(provider: provider)) }
+            let baseURL = userDefaults.string(forKey: "ollamaBaseURL") ?? OllamaService.defaultBaseURL
+            guard URL(string: baseURL) != nil else { return .failure(.endpointInvalid(provider: provider)) }
+            return .success(.ollama(baseURL: baseURL, model: model))
+        case .localCLI:
+            guard localCLIService.isConfigured else { return .failure(.commandMissing) }
+            return .success(.localCLI(
+                commandTemplate: localCLIService.commandTemplate,
+                timeout: localCLIService.timeoutSeconds
+            ))
+        default:
+            guard !provider.isTranscriptionOnly else {
+                return .failure(.transcriptionOnlyProvider(provider: provider))
+            }
+            guard let apiKey = APIKeyManager.shared.getAPIKey(forProvider: provider.rawValue), !apiKey.isEmpty else {
+                return .failure(.apiKeyMissing(provider: provider))
+            }
+            guard !model.isEmpty else { return .failure(.modelMissing(provider: provider)) }
+            if provider == .anthropic {
+                return .success(.anthropic(apiKey: apiKey, model: model))
+            }
+            guard URL(string: provider.baseURL)?.host != nil else {
+                return .failure(.endpointInvalid(provider: provider))
+            }
+            return .success(.openAICompatible(baseURL: provider.baseURL, apiKey: apiKey, model: model))
+        }
+    }
+
     var availableModels: [String] {
         availableModels(for: selectedProvider)
     }
@@ -311,11 +365,26 @@ class AIService: ObservableObject {
     
     private func loadSavedModelSelections() {
         for provider in AIProvider.allCases {
-            let key = "\(provider.rawValue)SelectedModel"
-            if let savedModel = userDefaults.string(forKey: key), !savedModel.isEmpty {
+            if let savedModel = userDefaults.string(forKey: Self.modelKey(for: provider)), !savedModel.isEmpty {
                 selectedModels[provider] = savedModel
             }
         }
+    }
+
+    private static func modelKey(for provider: AIProvider) -> String {
+        provider == .ollama ? ollamaModelKey : "\(provider.rawValue)SelectedModel"
+    }
+
+    /// 2.8.5 kept the Ollama model under two keys, written by different screens, so the model
+    /// shown in settings was not always the one enhancement used. `ollamaSelectedModel` — the one
+    /// the Ollama picker and `OllamaService` write — wins; the per-provider copy is removed.
+    static func migrateOllamaModelKey(in defaults: UserDefaults) {
+        let legacyKey = "\(AIProvider.ollama.rawValue)SelectedModel"
+        if defaults.string(forKey: ollamaModelKey) == nil,
+           let legacy = defaults.string(forKey: legacyKey), !legacy.isEmpty {
+            defaults.set(legacy, forKey: ollamaModelKey)
+        }
+        defaults.removeObject(forKey: legacyKey)
     }
     
     private func loadSavedOpenRouterModels() {
@@ -331,14 +400,13 @@ class AIService: ObservableObject {
     func selectModel(_ model: String) {
         guard !model.isEmpty else { return }
         
-        selectedModels[selectedProvider] = model
-        let key = "\(selectedProvider.rawValue)SelectedModel"
-        userDefaults.set(model, forKey: key)
-        
         if selectedProvider == .ollama {
             updateSelectedOllamaModel(model)
+        } else {
+            selectedModels[selectedProvider] = model
+            userDefaults.set(model, forKey: Self.modelKey(for: selectedProvider))
         }
-        
+
         objectWillChange.send()
         NotificationCenter.default.post(name: .AppSettingsDidChange, object: nil)
     }
@@ -447,23 +515,15 @@ class AIService: ObservableObject {
         return ollamaService.availableModels
     }
 
-    func enhanceWithOllama(text: String, systemPrompt: String) async throws -> String {
-        do {
-            let result = try await ollamaService.enhance(text, withSystemPrompt: systemPrompt)
-            return result
-        } catch {
-            throw error
-        }
-    }
-    
     func updateOllamaBaseURL(_ newURL: String) {
         ollamaService.baseURL = newURL
         userDefaults.set(newURL, forKey: "ollamaBaseURL")
     }
-    
+
     func updateSelectedOllamaModel(_ modelName: String) {
         ollamaService.selectedModel = modelName
-        userDefaults.set(modelName, forKey: "ollamaSelectedModel")
+        selectedModels[.ollama] = modelName
+        userDefaults.set(modelName, forKey: Self.ollamaModelKey)
     }
 
     func loadLocalCLITemplate(_ template: LocalCLITemplate) {
@@ -479,10 +539,6 @@ class AIService: ObservableObject {
     func updateLocalCLITimeoutSeconds(_ timeout: Double) {
         localCLIService.timeoutSeconds = timeout
         refreshLocalCLIConfigurationState()
-    }
-
-    func enhanceWithLocalCLI(systemPrompt: String, userPrompt: String) async throws -> String {
-        try await localCLIService.enhance(systemPrompt: systemPrompt, userPrompt: userPrompt)
     }
 
     private func refreshLocalCLIConfigurationState() {

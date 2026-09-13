@@ -25,6 +25,11 @@ final class Transcription {
     var powerModeName: String?
     var powerModeEmoji: String?
     var transcriptionStatus: String?
+    /// `EnhancementRecordState` raw value; nil when no enhancement was expected or for records
+    /// written before 2.8.6.
+    var enhancementOutcome: String? = nil
+    /// Why an enhancement was skipped, failed or rejected. A stable English code, not UI copy.
+    var enhancementOutcomeReason: String? = nil
 
     /// What History and the list previews should show.
     ///

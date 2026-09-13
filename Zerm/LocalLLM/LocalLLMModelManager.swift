@@ -179,27 +179,38 @@ final class LocalLLMModelManager: ObservableObject {
         return recommendedPackage
     }
 
-    /// Package for a job. Enhancement prefers the tiny default once it is on disk,
-    /// otherwise the already-installed reading model so Instant + Refine does not
-    /// go dark for people who only have Gemma.
+    /// Package for a job.
+    ///
+    /// Enhancement uses exactly the enhancement model the user picked. Without a pick it uses the
+    /// default, or the first enhancement model already on disk. It never borrows the Read Aloud
+    /// model: some of those are unfit for cleanup, and the picker would not show it as selected.
     nonisolated static func package(for role: LocalLLMRole) -> LocalLLMPackage {
         switch role {
         case .reading:
             return current
         case .enhancement:
+            let enhancementPackages = packages(for: .enhancement)
             let saved = UserDefaults.standard.string(forKey: enhancementModelKey)
-            if let selected = packages.first(where: { $0.fileName == saved }),
-               isDownloadedOnDisk(selected) {
+            if let selected = enhancementPackages.first(where: { $0.fileName == saved }) {
                 return selected
             }
             if isDownloadedOnDisk(enhancementDefaultPackage) {
                 return enhancementDefaultPackage
             }
-            if isDownloadedOnDisk(current) {
-                return current
-            }
-            return enhancementDefaultPackage
+            return enhancementPackages.first(where: isDownloadedOnDisk) ?? enhancementDefaultPackage
         }
+    }
+
+    /// An enhancement package by display name or file name — the forms a Power Mode or prompt
+    /// stores — falling back to the selected enhancement model when `name` is not one of them.
+    nonisolated static func enhancementPackage(named name: String) -> LocalLLMPackage? {
+        let enhancementPackages = packages(for: .enhancement)
+        return enhancementPackages.first { $0.displayName == name || $0.fileName == name }
+            ?? (name.isEmpty ? package(for: .enhancement) : nil)
+    }
+
+    nonisolated static func isDownloaded(_ package: LocalLLMPackage) -> Bool {
+        isDownloadedOnDisk(package)
     }
 
     nonisolated private static func isDownloadedOnDisk(_ package: LocalLLMPackage) -> Bool {
@@ -388,15 +399,17 @@ final class LocalLLMModelManager: ObservableObject {
 
     // MARK: - Generation
 
-    /// Rewrites/answers using the model for `role`. Loads it on first use.
+    /// Rewrites/answers using the model for `role`, or exactly `packageFileName` when a request has
+    /// already resolved one. Loads it on first use.
     func generate(
         system: String,
         user: String,
         maxNewTokens: Int = 400,
         role: LocalLLMRole = .reading,
+        packageFileName: String? = nil,
         isCancelled: @escaping @Sendable () -> Bool = { false }
     ) async throws -> String {
-        let package = Self.package(for: role)
+        let package = Self.packages.first { $0.fileName == packageFileName } ?? Self.package(for: role)
         guard isDownloaded(package) else {
             throw TTSError.notAvailable("The on-device model isn't downloaded yet. Download it in Enhancement or Read Aloud settings.")
         }
@@ -413,11 +426,6 @@ final class LocalLLMModelManager: ObservableObject {
     func prewarmIfNeeded() async {
         guard TTSSettings.naturalReadingAI else { return }
         await prewarm(role: .reading)
-    }
-
-    /// Pre-loads the Instant + Refine model so it is resident before transcription finishes.
-    func prewarm() async {
-        await prewarm(role: .enhancement)
     }
 
     func prewarm(role: LocalLLMRole) async {

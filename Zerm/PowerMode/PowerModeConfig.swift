@@ -457,6 +457,12 @@ class PowerModeManager: ObservableObject {
         self.objectWillChange.send()
     }
 
+    /// An explicit pick from the recorder. It applies to the recording in progress.
+    func selectInRecorder(_ config: PowerModeConfig) {
+        setActiveConfiguration(config)
+        NotificationCenter.default.post(name: .powerModeSelectedInRecorder, object: config)
+    }
+
     var currentActiveConfiguration: PowerModeConfig? {
         return activeConfiguration
     }

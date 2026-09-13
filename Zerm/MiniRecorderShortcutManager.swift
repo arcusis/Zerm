@@ -209,9 +209,7 @@ class MiniRecorderShortcutManager: ObservableObject {
                 if !powerModeManager.enabledConfigurations.isEmpty {
                     let availableConfigurations = powerModeManager.enabledConfigurations
                     if index < availableConfigurations.count {
-                        let selectedConfig = availableConfigurations[index]
-                        powerModeManager.setActiveConfiguration(selectedConfig)
-                        await PowerModeSessionManager.shared.beginSession(with: selectedConfig)
+                        powerModeManager.selectInRecorder(availableConfigurations[index])
                     }
                 }
             }

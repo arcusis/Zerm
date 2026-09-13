@@ -23,9 +23,8 @@ enum DictationOutputMode: String, Codable, CaseIterable, Identifiable {
 
     static let storageKey = "DictationOutputMode"
 
-    /// The pre-`DictationOutputMode` flag. Still written as a derived mirror so that any
-    /// path not yet migrated keeps behaving the same; remove once nothing reads it.
-    static let legacyInstantKey = "InstantTranscriptionMode"
+    /// The AI mode that turning enhancement back on returns to.
+    static let lastEnhancingModeKey = "LastEnhancingDictationOutputMode"
 
     var id: String { rawValue }
 
@@ -68,12 +67,44 @@ enum DictationOutputMode: String, Codable, CaseIterable, Identifiable {
     }
 
     static var current: DictationOutputMode {
-        let raw = UserDefaults.standard.string(forKey: storageKey) ?? ""
-        return DictationOutputMode(rawValue: raw) ?? .instant
+        current(in: .standard)
     }
 
-    static func setCurrent(_ mode: DictationOutputMode) {
-        UserDefaults.standard.set(mode.rawValue, forKey: storageKey)
-        UserDefaults.standard.set(mode != .enhanced, forKey: legacyInstantKey)
+    static func current(in defaults: UserDefaults) -> DictationOutputMode {
+        DictationOutputMode(rawValue: defaults.string(forKey: storageKey) ?? "") ?? .instant
+    }
+
+    static func setCurrent(_ mode: DictationOutputMode, in defaults: UserDefaults = .standard) {
+        defaults.set(mode.rawValue, forKey: storageKey)
+        if mode.usesEnhancement {
+            defaults.set(mode.rawValue, forKey: lastEnhancingModeKey)
+        }
+    }
+
+    static func lastEnhancing(in defaults: UserDefaults = .standard) -> DictationOutputMode {
+        guard let mode = DictationOutputMode(rawValue: defaults.string(forKey: lastEnhancingModeKey) ?? ""),
+              mode.usesEnhancement else {
+            return .instantRefine
+        }
+        return mode
+    }
+
+    /// Folds the separate "Enhancement" on/off switch into the output mode, which is now the only
+    /// thing that decides whether enhancement runs.
+    ///
+    /// The switch and the mode could disagree — a mode that enhances with the switch off, which is
+    /// how enhancement looked broken while its settings read ON. What each install did is kept: a
+    /// mode that enhances with the switch off becomes Instant, and the mode it had is remembered so
+    /// switching enhancement back on returns to it. Reads the registered-default fallbacks the old
+    /// keys had. Removes `isAIEnhancementEnabled` and the `InstantTranscriptionMode` mirror.
+    static func migrateLegacyEnhancementToggle(in defaults: UserDefaults) {
+        let enabled = defaults.object(forKey: "isAIEnhancementEnabled") as? Bool ?? true
+        let mode = DictationOutputMode(rawValue: defaults.string(forKey: storageKey) ?? "") ?? .instantRefine
+        if mode.usesEnhancement {
+            defaults.set(mode.rawValue, forKey: lastEnhancingModeKey)
+        }
+        defaults.set((enabled ? mode : .instant).rawValue, forKey: storageKey)
+        defaults.removeObject(forKey: "isAIEnhancementEnabled")
+        defaults.removeObject(forKey: "InstantTranscriptionMode")
     }
 }

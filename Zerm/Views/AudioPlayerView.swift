@@ -465,8 +465,8 @@ struct AudioPlayerView: View {
                             showSuccess: bannerState == .reEnhanceSuccess,
                             action: reEnhanceOnly
                         )
-                        .disabled(isOperationInProgress || !enhancementService.isEnhancementEnabled || !enhancementService.isConfigured)
-                        .opacity(enhancementService.isEnhancementEnabled && enhancementService.isConfigured ? 1.0 : 0.4)
+                        .disabled(isOperationInProgress || !enhancementService.isConfigured)
+                        .opacity(enhancementService.isConfigured ? 1.0 : 0.4)
                         .help("Re-enhance with selected prompt")
                     }
 
@@ -528,34 +528,16 @@ struct AudioPlayerView: View {
     private func reEnhanceOnly() {
         guard let transcription = transcription else { return }
 
-        guard enhancementService.isEnhancementEnabled, enhancementService.isConfigured else {
-            showTemporaryBanner(.reEnhanceError("AI Enhancement is not enabled or configured"))
-            return
-        }
-
         isReEnhancing = true
         bannerState = nil
 
-        Task {
-            do {
-                let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(transcription.text)
-                await MainActor.run {
-                    transcription.enhancedText = enhancedText
-                    transcription.aiEnhancementModelName = enhancementService.getAIService()?.currentModel
-                    transcription.promptName = promptName
-                    transcription.enhancementDuration = enhancementDuration
-                    transcription.aiRequestSystemMessage = enhancementService.lastSystemMessageSent
-                    transcription.aiRequestUserMessage = enhancementService.lastUserMessageSent
-                    try? modelContext.save()
-
-                    isReEnhancing = false
-                    showTemporaryBanner(.reEnhanceSuccess)
-                }
-            } catch {
-                await MainActor.run {
-                    isReEnhancing = false
-                    showTemporaryBanner(.reEnhanceError(error.localizedDescription))
-                }
+        Task { @MainActor in
+            let outcome = await enhancementService.reenhance(transcription)
+            isReEnhancing = false
+            if case .enhanced = outcome {
+                showTemporaryBanner(.reEnhanceSuccess)
+            } else {
+                showTemporaryBanner(.reEnhanceError(EnhancementNotifier.message(for: outcome)?.title ?? ""))
             }
         }
     }

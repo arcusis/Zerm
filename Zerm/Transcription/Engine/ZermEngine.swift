@@ -11,6 +11,9 @@ class ZermEngine: NSObject, ObservableObject {
     @Published var shouldCancelRecording = false
     var partialTranscript: String = ""
     var currentSession: TranscriptionSession?
+    /// The configuration of the recording in progress, resolved when it started. Handed to the
+    /// pipeline, by value, when recording stops.
+    private(set) var sessionConfiguration: DictationSessionConfiguration?
 
     let recorder = Recorder()
     var recordedFile: URL? = nil
@@ -63,10 +66,6 @@ class ZermEngine: NSObject, ObservableObject {
         )
 
         super.init()
-
-        if let enhancementService {
-            PowerModeSessionManager.shared.configure(engine: self, enhancementService: enhancementService)
-        }
 
         setupNotifications()
         createRecordingsDirectoryIfNeeded()
@@ -234,7 +233,7 @@ class ZermEngine: NSObject, ObservableObject {
                                     MediaController.shared.cancelPendingMute()
                                     await MediaController.shared.unmuteSystemAudio()
                                     await self.recorder.stopRecordingAndWaitUntilFinalized()
-                                    if let recordedFile,
+                                    if let recordedFile = self.recordedFile,
                                        let inspection = RecordingAudioStore.inspect(recordedFile),
                                        inspection.hasAudio {
                                         self.persistPreservedRecording(
@@ -247,16 +246,13 @@ class ZermEngine: NSObject, ObservableObject {
                                     return
                                 }
 
-                                await ActiveWindowService.shared.applyConfiguration(
-                                    powerModeId: powerModeId,
-                                    shouldApplyURLMatch: { [weak self] in
-                                        self?.recordingState == .recording
-                                    }
-                                )
+                                let powerMode = await ActiveWindowService.shared.resolveConfiguration(powerModeId: powerModeId)
+                                PowerModeManager.shared.setActiveConfiguration(powerMode)
+                                let dictationSession = self.beginDictationSession(powerMode: powerMode)
                                 self.startAutoStopMonitor()
 
-                                if self.recordingState == .recording,
-                                   let model = self.transcriptionModelManager.currentTranscriptionModel {
+                                if self.recordingState == .recording, let dictationSession {
+                                    let model = dictationSession.transcriptionModel
                                     let session = self.serviceRegistry.createSession(
                                         for: model,
                                         onPartialTranscript: { [weak self] partial in
@@ -275,7 +271,9 @@ class ZermEngine: NSObject, ObservableObject {
                                         }
                                     )
                                     self.currentSession = session
-                                    let realCallback = try await session.prepare(model: model)
+                                    let realCallback = try await LanguagePreference.$operationOverrideCode.withValue(dictationSession.languageCode) {
+                                        try await session.prepare(model: model)
+                                    }
 
                                     if let realCallback {
                                         self.recorder.onAudioChunk = realCallback
@@ -291,56 +289,9 @@ class ZermEngine: NSObject, ObservableObject {
                                     }
                                 }
 
-                                Task.detached { [weak self] in
-                                    guard let self else { return }
-
-                                    if let model = await self.transcriptionModelManager.currentTranscriptionModel,
-                                       model.provider == .whisper {
-                                        if let localWhisperModel = await self.whisperModelManager.availableModels.first(where: { $0.name == model.name }),
-                                           await self.whisperModelManager.whisperContext == nil {
-                                            do {
-                                                try await self.whisperModelManager.loadModel(localWhisperModel)
-                                            } catch {
-                                                self.logger.error("❌ Model loading failed: \(error.localizedDescription, privacy: .public)")
-                                            }
-                                        }
-                                    } else if let fluidAudioModel = await self.transcriptionModelManager.currentTranscriptionModel as? FluidAudioModel {
-                                        try? await self.serviceRegistry.fluidAudioTranscriptionService.loadModel(for: fluidAudioModel)
-                                    }
-
-                                    if let enhancementService = self.enhancementService {
-                                        let captureSettings = await MainActor.run {
-                                            (
-                                                mode: DictationOutputMode.current,
-                                                enabled: enhancementService.isEnhancementEnabled,
-                                                clipboard: enhancementService.useClipboardContext,
-                                                screen: enhancementService.useScreenCaptureContext
-                                            )
-                                        }
-
-                                        // Refine has a few seconds in total, so the enhancement model
-                                        // must already be resident — a cold Gemma load used to exhaust
-                                        // the whole budget. Qwen 0.6B warms in well under a second.
-                                        if captureSettings.mode == .instantRefine, captureSettings.enabled {
-                                            await LocalLLMModelManager.shared.prewarm(role: .enhancement)
-                                        }
-
-                                        if captureSettings.mode.usesEnhancement && captureSettings.enabled {
-                                            if captureSettings.clipboard {
-                                                await MainActor.run {
-                                                    enhancementService.captureClipboardContext()
-                                                }
-                                            }
-                                            // Screen capture is only affordable when the paste waits for
-                                            // the result anyway.
-                                            if captureSettings.screen, captureSettings.mode == .enhanced {
-                                                await enhancementService.captureScreenContext()
-                                            }
-                                        } else {
-                                            await MainActor.run {
-                                                enhancementService.clearCapturedContexts()
-                                            }
-                                        }
+                                if let model = dictationSession?.transcriptionModel {
+                                    Task { [weak self] in
+                                        await self?.loadTranscriptionModelIfNeeded(model)
                                     }
                                 }
 
@@ -549,6 +500,96 @@ class ZermEngine: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Dictation session
+
+    /// Resolves the recording's configuration once, captures the context its enhancement may use,
+    /// and warms the on-device model only when this dictation will actually use it.
+    private func beginDictationSession(powerMode: PowerModeConfig?) -> DictationSessionConfiguration? {
+        guard let globalModel = transcriptionModelManager.currentTranscriptionModel else { return nil }
+
+        let outputMode = DictationOutputMode.effective(
+            configured: powerMode?.outputMode ?? DictationOutputMode.current,
+            autoSendEnabled: powerMode?.autoSendKey.isEnabled == true
+        )
+        let triggerWordsMayEnhance = UserDefaults.standard.bool(forKey: "AllowPromptTriggeredEnhancement")
+
+        var clipboardContext: String?
+        var screenContext: Task<String?, Never>?
+        if let enhancementService {
+            if enhancementService.useClipboardContext, outputMode.usesEnhancement || triggerWordsMayEnhance {
+                clipboardContext = NSPasteboard.general.string(forType: .string)
+            }
+            // A capture plus OCR is only affordable when the paste waits for the result anyway.
+            if outputMode == .enhanced,
+               powerMode?.contextAwareness ?? enhancementService.useScreenCaptureContext {
+                screenContext = Task { await AIEnhancementService.captureScreenText() }
+            }
+        }
+
+        let session = DictationSessionConfiguration.resolve(
+            powerMode: powerMode,
+            globalModel: globalModel,
+            usableModels: transcriptionModelManager.usableModels,
+            globalLanguage: LanguagePreference.selectedCode(),
+            globalTextCleanup: .global(),
+            clipboardContext: clipboardContext,
+            screenContext: screenContext
+        )
+        sessionConfiguration = session
+
+        // Both AI modes need the on-device model resident by the time transcription ends; a cold
+        // load can exhaust a refine's whole budget. Cloud users never load it.
+        if let enhancementService, outputMode.usesEnhancement,
+           enhancementService.resolvedProvider(for: session.enhancementOverrides) == .localLLM {
+            Task { await LocalLLMModelManager.shared.prewarm(role: .enhancement) }
+        }
+        return session
+    }
+
+    private func loadTranscriptionModelIfNeeded(_ model: any TranscriptionModel) async {
+        if model.provider == .whisper {
+            guard let localWhisperModel = whisperModelManager.availableModels.first(where: { $0.name == model.name }),
+                  whisperModelManager.whisperContext == nil else { return }
+            do {
+                try await whisperModelManager.loadModel(localWhisperModel)
+            } catch {
+                logger.error("❌ Model loading failed: \(error.localizedDescription, privacy: .public)")
+            }
+        } else if let fluidAudioModel = model as? FluidAudioModel {
+            do {
+                try await serviceRegistry.fluidAudioTranscriptionService.loadModel(for: fluidAudioModel)
+            } catch {
+                logger.error("❌ \(fluidAudioModel.displayName, privacy: .public) failed to load at recording start: \(error.localizedDescription, privacy: .public)")
+                DebugLogger.shared.log("ZermEngine", "model load at recording start failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Explicit choices made in the recorder apply to the recording in progress.
+    @objc private func handlePowerModeSelectedInRecorder(_ notification: Notification) {
+        guard recordingState == .recording, let session = sessionConfiguration,
+              let config = notification.object as? PowerModeConfig else { return }
+        sessionConfiguration = session.replacingPowerMode(config)
+    }
+
+    @objc private func handleOutputModeChanged() {
+        guard recordingState == .recording, let session = sessionConfiguration,
+              let enhancementService else { return }
+        sessionConfiguration = session.withExplicitOutputMode(enhancementService.outputMode)
+    }
+
+    @objc private func handlePromptSelectionChanged() {
+        guard recordingState == .recording, let session = sessionConfiguration,
+              let enhancementService else { return }
+        sessionConfiguration = session.withExplicitPrompt(enhancementService.selectedPromptId)
+    }
+
+    /// Ends the recording's configuration. Called once the pipeline has its copy, or when the
+    /// recorder closes without one.
+    func endDictationSession() {
+        sessionConfiguration = nil
+    }
+
     // MARK: - Pipeline Dispatch
 
     /// History row for a take that must survive even though AI did not run.
@@ -572,7 +613,12 @@ class ZermEngine: NSObject, ObservableObject {
     }
 
     private func runPipeline(on transcription: Transcription, audioURL: URL) async {
-        guard let model = transcriptionModelManager.currentTranscriptionModel else {
+        // A recording that stopped before its session was resolved still runs under the Power
+        // Mode that was active, just without captured context.
+        let dictationSession = sessionConfiguration
+            ?? beginDictationSession(powerMode: PowerModeManager.shared.currentActiveConfiguration)
+        endDictationSession()
+        guard let dictationSession else {
             transcription.text = "Transcription Failed: No model selected"
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
             try? modelContext.save()
@@ -618,8 +664,8 @@ class ZermEngine: NSObject, ObservableObject {
         await pipeline.run(
             transcription: transcription,
             audioURL: audioURL,
-            model: model,
-            session: session,
+            dictationSession: dictationSession,
+            transcriptionSession: session,
             onStateChange: { [weak self] state in
                 guard let self, self.pipelineRunToken == runToken else { return }
                 self.setState(state)
@@ -716,6 +762,24 @@ class ZermEngine: NSObject, ObservableObject {
             self,
             selector: #selector(handlePromptChange),
             name: .promptDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePowerModeSelectedInRecorder(_:)),
+            name: .powerModeSelectedInRecorder,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOutputModeChanged),
+            name: .enhancementToggleChanged,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePromptSelectionChanged),
+            name: .promptSelectionChanged,
             object: nil
         )
     }

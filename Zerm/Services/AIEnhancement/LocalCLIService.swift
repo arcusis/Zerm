@@ -77,18 +77,23 @@ final class LocalCLIService {
         commandTemplate = template.commandTemplate
     }
 
-    func enhance(systemPrompt: String, userPrompt: String) async throws -> String {
-        guard isConfigured else {
+    /// Runs a command captured into an enhancement request, independent of the current settings.
+    static func run(
+        commandTemplate: String,
+        timeout: Double,
+        systemPrompt: String,
+        userPrompt: String
+    ) async throws -> String {
+        guard !commandTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LocalCLIError.commandNotConfigured
         }
 
-        let fullPrompt = Self.makeFullPrompt(systemPrompt: systemPrompt, userPrompt: userPrompt)
         return try await executeCommand(
             commandTemplate: commandTemplate,
             systemPrompt: systemPrompt,
             userPrompt: userPrompt,
-            fullPrompt: fullPrompt,
-            timeout: timeoutSeconds
+            fullPrompt: makeFullPrompt(systemPrompt: systemPrompt, userPrompt: userPrompt),
+            timeout: timeout
         )
     }
 
@@ -104,7 +109,7 @@ final class LocalCLIService {
         """
     }
 
-    private func executeCommand(
+    private static func executeCommand(
         commandTemplate: String,
         systemPrompt: String,
         userPrompt: String,

@@ -201,9 +201,7 @@ struct ZermApp: App {
         recorderUIManager.onCancelSpeaking = { [weak ttsController] in ttsController?.stop() }
         _ttsController = StateObject(wrappedValue: ttsController)
 
-        let activeWindowService = ActiveWindowService.shared
-        activeWindowService.configure(with: enhancementService)
-        _activeWindowService = StateObject(wrappedValue: activeWindowService)
+        _activeWindowService = StateObject(wrappedValue: ActiveWindowService.shared)
 
         prewarmService = uiTestConfiguration.isEnabled
             ? nil
