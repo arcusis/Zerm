@@ -296,7 +296,8 @@ struct EnhancementRequestTests {
 
     // MARK: - Notifications
 
-    @Test func notConfiguredIsShownOnceWithinTheQuietPeriod() {
+    /// A setup problem does not fix itself mid-session, so it is reported once per launch.
+    @Test func notConfiguredIsShownOncePerLaunch() {
         var shown: [EnhancementNotifier.Message] = []
         var clock = Date(timeIntervalSince1970: 1_000)
         let notifier = EnhancementNotifier(quietPeriod: 120, now: { clock }, present: { shown.append($0) })
@@ -304,12 +305,49 @@ struct EnhancementRequestTests {
         let missingModel = EnhancementOutcome.skipped(.notConfigured(.onDeviceModelMissing(modelName: "Gemma 4 E2B")))
         #expect(notifier.report(missingModel, purpose: .refine))
         #expect(!notifier.report(missingModel, purpose: .enhanced))
-        #expect(notifier.report(.skipped(.notConfigured(.apiKeyMissing(provider: .openAI))), purpose: .manual))
 
-        clock = clock.addingTimeInterval(121)
-        #expect(notifier.report(missingModel, purpose: .enhanced))
+        clock = clock.addingTimeInterval(3_600)
+        #expect(!notifier.report(missingModel, purpose: .enhanced))
+
+        // A different setup problem is new information; manual actions always report.
+        #expect(notifier.report(.skipped(.notConfigured(.apiKeyMissing(provider: .openAI))), purpose: .enhanced))
+        #expect(notifier.report(missingModel, purpose: .manual))
         #expect(shown.count == 3)
         #expect(shown.allSatisfy { $0.opensSettings })
+    }
+
+    @Test func transientFailuresAreShownAgainAfterTheQuietPeriod() {
+        var shown = 0
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let notifier = EnhancementNotifier(quietPeriod: 120, now: { clock }, present: { _ in shown += 1 })
+
+        #expect(notifier.report(.failed(.timeout), purpose: .enhanced))
+        #expect(!notifier.report(.failed(.timeout), purpose: .refine))
+        clock = clock.addingTimeInterval(121)
+        #expect(notifier.report(.failed(.timeout), purpose: .refine))
+        #expect(notifier.report(.rejected(.languageChanged), purpose: .refine))
+        #expect(shown == 3)
+    }
+
+    // MARK: - Local CLI
+
+    /// A refine deadline or Esc must stop a CLI agent, not wait out its own timeout.
+    @Test func cancellingALocalCLIRequestStopsTheCommand() async {
+        let started = Date()
+        let task = Task {
+            try await LocalCLIService.run(
+                commandTemplate: "sleep 30",
+                timeout: 60,
+                systemPrompt: "system",
+                userPrompt: "user"
+            )
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        task.cancel()
+        let result = await task.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        // Allows for the one-off PATH lookup through the login shell.
+        #expect(Date().timeIntervalSince(started) < 8)
     }
 
     @Test func everySkipAndFailureTheUserExpectedIsReported() {

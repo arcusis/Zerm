@@ -22,6 +22,9 @@ class TranscriptionPipeline {
     private let enhancementService: AIEnhancementService?
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionPipeline")
 
+    /// How long Enhanced output waits for on-screen text still being read.
+    static let screenContextWaitLimit: TimeInterval = 1
+
     var licenseViewModel: LicenseViewModel
 
     init(
@@ -169,10 +172,19 @@ class TranscriptionPipeline {
                     if plan.skipsAsShort {
                         transcription.record(.skipped(.shortTranscription), of: nil)
                     } else {
-                        let screenContext = plan.outputMode == .enhanced
-                            && dictationSession.usesScreenContext(global: enhancementService.useScreenCaptureContext)
-                            ? await dictationSession.screenContext?.value
-                            : nil
+                        var screenContext: String?
+                        if plan.outputMode == .enhanced,
+                           dictationSession.usesScreenContext(global: enhancementService.useScreenCaptureContext),
+                           let capture = dictationSession.screenContext {
+                            // The capture started with the recording and is usually done. If OCR
+                            // is still running, enhance without it rather than make the paste wait.
+                            screenContext = await BoundedWait.value(
+                                of: capture,
+                                within: Self.screenContextWaitLimit,
+                                isCancelled: shouldCancel
+                            ) ?? nil
+                        }
+                        if shouldCancel() { throw CancellationError() }
                         switch enhancementService.makeRequest(
                             input: plan.input,
                             purpose: plan.outputMode == .enhanced ? .enhanced : .refine,

@@ -11,9 +11,9 @@ class ZermEngine: NSObject, ObservableObject {
     @Published var shouldCancelRecording = false
     var partialTranscript: String = ""
     var currentSession: TranscriptionSession?
-    /// The configuration of the recording in progress, resolved when it started. Handed to the
-    /// pipeline, by value, when recording stops.
-    private(set) var sessionConfiguration: DictationSessionConfiguration?
+    /// The configuration of the recording in progress, resolved when it started, and the choices
+    /// made in the recorder during it. Handed to the pipeline, by value, when recording stops.
+    let dictationSession = DictationSessionTracker()
 
     let recorder = Recorder()
     var recordedFile: URL? = nil
@@ -90,6 +90,7 @@ class ZermEngine: NSObject, ObservableObject {
         logger.notice("toggleRecord called – state=\(String(describing: self.recordingState), privacy: .public)")
 
         if recordingState == .recording {
+            dictationSession.stop()
             cancelAutoStopMonitor()
             partialTranscript = ""
             setState(.transcribing)
@@ -181,6 +182,7 @@ class ZermEngine: NSObject, ObservableObject {
             partialTranscript = ""
             invalidatePipelineRun()
             cancelWhisperIdleUnload()
+            let sessionGeneration = dictationSession.begin(powerModeId: powerModeId)
             setState(.starting)
 
             requestRecordPermission { [self] granted in
@@ -246,9 +248,19 @@ class ZermEngine: NSObject, ObservableObject {
                                     return
                                 }
 
-                                let powerMode = await ActiveWindowService.shared.resolveConfiguration(powerModeId: powerModeId)
+                                // Resolving can wait on a browser. A recording that stopped or was
+                                // replaced meanwhile must not be configured, given a streaming
+                                // session, or have context captured for it.
+                                guard case .resolved(let powerMode) = await self.dictationSession.resolvePowerMode(
+                                    for: sessionGeneration,
+                                    isLive: { self.recordingState == .recording && !self.shouldCancelRecording },
+                                    using: { await ActiveWindowService.shared.resolveConfiguration(powerModeId: powerModeId) }
+                                ) else {
+                                    self.logger.notice("toggleRecord: recording ended while its Power Mode resolved")
+                                    return
+                                }
                                 PowerModeManager.shared.setActiveConfiguration(powerMode)
-                                let dictationSession = self.beginDictationSession(powerMode: powerMode)
+                                let dictationSession = self.startDictationSession(powerMode: powerMode, generation: sessionGeneration)
                                 self.startAutoStopMonitor()
 
                                 if self.recordingState == .recording, let dictationSession {
@@ -502,9 +514,9 @@ class ZermEngine: NSObject, ObservableObject {
 
     // MARK: - Dictation session
 
-    /// Resolves the recording's configuration once, captures the context its enhancement may use,
-    /// and warms the on-device model only when this dictation will actually use it.
-    private func beginDictationSession(powerMode: PowerModeConfig?) -> DictationSessionConfiguration? {
+    /// Resolves the live recording's configuration once, captures the context its enhancement may
+    /// use, and warms the on-device model only when this dictation will actually use it.
+    private func startDictationSession(powerMode: PowerModeConfig?, generation: Int) -> DictationSessionConfiguration? {
         guard let globalModel = transcriptionModelManager.currentTranscriptionModel else { return nil }
 
         let outputMode = DictationOutputMode.effective(
@@ -535,7 +547,7 @@ class ZermEngine: NSObject, ObservableObject {
             clipboardContext: clipboardContext,
             screenContext: screenContext
         )
-        sessionConfiguration = session
+        dictationSession.setConfiguration(session, for: generation)
 
         // Both AI modes need the on-device model resident by the time transcription ends; a cold
         // load can exhaust a refine's whole budget. Cloud users never load it.
@@ -544,6 +556,21 @@ class ZermEngine: NSObject, ObservableObject {
             Task { await LocalLLMModelManager.shared.prewarm(role: .enhancement) }
         }
         return session
+    }
+
+    /// For a recording that stopped before its Power Mode resolved: the app's or default Power
+    /// Mode, without waiting on a browser, and without context that was never captured.
+    private func fallbackDictationSession() -> DictationSessionConfiguration? {
+        guard let globalModel = transcriptionModelManager.currentTranscriptionModel else { return nil }
+        return DictationSessionConfiguration.resolve(
+            powerMode: ActiveWindowService.shared.resolveConfigurationWithoutURL(
+                powerModeId: dictationSession.requestedPowerModeId
+            ),
+            globalModel: globalModel,
+            usableModels: transcriptionModelManager.usableModels,
+            globalLanguage: LanguagePreference.selectedCode(),
+            globalTextCleanup: .global()
+        )
     }
 
     private func loadTranscriptionModelIfNeeded(_ model: any TranscriptionModel) async {
@@ -565,29 +592,10 @@ class ZermEngine: NSObject, ObservableObject {
         }
     }
 
-    /// Explicit choices made in the recorder apply to the recording in progress.
+    /// A Power Mode picked in the recorder applies to the recording in progress.
     @objc private func handlePowerModeSelectedInRecorder(_ notification: Notification) {
-        guard recordingState == .recording, let session = sessionConfiguration,
-              let config = notification.object as? PowerModeConfig else { return }
-        sessionConfiguration = session.replacingPowerMode(config)
-    }
-
-    @objc private func handleOutputModeChanged() {
-        guard recordingState == .recording, let session = sessionConfiguration,
-              let enhancementService else { return }
-        sessionConfiguration = session.withExplicitOutputMode(enhancementService.outputMode)
-    }
-
-    @objc private func handlePromptSelectionChanged() {
-        guard recordingState == .recording, let session = sessionConfiguration,
-              let enhancementService else { return }
-        sessionConfiguration = session.withExplicitPrompt(enhancementService.selectedPromptId)
-    }
-
-    /// Ends the recording's configuration. Called once the pipeline has its copy, or when the
-    /// recorder closes without one.
-    func endDictationSession() {
-        sessionConfiguration = nil
+        guard let config = notification.object as? PowerModeConfig else { return }
+        dictationSession.selectPowerMode(config)
     }
 
     // MARK: - Pipeline Dispatch
@@ -613,12 +621,7 @@ class ZermEngine: NSObject, ObservableObject {
     }
 
     private func runPipeline(on transcription: Transcription, audioURL: URL) async {
-        // A recording that stopped before its session was resolved still runs under the Power
-        // Mode that was active, just without captured context.
-        let dictationSession = sessionConfiguration
-            ?? beginDictationSession(powerMode: PowerModeManager.shared.currentActiveConfiguration)
-        endDictationSession()
-        guard let dictationSession else {
+        guard let dictationSession = self.dictationSession.takeConfiguration(fallback: fallbackDictationSession) else {
             transcription.text = "Transcription Failed: No model selected"
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
             try? modelContext.save()
@@ -768,18 +771,6 @@ class ZermEngine: NSObject, ObservableObject {
             self,
             selector: #selector(handlePowerModeSelectedInRecorder(_:)),
             name: .powerModeSelectedInRecorder,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleOutputModeChanged),
-            name: .enhancementToggleChanged,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handlePromptSelectionChanged),
-            name: .promptSelectionChanged,
             object: nil
         )
     }

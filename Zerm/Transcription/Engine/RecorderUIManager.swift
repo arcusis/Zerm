@@ -224,7 +224,7 @@ class RecorderUIManager: ObservableObject {
 
         // A Power Mode only ever configured the recording that just ended; there are no global
         // settings to restore.
-        engine.endDictationSession()
+        engine.dictationSession.end()
         PowerModeManager.shared.setActiveConfiguration(nil)
 
         await MainActor.run {

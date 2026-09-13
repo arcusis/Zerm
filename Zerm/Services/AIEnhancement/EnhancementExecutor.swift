@@ -39,10 +39,12 @@ struct LiveEnhancementClient: EnhancementClient {
                 options: OllamaGenerationOptions(temperature: 0.3),
                 timeout: request.timeout
             )
-        case .localCLI(let commandTemplate, let timeout):
+        case .localCLI(let commandTemplate, _):
+            // The request's timeout already allows for the CLI's own setting where the user is
+            // waiting, and holds a refine to its budget.
             return try await LocalCLIService.run(
                 commandTemplate: commandTemplate,
-                timeout: timeout,
+                timeout: request.timeout,
                 systemPrompt: request.systemMessage,
                 userPrompt: request.userMessage
             )

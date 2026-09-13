@@ -22,6 +22,7 @@ class NotchWindowManager: ObservableObject {
                 NotchRecorderView(stateProvider: engine, recorder: recorder)
                     .environmentObject(manager)
                     .environmentObject(enhancementService)
+                    .environmentObject(engine.dictationSession)
             )
         }
         NotificationCenter.default.addObserver(

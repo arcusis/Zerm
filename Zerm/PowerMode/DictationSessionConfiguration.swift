@@ -1,6 +1,39 @@
 import Foundation
 import os
 
+/// Waits for work that dictation may use but must never be held up by.
+enum BoundedWait {
+    private static let pollInterval: UInt64 = 20_000_000
+
+    /// The task's value if it arrives within `seconds` and before `isCancelled`, otherwise nil. The
+    /// task keeps running either way; `Task.value` cannot be abandoned by cancelling its awaiter, so
+    /// the value and a timer race through one continuation.
+    static func value<T: Sendable>(
+        of task: Task<T, Never>,
+        within seconds: TimeInterval,
+        isCancelled: @escaping @MainActor @Sendable () -> Bool = { false }
+    ) async -> T? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            let finish: @Sendable (T?) -> Void = { value in
+                let shouldResume = resumed.withLock { alreadyResumed -> Bool in
+                    defer { alreadyResumed = true }
+                    return !alreadyResumed
+                }
+                if shouldResume { continuation.resume(returning: value) }
+            }
+            Task { finish(await task.value) }
+            Task {
+                let deadline = Date().addingTimeInterval(seconds)
+                while Date() < deadline, !(await isCancelled()), !resumed.withLock({ $0 }) {
+                    try? await Task.sleep(nanoseconds: pollInterval)
+                }
+                finish(nil)
+            }
+        }
+    }
+}
+
 /// The user's lowercase, punctuation and formatting choices for one dictation.
 struct TextCleanupPreferences: Equatable, Sendable {
     let formatsText: Bool
@@ -38,8 +71,7 @@ struct TextCleanupPreferences: Equatable, Sendable {
 /// model or language of a recording already in progress.
 ///
 /// The only way to change it mid-recording is an explicit choice in the recorder (a Power Mode,
-/// prompt or output-mode shortcut). Those replace the enhancement side only: the transcription
-/// model and language are already bound to the live transcription session.
+/// prompt or output-mode shortcut), collected in `RecorderChoices` and applied at hand-off.
 struct DictationSessionConfiguration {
     let powerMode: PowerModeConfig?
     let transcriptionModel: any TranscriptionModel
@@ -114,42 +146,18 @@ struct DictationSessionConfiguration {
         )
     }
 
-    func replacingPowerMode(_ config: PowerModeConfig?) -> DictationSessionConfiguration {
+    /// The recorder's choices replace the enhancement side only: the transcription model and
+    /// language are already bound to the live transcription session.
+    func applying(_ choices: RecorderChoices) -> DictationSessionConfiguration {
         DictationSessionConfiguration(
-            powerMode: config,
+            powerMode: choices.powerMode ?? powerMode,
             transcriptionModel: transcriptionModel,
             languageCode: languageCode,
             globalTextCleanup: globalTextCleanup,
             clipboardContext: clipboardContext,
             screenContext: screenContext,
-            explicitOutputMode: explicitOutputMode,
-            explicitPromptID: explicitPromptID
-        )
-    }
-
-    func withExplicitOutputMode(_ mode: DictationOutputMode) -> DictationSessionConfiguration {
-        DictationSessionConfiguration(
-            powerMode: powerMode,
-            transcriptionModel: transcriptionModel,
-            languageCode: languageCode,
-            globalTextCleanup: globalTextCleanup,
-            clipboardContext: clipboardContext,
-            screenContext: screenContext,
-            explicitOutputMode: mode,
-            explicitPromptID: explicitPromptID
-        )
-    }
-
-    func withExplicitPrompt(_ promptID: UUID?) -> DictationSessionConfiguration {
-        DictationSessionConfiguration(
-            powerMode: powerMode,
-            transcriptionModel: transcriptionModel,
-            languageCode: languageCode,
-            globalTextCleanup: globalTextCleanup,
-            clipboardContext: clipboardContext,
-            screenContext: screenContext,
-            explicitOutputMode: explicitOutputMode,
-            explicitPromptID: promptID
+            explicitOutputMode: choices.outputMode ?? explicitOutputMode,
+            explicitPromptID: choices.promptID ?? explicitPromptID
         )
     }
 }

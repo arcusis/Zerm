@@ -25,31 +25,37 @@ class ActiveWindowService: ObservableObject {
     /// transcription session was already built.
     @MainActor
     func resolveConfiguration(powerModeId: UUID? = nil) async -> PowerModeConfig? {
-        let configurations = PowerModeManager.shared.configurations
-        if let powerModeId, let config = configurations.first(where: { $0.id == powerModeId }) {
-            return config
-        }
-
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-              let bundleIdentifier = frontmostApp.bundleIdentifier else {
-            return nil
-        }
-        currentApplication = frontmostApp
-
-        let appConfiguration = PowerModeManager.configuration(forApp: bundleIdentifier, in: configurations)
-            ?? PowerModeManager.defaultConfiguration(in: configurations)
-
-        guard let browserType = BrowserType.allCases.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+        let appConfiguration = resolveConfigurationWithoutURL(powerModeId: powerModeId)
+        guard powerModeId == nil,
+              let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+              let browserType = BrowserType.allCases.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
             return appConfiguration
         }
 
         let browserURLService = browserURLService
         return await Self.configuration(
             appConfiguration: appConfiguration,
-            configurations: configurations,
+            configurations: PowerModeManager.shared.configurations,
             waitLimit: Self.browserURLWaitLimit,
             lookupURL: { try await browserURLService.getCurrentURL(from: browserType) }
         )
+    }
+
+    /// The requested, frontmost app's or default Power Mode, without asking a browser for its URL.
+    /// For a recording that stopped before its full resolution finished.
+    @MainActor
+    func resolveConfigurationWithoutURL(powerModeId: UUID? = nil) -> PowerModeConfig? {
+        let configurations = PowerModeManager.shared.configurations
+        if let powerModeId, let config = configurations.first(where: { $0.id == powerModeId }) {
+            return config
+        }
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleIdentifier = frontmostApp.bundleIdentifier else {
+            return nil
+        }
+        currentApplication = frontmostApp
+        return PowerModeManager.configuration(forApp: bundleIdentifier, in: configurations)
+            ?? PowerModeManager.defaultConfiguration(in: configurations)
     }
 
     static func configuration(
@@ -67,25 +73,7 @@ class ActiveWindowService: ObservableObject {
             }
         }
 
-        // `Task.value` cannot be abandoned by cancelling its awaiter, so the lookup and the
-        // timer race through one continuation. Whichever loses is simply ignored.
-        let url: String?? = await withCheckedContinuation { continuation in
-            let resumed = OSAllocatedUnfairLock(initialState: false)
-            let finish: @Sendable (String??) -> Void = { value in
-                let shouldResume = resumed.withLock { alreadyResumed -> Bool in
-                    defer { alreadyResumed = true }
-                    return !alreadyResumed
-                }
-                if shouldResume { continuation.resume(returning: value) }
-            }
-            Task { finish(.some(await lookup.value)) }
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(waitLimit * 1_000_000_000))
-                finish(.none)
-            }
-        }
-
-        guard let answered = url else {
+        guard let answered = await BoundedWait.value(of: lookup, within: waitLimit) else {
             logger.notice("Browser URL arrived too late for this recording; using the app's Power Mode")
             return appConfiguration
         }

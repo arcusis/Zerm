@@ -434,7 +434,11 @@ struct AudioPlayerView: View {
                     .opacity(enhancementService.isEnhancementEnabled ? 1.0 : 0.4)
                     .help("Select enhancement prompt")
                     .popover(isPresented: $showPromptPopover, arrowEdge: .bottom) {
-                        EnhancementPromptPopover()
+                        EnhancementPromptPopover(
+                            isEnhancementEnabled: $enhancementService.isEnhancementEnabled,
+                            selectedPromptID: enhancementService.selectedPromptId,
+                            onSelectPrompt: { enhancementService.setActivePrompt($0) }
+                        )
                             .environmentObject(enhancementService)
                     }
 
