@@ -145,4 +145,75 @@ struct LaunchMigrationTests {
             #expect(!RetiredLocalLLMMigration.retiredFileNames.contains(package.fileName), "\(package.fileName)")
         }
     }
+
+    // MARK: - RetiredGeminiTranscriptionMigration
+
+    @Test(arguments: RetiredGeminiTranscriptionMigration.retiredModelNames.sorted())
+    func geminiSelectionMovesToTheDedicatedModel(retired: String) {
+        let defaults = isolatedDefaults("geminiSelection-\(retired)")
+        defaults.set(retired, forKey: "CurrentTranscriptionModel")
+
+        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+
+        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "gemini-3.5-transcribe")
+        #expect(defaults.bool(forKey: RetiredGeminiTranscriptionMigration.completionKey))
+    }
+
+    @Test func geminiMigrationLeavesOtherSelectionsAlone() {
+        let defaults = isolatedDefaults()
+        defaults.set("scribe_v2", forKey: "CurrentTranscriptionModel")
+
+        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+
+        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "scribe_v2")
+    }
+
+    @Test func geminiMigrationRewritesPowerModeConfigurationsAndSession() throws {
+        let defaults = isolatedDefaults()
+        let configs: [[String: Any]] = [
+            ["id": "A", "name": "Mail", "selectedTranscriptionModelName": "gemini-2.5-pro"],
+            ["id": "B", "name": "Code", "selectedTranscriptionModelName": "parakeet-tdt-0.6b-v3"],
+            ["id": "C", "name": "Notes"]
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: configs),
+                     forKey: RetiredGeminiTranscriptionMigration.powerModeConfigurationsKey)
+        let session: [String: Any] = [
+            "id": "S",
+            "originalState": ["isEnhancementEnabled": true, "transcriptionModelName": "gemini-3.5-flash"]
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: session),
+                     forKey: RetiredGeminiTranscriptionMigration.powerModeSessionKey)
+
+        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+
+        let migratedData = try #require(defaults.data(forKey: RetiredGeminiTranscriptionMigration.powerModeConfigurationsKey))
+        let migrated = try #require(try JSONSerialization.jsonObject(with: migratedData) as? [[String: Any]])
+        #expect(migrated[0]["selectedTranscriptionModelName"] as? String == "gemini-3.5-transcribe")
+        #expect(migrated[0]["name"] as? String == "Mail")
+        #expect(migrated[1]["selectedTranscriptionModelName"] as? String == "parakeet-tdt-0.6b-v3")
+        #expect(migrated[2]["selectedTranscriptionModelName"] == nil)
+
+        let sessionData = try #require(defaults.data(forKey: RetiredGeminiTranscriptionMigration.powerModeSessionKey))
+        let migratedSession = try #require(try JSONSerialization.jsonObject(with: sessionData) as? [String: Any])
+        let state = try #require(migratedSession["originalState"] as? [String: Any])
+        #expect(state["transcriptionModelName"] as? String == "gemini-3.5-transcribe")
+        #expect(state["isEnhancementEnabled"] as? Bool == true)
+    }
+
+    @Test func geminiMigrationRunsOnlyOnce() {
+        let defaults = isolatedDefaults()
+        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+
+        defaults.set("gemini-2.5-flash", forKey: "CurrentTranscriptionModel")
+        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+
+        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "gemini-2.5-flash")
+    }
+
+    /// The migration target must be what the provider offers, and never itself retired.
+    @Test func geminiCatalogOffersOnlyTheDedicatedModel() {
+        let names = GeminiProvider().models.map(\.name)
+        #expect(names == [GeminiProvider.transcribeModelName])
+        #expect(!RetiredGeminiTranscriptionMigration.retiredModelNames.contains(GeminiProvider.transcribeModelName))
+    }
 }
