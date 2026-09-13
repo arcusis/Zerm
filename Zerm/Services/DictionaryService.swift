@@ -21,7 +21,7 @@ enum DictionaryService {
 
         if parts.count == 1, let word = parts.first {
             if existing.contains(where: { $0.word.lowercased() == word.lowercased() }) {
-                return "'\(word)' is already in the vocabulary"
+                return String(localized: "'\(word)' is already in the vocabulary")
             }
             return insertVocabularyWord(word, context: context)
         }
@@ -49,7 +49,7 @@ enum DictionaryService {
             return nil
         } catch {
             context.delete(entry)
-            return "Failed to add '\(word)': \(error.localizedDescription)"
+            return String(localized: "Failed to add '\(word)': \(error.localizedDescription)")
         }
     }
 
@@ -79,7 +79,7 @@ enum DictionaryService {
 
             for token in tokens {
                 if existingTokens.contains(token.lowercased()) {
-                    return "'\(token)' already exists in word replacements"
+                    return String(localized: "'\(token)' already exists in word replacements")
                 }
             }
         }
@@ -91,7 +91,7 @@ enum DictionaryService {
             return nil
         } catch {
             context.delete(entry)
-            return "Failed to add replacement: \(error.localizedDescription)"
+            return String(localized: "Failed to add replacement: \(error.localizedDescription)")
         }
     }
 }

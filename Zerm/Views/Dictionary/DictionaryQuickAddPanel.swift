@@ -125,7 +125,7 @@ struct DictionaryQuickAddView: View {
     enum Mode: CaseIterable {
         case vocabulary, replacement
 
-        var label: String {
+        var label: LocalizedStringKey {
             switch self {
             case .vocabulary: return "Vocabulary"
             case .replacement: return "Word Replacement"
@@ -169,7 +169,7 @@ struct DictionaryQuickAddView: View {
             Divider().opacity(0.4)
             inputArea
             if let errorMessage {
-                Text(errorMessage)
+                Text(verbatim: errorMessage)
                     .font(.caption)
                     .foregroundColor(.red)
                     .padding(.horizontal, 16)
@@ -349,7 +349,7 @@ private struct KeyHint: View {
     init(_ label: String) { self.label = label }
 
     var body: some View {
-        Text(label)
+        Text(verbatim: label)
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 5)

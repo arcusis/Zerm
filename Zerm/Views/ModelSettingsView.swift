@@ -62,7 +62,7 @@ struct ModelSettingsView: View {
                 Toggle(isOn: $appendTrailingSpace) {
                     HStack(spacing: 4) {
                         Text("Add Space After Paste")
-                        InfoTip("Puts a single space at the end of every pasted transcript, so you can dictate one sentence after another without the words running together. Turn it off when you dictate into fields where a trailing space matters, such as a search box or a file name.")
+                        InfoTip(String(localized: "Puts a single space at the end of every pasted transcript, so you can dictate one sentence after another without the words running together. Turn it off when you dictate into fields where a trailing space matters, such as a search box or a file name."))
                     }
                 }
                 .toggleStyle(.switch)
@@ -70,7 +70,7 @@ struct ModelSettingsView: View {
                 Toggle(isOn: $isTextFormattingEnabled) {
                     HStack(spacing: 4) {
                         Text("Automatic text formatting")
-                        InfoTip("Apply intelligent text formatting to break large block of text into paragraphs.")
+                        InfoTip(String(localized: "Apply intelligent text formatting to break large block of text into paragraphs."))
                     }
                 }
                 .toggleStyle(.switch)
@@ -79,7 +79,7 @@ struct ModelSettingsView: View {
                     Toggle(isOn: $isVADEnabled) {
                         HStack(spacing: 4) {
                             Text("Voice Activity Detection (VAD)")
-                            InfoTip("Detect speech segments and filter out silence to improve accuracy of local models.")
+                            InfoTip(String(localized: "Detect speech segments and filter out silence to improve accuracy of local models."))
                         }
                     }
                     .toggleStyle(.switch)
@@ -89,7 +89,7 @@ struct ModelSettingsView: View {
                     Toggle(isOn: $prewarmModelOnWake) {
                         HStack(spacing: 4) {
                             Text("Prewarm model (Experimental)")
-                            InfoTip("Turn this on if transcriptions with local models are taking longer than expected. Runs silent background transcription on app launch and wake to trigger optimization.")
+                            InfoTip(String(localized: "Turn this on if transcriptions with local models are taking longer than expected. Runs silent background transcription on app launch and wake to trigger optimization."))
                         }
                     }
                     .toggleStyle(.switch)
@@ -99,7 +99,7 @@ struct ModelSettingsView: View {
                     Toggle(isOn: $showLiveTextPreview) {
                         HStack(spacing: 4) {
                             Text("Show Live Text Preview")
-                            InfoTip("Displays the live transcript preview in the recorder while speaking. Only applies when using real-time streaming models.")
+                            InfoTip(String(localized: "Displays the live transcript preview in the recorder while speaking. Only applies when using real-time streaming models."))
                         }
                     }
                     .toggleStyle(.switch)
@@ -108,7 +108,7 @@ struct ModelSettingsView: View {
                 if visibility.showsCloudTimeout {
                     Picker(selection: $cloudTimeout) {
                         ForEach(CloudTranscriptionSettings.timeoutOptions, id: \.self) { seconds in
-                            Text(Duration.seconds(seconds).formatted(.units(allowed: [.minutes, .seconds], width: .wide)))
+                            Text(verbatim: Duration.seconds(seconds).formatted(.units(allowed: [.minutes, .seconds], width: .wide)))
                                 .tag(seconds)
                         }
                     } label: {
@@ -151,7 +151,7 @@ struct ModelSettingsView: View {
                         isEditing = false
                     }
                 } else {
-                    Text(whisperPrompt.getLanguagePrompt(for: selectedLanguage))
+                    Text(verbatim: whisperPrompt.getLanguagePrompt(for: selectedLanguage))
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

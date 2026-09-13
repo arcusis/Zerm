@@ -106,7 +106,7 @@ class ZermEngine: NSObject, ObservableObject {
                         persistPreservedRecording(
                             file: recordedFile,
                             duration: inspection.duration,
-                            message: "Recording saved — transcription was cancelled. Retry from History."
+                            message: String(localized: "Recording saved — transcription was cancelled. Retry from History.")
                         )
                     }
                     setState(.idle)
@@ -127,7 +127,7 @@ class ZermEngine: NSObject, ObservableObject {
                     let fileBytes = inspection?.byteCount ?? 0
                     logger.error("Recording finalized with no audio bytes path=\(recordedFile.lastPathComponent, privacy: .public) size=\(fileBytes, privacy: .public)")
                     NotificationManager.shared.showNotification(
-                        title: "Recording produced no audio — the microphone may have dropped. Try again.",
+                        title: String(localized: "Recording produced no audio — the microphone may have dropped. Try again."),
                         type: .error,
                         duration: 5.0
                     )
@@ -147,10 +147,10 @@ class ZermEngine: NSObject, ObservableObject {
             logger.notice("toggleRecord: entering start-recording branch")
             guard let selectedModel = transcriptionModelManager.currentTranscriptionModel else {
                 NotificationManager.shared.showNotification(
-                    title: "No AI Model Selected",
+                    title: String(localized: "No AI Model Selected"),
                     type: .error,
                     duration: 5.0,
-                    actionButton: (label: "Open Models", action: {
+                    actionButton: (label: String(localized: "Open Models"), action: {
                         MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                     })
                 )
@@ -162,17 +162,17 @@ class ZermEngine: NSObject, ObservableObject {
                 let message: String
                 switch selectedModel.provider {
                 case .whisper, .fluidAudio:
-                    message = "Model not downloaded — download \(selectedModel.displayName) first"
+                    message = String(localized: "Model not downloaded — download \(selectedModel.displayName) first")
                 case .nativeApple:
-                    message = "Apple Speech is not available on this system"
+                    message = String(localized: "Apple Speech is not available on this system")
                 default:
-                    message = "Add an API key for \(selectedModel.displayName) in Settings"
+                    message = String(localized: "Add an API key for \(selectedModel.displayName) in Settings")
                 }
                 NotificationManager.shared.showNotification(
                     title: message,
                     type: .error,
                     duration: 5.0,
-                    actionButton: (label: "Open Models", action: {
+                    actionButton: (label: String(localized: "Open Models"), action: {
                         MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                     })
                 )
@@ -241,7 +241,7 @@ class ZermEngine: NSObject, ObservableObject {
                                         self.persistPreservedRecording(
                                             file: recordedFile,
                                             duration: inspection.duration,
-                                            message: "Recording saved — the recorder closed before transcription. Retry from History."
+                                            message: String(localized: "Recording saved — the recorder closed before transcription. Retry from History.")
                                         )
                                     }
                                     self.setState(.idle)
@@ -312,7 +312,7 @@ class ZermEngine: NSObject, ObservableObject {
                                 self.logger.error("❌ Failed to start recording: \(error.localizedDescription, privacy: .public)")
                                 self.setState(.idle)
                                 self.recordedFile = nil
-                                NotificationManager.shared.showNotification(title: "Recording failed to start", type: .error)
+                                NotificationManager.shared.showNotification(title: String(localized: "Recording failed to start"), type: .error)
                                 self.logger.notice("toggleRecord: calling dismissMiniRecorder from error handler")
                                 await self.recorderUIManager?.dismissMiniRecorder()
                             }
@@ -322,10 +322,10 @@ class ZermEngine: NSObject, ObservableObject {
                     logger.error("❌ Recording permission denied.")
                     DebugLogger.shared.log("ZermEngine", "recording blocked: microphone permission denied")
                     NotificationManager.shared.showNotification(
-                        title: "Microphone access denied — enable Zerm in System Settings → Privacy & Security → Microphone",
+                        title: String(localized: "Microphone access denied — enable Zerm in System Settings → Privacy & Security → Microphone"),
                         type: .error,
                         duration: 6.0,
-                        actionButton: (label: "Open Settings", action: {
+                        actionButton: (label: String(localized: "Open Settings"), action: {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
                                 NSWorkspace.shared.open(url)
                             }
@@ -376,7 +376,7 @@ class ZermEngine: NSObject, ObservableObject {
             self.invalidatePipelineRun()
             self.setState(.idle)
             NotificationManager.shared.showNotification(
-                title: "Zerm recovered from a stuck state — try again",
+                title: String(localized: "Zerm recovered from a stuck state — try again"),
                 type: .warning,
                 duration: 4.0
             )
@@ -424,7 +424,7 @@ class ZermEngine: NSObject, ObservableObject {
                     self.logger.error("Recording dropped: no audio input for \(sinceInput, privacy: .public)s — recovering")
                     DebugLogger.shared.log("ZermEngine", "watchdog: no audio input for \(String(format: "%.1f", sinceInput))s — recording dropped")
                     NotificationManager.shared.showNotification(
-                        title: "Recording stopped — microphone dropped",
+                        title: String(localized: "Recording stopped — microphone dropped"),
                         type: .warning,
                         duration: 3.0
                     )
@@ -622,15 +622,15 @@ class ZermEngine: NSObject, ObservableObject {
 
     private func runPipeline(on transcription: Transcription, audioURL: URL) async {
         guard let dictationSession = self.dictationSession.takeConfiguration(fallback: fallbackDictationSession) else {
-            transcription.text = "Transcription Failed: No model selected"
+            transcription.text = String(localized: "Transcription Failed: No model selected")
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
             try? modelContext.save()
             setState(.idle)
             NotificationManager.shared.showNotification(
-                title: "Transcription failed: No model selected",
+                title: String(localized: "Transcription failed: No model selected"),
                 type: .error,
                 duration: 5.0,
-                actionButton: (label: "Open Models", action: {
+                actionButton: (label: String(localized: "Open Models"), action: {
                     MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                 })
             )

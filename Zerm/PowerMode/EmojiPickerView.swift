@@ -61,9 +61,9 @@ struct EmojiPickerView: View {
                                     newEmojiText = cleaned
                                 }
                                 if !newEmojiText.isEmpty && emojiManager.allEmojis.contains(newEmojiText) {
-                                    inputFeedbackMessage = "Emoji already exists!"
+                                    inputFeedbackMessage = String(localized: "Emoji already exists!")
                                 } else if !newEmojiText.isEmpty && !newEmojiText.isValidEmoji {
-                                    inputFeedbackMessage = "Invalid emoji."
+                                    inputFeedbackMessage = String(localized: "Invalid emoji.")
                                 } else {
                                     inputFeedbackMessage = ""
                                 }
@@ -84,9 +84,9 @@ struct EmojiPickerView: View {
                         .buttonStyle(.bordered)
                     }
                     if !inputFeedbackMessage.isEmpty {
-                        Text(inputFeedbackMessage)
+                        Text(verbatim: inputFeedbackMessage)
                             .font(.caption)
-                            .foregroundColor(inputFeedbackMessage == "Emoji already exists!" || inputFeedbackMessage == "Invalid emoji." ? .red : .secondary)
+                            .foregroundColor(inputFeedbackMessage == String(localized: "Emoji already exists!") || inputFeedbackMessage == String(localized: "Invalid emoji.") ? .red : .secondary)
                             .transition(.opacity)
                     }
                     Text("Tip: Use ⌃⌘Space for emoji picker or paste an emoji.")
@@ -110,15 +110,15 @@ struct EmojiPickerView: View {
     private func attemptAddCustomEmoji() {
         let trimmedEmoji = newEmojiText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedEmoji.isEmpty else {
-            inputFeedbackMessage = "Emoji cannot be empty."
+            inputFeedbackMessage = String(localized: "Emoji cannot be empty.")
             return
         }
         guard trimmedEmoji.isValidEmoji else {
-            inputFeedbackMessage = "Invalid emoji character."
+            inputFeedbackMessage = String(localized: "Invalid emoji character.")
             return
         }
         guard !emojiManager.allEmojis.contains(trimmedEmoji) else {
-            inputFeedbackMessage = "Emoji already exists!"
+            inputFeedbackMessage = String(localized: "Emoji already exists!")
             return
         }
 
@@ -128,7 +128,7 @@ struct EmojiPickerView: View {
             isAddingCustomEmoji = false
             newEmojiText = ""
         } else {
-            inputFeedbackMessage = "Could not add emoji."
+            inputFeedbackMessage = String(localized: "Could not add emoji.")
         }
     }
 
@@ -157,7 +157,7 @@ private struct EmojiButton: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Button(action: selectAction) {
-                Text(emoji)
+                Text(verbatim: emoji)
                     .font(.largeTitle) 
                     .frame(width: 44, height: 44)
                     .overlay( 

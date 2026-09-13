@@ -123,7 +123,7 @@ final class KokoroModelManager: ObservableObject {
             let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
                 if let error { continuation.resume(throwing: error); return }
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                    continuation.resume(throwing: TTSError.http((response as? HTTPURLResponse)?.statusCode ?? -1, "download failed"))
+                    continuation.resume(throwing: TTSError.http((response as? HTTPURLResponse)?.statusCode ?? -1, String(localized: "download failed")))
                     return
                 }
                 guard let tempURL else { continuation.resume(throwing: TTSError.badResponse); return }

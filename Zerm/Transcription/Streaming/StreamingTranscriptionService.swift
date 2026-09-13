@@ -306,7 +306,7 @@ class StreamingTranscriptionService {
 
         if sawStreamingError {
             logger.warning("Streaming error observed — forcing batch fallback")
-            throw StreamingTranscriptionError.providerError("Streaming provider reported an error")
+            throw StreamingTranscriptionError.providerError(String(localized: "Streaming provider reported an error"))
         }
 
         if !receivedInTime {

@@ -472,7 +472,7 @@ class AIService: ObservableObject {
             default:
                 guard let baseURL = URL(string: selectedProvider.baseURL) else {
                     DispatchQueue.main.async {
-                        completion(false, "Invalid or missing base URL configuration")
+                        completion(false, String(localized: "Invalid or missing base URL configuration"))
                     }
                     return
                 }

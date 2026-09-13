@@ -26,7 +26,7 @@ struct NativeAppleModelCardView: View {
     
     private var headerSection: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(model.displayName)
+            Text(verbatim: model.displayName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
             
@@ -64,7 +64,7 @@ struct NativeAppleModelCardView: View {
     }
     
     private var descriptionSection: some View {
-        Text(model.description)
+        Text(verbatim: model.description)
             .font(.system(size: 11))
             .foregroundColor(Color(.secondaryLabelColor))
             .lineLimit(2)

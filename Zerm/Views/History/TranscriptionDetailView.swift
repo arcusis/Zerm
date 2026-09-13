@@ -262,10 +262,10 @@ enum DictionarySuggestion {
         let unique = Array(Set(suggestions)).prefix(5)
         let joined = unique.joined(separator: ", ")
         NotificationManager.shared.showNotification(
-            title: "Add to dictionary? \(joined)",
+            title: String(localized: "Add to dictionary? \(joined)"),
             type: .info,
             duration: 6.0,
-            actionButton: (label: "Add", action: {
+            actionButton: (label: String(localized: "Add"), action: {
                 let existing = (try? modelContext.fetch(FetchDescriptor<VocabularyWord>())) ?? []
                 for word in unique {
                     _ = DictionaryService.addVocabularyWords(word, existing: existing, context: modelContext)

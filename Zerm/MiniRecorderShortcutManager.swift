@@ -103,7 +103,7 @@ class MiniRecorderShortcutManager: ObservableObject {
                     SoundManager.shared.playEscSound()
                     guard showsHint else { return }
                     NotificationManager.shared.showNotification(
-                        title: "Press ESC again to cancel recording",
+                        title: String(localized: "Press ESC again to cancel recording"),
                         type: .info,
                         duration: self.escapeDoublePress.window
                     )

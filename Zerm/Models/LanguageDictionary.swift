@@ -37,6 +37,14 @@ enum LanguageDictionary {
         }
     }
 
+    /// A language's name in the app's language, e.g. "עברית" for `he`. The English names below
+    /// are the fallback for codes macOS has no name for.
+    static func displayName(for code: String) -> String {
+        if code == "auto" { return String(localized: "Auto-detect") }
+        if let name = Locale.current.localizedString(forIdentifier: code), name != code { return name }
+        return all[code] ?? regional[code] ?? code
+    }
+
     /// Names for the given codes, including regional variants that only some providers accept.
     static func forCodes(_ codes: [String]) -> [String: String] {
         var languages: [String: String] = [:]

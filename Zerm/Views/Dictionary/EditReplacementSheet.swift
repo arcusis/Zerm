@@ -31,7 +31,7 @@ struct EditReplacementSheet: View {
         .alert("Word Replacement", isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(alertMessage)
+            Text(verbatim: alertMessage)
         }
     }
 
@@ -148,7 +148,7 @@ struct EditReplacementSheet: View {
 
                 for tokenPair in newTokensPairs {
                     if existingTokens.contains(tokenPair.lowercased) {
-                        alertMessage = "'\(tokenPair.original)' already exists in word replacements"
+                        alertMessage = String(localized: "'\(tokenPair.original)' already exists in word replacements")
                         showAlert = true
                         return
                     }
@@ -164,7 +164,7 @@ struct EditReplacementSheet: View {
             try modelContext.save()
             dismiss()
         } catch {
-            alertMessage = "Failed to save changes: \(error.localizedDescription)"
+            alertMessage = String(localized: "Failed to save changes: \(error.localizedDescription)")
             showAlert = true
         }
     }

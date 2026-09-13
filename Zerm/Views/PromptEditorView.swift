@@ -33,6 +33,17 @@ struct PromptEditorView: View {
     @State private var allowsLanguageChange: Bool
     @State private var showingIconPicker = false
     
+    private var headerTitle: LocalizedStringKey {
+        if isEditingPredefinedPrompt { return "Edit Trigger Words" }
+        return mode == .add ? "New Prompt" : "Edit Prompt"
+    }
+
+    /// Built-in prompts show their translated title.
+    private var editingTitle: String {
+        if case .edit(let prompt) = mode { return prompt.displayTitle }
+        return title
+    }
+
     private var isEditingPredefinedPrompt: Bool {
         if case .edit(let prompt) = mode {
             return prompt.isPredefined
@@ -80,7 +91,7 @@ struct PromptEditorView: View {
             Picker(selection: $providerOverride) {
                 Text("Use global setting").tag(String?.none)
                 ForEach(providerChoices, id: \.self) { provider in
-                    Text(provider.rawValue).tag(provider.rawValue as String?)
+                    Text(LocalizedStringKey(provider.rawValue)).tag(provider.rawValue as String?)
                 }
             } label: {
                 HStack(spacing: 4) {
@@ -98,7 +109,7 @@ struct PromptEditorView: View {
                     Picker(selection: $modelOverride) {
                         Text("Use global setting").tag(String?.none)
                         ForEach(models, id: \.self) { model in
-                            Text(model).tag(model as String?)
+                            Text(verbatim: model).tag(model as String?)
                         }
                     } label: {
                         Text("AI Model")
@@ -122,7 +133,7 @@ struct PromptEditorView: View {
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 12) {
-                Text(isEditingPredefinedPrompt ? "Edit Trigger Words" : (mode == .add ? "New Prompt" : "Edit Prompt"))
+                Text(headerTitle)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
@@ -192,7 +203,7 @@ struct PromptEditorView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             } header: {
-                Text("Editing: \(title)")
+                Text("Editing: \(editingTitle)")
             }
 
             Section {
@@ -237,7 +248,7 @@ struct PromptEditorView: View {
             } header: {
                 HStack(spacing: 4) {
                     Text("Details")
-                    InfoTip("The name and icon you will see on the prompt grid and in the recorder when switching prompts mid-dictation. The description is a reminder for you — it is not sent to the AI.")
+                    InfoTip(String(localized: "The name and icon you will see on the prompt grid and in the recorder when switching prompts mid-dictation. The description is a reminder for you — it is not sent to the AI."))
                 }
             }
 
@@ -260,7 +271,7 @@ struct PromptEditorView: View {
                 Toggle(isOn: $useSystemInstructions) {
                     HStack(spacing: 4) {
                         Text("Use System Template")
-                        InfoTip("If enabled, your instructions are combined with a general-purpose template to improve transcription quality.\n\nDisable for full control over the AI's system prompt (for advanced users).")
+                        InfoTip(String(localized: "If enabled, your instructions are combined with a general-purpose template to improve transcription quality.\n\nDisable for full control over the AI's system prompt (for advanced users)."))
                     }
                 }
                 .toggleStyle(.switch)
@@ -276,7 +287,7 @@ struct PromptEditorView: View {
                 HStack(spacing: 4) {
                     Text("Instructions")
                     InfoTip(
-                        "What the AI is told to do with each transcript — \"rewrite this as a short, polite email\", \"keep my wording but fix the punctuation\". Write it as directions to a person; the transcript is handed to the model along with this text.",
+                        String(localized: "What the AI is told to do with each transcript — \"rewrite this as a short, polite email\", \"keep my wording but fix the punctuation\". Write it as directions to a person; the transcript is handed to the model along with this text."),
                         doc: .enhancement
                     )
                 }
@@ -287,7 +298,7 @@ struct PromptEditorView: View {
             } header: {
                 HStack(spacing: 4) {
                     Text("Trigger Words")
-                    InfoTip("Add words that automatically activate this prompt. For example, 'summarize', 'email', 'translate'.")
+                    InfoTip(String(localized: "Add words that automatically activate this prompt. For example, 'summarize', 'email', 'translate'."))
                 }
             }
 
@@ -410,7 +421,7 @@ struct TriggerWordItemView: View {
     
     var body: some View {
         HStack(spacing: 4) {
-                Text(word)
+                Text(verbatim: word)
                     .font(.system(size: 12))
                     .lineLimit(1)
                     .truncationMode(.tail)

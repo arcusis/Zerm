@@ -52,7 +52,7 @@ struct SonioxProvider: CloudProvider {
             let status = try CloudHTTP.decode(Status.self, from: data)
             switch status.status {
             case "completed": return true
-            case "error": throw CloudTranscriptionError.apiRequestFailed(statusCode: 200, message: status.error_message ?? "Soniox transcription failed")
+            case "error": throw CloudTranscriptionError.apiRequestFailed(statusCode: 200, message: status.error_message ?? String(localized: "Soniox transcription failed"))
             default: return nil
             }
         }

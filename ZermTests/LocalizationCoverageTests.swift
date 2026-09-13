@@ -2,26 +2,25 @@ import Foundation
 import Testing
 @testable import Zerm
 
-/// Keeps the Dashboard and History translatable (#319).
+/// Keeps the app translatable: every screen ships in English and Hebrew (#319, #331).
 ///
 /// Pragmatic by design: the sources are read as text rather than type-checked, so these catch
 /// the regressions that actually happened — a `String` handed to `Text`, a new literal with no
-/// Hebrew entry — not every conceivable one.
+/// Hebrew entry, a notification raised with a plain literal — not every conceivable one.
 struct LocalizationCoverageTests {
 
     private static let repoRoot = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    private static let scannedFolders = ["Zerm/Views/Metrics", "Zerm/Views/History", "Zerm/Views/FileTranscription"]
+    private static let scannedFolders = ["Zerm/Views", "Zerm/PowerMode", "Zerm/Notifications", "Zerm/TextToSpeech"]
 
-    /// Shared views that only appear inside History, and the Models screen (#326).
-    private static let scannedFiles = [
-        "Zerm/Views/Common/CopyIconButton.swift",
-        "Zerm/Views/Common/SaveIconButton.swift",
-        "Zerm/Views/Common/TranscriptionInfoPanel.swift",
-        "Zerm/Views/AI Models/ModelManagementView.swift",
-        "Zerm/Views/AI Models/ModelBadgesRow.swift"
+    /// Files under the scanned folders that never reach the screen.
+    private static let excludedFiles: Set<String> = [
+        "SherpaOnnx.swift", // C bridge for the Kokoro engine
+        "LicenseManagementView.swift", // inherited licensing screens, not instantiated anywhere in Zerm
+        "LicenseView.swift",
+        "TrialMessageView.swift"
     ]
 
     // MARK: - Tests
@@ -46,24 +45,60 @@ struct LocalizationCoverageTests {
         var missing: [String] = []
         var checked = 0
 
-        for file in try Self.sources() {
-            for key in Self.localizationKeys(in: file.text) {
-                checked += 1
-                switch key {
-                case .exact(let text):
-                    if !translated.contains(text) { missing.append("\(file.name): \(text)") }
-                case .pattern(let pattern):
-                    let regex = try NSRegularExpression(pattern: "^\(pattern)$")
-                    let found = translated.contains { key in
-                        regex.firstMatch(in: key, range: NSRange(location: 0, length: (key as NSString).length)) != nil
+        // Views are read for every SwiftUI initializer; the rest of the app raises its errors and
+        // notifications through `String(localized:)`, so the whole target is read for that alone.
+        let passes = [
+            (files: try Self.sources(), opener: Self.keyOpener),
+            (files: try Self.sources(in: ["Zerm"]), opener: Self.localizedStringOpener)
+        ]
+        for pass in passes {
+            for file in pass.files {
+                for key in Self.localizationKeys(in: file.text, opener: pass.opener) {
+                    checked += 1
+                    switch key {
+                    case .exact(let text):
+                        if !translated.contains(text) { missing.append("\(file.name): \(text)") }
+                    case .pattern(let pattern):
+                        let regex = try NSRegularExpression(pattern: "^\(pattern)$")
+                        let found = translated.contains { key in
+                            regex.firstMatch(in: key, range: NSRange(location: 0, length: (key as NSString).length)) != nil
+                        }
+                        if !found { missing.append("\(file.name): /\(pattern)/") }
                     }
-                    if !found { missing.append("\(file.name): /\(pattern)/") }
                 }
             }
         }
 
-        #expect(checked > 100)
+        #expect(checked > 1000)
         #expect(missing.isEmpty, "Add Hebrew entries to Localizable.xcstrings for: \(missing)")
+    }
+
+    @Test func plainStringSinksAreGivenLocalizedStrings() throws {
+        let violations = try Self.sources(in: ["Zerm"]).flatMap { file in
+            Self.plainLiteralSinks(in: file.text).map { "\(file.name): \($0)" }
+        }
+
+        #expect(
+            violations.isEmpty,
+            "These take an already-localized String; wrap the literal in String(localized:): \(violations)"
+        )
+    }
+
+    @Test func sinkDetectorFlagsBareLiteralsOnly() {
+        let source = #"""
+        NotificationManager.shared.showNotification(title: "Copied", type: .success)
+        NotificationManager.shared.showNotification(title: String(localized: "Copied"), type: .success)
+        InfoTip("Explains a setting")
+        InfoTip(String(localized: "Explains a setting"), doc: .models)
+        alert.messageText = "Delete?"
+        alert.addButton(withTitle: String(localized: "Delete"))
+        """#
+
+        #expect(Self.plainLiteralSinks(in: source) == [
+            #"showNotification(title: ""#,
+            #"InfoTip(""#,
+            #".messageText = ""#
+        ])
     }
 
     @Test func dashboardRangeLabelsAreTranslated() throws {
@@ -111,12 +146,12 @@ struct LocalizationCoverageTests {
 
     // MARK: - Sources
 
-    private static func sources() throws -> [(name: String, text: String)] {
-        var urls = scannedFiles.map { repoRoot.appending(path: $0) }
-        for folder in scannedFolders {
+    private static func sources(in folders: [String] = scannedFolders) throws -> [(name: String, text: String)] {
+        var urls: [URL] = []
+        for folder in folders {
             let enumerator = FileManager.default.enumerator(at: repoRoot.appending(path: folder), includingPropertiesForKeys: nil)
             while let url = enumerator?.nextObject() as? URL {
-                if url.pathExtension == "swift" { urls.append(url) }
+                if url.pathExtension == "swift", !excludedFiles.contains(url.lastPathComponent) { urls.append(url) }
             }
         }
         return try urls.sorted { $0.path < $1.path }.map {
@@ -158,6 +193,14 @@ struct LocalizationCoverageTests {
         }
     }
 
+    // MARK: - Plain String sinks
+
+    /// AppKit and app APIs that show a `String` as is, called with a bare literal.
+    private static func plainLiteralSinks(in text: String) -> [String] {
+        captures(#"(?:showNotification\(\s*title:|InfoTip\(|actionButton:\s*\(label:|\.messageText\s*=|\.informativeText\s*=|addButton\(withTitle:|NSMenuItem\(title:)\s*""#, in: text)
+            .map { $0[0] }
+    }
+
     // MARK: - Key extraction
 
     enum SourceKey: Equatable {
@@ -166,10 +209,12 @@ struct LocalizationCoverageTests {
         case pattern(String)
     }
 
-    private static let formatSpecifier = #"%(?:\d+\$)?(?:lld|ld|d|@|lf|f)"#
+    private static let formatSpecifier = #"%(?:\d+\$)?(?:\.\d+)?(?:lld|ld|llu|lu|d|u|@|lf|f)"#
 
     /// Calls whose leading string literal is a localization key.
-    private static let keyOpener = try! NSRegularExpression(pattern: #"(?<![\w.])(?:Text|Button|Label|TextField|ProgressView|DisclosureGroup|Toggle|Picker|Menu|LocalizedStringKey|sectionHeader)\(|\.(?:help|alert|accessibilityLabel|value)\(|String\(localized:\s*|(?<![\w.])(?:title|label):\s*(?=")"#)
+    private static let keyOpener = try! NSRegularExpression(pattern: #"(?<![\w.])(?:Text|Button|Label|TextField|SecureField|ProgressView|DisclosureGroup|Toggle|Picker|Menu|Section|LabeledContent|GroupBox|Link|Stepper|LocalizedStringKey|LocalizedStringResource|sectionHeader)\(|\.(?:help|alert|confirmationDialog|accessibilityLabel|accessibilityHint|navigationTitle|value)\(|String\(localized:\s*|(?<![\w.])(?:title|label|prompt):\s*(?=")"#)
+
+    private static let localizedStringOpener = try! NSRegularExpression(pattern: #"String\(localized:\s*"#)
 
     private static func ascii(_ scalar: Unicode.Scalar) -> UInt16 { UInt16(scalar.value) }
 
@@ -178,12 +223,12 @@ struct LocalizationCoverageTests {
     private static let openParen = ascii("(")
     private static let closeParen = ascii(")")
 
-    private static func localizationKeys(in text: String) -> [SourceKey] {
+    private static func localizationKeys(in text: String, opener: NSRegularExpression = keyOpener) -> [SourceKey] {
         let units = Array(text.utf16)
         let string = text as NSString
         var keys: [SourceKey] = []
 
-        for match in keyOpener.matches(in: text, range: NSRange(location: 0, length: string.length)) {
+        for match in opener.matches(in: text, range: NSRange(location: 0, length: string.length)) {
             // Notification titles are plain `String`s, not keys.
             let lookback = max(0, match.range.location - 120)
             if string.substring(with: NSRange(location: lookback, length: match.range.location - lookback))

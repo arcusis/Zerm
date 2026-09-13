@@ -44,7 +44,7 @@ struct EnhancementSettingsView: View {
                 // The output mode is the only enhancement switch: Instant never uses AI.
                 Picker(selection: $enhancementService.outputMode) {
                     ForEach(DictationOutputMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(verbatim: mode.title).tag(mode)
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -57,7 +57,7 @@ struct EnhancementSettingsView: View {
                 }
                 .pickerStyle(.menu)
 
-                Text(enhancementService.outputMode.subtitle)
+                Text(verbatim: enhancementService.outputMode.subtitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -20,7 +20,7 @@ struct CustomSoundSettingsView: View {
         .alert(alertTitle, isPresented: $showingAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(alertMessage)
+            Text(verbatim: alertMessage)
         }
     }
 

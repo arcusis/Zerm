@@ -147,7 +147,7 @@ struct ConfigurationView: View {
                         Button {
                             isShowingEmojiPicker.toggle()
                         } label: {
-                            Text(selectedEmoji)
+                            Text(verbatim: selectedEmoji)
                                 .font(.system(size: 22))
                                 .frame(width: 32, height: 32)
                                 .background(
@@ -174,7 +174,7 @@ struct ConfigurationView: View {
                         HStack {
                             Text("Applications")
                             InfoTip(
-                                "This mode switches on whenever one of these apps is the one you are working in. Apps are matched exactly, so adding Mail here has no effect while you are in a browser reading webmail — use a website trigger for that.",
+                                String(localized: "This mode switches on whenever one of these apps is the one you are working in. Apps are matched exactly, so adding Mail here has no effect while you are in a browser reading webmail — use a website trigger for that."),
                                 doc: .powerMode
                             )
                             Spacer()
@@ -238,7 +238,7 @@ struct ConfigurationView: View {
                         HStack {
                             Text("Websites")
                             InfoTip(
-                                "Matching is a substring test, not an exact one. Both the address you are on and the entry you type here are lowercased and stripped of \"https://\", \"http://\" and \"www.\" first, then Zerm checks whether the address contains your entry. So \"github.com\" matches every page on the site, and \"github.com/arcusis\" narrows it to one account. The first time this runs, macOS asks to let Zerm control your browser — that is how it reads the current address.",
+                                String(localized: "Matching is a substring test, not an exact one. Both the address you are on and the entry you type here are lowercased and stripped of \"https://\", \"http://\" and \"www.\" first, then Zerm checks whether the address contains your entry. So \"github.com\" matches every page on the site, and \"github.com/arcusis\" narrows it to one account. The first time this runs, macOS asks to let Zerm control your browser — that is how it reads the current address."),
                                 doc: .powerMode
                             )
                         }
@@ -263,7 +263,7 @@ struct ConfigurationView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "globe")
                                             .foregroundColor(.secondary)
-                                        Text(urlConfig.url)
+                                        Text(verbatim: urlConfig.url)
                                             .lineLimit(1)
                                         Spacer(minLength: 0)
                                         Button {
@@ -296,7 +296,7 @@ struct ConfigurationView: View {
                         Picker(selection: $selectedTranscriptionModelName) {
                             Text("Use global setting").tag(String?.none)
                             ForEach(modelChoices, id: \.name) { model in
-                                Text(model.displayName).tag(model.name as String?)
+                                Text(verbatim: model.displayName).tag(model.name as String?)
                             }
                         } label: {
                             HStack(spacing: 4) {
@@ -313,7 +313,7 @@ struct ConfigurationView: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Language")
-                                InfoTip("The model above works out the language on its own, so there is nothing to choose here. Switch to a different model if you need to pin one language.")
+                                InfoTip(String(localized: "The model above works out the language on its own, so there is nothing to choose here. Switch to a different model if you need to pin one language."))
                             }
                         }
                     } else if let modelInfo = effectiveModel, !modelInfo.isMultilingualModel {
@@ -331,7 +331,7 @@ struct ConfigurationView: View {
                                 if $1.key == "auto" { return false }
                                 return $0.value < $1.value
                             }), id: \.key) { key, value in
-                                Text(value).tag(key as String?)
+                                Text(verbatim: FileTranscriptionOptionsView.languageName(key, for: modelInfo)).tag(key as String?)
                             }
                         } label: {
                             HStack(spacing: 4) {
@@ -369,7 +369,7 @@ struct ConfigurationView: View {
                     Picker(selection: $outputMode) {
                         Text("Use global setting").tag(DictationOutputMode?.none)
                         ForEach(DictationOutputMode.allCases) { mode in
-                            Text(mode.title).tag(DictationOutputMode?.some(mode))
+                            Text(verbatim: mode.title).tag(DictationOutputMode?.some(mode))
                         }
                     } label: {
                         HStack(spacing: 4) {
@@ -386,12 +386,12 @@ struct ConfigurationView: View {
                         Picker(selection: $selectedAIProvider) {
                             Text("Use global setting").tag(String?.none)
                             ForEach(providerChoices, id: \.self) { provider in
-                                Text(provider.rawValue).tag(provider.rawValue as String?)
+                                Text(LocalizedStringKey(provider.rawValue)).tag(provider.rawValue as String?)
                             }
                         } label: {
                             HStack(spacing: 4) {
                                 Text("AI Provider")
-                                InfoTip("Which connected service enhances transcripts in this mode. Handy for keeping work text on a local provider while using a cloud one elsewhere. Only providers you have already connected appear here.")
+                                InfoTip(String(localized: "Which connected service enhances transcripts in this mode. Handy for keeping work text on a local provider while using a cloud one elsewhere. Only providers you have already connected appear here."))
                             }
                         }
                         .onChange(of: selectedAIProvider) { _, _ in
@@ -411,12 +411,12 @@ struct ConfigurationView: View {
                                 Picker(selection: $selectedAIModel) {
                                     Text("Use global setting").tag(String?.none)
                                     ForEach(models, id: \.self) { model in
-                                        Text(model).tag(model as String?)
+                                        Text(verbatim: model).tag(model as String?)
                                     }
                                 } label: {
                                     HStack(spacing: 4) {
                                         Text("AI Model")
-                                        InfoTip("The specific model from that provider. Smaller models return faster and cost less, which suits quick messages; larger ones handle long or carefully worded text better.")
+                                        InfoTip(String(localized: "The specific model from that provider. Smaller models return faster and cost less, which suits quick messages; larger ones handle long or carefully worded text better."))
                                     }
                                 }
 
@@ -432,13 +432,13 @@ struct ConfigurationView: View {
                         Picker(selection: $selectedPromptId) {
                             Text("Use global setting").tag(UUID?.none)
                             ForEach(enhancementService.allPrompts) { prompt in
-                                Text(prompt.title).tag(prompt.id as UUID?)
+                                Text(verbatim: prompt.displayTitle).tag(prompt.id as UUID?)
                             }
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Enhancement Prompt")
                                 InfoTip(
-                                    "The instructions the AI follows in this mode — this is what makes a Power Mode feel tailored. Pick your email prompt for the mail app, a terse one for chat, a note-taking one for your editor.",
+                                    String(localized: "The instructions the AI follows in this mode — this is what makes a Power Mode feel tailored. Pick your email prompt for the mail app, a terse one for chat, a note-taking one for your editor."),
                                     doc: .enhancement
                                 )
                             }
@@ -462,24 +462,24 @@ struct ConfigurationView: View {
                     Toggle(isOn: $isDefault) {
                         HStack(spacing: 6) {
                             Text("Set as default")
-                            InfoTip("Default power mode is used when no specific app or website matches are found.")
+                            InfoTip(String(localized: "Default power mode is used when no specific app or website matches are found."))
                         }
                     }
 
                     Picker(selection: $autoSendKey) {
                         ForEach(AutoSendKey.allCases, id: \.self) { key in
-                            Text(key.displayName).tag(key)
+                            Text(LocalizedStringKey(key.displayName)).tag(key)
                         }
                     } label: {
                         HStack(spacing: 6) {
                             Text("Auto Send")
-                            InfoTip("Automatically presses a key combination after pasting text. Useful for chat applications or forms that use different send shortcuts.")
+                            InfoTip(String(localized: "Automatically presses a key combination after pasting text. Useful for chat applications or forms that use different send shortcuts."))
                         }
                     }
 
                     HStack {
                         Text("Keyboard Shortcut")
-                        InfoTip("Assign a unique keyboard shortcut to instantly activate this Power Mode and start recording.")
+                        InfoTip(String(localized: "Assign a unique keyboard shortcut to instantly activate this Power Mode and start recording."))
 
                         Spacer()
 

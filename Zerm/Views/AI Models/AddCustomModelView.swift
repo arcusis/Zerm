@@ -187,7 +187,7 @@ struct AddCustomModelCardView: View {
         .alert("Validation Errors", isPresented: $showingAlert) {
             Button("OK") { }
         } message: {
-            Text(validationErrors.joined(separator: "\n"))
+            Text(verbatim: validationErrors.joined(separator: "\n"))
         }
         .onChange(of: editingModel) { oldValue, newValue in
             if newValue != nil {

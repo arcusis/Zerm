@@ -69,7 +69,7 @@ struct AssemblyAIProvider: CloudProvider {
             case "completed":
                 return decoded.text ?? ""
             case "error":
-                throw CloudTranscriptionError.apiRequestFailed(statusCode: 200, message: decoded.error ?? "AssemblyAI transcription failed")
+                throw CloudTranscriptionError.apiRequestFailed(statusCode: 200, message: decoded.error ?? String(localized: "AssemblyAI transcription failed"))
             default:
                 return nil
             }

@@ -19,13 +19,13 @@ enum PowerModeValidationError: Error, Identifiable {
     var localizedDescription: String {
         switch self {
         case .emptyName:
-            return "Power mode name cannot be empty."
+            return String(localized: "Power mode name cannot be empty.")
         case .duplicateName(let name):
-            return "A power mode with the name '\(name)' already exists."
+            return String(localized: "A power mode with the name '\(name)' already exists.")
         case .duplicateAppTrigger(let appName, let powerModeName):
-            return "The app '\(appName)' is already configured in the '\(powerModeName)' power mode."
+            return String(localized: "The app '\(appName)' is already configured in the '\(powerModeName)' power mode.")
         case .duplicateWebsiteTrigger(let website, let powerModeName):
-            return "The website '\(website)' is already configured in the '\(powerModeName)' power mode."
+            return String(localized: "The website '\(website)' is already configured in the '\(powerModeName)' power mode.")
         }
     }
 }
@@ -104,7 +104,7 @@ extension View {
             },
             message: {
                 if let firstError = errors.first {
-                    Text(firstError.localizedDescription)
+                    Text(verbatim: firstError.localizedDescription)
                 } else {
                     Text("Please fix the validation errors before saving.")
                 }

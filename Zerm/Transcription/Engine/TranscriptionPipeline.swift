@@ -63,7 +63,7 @@ class TranscriptionPipeline {
         if shouldCancel() || !isRunStillValid() {
             markPreservedFailure(
                 transcription,
-                message: "Recording saved — transcription was cancelled. Retry from History."
+                message: String(localized: "Recording saved — transcription was cancelled. Retry from History.")
             )
             await onCleanup()
             return
@@ -96,7 +96,7 @@ class TranscriptionPipeline {
                 logger.notice("⏹️ Transcription superseded by newer run — keeping audio")
                 markPreservedFailure(
                     transcription,
-                    message: "Recording saved — a newer take started before this one finished. Retry from History."
+                    message: String(localized: "Recording saved — a newer take started before this one finished. Retry from History.")
                 )
                 await onCleanup()
                 return
@@ -126,8 +126,8 @@ class TranscriptionPipeline {
                 logger.notice("⚠️ Transcription returned empty result model=\(model.displayName, privacy: .public) dur=\(actualDuration, privacy: .public)s")
                 let shortClip = actualDuration < 0.8
                 let title = shortClip
-                    ? "Nothing transcribed — hold a bit longer before releasing"
-                    : "Nothing transcribed — try again or switch model in AI Models"
+                    ? String(localized: "Nothing transcribed — hold a bit longer before releasing")
+                    : String(localized: "Nothing transcribed — try again or switch model in AI Models")
                 if shortClip {
                     NotificationManager.shared.showNotification(
                         title: title,
@@ -139,7 +139,7 @@ class TranscriptionPipeline {
                         title: title,
                         type: .warning,
                         duration: 4.0,
-                        actionButton: (label: "Open Models", action: {
+                        actionButton: (label: String(localized: "Open Models"), action: {
                             MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
                         })
                     )
@@ -232,11 +232,11 @@ class TranscriptionPipeline {
             let recoverySuggestion = (error as? LocalizedError)?.recoverySuggestion ?? ""
             let fullErrorText = recoverySuggestion.isEmpty ? errorDescription : "\(errorDescription) \(recoverySuggestion)"
 
-            markPreservedFailure(transcription, message: "Transcription Failed: \(fullErrorText)")
+            markPreservedFailure(transcription, message: String(localized: "Transcription Failed: \(fullErrorText)"))
             finalPastedText = nil
             let shortReason = String(fullErrorText.prefix(100))
             NotificationManager.shared.showNotification(
-                title: "Transcription failed: \(shortReason)",
+                title: String(localized: "Transcription failed: \(shortReason)"),
                 type: .error,
                 duration: 5.0
             )
@@ -252,7 +252,7 @@ class TranscriptionPipeline {
             didPersist = false
             logger.error("Transcription finished but could not be persisted: \(error.localizedDescription, privacy: .public)")
             NotificationManager.shared.showNotification(
-                title: "Transcription history could not be saved",
+                title: String(localized: "Transcription history could not be saved"),
                 type: .error,
                 duration: 5.0
             )
@@ -321,7 +321,10 @@ class TranscriptionPipeline {
     }
 
     private func markPreservedFailure(_ transcription: Transcription, message: String) {
-        if transcription.text.isEmpty || transcription.text.hasPrefix("Transcription Failed") {
+        // English as well, for failures stored before the message was localized.
+        if transcription.text.isEmpty
+            || transcription.text.hasPrefix("Transcription Failed")
+            || transcription.text.hasPrefix(String(localized: "Transcription Failed")) {
             transcription.text = message
         }
         transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
@@ -358,8 +361,8 @@ enum DictationTextProcessing {
 // MARK: - Transcription timeout helper
 
 private struct TranscriptionTimeoutError: LocalizedError {
-    var errorDescription: String? { "Transcription timed out after 120 seconds. The audio was kept — retry from History." }
-    var recoverySuggestion: String? { "If this keeps happening, try reloading the model in Settings." }
+    var errorDescription: String? { String(localized: "Transcription timed out after 120 seconds. The audio was kept — retry from History.") }
+    var recoverySuggestion: String? { String(localized: "If this keeps happening, try reloading the model in Settings.") }
 }
 
 extension TranscriptionPipeline {
@@ -367,7 +370,7 @@ extension TranscriptionPipeline {
     /// with no mention of timeout or a missing file. That is what History row 14155 stored.
     static func describeTranscriptionFailure(_ error: Error) -> String {
         if error is CancellationError {
-            return "Transcription was cancelled. The audio was kept — retry from History."
+            return String(localized: "Transcription was cancelled. The audio was kept — retry from History.")
         }
         if error is TranscriptionTimeoutError {
             return error.localizedDescription
@@ -377,12 +380,12 @@ extension TranscriptionPipeline {
         }
         let nsError = error as NSError
         if nsError.domain == NSCocoaErrorDomain, nsError.code == 260 {
-            return "The recording file could not be opened. If the audio is still in History, retry from there."
+            return String(localized: "The recording file could not be opened. If the audio is still in History, retry from there.")
         }
         let lower = nsError.localizedDescription.lowercased()
         if lower.contains("operation could not be completed")
             || lower.contains("operation couldn't be completed") {
-            return "Transcription was interrupted (the file was still being written, or the 120s limit cancelled Whisper). The audio should still be in Recordings — retry from History."
+            return String(localized: "Transcription was interrupted (the file was still being written, or the 120s limit cancelled Whisper). The audio should still be in Recordings — retry from History.")
         }
         return nsError.localizedDescription
     }

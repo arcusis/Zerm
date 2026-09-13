@@ -5,8 +5,8 @@ import KeyboardShortcuts
 
 struct OnboardingPermission: Identifiable {
     let id = UUID()
-    let title: String
-    let description: String
+    let title: LocalizedStringKey
+    let description: LocalizedStringKey
     let icon: String
     let type: PermissionType
     
@@ -159,10 +159,10 @@ struct OnboardingPermissionsView: View {
                                         styledPicker(
                                             label: "Microphone:",
                                             selectedValue: audioDeviceManager.selectedDeviceID ?? 0,
-                                            displayValue: audioDeviceManager.availableDevices.first { $0.id == audioDeviceManager.selectedDeviceID }?.name ?? "Select Device",
+                                            displayValue: audioDeviceManager.availableDevices.first { $0.id == audioDeviceManager.selectedDeviceID }?.name ?? String(localized: "Select Device"),
                                             options: audioDeviceManager.availableDevices.map { $0.id },
                                             optionDisplayName: { deviceId in
-                                                audioDeviceManager.availableDevices.first { $0.id == deviceId }?.name ?? "Unknown Device"
+                                                audioDeviceManager.availableDevices.first { $0.id == deviceId }?.name ?? String(localized: "Unknown Device")
                                             },
                                             onSelection: { deviceId in
                                                 audioDeviceManager.selectDevice(id: deviceId)
@@ -381,7 +381,7 @@ struct OnboardingPermissionsView: View {
         }
     }
     
-    private func getButtonTitle() -> String {
+    private func getButtonTitle() -> LocalizedStringKey {
         switch permissions[currentPermissionIndex].type {
         case .keyboardShortcut:
             return permissionStates[currentPermissionIndex] ? "Continue" : "Set Shortcut"
@@ -394,7 +394,7 @@ struct OnboardingPermissionsView: View {
 
     @ViewBuilder
     private func styledPicker<T: Hashable>(
-        label: String,
+        label: LocalizedStringKey,
         selectedValue: T,
         displayValue: String,
         options: [T],
@@ -415,7 +415,7 @@ struct OnboardingPermissionsView: View {
                             onSelection(option)
                         }) {
                             HStack {
-                                Text(optionDisplayName(option))
+                                Text(verbatim: optionDisplayName(option))
                                 if selectedValue == option {
                                     Spacer()
                                     Image(systemName: "checkmark")
@@ -425,7 +425,7 @@ struct OnboardingPermissionsView: View {
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Text(displayValue)
+                        Text(verbatim: displayValue)
                             .foregroundColor(.white)
                             .font(.system(size: 16, weight: .medium))
                         Image(systemName: "chevron.up.chevron.down")
@@ -461,9 +461,9 @@ struct OnboardingPermissionsView: View {
             styledPicker(
                 label: "Shortcut:",
                 selectedValue: binding.wrappedValue,
-                displayValue: binding.wrappedValue.displayName,
+                displayValue: String(localized: String.LocalizationValue(binding.wrappedValue.displayName)),
                 options: HotkeyManager.HotkeyOption.allCases.filter { $0 != .none && $0 != .custom },
-                optionDisplayName: { $0.displayName },
+                optionDisplayName: { String(localized: String.LocalizationValue($0.displayName)) },
                 onSelection: { option in
                     binding.wrappedValue = option
                     onConfigured(option.isModifierKey)
