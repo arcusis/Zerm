@@ -15,11 +15,13 @@ struct LocalizationCoverageTests {
 
     private static let scannedFolders = ["Zerm/Views/Metrics", "Zerm/Views/History"]
 
-    /// Shared views that only appear inside History.
+    /// Shared views that only appear inside History, and the Models screen (#326).
     private static let scannedFiles = [
         "Zerm/Views/Common/CopyIconButton.swift",
         "Zerm/Views/Common/SaveIconButton.swift",
-        "Zerm/Views/Common/TranscriptionInfoPanel.swift"
+        "Zerm/Views/Common/TranscriptionInfoPanel.swift",
+        "Zerm/Views/AI Models/ModelManagementView.swift",
+        "Zerm/Views/AI Models/ModelBadgesRow.swift"
     ]
 
     // MARK: - Tests
