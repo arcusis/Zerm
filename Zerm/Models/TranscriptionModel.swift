@@ -45,6 +45,17 @@ protocol TranscriptionModel: Identifiable, Hashable {
     var supportedLanguages: [String: String] { get }
 
     var supportsStreaming: Bool { get }
+
+    var languageGroup: ModelLanguageGroup { get }
+    /// Listed under "Great in Hebrew".
+    var isHebrewOptimized: Bool { get }
+    /// Cloud models only; local recommendations are derived from this Mac's hardware.
+    var isRecommended: Bool { get }
+}
+
+enum ModelLanguageGroup {
+    case englishOnly
+    case multilingual
 }
 
 extension TranscriptionModel {
@@ -57,6 +68,14 @@ extension TranscriptionModel {
     }
 
     var supportsStreaming: Bool { false }
+
+    var languageGroup: ModelLanguageGroup {
+        isMultilingualModel ? .multilingual : .englishOnly
+    }
+
+    var isHebrewOptimized: Bool { false }
+
+    var isRecommended: Bool { false }
 }
 
 // A new struct for Apple's native models
@@ -67,7 +86,22 @@ struct NativeAppleModel: TranscriptionModel {
     let description: String
     let provider: ModelProvider = .nativeApple
     let isMultilingualModel: Bool
-    let supportedLanguages: [String: String]
+    let languageGroup: ModelLanguageGroup = .multilingual
+    private let catalogLanguages: [String: String]
+
+    /// Hebrew is added only once `SpeechTranscriber` has reported it at runtime.
+    var supportedLanguages: [String: String] {
+        guard AppleSpeechLanguageSupport.supportsHebrew else { return catalogLanguages }
+        return catalogLanguages.merging(["he": "Hebrew"]) { current, _ in current }
+    }
+
+    init(name: String, displayName: String, description: String, isMultilingualModel: Bool, supportedLanguages: [String: String]) {
+        self.name = name
+        self.displayName = displayName
+        self.description = description
+        self.isMultilingualModel = isMultilingualModel
+        self.catalogLanguages = supportedLanguages
+    }
 }
 
 // A new struct for FluidAudio models
@@ -82,12 +116,13 @@ struct FluidAudioModel: TranscriptionModel {
     let accuracy: Double
     let ramUsage: Double
     let supportsStreaming: Bool
+    let languageGroup: ModelLanguageGroup
     var isMultilingualModel: Bool {
-        supportedLanguages.count > 1
+        languageGroup == .multilingual
     }
     let supportedLanguages: [String: String]
 
-    init(name: String, displayName: String, description: String, size: String, speed: Double, accuracy: Double, ramUsage: Double, supportsStreaming: Bool = false, supportedLanguages: [String: String]) {
+    init(name: String, displayName: String, description: String, size: String, speed: Double, accuracy: Double, ramUsage: Double, supportsStreaming: Bool = false, languageGroup: ModelLanguageGroup, supportedLanguages: [String: String]) {
         self.name = name
         self.displayName = displayName
         self.description = description
@@ -96,6 +131,7 @@ struct FluidAudioModel: TranscriptionModel {
         self.accuracy = accuracy
         self.ramUsage = ramUsage
         self.supportsStreaming = supportsStreaming
+        self.languageGroup = languageGroup
         self.supportedLanguages = supportedLanguages
     }
 }
@@ -201,17 +237,41 @@ struct WhisperModel: TranscriptionModel {
     let accuracy: Double
     let ramUsage: Double
     let provider: ModelProvider = .whisper
+    let isHebrewOptimized: Bool
+    /// The pinned Hugging Face file this model is downloaded from.
+    let source: ModelIntegrity.PinnedFile
 
-    var downloadURL: String {
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(filename)"
+    init(name: String, displayName: String, size: String, supportedLanguages: [String: String], description: String, speed: Double, accuracy: Double, ramUsage: Double, isHebrewOptimized: Bool = false, source: ModelIntegrity.PinnedFile? = nil) {
+        self.name = name
+        self.displayName = displayName
+        self.size = size
+        self.supportedLanguages = supportedLanguages
+        self.description = description
+        self.speed = speed
+        self.accuracy = accuracy
+        self.ramUsage = ramUsage
+        self.isHebrewOptimized = isHebrewOptimized
+        self.source = source ?? .whisperCpp(fileName: "\(name).bin")
     }
 
+    var downloadURL: String {
+        source.downloadURL
+    }
+
+    /// Local file name inside the WhisperModels directory.
     var filename: String {
         "\(name).bin"
     }
 
     var isMultilingualModel: Bool {
         supportedLanguages.count > 1
+    }
+
+    /// Hebrew fine-tunes detect the spoken language poorly, so Auto (or a language they were
+    /// not tuned for) runs as Hebrew. An explicit English choice is kept.
+    func transcriptionLanguageCode(forSelected code: String) -> String {
+        guard isHebrewOptimized else { return code }
+        return code == "en" ? "en" : "he"
     }
 }
 

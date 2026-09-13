@@ -76,6 +76,8 @@ class FluidAudioTranscriptionService: TranscriptionService {
     }
 
     func loadModel(for model: FluidAudioModel) async throws {
+        // Parakeet Unified has its own service; don't warm TDT v3 through the version fallback.
+        guard FluidAudioModelManager.modelVersionMap[model.name] != nil else { return }
         try await ensureModelsLoaded(for: version(for: model))
     }
 
