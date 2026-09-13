@@ -10,7 +10,7 @@ struct APIKeyManagementView: View {
     @State private var isVerifying = false
     @State private var ollamaBaseURL: String = UserDefaults.standard.string(forKey: "ollamaBaseURL") ?? "http://localhost:11434"
     @State private var ollamaModels: [OllamaModel] = []
-    @State private var selectedOllamaModel: String = UserDefaults.standard.string(forKey: "ollamaSelectedModel") ?? "mistral"
+    @State private var selectedOllamaModel: String = UserDefaults.standard.string(forKey: AIService.ollamaModelKey) ?? "mistral"
     @State private var isCheckingOllama = false
     @State private var isEditingURL = false
     @State private var localCLICommandTemplate: String = ""
@@ -21,7 +21,7 @@ struct APIKeyManagementView: View {
         Section("AI Provider Integration") {
             HStack {
                 Picker(selection: $aiService.selectedProvider) {
-                    ForEach(AIProvider.allCases.filter { $0 != .elevenLabs && $0 != .deepgram && $0 != .soniox && $0 != .speechmatics }, id: \.self) { provider in
+                    ForEach(AIProvider.enhancementProviders, id: \.self) { provider in
                         Text(provider.rawValue).tag(provider)
                     }
                 } label: {
@@ -129,7 +129,9 @@ struct APIKeyManagementView: View {
                     
                 } else if !aiService.availableModels.isEmpty &&
                             aiService.selectedProvider != .ollama &&
-                            aiService.selectedProvider != .custom {
+                            aiService.selectedProvider != .custom &&
+                            // On-device models are picked in the model list below.
+                            aiService.selectedProvider != .localLLM {
                     Picker(selection: Binding(
                         get: { aiService.currentModel },
                         set: { aiService.selectModel($0) }
@@ -310,7 +312,7 @@ struct APIKeyManagementView: View {
                     }
 
                 } else if aiService.selectedProvider == .localLLM {
-                    Text("On-device enhancement is a separate model from dictation (Whisper) and from Read Aloud. Instant + Refine stays instant only if this job uses a small cleanup model, not Gemma.")
+                    Text("On-device enhancement uses its own model, separate from dictation and from Read Aloud. Enhancement uses exactly the model marked In use below.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     LocalLLMModelListView(role: .enhancement)

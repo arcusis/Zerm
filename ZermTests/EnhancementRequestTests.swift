@@ -180,6 +180,15 @@ struct EnhancementRequestTests {
         #expect(AIProvider.enhancementProviders.contains(.localLLM))
     }
 
+    /// The newest listed models must not fall back to a provider's default reasoning effort,
+    /// which adds seconds of thinking to a one-sentence cleanup.
+    @Test func currentModelIdsHaveReasoningSettings() {
+        for (provider, model) in [(AIProvider.openAI, "gpt-5.5"), (.gemini, "gemini-3.5-flash"), (.gemini, "gemini-3.1-flash-lite")] {
+            #expect(provider.availableModels.contains(model), "\(model)")
+            #expect(ReasoningConfig.getReasoningParameter(for: model) != nil, "\(model)")
+        }
+    }
+
     // MARK: - Outcomes
 
     @Test func languageGuardRejectionIsNotAnEnhancement() async throws {

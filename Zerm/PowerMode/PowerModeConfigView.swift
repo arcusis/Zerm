@@ -73,11 +73,11 @@ struct ConfigurationView: View {
 
     private var canSave: Bool { !configName.isEmpty }
 
+    /// Multilingual models that detect the language themselves. English-only models of the same
+    /// providers get the English-only presentation instead of "Autodetected".
     private func languageSelectionDisabled() -> Bool {
-        guard let selectedModelName = effectiveModelName,
-              let model = transcriptionModelManager.allAvailableModels.first(where: { $0.name == selectedModelName })
-        else { return false }
-        return model.provider == .fluidAudio || model.provider == .gemini
+        guard let model = effectiveModel else { return false }
+        return (model.provider == .fluidAudio || model.provider == .gemini) && model.isMultilingualModel
     }
 
     init(mode: ConfigurationMode, powerModeManager: PowerModeManager, onDismiss: @escaping () -> Void) {
@@ -315,6 +315,13 @@ struct ConfigurationView: View {
                                 Text("Language")
                                 InfoTip("The model above works out the language on its own, so there is nothing to choose here. Switch to a different model if you need to pin one language.")
                             }
+                        }
+                    } else if let modelInfo = effectiveModel, !modelInfo.isMultilingualModel {
+                        LabeledContent {
+                            Text("English")
+                                .foregroundColor(.secondary)
+                        } label: {
+                            Text("Language")
                         }
                     } else if let modelInfo = effectiveModel, modelInfo.isMultilingualModel {
                         Picker(selection: $selectedLanguage) {
