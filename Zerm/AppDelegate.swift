@@ -3,6 +3,9 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var menuBarManager: MenuBarManager?
+    weak var fileTranscriptionQueue: FileTranscriptionQueue?
+    private var hasFinishedLaunching = false
+    private var receivedFilesDuringLaunch = false
 
     #if DEBUG
     private var uiTestWindowPresentationAttemptsRemaining = 40
@@ -28,6 +31,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             menuBarManager?.applyActivationPolicy()
             MetricKitReporter.shared.start()
+        }
+        hasFinishedLaunching = true
+        if receivedFilesDuringLaunch {
+            // Files opened Zerm: show them over the launch activation policy just applied.
+            DispatchQueue.main.async { [weak self] in self?.menuBarManager?.focusMainWindow() }
+        }
+    }
+
+    /// Finder "Open With" and files dropped on the Dock icon go to Transcribe File.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let fileTranscriptionQueue else { return }
+        fileTranscriptionQueue.add(urls)
+        fileTranscriptionQueue.isRevealRequested = true
+        if hasFinishedLaunching {
+            menuBarManager?.focusMainWindow()
+        } else {
+            receivedFilesDuringLaunch = true
         }
     }
 

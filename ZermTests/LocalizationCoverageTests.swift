@@ -13,7 +13,7 @@ struct LocalizationCoverageTests {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    private static let scannedFolders = ["Zerm/Views/Metrics", "Zerm/Views/History"]
+    private static let scannedFolders = ["Zerm/Views/Metrics", "Zerm/Views/History", "Zerm/Views/FileTranscription"]
 
     /// Shared views that only appear inside History, and the Models screen (#326).
     private static let scannedFiles = [

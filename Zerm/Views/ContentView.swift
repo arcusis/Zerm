@@ -10,6 +10,7 @@ enum AppRoute: String, Hashable, Identifiable {
     case dictationHistory
     case dictationModels
     case dictationVocabulary
+    case transcribeFile
     case readAloudSpeak
     case readAloudHistory
     case readAloudModels
@@ -27,6 +28,7 @@ enum AppRoute: String, Hashable, Identifiable {
         case .dictationHistory: "History"
         case .dictationModels: "Models"
         case .dictationVocabulary: "Vocabulary"
+        case .transcribeFile: "Transcribe File"
         case .readAloudSpeak: "Speak"
         case .readAloudHistory: "History"
         case .readAloudModels: "Models & Voices"
@@ -44,6 +46,7 @@ enum AppRoute: String, Hashable, Identifiable {
         case .dictationHistory: "clock.arrow.circlepath"
         case .dictationModels: "waveform.badge.magnifyingglass"
         case .dictationVocabulary: "character.book.closed"
+        case .transcribeFile: "waveform.and.person.filled"
         case .readAloudSpeak: "speaker.wave.2"
         case .readAloudHistory: "clock.arrow.circlepath"
         case .readAloudModels: "person.wave.2"
@@ -98,6 +101,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
+    @EnvironmentObject private var fileTranscriptionQueue: FileTranscriptionQueue
     @AppStorage("powerModeUIFlag") private var powerModeUIFlag = false
     @AppStorage("sidebarDictationExpanded") private var isDictationExpanded = true
     @AppStorage("sidebarReadAloudExpanded") private var isReadAloudExpanded = true
@@ -125,11 +129,20 @@ struct ContentView: View {
         .frame(minWidth: 760, minHeight: 560)
         .onAppear {
             logger.notice("ContentView appeared")
+            revealFileTranscriptionIfRequested()
         }
         .onDisappear {
             logger.notice("ContentView disappeared")
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination), perform: navigate)
+        .onChange(of: fileTranscriptionQueue.isRevealRequested) { revealFileTranscriptionIfRequested() }
+    }
+
+    /// Files opened from Finder or dropped on the Dock icon.
+    private func revealFileTranscriptionIfRequested() {
+        guard fileTranscriptionQueue.isRevealRequested else { return }
+        fileTranscriptionQueue.isRevealRequested = false
+        selectedRoute = .transcribeFile
     }
 
     private func navigate(_ notification: Notification) {
@@ -193,6 +206,7 @@ private struct SidebarView: View {
                             .accessibilityIdentifier("read-aloud-navigation-group")
                     }
 
+                    SidebarLink(route: .transcribeFile, prominence: .primary)
                     SidebarLink(route: .enhancement, prominence: .primary)
                 } header: {
                     SidebarSectionHeader("Speech", identifier: "sidebar-group-speech")
@@ -297,6 +311,8 @@ private struct DetailDestination: View {
             ModelManagementView()
         case .dictationVocabulary:
             DictionarySettingsView(whisperPrompt: whisperModelManager.whisperPrompt)
+        case .transcribeFile:
+            TranscribeFileView()
         case .readAloudSpeak:
             ReadAloudSpeakView()
         case .readAloudHistory:

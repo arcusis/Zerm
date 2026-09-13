@@ -22,7 +22,7 @@ final class ZermUITests: XCTestCase {
 
         for route in [
             "dashboard", "dictationHistory",
-            "readAloudSpeak", "readAloudHistory", "enhancement", "powerModes", "permissions"
+            "readAloudSpeak", "readAloudHistory", "transcribeFile", "enhancement", "powerModes", "permissions"
         ] {
             let link = element("sidebar-\(route)")
             XCTAssertTrue(link.waitForExistence(timeout: 3), "Missing sidebar route \(route)")

@@ -18,6 +18,7 @@ struct ZermApp: App {
     @StateObject private var whisperModelManager: WhisperModelManager
     @StateObject private var fluidAudioModelManager: FluidAudioModelManager
     @StateObject private var transcriptionModelManager: TranscriptionModelManager
+    @StateObject private var fileTranscriptionQueue: FileTranscriptionQueue
     @StateObject private var recorderUIManager: RecorderUIManager
     @StateObject private var hotkeyManager: HotkeyManager
     @StateObject private var updaterViewModel: UpdaterViewModel
@@ -175,6 +176,13 @@ struct ZermApp: App {
         _recorderUIManager = StateObject(wrappedValue: recorderUIManager)
         _engine = StateObject(wrappedValue: engine)
 
+        let fileTranscriptionQueue = FileTranscriptionQueue.live(
+            engine: engine,
+            modelManager: transcriptionModelManager,
+            modelContext: container.mainContext
+        )
+        _fileTranscriptionQueue = StateObject(wrappedValue: fileTranscriptionQueue)
+
         // 7. Create other services that depend on engine
         let hotkeyManager = HotkeyManager(engine: engine, recorderUIManager: recorderUIManager)
         _hotkeyManager = StateObject(wrappedValue: hotkeyManager)
@@ -205,6 +213,7 @@ struct ZermApp: App {
             )
 
         appDelegate.menuBarManager = menuBarManager
+        appDelegate.fileTranscriptionQueue = fileTranscriptionQueue
 
         // Ensure no lingering recording state from previous runs
         if !uiTestConfiguration.isEnabled {
@@ -372,6 +381,7 @@ struct ZermApp: App {
                     .environmentObject(whisperModelManager)
                     .environmentObject(fluidAudioModelManager)
                     .environmentObject(transcriptionModelManager)
+                    .environmentObject(fileTranscriptionQueue)
                     .environmentObject(recorderUIManager)
                     .environmentObject(hotkeyManager)
                     .environmentObject(updaterViewModel)
