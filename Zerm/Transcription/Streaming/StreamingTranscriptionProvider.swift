@@ -52,9 +52,18 @@ protocol StreamingTranscriptionProvider: AnyObject {
     /// Commit the current audio buffer to finalize transcription
     func commit() async throws
 
+    /// Whether the provider finishes `transcriptionEvents` once the final transcript has been
+    /// emitted after `commit()`. The service then collects segments until the stream ends;
+    /// otherwise the first `.committed` event after the commit is taken as the acknowledgment.
+    var finishesEventsOnCommit: Bool { get }
+
     /// Disconnect from the streaming endpoint
     func disconnect() async
 
     /// Stream of transcription events from the provider
     var transcriptionEvents: AsyncStream<StreamingTranscriptionEvent> { get }
+}
+
+extension StreamingTranscriptionProvider {
+    var finishesEventsOnCommit: Bool { false }
 }

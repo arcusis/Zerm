@@ -75,11 +75,15 @@ class StreamingTranscriptionService {
 
     /// Start a streaming transcription session for the given model.
     func startStreaming(model: any TranscriptionModel) async throws {
+        try await startStreaming(with: createProvider(for: model), model: model)
+    }
+
+    /// Starts a session on an already created provider.
+    func startStreaming(with provider: StreamingTranscriptionProvider, model: any TranscriptionModel) async throws {
         state = .connecting
         committedSegments = []
         sawStreamingError = false
 
-        let provider = try createProvider(for: model)
         self.provider = provider
 
         // Normalize "auto" → nil so providers don't pass a literal "auto" language hint.
@@ -230,7 +234,9 @@ class StreamingTranscriptionService {
                     if self.state == .streaming {
                         self.onPartialTranscript?(self.committedSegments.joined(separator: " "))
                     }
-                    if self.state == .committing {
+                    // A provider that finishes its stream on commit may still be emitting the
+                    // last segments; its acknowledgment is the end of the stream, below.
+                    if self.state == .committing, !provider.finishesEventsOnCommit {
                         self.commitSignal?.yield()
                     }
                 case .partial(let text):
@@ -250,10 +256,19 @@ class StreamingTranscriptionService {
                 case .sessionStarted:
                     break
                 case .error(let error):
+                    let wasCommitting = self.state == .committing
                     self.sawStreamingError = true
                     self.state = .failed
                     self.logger.error("Streaming event error: \(error.localizedDescription, privacy: .public)")
+                    // Wake the commit wait so the batch fallback starts now, not at the timeout.
+                    if wasCommitting {
+                        self.commitSignal?.yield()
+                    }
                 }
+            }
+            // Every event has been applied once the stream ends, so the transcript is complete.
+            if let self, self.state == .committing {
+                self.commitSignal?.yield()
             }
         }
     }
