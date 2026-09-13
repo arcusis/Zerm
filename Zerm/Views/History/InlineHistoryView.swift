@@ -423,6 +423,7 @@ struct InlineHistoryView: View {
                 print("Error deleting audio file: \(error.localizedDescription)")
             }
         }
+        FileTranscriptStore.recordings.remove(transcription.id)
 
         if expandedId == transcription.id {
             expandedId = nil
