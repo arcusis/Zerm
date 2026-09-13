@@ -200,8 +200,7 @@ struct ZermApp: App {
             ? nil
             : ModelPrewarmService(
                 transcriptionModelManager: transcriptionModelManager,
-                whisperModelManager: whisperModelManager,
-                modelContext: container.mainContext
+                serviceRegistry: engine.serviceRegistry
             )
 
         appDelegate.menuBarManager = menuBarManager

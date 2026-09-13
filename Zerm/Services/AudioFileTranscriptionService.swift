@@ -25,7 +25,7 @@ class AudioTranscriptionService: ObservableObject {
     init(modelContext: ModelContext, engine: ZermEngine) {
         self.modelContext = modelContext
         self.enhancementService = engine.enhancementService
-        self.serviceRegistry = TranscriptionServiceRegistry(modelProvider: engine.whisperModelManager, modelsDirectory: engine.whisperModelManager.modelsDirectory, modelContext: modelContext)
+        self.serviceRegistry = engine.serviceRegistry
     }
 
     init(modelContext: ModelContext, serviceRegistry: TranscriptionServiceRegistry, enhancementService: AIEnhancementService?) {
