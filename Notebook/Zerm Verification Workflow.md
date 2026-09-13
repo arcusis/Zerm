@@ -1,6 +1,6 @@
 # Zerm Verification Workflow
 
-Steps to verify a change before pushing. The local development Mac is treated as production and must not build, test, install or launch development versions of Zerm. Run the commands below only on the Office Mac after syncing the isolated worktree.
+Steps to verify a change before pushing. Since 2.8.6, `make test` and `make dev-app` build under the development bundle id `com.arcusis.zerm.dev` and never touch the installed app, so they are safe on the owner's Mac (see [[Zerm Dev Build Isolation]]). `make local` and `make install` still replace the installed app: never run them on the owner's Mac without an explicit request.
 
 ## Build
 
