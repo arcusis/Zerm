@@ -12,7 +12,7 @@ enum UsageRange: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .week: return "7 Days"
         case .month: return "30 Days"
@@ -21,7 +21,7 @@ enum UsageRange: String, CaseIterable, Identifiable {
         }
     }
 
-    var caption: String {
+    var caption: LocalizedStringResource {
         switch self {
         case .week: return "Last 7 days"
         case .month: return "Last 30 days"
@@ -81,6 +81,17 @@ enum UsageSeries {
 
     static func totals(_ buckets: [UsageBucket]) -> UsageTotals {
         buckets.reduce(into: UsageTotals()) { $0.add($1.totals) }
+    }
+
+    /// The rows of `days` that fall inside `range`. All Time keeps every row.
+    static func days(
+        _ days: [UsageDay],
+        in range: UsageRange,
+        today: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [UsageDay] {
+        guard let window = fetchRange(for: range, today: today, calendar: calendar) else { return days }
+        return days.filter { window.contains($0.day) }
     }
 
     /// The inclusive day range a `UsageDay` fetch should cover for `range`.
@@ -145,32 +156,34 @@ enum UsageSeries {
     }
 }
 
+/// Every figure on the dashboard is formatted for the app's language, so a Hebrew UI never
+/// shows English units or separators.
 enum UsageFormatters {
-    private static let numberFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter
-    }()
-
-    private static let durationFormatter: DateComponentsFormatter = {
-        let formatter = DateComponentsFormatter()
-        formatter.maximumUnitCount = 2
-        return formatter
-    }()
-
-    static func number(_ value: Int) -> String {
-        numberFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    static func number(_ value: Int, locale: Locale = .current) -> String {
+        value.formatted(.number.locale(locale))
     }
 
+    static func decimal(_ value: Double, fractionLength: Int, locale: Locale = .current) -> String {
+        value.formatted(.number.precision(.fractionLength(fractionLength)).locale(locale))
+    }
+
+    /// `nil` for a zero or negative interval, so callers choose their own wording for "nothing".
     static func duration(
         _ interval: TimeInterval,
-        style: DateComponentsFormatter.UnitsStyle,
-        fallback: String = "–"
-    ) -> String {
-        guard interval > 0 else { return fallback }
-        durationFormatter.unitsStyle = style
-        durationFormatter.allowedUnits = interval >= 3600 ? [.hour, .minute] : [.minute, .second]
-        return durationFormatter.string(from: interval) ?? fallback
+        width: Duration.UnitsFormatStyle.UnitWidth,
+        locale: Locale = .current
+    ) -> String? {
+        guard interval > 0 else { return nil }
+        let units: Set<Duration.UnitsFormatStyle.Unit> = interval >= 3600 ? [.hours, .minutes] : [.minutes, .seconds]
+        return Duration.seconds(interval)
+            .formatted(.units(allowed: units, width: width, maximumUnitCount: 2).locale(locale))
+    }
+
+    static func seconds(_ interval: TimeInterval, fractionLength: Int, locale: Locale = .current) -> String {
+        Duration.seconds(interval).formatted(
+            .units(allowed: [.seconds], width: .abbreviated, fractionalPart: .show(length: fractionLength))
+                .locale(locale)
+        )
     }
 }
 
