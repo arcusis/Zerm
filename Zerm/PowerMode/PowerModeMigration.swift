@@ -128,10 +128,28 @@ enum PowerModeMigration {
     static func migrateStoredConfigurations(defaults: UserDefaults) {
         guard let data = defaults.data(forKey: PowerModeManager.configKey),
               let configs = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return }
+        preserveEffectiveTextFormatting(of: configs, defaults: defaults)
         let migrated = migrate(configs, globals: .read(from: defaults))
         guard let newData = try? JSONSerialization.data(withJSONObject: migrated) else { return }
         defaults.set(newData, forKey: PowerModeManager.configKey)
         logger.notice("Cleared frozen settings from \(configs.count, privacy: .public) Power Mode configurations")
+    }
+
+    /// 2.8.5 wrote every active Power Mode's formatting flag — always off, it had no UI — over the
+    /// global setting, and the seeded default matched every app. Most people therefore dictated with
+    /// formatting off whatever Settings said. Once those configs inherit, the global value takes
+    /// effect, so it is set to what they actually used. Installs with no enabled Power Mode keep
+    /// their setting. Punctuation and lowercase were forced to keep/off, the global defaults, so
+    /// they need nothing.
+    static func preserveEffectiveTextFormatting(of configs: [[String: Any]], defaults: UserDefaults) {
+        let formattingForcedOff = configs.contains { config in
+            !config.keys.contains("outputMode")
+                && (config["isEnabled"] as? Bool ?? true)
+                && (config["isTextFormattingEnabled"] as? Bool) != true
+        }
+        guard formattingForcedOff else { return }
+        defaults.set(false, forKey: "IsTextFormattingEnabled")
+        logger.notice("Text formatting set off, as Power Mode applied it in 2.8.5")
     }
 
     /// Operates on raw JSON so the result does not depend on how `PowerModeConfig` decodes

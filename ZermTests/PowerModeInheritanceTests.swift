@@ -297,6 +297,36 @@ struct PowerModeInheritanceTests {
         #expect(config.selectedLanguage == "auto")
     }
 
+    /// An enabled 2.8.5 Power Mode forced formatting off, so that is what the user actually got.
+    @Test func formattingStaysOffWhenAPowerModeForcedItOff() throws {
+        let defaults = isolatedDefaults()
+        defaults.set(true, forKey: "IsTextFormattingEnabled")
+        let seed = legacySeed(PowerModeMigration.seededGeneralID)
+        defaults.set(try JSONSerialization.data(withJSONObject: [seed]), forKey: PowerModeManager.configKey)
+
+        PowerModeMigration.run(defaults: defaults)
+
+        #expect(defaults.object(forKey: "IsTextFormattingEnabled") as? Bool == false)
+        let data = try #require(defaults.data(forKey: PowerModeManager.configKey))
+        #expect(try JSONDecoder().decode([PowerModeConfig].self, from: data).first?.isTextFormattingEnabled == nil)
+    }
+
+    @Test func formattingIsUntouchedWhenNoPowerModeWasEnabled() throws {
+        let defaults = isolatedDefaults()
+        defaults.set(true, forKey: "IsTextFormattingEnabled")
+        var disabled = legacySeed(PowerModeMigration.seededGeneralID)
+        disabled["isEnabled"] = false
+        defaults.set(try JSONSerialization.data(withJSONObject: [disabled]), forKey: PowerModeManager.configKey)
+
+        PowerModeMigration.run(defaults: defaults)
+        #expect(defaults.bool(forKey: "IsTextFormattingEnabled"))
+
+        let noConfigs = isolatedDefaults("noConfigs")
+        noConfigs.set(true, forKey: "IsTextFormattingEnabled")
+        PowerModeMigration.run(defaults: noConfigs)
+        #expect(noConfigs.bool(forKey: "IsTextFormattingEnabled"))
+    }
+
     @Test func migrationRunsOnceAgainstStoredConfigurations() throws {
         let defaults = isolatedDefaults()
         defaults.set("parakeet-tdt-0.6b-v3", forKey: "CurrentTranscriptionModel")
