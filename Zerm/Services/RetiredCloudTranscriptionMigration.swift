@@ -1,24 +1,31 @@
 import Foundation
 import os
 
-/// Moves selections off the Gemini transcription models LLMkit no longer accepts.
+/// Moves selections off cloud transcription model ids that were renamed or retired.
 ///
-/// LLMkit's `GeminiTranscriptionClient` now only serves the dedicated `gemini-3.5-transcribe`
-/// model and throws `unsupportedModel` for anything else. A saved selection pointing at one of
-/// the general-purpose Gemini ids would otherwise fail every dictation, so it is switched to the
-/// dedicated model — same provider, same API key.
+/// - LLMkit's `GeminiTranscriptionClient` only serves the dedicated `gemini-3.5-transcribe` model
+///   and throws `unsupportedModel` for the general-purpose Gemini ids.
+/// - OpenAI deprecated the gpt-4o transcription models on 2026-08-26 in favour of `gpt-transcribe`.
+/// - Mistral's batch transcription model is now pinned as `voxtral-mini-2602`.
+///
+/// A saved selection pointing at one of these would otherwise fail every dictation or vanish from
+/// the Models screen, so it is switched to the replacement — same provider, same API key.
 ///
 /// Safe to delete once all users have updated past this version.
-enum RetiredGeminiTranscriptionMigration {
-    static let completionKey = "retired-gemini-transcription-migration-completed"
+enum RetiredCloudTranscriptionMigration {
+    static let completionKey = "retired-cloud-transcription-migration-completed"
 
-    /// Every Gemini id Zerm has ever offered for transcription. Exact names only.
-    static let retiredModelNames: Set<String> = [
-        "gemini-3.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview"
+    /// Every retired cloud id Zerm has offered for transcription, mapped to its replacement.
+    /// Exact names only.
+    static let replacements: [String: String] = [
+        "gemini-3.5-flash": GeminiProvider.transcribeModelName,
+        "gemini-2.5-pro": GeminiProvider.transcribeModelName,
+        "gemini-2.5-flash": GeminiProvider.transcribeModelName,
+        "gemini-3-flash-preview": GeminiProvider.transcribeModelName,
+        "gemini-3.1-pro-preview": GeminiProvider.transcribeModelName,
+        "gpt-4o-transcribe": OpenAIProvider.transcribeModelName,
+        "gpt-4o-mini-transcribe": OpenAIProvider.transcribeModelName,
+        "voxtral-mini-latest": MistralProvider.transcribeModelName
     ]
 
     static let powerModeConfigurationsKey = "powerModeConfigurationsV2"
@@ -28,10 +35,9 @@ enum RetiredGeminiTranscriptionMigration {
     static func run(defaults: UserDefaults = .standard) {
         guard !defaults.bool(forKey: completionKey) else { return }
 
-        let logger = Logger(subsystem: "com.arcusis.zerm", category: "RetiredGeminiTranscriptionMigration")
-        let replacement = GeminiProvider.transcribeModelName
+        let logger = Logger(subsystem: "com.arcusis.zerm", category: "RetiredCloudTranscriptionMigration")
 
-        if let saved = defaults.string(forKey: "CurrentTranscriptionModel"), retiredModelNames.contains(saved) {
+        if let saved = defaults.string(forKey: "CurrentTranscriptionModel"), let replacement = replacements[saved] {
             defaults.set(replacement, forKey: "CurrentTranscriptionModel")
             logger.notice("Switched transcription model \(saved, privacy: .public) to \(replacement, privacy: .public)")
         }
@@ -43,13 +49,13 @@ enum RetiredGeminiTranscriptionMigration {
             var changed = false
             for index in configs.indices {
                 guard let saved = configs[index]["selectedTranscriptionModelName"] as? String,
-                      retiredModelNames.contains(saved) else { continue }
+                      let replacement = replacements[saved] else { continue }
                 configs[index]["selectedTranscriptionModelName"] = replacement
                 changed = true
             }
             if changed, let newData = try? JSONSerialization.data(withJSONObject: configs) {
                 defaults.set(newData, forKey: powerModeConfigurationsKey)
-                logger.notice("Switched retired Gemini transcription models in Power Mode configurations")
+                logger.notice("Switched retired cloud transcription models in Power Mode configurations")
             }
         }
 
@@ -58,7 +64,7 @@ enum RetiredGeminiTranscriptionMigration {
            var session = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
            var state = session["originalState"] as? [String: Any],
            let saved = state["transcriptionModelName"] as? String,
-           retiredModelNames.contains(saved) {
+           let replacement = replacements[saved] {
             state["transcriptionModelName"] = replacement
             session["originalState"] = state
             if let newData = try? JSONSerialization.data(withJSONObject: session) {

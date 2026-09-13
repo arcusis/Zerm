@@ -146,75 +146,90 @@ struct LaunchMigrationTests {
         }
     }
 
-    // MARK: - RetiredGeminiTranscriptionMigration
+    // MARK: - RetiredCloudTranscriptionMigration
 
-    @Test(arguments: RetiredGeminiTranscriptionMigration.retiredModelNames.sorted())
-    func geminiSelectionMovesToTheDedicatedModel(retired: String) {
-        let defaults = isolatedDefaults("geminiSelection-\(retired)")
+    @Test(arguments: RetiredCloudTranscriptionMigration.replacements.keys.sorted())
+    func retiredCloudSelectionMovesToItsReplacement(retired: String) {
+        let defaults = isolatedDefaults("cloudSelection-\(retired)")
         defaults.set(retired, forKey: "CurrentTranscriptionModel")
 
-        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+        RetiredCloudTranscriptionMigration.run(defaults: defaults)
 
-        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "gemini-3.5-transcribe")
-        #expect(defaults.bool(forKey: RetiredGeminiTranscriptionMigration.completionKey))
+        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == RetiredCloudTranscriptionMigration.replacements[retired])
+        #expect(defaults.bool(forKey: RetiredCloudTranscriptionMigration.completionKey))
     }
 
-    @Test func geminiMigrationLeavesOtherSelectionsAlone() {
+    @Test func retiredCloudReplacementsMatchProviders() {
+        let replacements = RetiredCloudTranscriptionMigration.replacements
+        #expect(replacements["gemini-2.5-pro"] == "gemini-3.5-transcribe")
+        #expect(replacements["gpt-4o-transcribe"] == "gpt-transcribe")
+        #expect(replacements["gpt-4o-mini-transcribe"] == "gpt-transcribe")
+        #expect(replacements["voxtral-mini-latest"] == "voxtral-mini-2602")
+    }
+
+    @Test func cloudMigrationLeavesOtherSelectionsAlone() {
         let defaults = isolatedDefaults()
         defaults.set("scribe_v2", forKey: "CurrentTranscriptionModel")
 
-        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+        RetiredCloudTranscriptionMigration.run(defaults: defaults)
 
         #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "scribe_v2")
     }
 
-    @Test func geminiMigrationRewritesPowerModeConfigurationsAndSession() throws {
+    @Test func cloudMigrationRewritesPowerModeConfigurationsAndSession() throws {
         let defaults = isolatedDefaults()
         let configs: [[String: Any]] = [
             ["id": "A", "name": "Mail", "selectedTranscriptionModelName": "gemini-2.5-pro"],
             ["id": "B", "name": "Code", "selectedTranscriptionModelName": "parakeet-tdt-0.6b-v3"],
-            ["id": "C", "name": "Notes"]
+            ["id": "C", "name": "Notes"],
+            ["id": "D", "name": "Docs", "selectedTranscriptionModelName": "gpt-4o-mini-transcribe"],
+            ["id": "E", "name": "Chat", "selectedTranscriptionModelName": "voxtral-mini-latest"]
         ]
         defaults.set(try JSONSerialization.data(withJSONObject: configs),
-                     forKey: RetiredGeminiTranscriptionMigration.powerModeConfigurationsKey)
+                     forKey: RetiredCloudTranscriptionMigration.powerModeConfigurationsKey)
         let session: [String: Any] = [
             "id": "S",
-            "originalState": ["isEnhancementEnabled": true, "transcriptionModelName": "gemini-3.5-flash"]
+            "originalState": ["isEnhancementEnabled": true, "transcriptionModelName": "gpt-4o-transcribe"]
         ]
         defaults.set(try JSONSerialization.data(withJSONObject: session),
-                     forKey: RetiredGeminiTranscriptionMigration.powerModeSessionKey)
+                     forKey: RetiredCloudTranscriptionMigration.powerModeSessionKey)
 
-        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+        RetiredCloudTranscriptionMigration.run(defaults: defaults)
 
-        let migratedData = try #require(defaults.data(forKey: RetiredGeminiTranscriptionMigration.powerModeConfigurationsKey))
+        let migratedData = try #require(defaults.data(forKey: RetiredCloudTranscriptionMigration.powerModeConfigurationsKey))
         let migrated = try #require(try JSONSerialization.jsonObject(with: migratedData) as? [[String: Any]])
         #expect(migrated[0]["selectedTranscriptionModelName"] as? String == "gemini-3.5-transcribe")
         #expect(migrated[0]["name"] as? String == "Mail")
         #expect(migrated[1]["selectedTranscriptionModelName"] as? String == "parakeet-tdt-0.6b-v3")
         #expect(migrated[2]["selectedTranscriptionModelName"] == nil)
+        #expect(migrated[3]["selectedTranscriptionModelName"] as? String == "gpt-transcribe")
+        #expect(migrated[4]["selectedTranscriptionModelName"] as? String == "voxtral-mini-2602")
 
-        let sessionData = try #require(defaults.data(forKey: RetiredGeminiTranscriptionMigration.powerModeSessionKey))
+        let sessionData = try #require(defaults.data(forKey: RetiredCloudTranscriptionMigration.powerModeSessionKey))
         let migratedSession = try #require(try JSONSerialization.jsonObject(with: sessionData) as? [String: Any])
         let state = try #require(migratedSession["originalState"] as? [String: Any])
-        #expect(state["transcriptionModelName"] as? String == "gemini-3.5-transcribe")
+        #expect(state["transcriptionModelName"] as? String == "gpt-transcribe")
         #expect(state["isEnhancementEnabled"] as? Bool == true)
     }
 
-    @Test func geminiMigrationRunsOnlyOnce() {
+    @Test func cloudMigrationRunsOnlyOnce() {
         let defaults = isolatedDefaults()
-        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+        RetiredCloudTranscriptionMigration.run(defaults: defaults)
 
         defaults.set("gemini-2.5-flash", forKey: "CurrentTranscriptionModel")
-        RetiredGeminiTranscriptionMigration.run(defaults: defaults)
+        RetiredCloudTranscriptionMigration.run(defaults: defaults)
 
         #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "gemini-2.5-flash")
     }
 
-    /// The migration target must be what the provider offers, and never itself retired.
-    @Test func geminiCatalogOffersOnlyTheDedicatedModel() {
-        let names = GeminiProvider().models.map(\.name)
-        #expect(names == [GeminiProvider.transcribeModelName])
-        #expect(!RetiredGeminiTranscriptionMigration.retiredModelNames.contains(GeminiProvider.transcribeModelName))
+    /// Every target must be a model the catalog offers, and never itself retired.
+    @Test func cloudMigrationTargetsAreOfferedModels() {
+        let offered = Set(CloudProviderRegistry.allProviders.flatMap(\.models).map(\.name))
+        for (retired, replacement) in RetiredCloudTranscriptionMigration.replacements {
+            #expect(offered.contains(replacement), "\(replacement)")
+            #expect(!offered.contains(retired), "\(retired)")
+        }
+        #expect(GeminiProvider().models.map(\.name) == [GeminiProvider.transcribeModelName])
     }
 
     // MARK: - MeetingDataRemovalMigration

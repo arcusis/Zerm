@@ -57,12 +57,4 @@ enum CloudProviderRegistry {
     static func provider(for modelProvider: ModelProvider) -> (any CloudProvider)? {
         allProviders.first { $0.modelProvider == modelProvider }
     }
-
-    /// Cloud model ids that were renamed or removed, mapped to their replacement, so a saved
-    /// selection keeps working after the catalog changes.
-    static let replacedModelNames: [String: String] = [
-        "gpt-4o-transcribe": OpenAIProvider.transcribeModelName,
-        "gpt-4o-mini-transcribe": OpenAIProvider.transcribeModelName,
-        "voxtral-mini-latest": MistralProvider.transcribeModelName
-    ]
 }

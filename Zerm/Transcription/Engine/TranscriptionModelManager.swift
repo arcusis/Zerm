@@ -58,12 +58,8 @@ class TranscriptionModelManager: ObservableObject {
     // MARK: - Model loading from UserDefaults
 
     func loadCurrentTranscriptionModel() {
-        guard var savedModelName = UserDefaults.standard.string(forKey: "CurrentTranscriptionModel") else { return }
-        if let replacement = CloudProviderRegistry.replacedModelNames[savedModelName] {
-            savedModelName = replacement
-            UserDefaults.standard.set(replacement, forKey: "CurrentTranscriptionModel")
-        }
-        if let savedModel = allAvailableModels.first(where: { $0.name == savedModelName }) {
+        if let savedModelName = UserDefaults.standard.string(forKey: "CurrentTranscriptionModel"),
+           let savedModel = allAvailableModels.first(where: { $0.name == savedModelName }) {
             currentTranscriptionModel = savedModel
         }
     }

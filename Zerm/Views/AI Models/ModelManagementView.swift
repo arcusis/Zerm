@@ -517,10 +517,7 @@ struct ModelManagementView: View {
     }
 
     private var cloudProviderChips: some View {
-        var providers: [ModelProvider] = []
-        for model in cloudModels where !providers.contains(model.provider) {
-            providers.append(model.provider)
-        }
+        let providers = CloudProviderRegistry.allProviders.map(\.modelProvider)
 
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {

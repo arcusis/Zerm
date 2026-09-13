@@ -42,12 +42,20 @@ struct TranscriptionCapabilityTests {
         }
     }
 
-    @Test func renamedModelsPointAtCatalogModels() {
-        let names = Set(CloudProviderRegistry.allProviders.flatMap(\.models).map(\.name))
-        for (old, replacement) in CloudProviderRegistry.replacedModelNames {
-            #expect(!names.contains(old))
-            #expect(names.contains(replacement))
+    @Test func languageListsKeepLocalAndRegionalEntries() throws {
+        let models = TranscriptionModelRegistry.models
+        let parakeetV3 = try #require(models.first { $0.name == "parakeet-tdt-0.6b-v3" })
+        #expect(parakeetV3.supportedLanguages.count == 26)
+        #expect(parakeetV3.supportedLanguages["auto"] != nil && parakeetV3.supportedLanguages["uk"] != nil)
+
+        for name in ["ivrit-large-v3-turbo", "ivrit-large-v3"] {
+            let ivrit = try #require(models.first { $0.name == name })
+            #expect(Set(ivrit.supportedLanguages.keys) == ["auto", "he", "en"], "\(name)")
         }
+
+        let nova3 = try cloudModel("nova-3")
+        #expect(nova3.supportedLanguages["pt-BR"] == "Portuguese (Brazil)")
+        #expect(LanguageDictionary.all["pt-BR"] == nil)
     }
 
     @Test func localModelsDeclareCapabilities() {
