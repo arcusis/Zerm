@@ -45,7 +45,7 @@ class TranscriptionModelManager: ObservableObject {
             case .nativeApple:
                 if #available(macOS 26, *) { return true } else { return false }
             case .custom:
-                return true
+                return (model as? CustomCloudModel)?.isUsable ?? false
             default:
                 if let cloudProvider = CloudProviderRegistry.provider(for: model.provider) {
                     return APIKeyManager.shared.hasAPIKey(forProvider: cloudProvider.providerKey)
@@ -58,8 +58,12 @@ class TranscriptionModelManager: ObservableObject {
     // MARK: - Model loading from UserDefaults
 
     func loadCurrentTranscriptionModel() {
-        if let savedModelName = UserDefaults.standard.string(forKey: "CurrentTranscriptionModel"),
-           let savedModel = allAvailableModels.first(where: { $0.name == savedModelName }) {
+        guard var savedModelName = UserDefaults.standard.string(forKey: "CurrentTranscriptionModel") else { return }
+        if let replacement = CloudProviderRegistry.replacedModelNames[savedModelName] {
+            savedModelName = replacement
+            UserDefaults.standard.set(replacement, forKey: "CurrentTranscriptionModel")
+        }
+        if let savedModel = allAvailableModels.first(where: { $0.name == savedModelName }) {
             currentTranscriptionModel = savedModel
         }
     }
