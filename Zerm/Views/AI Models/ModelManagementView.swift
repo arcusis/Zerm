@@ -605,7 +605,7 @@ struct ModelManagementView: View {
                 HStack(spacing: 4) {
                     Text("Use Cloud")
                         .font(.system(size: 12, weight: .semibold))
-                    Image(systemName: "arrow.right")
+                    Image(systemName: "arrow.forward")
                         .font(.system(size: 10, weight: .bold))
                 }
                 .foregroundColor(.orange)

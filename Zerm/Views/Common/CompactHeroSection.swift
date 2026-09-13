@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CompactHeroSection: View {
     let icon: String
+    /// Already localized by the caller.
     let title: String
     let description: String
     var maxDescriptionWidth: CGFloat? = nil
@@ -14,9 +15,9 @@ struct CompactHeroSection: View {
                 .symbolRenderingMode(.hierarchical)
 
             VStack(spacing: 6) {
-                Text(title)
+                Text(verbatim: title)
                     .font(.system(size: 22, weight: .bold))
-                Text(description)
+                Text(verbatim: description)
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

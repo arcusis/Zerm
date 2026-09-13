@@ -42,7 +42,7 @@ struct AppPickerPopover: View {
                                     .frame(width: 28, height: 28)
                                     .cornerRadius(6)
 
-                                Text(app.name)
+                                Text(verbatim: app.name)
                                     .font(.system(size: 13))
                                     .foregroundColor(.primary)
                                     .lineLimit(1)

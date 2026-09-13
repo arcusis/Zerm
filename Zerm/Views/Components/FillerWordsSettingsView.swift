@@ -7,7 +7,7 @@ struct FillerWordChip: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(word)
+            Text(verbatim: word)
                 .font(.system(size: 12))
                 .foregroundColor(.primary)
 
@@ -47,7 +47,7 @@ struct FillerWordsSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Remove filler words")
-                InfoTip("Automatically remove filler words like 'uh', 'um', 'hmm' from transcriptions.")
+                InfoTip(String(localized: "Automatically remove filler words like 'uh', 'um', 'hmm' from transcriptions."))
                 Spacer()
                 Toggle("", isOn: $removeFillerWords)
                     .toggleStyle(.switch)

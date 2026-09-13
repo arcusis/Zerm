@@ -296,7 +296,7 @@ class HotkeyManager: ObservableObject {
             logger.warning("Global event monitor is nil — Accessibility / Input Monitoring permission may be missing")
             Task { @MainActor in
                 NotificationManager.shared.showNotification(
-                    title: "Hotkey not working — enable Accessibility in System Settings",
+                    title: String(localized: "Hotkey not working — enable Accessibility in System Settings"),
                     type: .warning,
                     duration: 6.0
                 )

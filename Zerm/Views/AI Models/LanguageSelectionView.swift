@@ -52,7 +52,8 @@ struct LanguageSelectionView: View {
 
     // Get the display name of the current language
     private func currentLanguageDisplayName() -> String {
-        return getCurrentModelLanguages()[selectedLanguage] ?? "Unknown"
+        guard getCurrentModelLanguages()[selectedLanguage] != nil else { return String(localized: "Unknown") }
+        return LanguageDictionary.displayName(for: selectedLanguage)
     }
 
     var body: some View {
@@ -104,16 +105,17 @@ struct LanguageSelectionView: View {
                                 currentModel.supportedLanguages.sorted(by: {
                                     if $0.key == "auto" { return true }
                                     if $1.key == "auto" { return false }
-                                    return $0.value < $1.value
+                                    return LanguageDictionary.displayName(for: $0.key)
+                                        .localizedStandardCompare(LanguageDictionary.displayName(for: $1.key)) == .orderedAscending
                                 }), id: \.key
-                            ) { key, value in
-                                Text(value).tag(key)
+                            ) { key, _ in
+                                Text(verbatim: LanguageDictionary.displayName(for: key)).tag(key)
                             }
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Select Language")
                                 InfoTip(
-                                    "The language you speak when dictating. Naming it is more accurate than Auto-detect, which can guess wrong on a short phrase or a sentence that mixes languages. Set a different language for particular apps with a Power Mode.",
+                                    String(localized: "The language you speak when dictating. Naming it is more accurate than Auto-detect, which can guess wrong on a short phrase or a sentence that mixes languages. Set a different language for particular apps with a Power Mode."),
                                     doc: .models
                                 )
                             }
@@ -190,14 +192,15 @@ struct LanguageSelectionView: View {
                         getCurrentModelLanguages().sorted(by: {
                             if $0.key == "auto" { return true }
                             if $1.key == "auto" { return false }
-                            return $0.value < $1.value
+                            return LanguageDictionary.displayName(for: $0.key)
+                                .localizedStandardCompare(LanguageDictionary.displayName(for: $1.key)) == .orderedAscending
                         }), id: \.key
-                    ) { key, value in
+                    ) { key, _ in
                         Button {
                             updateLanguage(key)
                         } label: {
                             HStack {
-                                Text(value)
+                                Text(verbatim: LanguageDictionary.displayName(for: key))
                                 if selectedLanguage == key {
                                     Image(systemName: "checkmark")
                                 }

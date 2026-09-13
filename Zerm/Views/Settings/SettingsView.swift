@@ -414,7 +414,7 @@ struct SettingsView: View {
                 }
 
                 if let error = updaterViewModel.lastErrorMessage, !error.isEmpty {
-                    Text(error)
+                    Text(verbatim: error)
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
@@ -553,6 +553,7 @@ struct SettingsView: View {
 
 struct ExpandableSettingsRow<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
     @Binding var isExpanded: Bool
     @Binding var isEnabled: Bool
     let label: String
@@ -565,7 +566,7 @@ struct ExpandableSettingsRow<Content: View>: View {
             HStack {
                 Toggle(isOn: $isEnabled) {
                     HStack(spacing: 4) {
-                        Text(label)
+                        Text(verbatim: label)
                         if let message = infoMessage {
                             if let url = infoURL {
                                 InfoTip(message, learnMoreURL: url)
@@ -579,10 +580,11 @@ struct ExpandableSettingsRow<Content: View>: View {
                 Spacer()
 
                 Button(action: toggleExpanded) {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
-                        .rotationEffect(.degrees(isEnabled && isExpanded ? 90 : 0))
+                        // The forward chevron points left in right-to-left layouts, so it turns the other way to point down.
+                        .rotationEffect(.degrees(isEnabled && isExpanded ? (layoutDirection == .rightToLeft ? -90 : 90) : 0))
                 }
                 .buttonStyle(.plain)
                 .disabled(!isEnabled)

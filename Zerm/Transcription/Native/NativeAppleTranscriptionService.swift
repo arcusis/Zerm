@@ -22,24 +22,24 @@ class NativeAppleTranscriptionService: TranscriptionService {
         var errorDescription: String? {
             switch self {
             case .unsupportedOS:
-                return "SpeechAnalyzer requires macOS 26 or later."
+                return String(localized: "SpeechAnalyzer requires macOS 26 or later.")
             case .transcriptionFailed:
-                return "Transcription failed using SpeechAnalyzer."
+                return String(localized: "Transcription failed using SpeechAnalyzer.")
             case .localeNotSupported:
-                return "The selected language is not supported by SpeechAnalyzer."
+                return String(localized: "The selected language is not supported by SpeechAnalyzer.")
             case .invalidModel:
-                return "Invalid model type provided for Native Apple transcription."
+                return String(localized: "Invalid model type provided for Native Apple transcription.")
             case .assetDownloadRequired(let displayName):
-                return "Download required for \(displayName)."
+                return String(localized: "Download required for \(displayName).")
             case .resultStreamTimedOut:
-                return "Apple Speech did not finish returning transcription results."
+                return String(localized: "Apple Speech did not finish returning transcription results.")
             }
         }
     }
 
     private func languageDisplayName(for localeIdentifier: String) -> String {
-        LanguageDictionary.appleNative[localeIdentifier]
-            ?? Locale.current.localizedString(forIdentifier: localeIdentifier)
+        Locale.current.localizedString(forIdentifier: localeIdentifier)
+            ?? LanguageDictionary.appleNative[localeIdentifier]
             ?? localeIdentifier
     }
 

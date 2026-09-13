@@ -8,6 +8,7 @@ struct EnhancementSettingsPanel: View {
     @AppStorage("EnhancementRetryOnTimeout") private var retryOnTimeout = true
     @State private var isShortEnhancementExpanded = false
     @State private var isHandlingToggleChange = false
+    @Environment(\.layoutDirection) private var layoutDirection
 
     var onDismiss: () -> Void
 
@@ -86,17 +87,19 @@ struct EnhancementSettingsPanel: View {
                             )) {
                                 HStack(spacing: 4) {
                                     Text("Skip short transcriptions")
-                                    InfoTip("Automatically skip AI enhancement when the transcription has very few words. Short phrases like \"yes\", \"thank you\", or quick commands don't benefit from enhancement.")
+                                    InfoTip(String(localized: "Automatically skip AI enhancement when the transcription has very few words. Short phrases like \"yes\", \"thank you\", or quick commands don't benefit from enhancement."))
                                 }
                             }
                             .toggleStyle(.switch)
 
                             Spacer()
 
-                            Image(systemName: "chevron.right")
+                            // Mirrored in right-to-left layouts, so it turns the other way to point down.
+                            Image(systemName: "chevron.forward")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(.secondary)
-                                .rotationEffect(.degrees(isSkipShortEnhancementEnabled && isShortEnhancementExpanded ? 90 : 0))
+                                .rotationEffect(.degrees(isSkipShortEnhancementEnabled && isShortEnhancementExpanded
+                                                         ? (layoutDirection == .rightToLeft ? -90 : 90) : 0))
                                 .opacity(isSkipShortEnhancementEnabled ? 1 : 0.4)
                         }
                         .contentShape(Rectangle())
@@ -112,12 +115,12 @@ struct EnhancementSettingsPanel: View {
                         if isSkipShortEnhancementEnabled && isShortEnhancementExpanded {
                             Picker(selection: $shortEnhancementWordThreshold) {
                                 ForEach(1...15, id: \.self) { count in
-                                    Text("\(count) \(count == 1 ? "word" : "words")").tag(count)
+                                    Text("\(count) words").tag(count)
                                 }
                             } label: {
                                 HStack(spacing: 4) {
                                     Text("Minimum words")
-                                    InfoTip("Transcripts shorter than this are pasted as-is, with no AI call — so they appear instantly and cost nothing. Raise it if short replies keep getting reworded; lower it if you want even brief phrases enhanced.")
+                                    InfoTip(String(localized: "Transcripts shorter than this are pasted as-is, with no AI call — so they appear instantly and cost nothing. Raise it if short replies keep getting reworded; lower it if you want even brief phrases enhanced."))
                                 }
                             }
                             .padding(.top, 12)
@@ -136,7 +139,7 @@ struct EnhancementSettingsPanel: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("Timeout duration")
-                            InfoTip("How long to wait for the AI provider before giving up. Keep it short for quick back-and-forth typing, where waiting is worse than a plain transcript. Allow longer for slow local models or long dictations that take a while to process.")
+                            InfoTip(String(localized: "How long to wait for the AI provider before giving up. Keep it short for quick back-and-forth typing, where waiting is worse than a plain transcript. Allow longer for slow local models or long dictations that take a while to process."))
                         }
                     }
                     .pickerStyle(.menu)
@@ -147,7 +150,7 @@ struct EnhancementSettingsPanel: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("On timeout")
-                            InfoTip("What happens once the wait runs out. Fail immediately pastes the unenhanced transcript, so you always get your words. Retry tries again, up to three attempts — better on a flaky connection, but you wait longer before anything appears.")
+                            InfoTip(String(localized: "What happens once the wait runs out. Fail immediately pastes the unenhanced transcript, so you always get your words. Retry tries again, up to three attempts — better on a flaky connection, but you wait longer before anything appears."))
                         }
                     }
                     .pickerStyle(.menu)

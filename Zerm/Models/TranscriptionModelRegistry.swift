@@ -12,7 +12,7 @@ enum TranscriptionModelRegistry {
             NativeAppleModel(
                 name: "apple-speech",
                 displayName: "Apple Speech",
-                description: "Uses the native Apple Speech framework for transcription. Requires macOS 26",
+                description: String(localized: "Uses the native Apple Speech framework for transcription. Requires macOS 26"),
                 isMultilingualModel: true,
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .nativeApple)
             ),
@@ -41,7 +41,7 @@ enum TranscriptionModelRegistry {
             FluidAudioModel(
                 name: "parakeet-tdt-0.6b-v3",
                 displayName: "Parakeet V3",
-                description: "NVIDIA's Parakeet V3 model with multilingual support across English and 25 European languages",
+                description: String(localized: "NVIDIA's Parakeet V3 model with multilingual support across English and 25 European languages"),
                 size: "494 MB",
                 speed: 0.99,
                 accuracy: 0.94,
@@ -56,7 +56,7 @@ enum TranscriptionModelRegistry {
                 displayName: "Large v3 Turbo",
                 size: "1.5 GB",
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .whisper),
-                description: "Large model v3 Turbo, faster than v3 with similar accuracy",
+                description: String(localized: "Large model v3 Turbo, faster than v3 with similar accuracy"),
                 speed: 0.75,
                 accuracy: 0.97,
                 ramUsage: 1.8
@@ -66,7 +66,7 @@ enum TranscriptionModelRegistry {
                 displayName: "Large v3 Turbo (Quantized)",
                 size: "547 MB",
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .whisper),
-                description: "Quantized version of Large v3 Turbo, faster with slightly lower accuracy",
+                description: String(localized: "Quantized version of Large v3 Turbo, faster with slightly lower accuracy"),
                 speed: 0.75,
                 accuracy: 0.95,
                 ramUsage: 1.0

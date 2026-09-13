@@ -86,10 +86,10 @@ struct ZermApp: App {
             // Show alert to user about storage issue
             DispatchQueue.main.async {
                 let alert = NSAlert()
-                alert.messageText = "Storage Warning"
-                alert.informativeText = "Zerm couldn't access its storage location. Your transcriptions will not be saved between sessions."
+                alert.messageText = String(localized: "Storage Warning")
+                alert.informativeText = String(localized: "Zerm couldn't access its storage location. Your transcriptions will not be saved between sessions.")
                 alert.alertStyle = .warning
-                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: String(localized: "OK"))
                 alert.runModal()
             }
         }
@@ -393,10 +393,10 @@ struct ZermApp: App {
                         // Check if container initialization failed
                         if containerInitializationFailed {
                             let alert = NSAlert()
-                            alert.messageText = "Critical Storage Error"
-                            alert.informativeText = "Zerm cannot initialize its storage system. The app cannot continue.\n\nPlease try reinstalling the app or contact support if the issue persists."
+                            alert.messageText = String(localized: "Critical Storage Error")
+                            alert.informativeText = String(localized: "Zerm cannot initialize its storage system. The app cannot continue.\n\nPlease try reinstalling the app or contact support if the issue persists.")
                             alert.alertStyle = .critical
-                            alert.addButton(withTitle: "Quit")
+                            alert.addButton(withTitle: String(localized: "Quit"))
                             alert.runModal()
 
                             NSApplication.shared.terminate(nil)

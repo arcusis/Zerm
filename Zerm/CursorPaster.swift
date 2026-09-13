@@ -268,7 +268,7 @@ class CursorPaster {
             logger.error("Accessibility permission is required to paste with simulated key events")
             Task { @MainActor in
                 NotificationManager.shared.showNotification(
-                    title: "Enable Accessibility for reliable auto-paste",
+                    title: String(localized: "Enable Accessibility for reliable auto-paste"),
                     type: .warning
                 )
             }

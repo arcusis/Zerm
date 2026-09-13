@@ -3,6 +3,7 @@ import SwiftData
 
 struct AudioCleanupSettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.layoutDirection) private var layoutDirection
 
     // Audio cleanup settings
     @AppStorage("IsTranscriptionCleanupEnabled") private var isTranscriptionCleanupEnabled = false
@@ -37,10 +38,10 @@ struct AudioCleanupSettingsView: View {
 
                     Spacer()
 
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
-                        .rotationEffect(.degrees(isTranscriptionCleanupEnabled && isTranscriptExpanded ? 90 : 0))
+                        .rotationEffect(.degrees(isTranscriptionCleanupEnabled && isTranscriptExpanded ? expandedChevronAngle : 0))
                         .opacity(isTranscriptionCleanupEnabled ? 1 : 0.4)
                 }
                 .contentShape(Rectangle())
@@ -125,10 +126,10 @@ struct AudioCleanupSettingsView: View {
 
                         Spacer()
 
-                        Image(systemName: "chevron.right")
+                        Image(systemName: "chevron.forward")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.secondary)
-                            .rotationEffect(.degrees(isAudioCleanupEnabled && isAudioExpanded ? 90 : 0))
+                            .rotationEffect(.degrees(isAudioCleanupEnabled && isAudioExpanded ? expandedChevronAngle : 0))
                             .opacity(isAudioCleanupEnabled ? 1 : 0.4)
                     }
                     .contentShape(Rectangle())
@@ -206,7 +207,7 @@ struct AudioCleanupSettingsView: View {
                     }
                 } message: {
                     if cleanupInfo.fileCount > 0 {
-                        Text(deleteConfirmationMessage)
+                        Text(verbatim: deleteConfirmationMessage)
                     } else {
                         Text("No audio files were found beyond the retention period.")
                     }
@@ -215,9 +216,9 @@ struct AudioCleanupSettingsView: View {
                     Button("OK", role: .cancel) { }
                 } message: {
                     if cleanupResult.errorCount > 0 {
-                        Text(cleanupPartialResultMessage)
+                        Text(verbatim: cleanupPartialResultMessage)
                     } else {
-                        Text(cleanupSuccessMessage)
+                        Text(verbatim: cleanupSuccessMessage)
                     }
                 }
                 .onChange(of: isAudioCleanupEnabled) { _, newValue in
@@ -259,6 +260,11 @@ struct AudioCleanupSettingsView: View {
                 Text("Every recorded day and the Read Aloud totals will be deleted. Transcripts and audio are not affected. This cannot be undone.")
             }
         }
+    }
+
+    /// The forward chevron points left in right-to-left layouts, so it turns the other way to point down.
+    private var expandedChevronAngle: Double {
+        layoutDirection == .rightToLeft ? -90 : 90
     }
 
     private var deleteFilesTitle: String {

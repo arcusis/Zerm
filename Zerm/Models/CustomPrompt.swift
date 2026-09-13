@@ -157,6 +157,18 @@ struct CustomPrompt: Identifiable, Codable, Equatable {
         try container.encode(allowsLanguageChange, forKey: .allowsLanguageChange)
     }
 
+    /// The title shown in the UI. Built-in prompts are translated; the stored `title` stays
+    /// English because it is persisted and passed along with enhancement requests.
+    var displayTitle: String {
+        switch id {
+        case PredefinedPrompts.defaultPromptId: return String(localized: "Default")
+        case PredefinedPrompts.assistantPromptId: return String(localized: "Assistant")
+        case PredefinedPrompts.codingPromptId: return String(localized: "Coding")
+        case PredefinedPrompts.chatPromptId: return String(localized: "Chat")
+        default: return title
+        }
+    }
+
     var finalPromptText: String {
         if useSystemInstructions {
             return String(format: AIPrompts.customPromptTemplate, self.promptText)
@@ -257,7 +269,7 @@ extension CustomPrompt {
             
             // Enhanced title styling
             VStack(spacing: 2) {
-                Text(title)
+                Text(verbatim: displayTitle)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(isSelected ?
                         .primary : .secondary)
@@ -273,12 +285,12 @@ extension CustomPrompt {
                                 .foregroundColor(isSelected ? .accentColor.opacity(0.9) : .secondary.opacity(0.7))
                             
                             if triggerWords.count == 1 {
-                                Text("\"\(triggerWords[0])...\"")
+                                Text(verbatim: "\"\(triggerWords[0])...\"")
                                     .font(.system(size: 8, weight: .regular))
                                     .foregroundColor(isSelected ? .primary.opacity(0.8) : .secondary.opacity(0.7))
                                     .lineLimit(1)
                             } else {
-                                Text("\"\(triggerWords[0])...\" +\(triggerWords.count - 1)")
+                                Text(verbatim: "\"\(triggerWords[0])...\" +\(triggerWords.count - 1)")
                                     .font(.system(size: 8, weight: .regular))
                                     .foregroundColor(isSelected ? .primary.opacity(0.8) : .secondary.opacity(0.7))
                                     .lineLimit(1)
@@ -317,11 +329,11 @@ extension CustomPrompt {
                 if let onDelete = onDelete, !isPredefined {
                     Button(role: .destructive) {
                         let alert = NSAlert()
-                        alert.messageText = "Delete Prompt?"
-                        alert.informativeText = "Are you sure you want to delete '\(self.title)' prompt? This action cannot be undone."
+                        alert.messageText = String(localized: "Delete Prompt?")
+                        alert.informativeText = String(localized: "Are you sure you want to delete '\(self.displayTitle)' prompt? This action cannot be undone.")
                         alert.alertStyle = .warning
-                        alert.addButton(withTitle: "Delete")
-                        alert.addButton(withTitle: "Cancel")
+                        alert.addButton(withTitle: String(localized: "Delete"))
+                        alert.addButton(withTitle: String(localized: "Cancel"))
                         
                         let response = alert.runModal()
                         if response == .alertFirstButtonReturn {

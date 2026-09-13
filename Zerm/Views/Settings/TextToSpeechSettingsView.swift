@@ -155,12 +155,12 @@ struct TextToSpeechSettingsView: View {
             Spacer()
             Picker("Read Aloud voice provider", selection: $providerRaw) {
                 ForEach(TTSProviderKind.allCases, id: \.self) { kind in
-                    Text(displayName(for: kind)).tag(kind.rawValue)
+                    Text(verbatim: displayName(for: kind)).tag(kind.rawValue)
                 }
             }
             .labelsHidden()
             .accessibilityLabel("Read Aloud voice provider")
-            .accessibilityValue(Text(provider.displayName))
+            .accessibilityValue(Text(verbatim: provider.displayName))
             .frame(width: 240)
         }
     }
@@ -172,12 +172,12 @@ struct TextToSpeechSettingsView: View {
             Spacer()
             Picker("Read Aloud voice", selection: $voiceID) {
                 ForEach(provider.voices) { voice in
-                    Text(voice.displayName).tag(voice.id)
+                    Text(verbatim: voice.displayName).tag(voice.id)
                 }
             }
             .labelsHidden()
             .accessibilityLabel("Read Aloud voice")
-            .accessibilityValue(Text(selectedVoiceName))
+            .accessibilityValue(Text(verbatim: selectedVoiceName))
             .frame(width: 240)
             .onChange(of: voiceID) { _, newValue in
                 TTSSettings.setVoiceID(newValue, for: providerKind)
@@ -191,13 +191,13 @@ struct TextToSpeechSettingsView: View {
                 Label("Speed", systemImage: "speedometer")
                 InfoTip(String(localized: "Playback rate, from half speed to double. Around 1.3× is a common choice for skimming long text; drop below 1× for dense material or an unfamiliar language."))
                 Spacer()
-                Text(formattedSpeed)
+                Text(verbatim: formattedSpeed)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
             Slider(value: $speed, in: 0.5...2.0, step: 0.05)
                 .accessibilityLabel("Reading speed")
-                .accessibilityValue(Text(readingSpeedAccessibilityValue))
+                .accessibilityValue(Text(verbatim: readingSpeedAccessibilityValue))
         }
     }
 
@@ -234,13 +234,13 @@ struct TextToSpeechSettingsView: View {
                         Spacer()
                         Picker("Reading mode", selection: $readingModeRaw) {
                             ForEach(ReadAloudMode.allCases) { mode in
-                                Text(mode.title).tag(mode.rawValue)
+                                Text(verbatim: mode.title).tag(mode.rawValue)
                             }
                         }
                         .labelsHidden()
                         .frame(width: 220)
                     }
-                    Text(readingMode.subtitle)
+                    Text(verbatim: readingMode.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -269,7 +269,7 @@ struct TextToSpeechSettingsView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 4) {
-                    Text(apiKeyHeading)
+                    Text(verbatim: apiKeyHeading)
                         .font(.headline)
                     InfoTip(
                         String(localized: "Required for this provider — Read Aloud will not speak without it. Save & Verify checks the key against the provider before storing it in your macOS Keychain. Switch to Kokoro if you would rather not use an account at all."),
@@ -325,13 +325,13 @@ struct TextToSpeechSettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "cpu")
-                    Text(KokoroModelManager.package.displayName).font(.headline)
+                    Text(verbatim: KokoroModelManager.package.displayName).font(.headline)
                     InfoTip(
                         String(localized: "The offline voice model. Download it once and Read Aloud works with no account, no API key and no text ever leaving your Mac — including on a plane. Deleting it frees the disk space; you can download it again later."),
                         doc: .readAloud
                     )
                     Spacer()
-                    Text(KokoroModelManager.package.approxSize)
+                    Text(verbatim: KokoroModelManager.package.approxSize)
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -348,7 +348,7 @@ struct TextToSpeechSettingsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ProgressView(value: kokoro.downloadProgress ?? 0)
                         HStack {
-                            Text(kokoro.statusText ?? String(localized: "Downloading…"))
+                            Text(verbatim: kokoro.statusText ?? String(localized: "Downloading…"))
                                 .font(.caption).foregroundStyle(.secondary)
                             Spacer()
                             if let p = kokoro.downloadProgress {
@@ -368,7 +368,7 @@ struct TextToSpeechSettingsView: View {
                         }
                     }
                     if let status = kokoro.statusText {
-                        Text(status).font(.caption).foregroundStyle(.red)
+                        Text(verbatim: status).font(.caption).foregroundStyle(.red)
                     }
                 }
             }

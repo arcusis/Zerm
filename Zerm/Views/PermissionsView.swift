@@ -247,7 +247,7 @@ struct PermissionCard: View {
                     HStack {
                         Text(buttonTitle)
                         Spacer()
-                        Image(systemName: "arrow.right")
+                        Image(systemName: "arrow.forward")
                     }
                     .font(.headline)
                     .foregroundColor(.white)

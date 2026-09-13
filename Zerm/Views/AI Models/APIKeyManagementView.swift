@@ -22,13 +22,13 @@ struct APIKeyManagementView: View {
             HStack {
                 Picker(selection: $aiService.selectedProvider) {
                     ForEach(AIProvider.enhancementProviders, id: \.self) { provider in
-                        Text(provider.rawValue).tag(provider)
+                        Text(LocalizedStringKey(provider.rawValue)).tag(provider)
                     }
                 } label: {
                     HStack(spacing: 4) {
                         Text("Provider")
                         InfoTip(
-                            "Who runs the AI that cleans up your transcripts. The hosted services need an API key and send your text to their servers; Ollama and the on-device option keep everything on this Mac. Transcription is configured separately — this only affects enhancement.",
+                            String(localized: "Who runs the AI that cleans up your transcripts. The hosted services need an API key and send your text to their servers; Ollama and the on-device option keep everything on this Mac. Transcription is configured separately — this only affects enhancement."),
                             doc: .enhancement
                         )
                     }
@@ -106,12 +106,12 @@ struct APIKeyManagementView: View {
                                 set: { aiService.selectModel($0) }
                             )) {
                                 ForEach(aiService.availableModels, id: \.self) { model in
-                                    Text(model).tag(model)
+                                    Text(verbatim: model).tag(model)
                                 }
                             } label: {
                                 HStack(spacing: 4) {
                                     Text("Model")
-                                    InfoTip("Which model this provider should use for enhancement. Faster models keep the pause after you stop speaking short; larger ones follow long or fussy prompts more reliably.")
+                                    InfoTip(String(localized: "Which model this provider should use for enhancement. Faster models keep the pause after you stop speaking short; larger ones follow long or fussy prompts more reliably."))
                                 }
                             }
 
@@ -137,12 +137,12 @@ struct APIKeyManagementView: View {
                         set: { aiService.selectModel($0) }
                     )) {
                         ForEach(aiService.availableModels, id: \.self) { model in
-                            Text(model).tag(model)
+                            Text(verbatim: model).tag(model)
                         }
                     } label: {
                         HStack(spacing: 4) {
                             Text("Model")
-                            InfoTip("Which model this provider should use for enhancement. Faster models keep the pause after you stop speaking short; larger ones follow long or fussy prompts more reliably.")
+                            InfoTip(String(localized: "Which model this provider should use for enhancement. Faster models keep the pause after you stop speaking short; larger ones follow long or fussy prompts more reliably."))
                         }
                     }
                 }
@@ -180,12 +180,12 @@ struct APIKeyManagementView: View {
 
                         Picker(selection: $selectedOllamaModel) {
                             ForEach(ollamaModels) { model in
-                                Text(model.name).tag(model.name)
+                                Text(verbatim: model.name).tag(model.name)
                             }
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Model")
-                                InfoTip("Models already pulled on your Ollama server. Nothing appears here until you have pulled at least one; run ollama pull in a terminal, then reconnect.")
+                                InfoTip(String(localized: "Models already pulled on your Ollama server. Nothing appears here until you have pulled at least one; run ollama pull in a terminal, then reconnect."))
                             }
                         }
                         .onChange(of: selectedOllamaModel) { oldValue, newValue in
@@ -243,7 +243,7 @@ struct APIKeyManagementView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("Timeout")
-                            InfoTip("How long to let the command run before giving up on it. Local models loading from cold can take a while on the first request, so allow more time than you would for a hosted API.")
+                            InfoTip(String(localized: "How long to let the command run before giving up on it. Local models loading from cold can take a while on the first request, so allow more time than you would for a hosted API."))
                         }
                     }
                     .onChange(of: localCLITimeoutSeconds) { _, newValue in
@@ -289,7 +289,7 @@ struct APIKeyManagementView: View {
                                 aiService.saveAPIKey(apiKey) { success, errorMessage in
                                     isVerifying = false
                                     if !success {
-                                        alertMessage = errorMessage ?? "Verification failed"
+                                        alertMessage = errorMessage ?? String(localized: "Verification failed")
                                         showAlert = true
                                     }
                                     apiKey = ""
@@ -322,7 +322,7 @@ struct APIKeyManagementView: View {
                         HStack {
                             Text("API Key")
                             Spacer()
-                            Text("••••••••")
+                            Text(verbatim: "••••••••")
                                 .foregroundColor(.secondary)
                             Button("Remove", role: .destructive) {
                                 aiService.clearAPIKey()
@@ -356,7 +356,7 @@ struct APIKeyManagementView: View {
                                 aiService.saveAPIKey(apiKey) { success, errorMessage in
                                     isVerifying = false
                                     if !success {
-                                        alertMessage = errorMessage ?? "Verification failed"
+                                        alertMessage = errorMessage ?? String(localized: "Verification failed")
                                         showAlert = true
                                     }
                                     apiKey = ""
@@ -378,7 +378,7 @@ struct APIKeyManagementView: View {
         .alert("Error", isPresented: $showAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(alertMessage)
+            Text(verbatim: alertMessage)
         }
         .onAppear {
             if aiService.selectedProvider == .ollama {

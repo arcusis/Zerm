@@ -31,7 +31,7 @@ struct RecorderToggleButton: View {
         Button(action: action) {
             Group {
                 if isEmoji {
-                    Text(icon).font(.system(size: 14))
+                    Text(verbatim: icon).font(.system(size: 14))
                 } else {
                     Image(systemName: icon).font(.system(size: 13))
                 }
@@ -312,7 +312,7 @@ struct LiveTranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                Text(text)
+                Text(verbatim: text)
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.8))
                     .frame(maxWidth: .infinity, alignment: .leading)

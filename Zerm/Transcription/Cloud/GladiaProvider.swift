@@ -62,7 +62,7 @@ struct GladiaProvider: CloudProvider {
             case "done":
                 return job.result?.transcription?.full_transcript ?? ""
             case "error":
-                throw CloudTranscriptionError.apiRequestFailed(statusCode: 200, message: "Gladia transcription failed")
+                throw CloudTranscriptionError.apiRequestFailed(statusCode: 200, message: String(localized: "Gladia transcription failed"))
             default:
                 return nil
             }

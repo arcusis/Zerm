@@ -145,25 +145,25 @@ class ImportExportService {
             let savePanel = NSSavePanel()
             savePanel.allowedContentTypes = [UTType.json]
             savePanel.nameFieldStringValue = "Zerm_Settings_Backup.json"
-            savePanel.title = "Export Zerm Settings"
-            savePanel.message = "Choose a location to save your settings."
+            savePanel.title = String(localized: "Export Zerm Settings")
+            savePanel.message = String(localized: "Choose a location to save your settings.")
 
             DispatchQueue.main.async {
                 if savePanel.runModal() == .OK {
                     if let url = savePanel.url {
                         do {
                             try jsonData.write(to: url)
-                            self.showAlert(title: "Export Successful", message: "Your settings have been successfully exported to \(url.lastPathComponent).")
+                            self.showAlert(title: String(localized: "Export Successful"), message: String(localized: "Your settings have been successfully exported to \(url.lastPathComponent)."))
                         } catch {
-                            self.showAlert(title: "Export Error", message: "Could not save settings to file: \(error.localizedDescription)")
+                            self.showAlert(title: String(localized: "Export Error"), message: String(localized: "Could not save settings to file: \(error.localizedDescription)"))
                         }
                     }
                 } else {
-                    self.showAlert(title: "Export Canceled", message: "The settings export operation was canceled.")
+                    self.showAlert(title: String(localized: "Export Canceled"), message: String(localized: "The settings export operation was canceled."))
                 }
             }
         } catch {
-            self.showAlert(title: "Export Error", message: "Could not encode settings to JSON: \(error.localizedDescription)")
+            self.showAlert(title: String(localized: "Export Error"), message: String(localized: "Could not encode settings to JSON: \(error.localizedDescription)"))
         }
     }
 
@@ -174,13 +174,13 @@ class ImportExportService {
         openPanel.canChooseFiles = true
         openPanel.canChooseDirectories = false
         openPanel.allowsMultipleSelection = false
-        openPanel.title = "Import Zerm Settings"
-        openPanel.message = "Choose a settings file to import. This will overwrite ALL settings (prompts, power modes, dictionary, general app settings)."
+        openPanel.title = String(localized: "Import Zerm Settings")
+        openPanel.message = String(localized: "Choose a settings file to import. This will overwrite ALL settings (prompts, power modes, dictionary, general app settings).")
 
         DispatchQueue.main.async {
             if openPanel.runModal() == .OK {
                 guard let url = openPanel.url else {
-                    self.showAlert(title: "Import Error", message: "Could not get the file URL from the open panel.")
+                    self.showAlert(title: String(localized: "Import Error"), message: String(localized: "Could not get the file URL from the open panel."))
                     return
                 }
 
@@ -190,17 +190,17 @@ class ImportExportService {
                     let importedSettings = try decoder.decode(ZermExportedSettings.self, from: jsonData)
                     
                     if importedSettings.version != self.currentSettingsVersion {
-                        self.showAlert(title: "Version Mismatch", message: "The imported settings file (version \(importedSettings.version)) is from a different version than your application (version \(self.currentSettingsVersion)). Proceeding with import, but be aware of potential incompatibilities.")
+                        self.showAlert(title: String(localized: "Version Mismatch"), message: String(localized: "The imported settings file (version \(importedSettings.version)) is from a different version than your application (version \(self.currentSettingsVersion)). Proceeding with import, but be aware of potential incompatibilities."))
                     }
 
                     // A settings file is untrusted input that overwrites prompts, power modes,
                     // custom model endpoints, and the dictionary. Require explicit confirmation.
                     let confirm = NSAlert()
-                    confirm.messageText = "Import these settings?"
-                    confirm.informativeText = "This replaces your prompts, power modes, custom models, and dictionary with the contents of \"\(url.lastPathComponent)\". Only import files you trust."
+                    confirm.messageText = String(localized: "Import these settings?")
+                    confirm.informativeText = String(localized: "This replaces your prompts, power modes, custom models, and dictionary with the contents of \"\(url.lastPathComponent)\". Only import files you trust.")
                     confirm.alertStyle = .warning
-                    confirm.addButton(withTitle: "Import")
-                    confirm.addButton(withTitle: "Cancel")
+                    confirm.addButton(withTitle: String(localized: "Import"))
+                    confirm.addButton(withTitle: String(localized: "Cancel"))
                     guard confirm.runModal() == .alertFirstButtonReturn else {
                         return
                     }
@@ -361,13 +361,13 @@ class ImportExportService {
                         }
                     }
 
-                    self.showRestartAlert(message: "Settings imported successfully from \(url.lastPathComponent). All settings (including general app settings) have been applied.")
+                    self.showRestartAlert(message: String(localized: "Settings imported successfully from \(url.lastPathComponent). All settings (including general app settings) have been applied."))
 
                 } catch {
-                    self.showAlert(title: "Import Error", message: "Error importing settings: \(error.localizedDescription). The file might be corrupted or not in the correct format.")
+                    self.showAlert(title: String(localized: "Import Error"), message: String(localized: "Error importing settings: \(error.localizedDescription). The file might be corrupted or not in the correct format."))
                 }
             } else {
-                self.showAlert(title: "Import Canceled", message: "The settings import operation was canceled.")
+                self.showAlert(title: String(localized: "Import Canceled"), message: String(localized: "The settings import operation was canceled."))
             }
         }
     }
@@ -378,7 +378,7 @@ class ImportExportService {
             alert.messageText = title
             alert.informativeText = message
             alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: String(localized: "OK"))
             alert.runModal()
         }
     }
@@ -386,11 +386,11 @@ class ImportExportService {
     private func showRestartAlert(message: String) {
         DispatchQueue.main.async {
             let alert = NSAlert()
-            alert.messageText = "Import Successful"
-            alert.informativeText = message + "\n\nIMPORTANT: If you were using AI enhancement features, please make sure to reconfigure your API keys in the Enhancement section.\n\nIt is recommended to restart Zerm for all changes to take full effect."
+            alert.messageText = String(localized: "Import Successful")
+            alert.informativeText = message + "\n\n" + String(localized: "IMPORTANT: If you were using AI enhancement features, please make sure to reconfigure your API keys in the Enhancement section.\n\nIt is recommended to restart Zerm for all changes to take full effect.")
             alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Configure API Keys")
+            alert.addButton(withTitle: String(localized: "OK"))
+            alert.addButton(withTitle: String(localized: "Configure API Keys"))
             
             let response = alert.runModal()
             if response == .alertSecondButtonReturn {

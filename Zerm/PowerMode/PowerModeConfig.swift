@@ -7,6 +7,7 @@ enum AutoSendKey: String, Codable, CaseIterable {
     case shiftEnter = "shiftEnter"
     case commandEnter = "commandEnter"
 
+    /// English; views look it up with `LocalizedStringKey(displayName)`.
     var displayName: String {
         switch self {
         case .none: return "None"

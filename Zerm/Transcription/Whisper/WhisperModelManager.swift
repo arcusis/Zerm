@@ -483,7 +483,7 @@ class WhisperModelManager: ObservableObject {
 
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             NotificationManager.shared.showNotification(
-                title: "A model named \(baseName).bin already exists",
+                title: String(localized: "A model named \(baseName).bin already exists"),
                 type: .warning,
                 duration: 4.0
             )
@@ -500,14 +500,14 @@ class WhisperModelManager: ObservableObject {
             onModelsChanged?()
 
             NotificationManager.shared.showNotification(
-                title: "Imported \(destinationURL.lastPathComponent)",
+                title: String(localized: "Imported \(destinationURL.lastPathComponent)"),
                 type: .success,
                 duration: 3.0
             )
         } catch {
             logError("Failed to import local model", error)
             NotificationManager.shared.showNotification(
-                title: "Failed to import model: \(error.localizedDescription)",
+                title: String(localized: "Failed to import model: \(error.localizedDescription)"),
                 type: .error,
                 duration: 5.0
             )
@@ -551,14 +551,14 @@ struct DownloadProgressView: View {
 
     private var downloadPhase: String {
         if supportsCoreML && downloadProgress[modelName + "_coreml"] != nil {
-            return "Downloading Core ML Model for \(modelName)"
+            return String(localized: "Downloading Core ML Model for \(modelName)")
         }
-        return "Downloading \(modelName) Model"
+        return String(localized: "Downloading \(modelName) Model")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(downloadPhase)
+            Text(verbatim: downloadPhase)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Color(.secondaryLabelColor))
 
@@ -577,7 +577,7 @@ struct DownloadProgressView: View {
 
             HStack {
                 Spacer()
-                Text("\(Int(totalProgress * 100))%")
+                Text(verbatim: "\(Int(totalProgress * 100))%")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(Color(.secondaryLabelColor))
             }

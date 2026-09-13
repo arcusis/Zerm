@@ -83,7 +83,7 @@ extension TranscriptionModel {
     }
 
     var language: String {
-        isMultilingualModel ? "Multilingual" : "English-only"
+        isMultilingualModel ? String(localized: "Multilingual") : String(localized: "English-only")
     }
 
     var supportsStreaming: Bool { false }
@@ -369,7 +369,7 @@ struct ImportedWhisperModel: TranscriptionModel {
     init(fileBaseName: String) {
         self.name = fileBaseName
         self.displayName = fileBaseName
-        self.description = "Imported local model"
+        self.description = String(localized: "Imported local model")
         self.isMultilingualModel = true
         self.supportedLanguages = LanguageDictionary.forProvider(isMultilingual: true, provider: .whisper)
     }

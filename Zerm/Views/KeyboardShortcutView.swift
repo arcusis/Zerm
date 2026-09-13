@@ -13,7 +13,7 @@ struct KeyboardShortcutView: View {
                 }
             }
         } else {
-            KeyCapView(text: "Not Set")
+            KeyCapView(text: String(localized: "Not Set"))
                 .foregroundColor(.secondary)
         }
     }
@@ -37,7 +37,7 @@ struct KeyboardShortcutView: View {
     
     private func keyToString(_ key: KeyboardShortcuts.Key) -> String {
         switch key {
-        case .space: return "Space"
+        case .space: return String(localized: "Space")
         case .return: return "↩"
         case .escape: return "⎋"
         case .tab: return "⇥"
@@ -146,7 +146,7 @@ struct KeyCapView: View {
     }
     
     var body: some View {
-        Text(text)
+        Text(verbatim: text)
             .font(.system(size: 25, weight: .semibold, design: .rounded))
             .foregroundColor(colorScheme == .dark ? .white : .black)
             .padding(.horizontal, 12)

@@ -35,17 +35,17 @@ enum LocalLLMRole: String, Sendable, Hashable {
 
     var title: String {
         switch self {
-        case .enhancement: return "Enhancement"
-        case .reading: return "Read Aloud"
+        case .enhancement: return String(localized: "Enhancement")
+        case .reading: return String(localized: "Read Aloud")
         }
     }
 
     var jobDescription: String {
         switch self {
         case .enhancement:
-            return "Cleans the transcript after dictation. Must stay instant. Do not use a chatbot."
+            return String(localized: "Cleans the transcript after dictation. Must stay instant. Do not use a chatbot.")
         case .reading:
-            return "Retells selected text before it is spoken. Can be a larger model."
+            return String(localized: "Retells selected text before it is spoken. Can be a larger model.")
         }
     }
 }
@@ -71,7 +71,7 @@ final class LocalLLMModelManager: ObservableObject {
             downloadURL: URL(string: "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf")!,
             sha256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634",
             jobs: [.enhancement, .reading],
-            blurb: "Default for both jobs. The only catalogue model that leaves mixed-language dictation in its original script."
+            blurb: String(localized: "Default for both jobs. The only catalogue model that leaves mixed-language dictation in its original script.")
         ),
         LocalLLMPackage(
             fileName: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
@@ -81,7 +81,7 @@ final class LocalLLMModelManager: ObservableObject {
             downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")!,
             sha256: "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
             jobs: [.enhancement],
-            blurb: "Smaller opt-in. Matches the default on English cleanup, but translates mixed-language dictation instead of preserving it."
+            blurb: String(localized: "Smaller opt-in. Matches the default on English cleanup, but translates mixed-language dictation instead of preserving it.")
         ),
         LocalLLMPackage(
             fileName: "gemma-3-1b-it-Q4_K_M.gguf",
@@ -91,7 +91,7 @@ final class LocalLLMModelManager: ObservableObject {
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/f0b45be0aac41bd6a100a4b5734cad5f67255bfb/gemma-3-1b-it-Q4_K_M.gguf")!,
             sha256: "8270790f3ab69fdfe860b7b64008d9a19986d8df7e407bb018184caa08798ebd",
             jobs: [.reading],
-            blurb: "Small Read Aloud fallback. Do not use for enhancement."
+            blurb: String(localized: "Small Read Aloud fallback. Do not use for enhancement.")
         ),
         LocalLLMPackage(
             fileName: "gemma-4-E4B-it-Q4_K_M.gguf",
@@ -101,7 +101,7 @@ final class LocalLLMModelManager: ObservableObject {
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/bfc15c382204943c3a8fff0c750b94ae2364d7a3/gemma-4-E4B-it-Q4_K_M.gguf")!,
             sha256: "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
             jobs: [.reading],
-            blurb: "Larger Read Aloud model. Explicit opt-in."
+            blurb: String(localized: "Larger Read Aloud model. Explicit opt-in.")
         ),
         LocalLLMPackage(
             fileName: "gemma-4-12b-it-Q4_K_M.gguf",
@@ -111,7 +111,7 @@ final class LocalLLMModelManager: ObservableObject {
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/fc034cfff751157913579611efad8462ac1be606/gemma-4-12b-it-Q4_K_M.gguf")!,
             sha256: "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
             jobs: [.reading],
-            blurb: "Heavy Read Aloud model. Explicit opt-in."
+            blurb: String(localized: "Heavy Read Aloud model. Explicit opt-in.")
         ),
         LocalLLMPackage(
             fileName: "gemma-3-27b-it-Q4_K_M.gguf",
@@ -121,7 +121,7 @@ final class LocalLLMModelManager: ObservableObject {
             downloadURL: URL(string: "https://huggingface.co/unsloth/gemma-3-27b-it-GGUF/resolve/7cd0121f2530b00e42c4df952d4cad4418c0b3c1/gemma-3-27b-it-Q4_K_M.gguf")!,
             sha256: "f1b699659942c777bd3ec0bcb527d6ebf34ae14ca76e3af103d58d0c9cbdadee",
             jobs: [.reading],
-            blurb: "Largest Read Aloud model. Explicit opt-in."
+            blurb: String(localized: "Largest Read Aloud model. Explicit opt-in.")
         )
     ]
 
@@ -311,7 +311,7 @@ final class LocalLLMModelManager: ObservableObject {
 
     func download(_ package: LocalLLMPackage) async {
         guard !package.hardwareFit.blocksInstall else {
-            statusText = "\(package.displayName) needs more memory than this Mac has available"
+            statusText = String(localized: "\(package.displayName) needs more memory than this Mac has available")
             return
         }
         guard downloadProgress[package.fileName] == nil else { return }
@@ -325,7 +325,7 @@ final class LocalLLMModelManager: ObservableObject {
             guard ModelIntegrity.verify(fileURL: file, expectedSHA256: package.sha256) else {
                 try? FileManager.default.removeItem(at: file)
                 logger.error("Checksum mismatch for \(package.fileName, privacy: .public); download rejected")
-                statusText = "Download failed integrity check and was discarded"
+                statusText = String(localized: "Download failed integrity check and was discarded")
                 return
             }
             let dest = path(for: package)
@@ -333,10 +333,10 @@ final class LocalLLMModelManager: ObservableObject {
             try FileManager.default.moveItem(at: file, to: dest)
             refreshInstalled()
         } catch is CancellationError {
-            statusText = "Download cancelled"
+            statusText = String(localized: "Download cancelled")
         } catch {
             logger.error("LLM download failed: \(error.localizedDescription, privacy: .public)")
-            statusText = "Download failed: \(error.localizedDescription)"
+            statusText = String(localized: "Download failed: \(error.localizedDescription)")
         }
     }
 
@@ -381,7 +381,7 @@ final class LocalLLMModelManager: ObservableObject {
                 }
                 if let error { continuation.resume(throwing: error); return }
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                    continuation.resume(throwing: TTSError.http((response as? HTTPURLResponse)?.statusCode ?? -1, "download failed"))
+                    continuation.resume(throwing: TTSError.http((response as? HTTPURLResponse)?.statusCode ?? -1, String(localized: "download failed")))
                     return
                 }
                 guard let tempURL else { continuation.resume(throwing: TTSError.badResponse); return }
@@ -417,7 +417,7 @@ final class LocalLLMModelManager: ObservableObject {
     ) async throws -> String {
         let package = Self.packages.first { $0.fileName == packageFileName } ?? Self.package(for: role)
         guard isDownloaded(package) else {
-            throw TTSError.notAvailable("The on-device model isn't downloaded yet. Download it in Enhancement or Read Aloud settings.")
+            throw TTSError.notAvailable(String(localized: "The on-device model isn't downloaded yet. Download it in Enhancement or Read Aloud settings."))
         }
         beginOperation()
         defer { endOperation() }

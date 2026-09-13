@@ -43,7 +43,7 @@ struct DictionarySettingsPanel: View {
                         HStack(spacing: 4) {
                             Text("Quick Add to Dictionary")
                             InfoTip(
-                                "Opens a small panel from anywhere so you can add a word or a replacement without coming back to this window. Handy the moment a transcript gets a name wrong — fix it once and later dictations get it right.",
+                                String(localized: "Opens a small panel from anywhere so you can add a word or a replacement without coming back to this window. Handy the moment a transcript gets a name wrong — fix it once and later dictations get it right."),
                                 doc: .dictionary
                             )
                         }

@@ -344,7 +344,7 @@ private struct StatusBanner: View {
         HStack(spacing: 8) {
             Image(systemName: isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                 .foregroundColor(isError ? .red : .green)
-            Text(message)
+            Text(verbatim: message)
                 .font(.system(size: 14, weight: .medium))
         }
         .padding(.horizontal, 16)
@@ -419,7 +419,7 @@ struct AudioPlayerView: View {
                             .fill(Color.primary.opacity(playerManager.playbackRate == 1.0 ? 0.06 : 0.14))
                             .frame(width: 32, height: 32)
                             .overlay(
-                                Text(playerManager.playbackRate == 1.0 ? "1×" : playerManager.playbackRate == 1.5 ? "1.5×" : "2×")
+                                Text(verbatim: playerManager.playbackRate == 1.0 ? "1×" : playerManager.playbackRate == 1.5 ? "1.5×" : "2×")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.primary)
                             )
@@ -502,13 +502,13 @@ struct AudioPlayerView: View {
                 if let state = bannerState {
                     switch state {
                     case .retranscribeSuccess:
-                        StatusBanner(message: "Retranscription successful", isError: false)
+                        StatusBanner(message: String(localized: "Retranscription successful"), isError: false)
                     case .reEnhanceSuccess:
-                        StatusBanner(message: "Re-enhancement successful", isError: false)
+                        StatusBanner(message: String(localized: "Re-enhancement successful"), isError: false)
                     case .retranscribeError(let message):
-                        StatusBanner(message: message.isEmpty ? "Retranscription failed" : message, isError: true)
+                        StatusBanner(message: message.isEmpty ? String(localized: "Retranscription failed") : message, isError: true)
                     case .reEnhanceError(let message):
-                        StatusBanner(message: message.isEmpty ? "Re-enhancement failed" : message, isError: true)
+                        StatusBanner(message: message.isEmpty ? String(localized: "Re-enhancement failed") : message, isError: true)
                     }
                 }
                 Spacer()
@@ -548,7 +548,7 @@ struct AudioPlayerView: View {
 
     private func retranscribeAudio() {
         guard let currentTranscriptionModel = engine.transcriptionModelManager.currentTranscriptionModel else {
-            showTemporaryBanner(.retranscribeError("No transcription model selected"))
+            showTemporaryBanner(.retranscribeError(String(localized: "No transcription model selected")))
             return
         }
 

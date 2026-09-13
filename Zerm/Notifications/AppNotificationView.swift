@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AppNotificationView: View {
+    /// Already localized by the caller, like `actionButton.label`.
     let title: String
     let type: NotificationType
     let duration: TimeInterval
@@ -46,7 +47,7 @@ struct AppNotificationView: View {
                     .frame(width: 20, height: 20)
 
                 // Single message text
-                Text(title)
+                Text(verbatim: title)
                     .font(.system(size: 12))
                     .fontWeight(.medium)
                     .foregroundColor(.white)
@@ -60,7 +61,7 @@ struct AppNotificationView: View {
                         actionButton.action()
                         onClose()
                     }) {
-                        Text(actionButton.label)
+                        Text(verbatim: actionButton.label)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(type.iconColor)
                             .padding(.horizontal, 8)

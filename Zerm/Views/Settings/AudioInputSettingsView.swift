@@ -330,7 +330,7 @@ struct InputModeCard: View {
                     Text(LocalizedStringKey(mode.rawValue))
                         .font(.headline)
                     
-                    Text(description)
+                    Text(verbatim: description)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -358,7 +358,7 @@ struct DeviceSelectionCard: View {
                     .foregroundStyle(isSelected ? .blue : .secondary)
                     .font(.system(size: 18))
                 
-                Text(name)
+                Text(verbatim: name)
                     .foregroundStyle(.primary)
                 
                 Spacer()
@@ -398,7 +398,7 @@ struct DevicePriorityCard: View {
         HStack {
             // Priority number or dash
             if let priority = priority {
-                Text("\(priority + 1)")
+                Text(verbatim: "\(priority + 1)")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 24)
@@ -410,7 +410,7 @@ struct DevicePriorityCard: View {
             }
             
             // Device name
-            Text(name)
+            Text(verbatim: name)
                 .foregroundStyle(isAvailable ? .primary : .secondary)
             
             Spacer()
@@ -448,14 +448,14 @@ struct DevicePriorityCard: View {
                                 .foregroundStyle(canMoveUp ? .blue : .secondary.opacity(0.5))
                         }
                         .disabled(!canMoveUp)
-                        .accessibilityLabel(Text(moveUpAccessibilityLabel))
+                        .accessibilityLabel(Text(verbatim: moveUpAccessibilityLabel))
                         
                         Button(action: onMoveDown) {
                             Image(systemName: "chevron.down")
                                 .foregroundStyle(canMoveDown ? .blue : .secondary.opacity(0.5))
                         }
                         .disabled(!canMoveDown)
-                        .accessibilityLabel(Text(moveDownAccessibilityLabel))
+                        .accessibilityLabel(Text(verbatim: moveDownAccessibilityLabel))
                     }
                 }
                 
@@ -465,7 +465,7 @@ struct DevicePriorityCard: View {
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(isPrioritized ? .red : .blue)
                 }
-                .accessibilityLabel(Text(togglePriorityAccessibilityLabel))
+                .accessibilityLabel(Text(verbatim: togglePriorityAccessibilityLabel))
             }
             .buttonStyle(.plain)
         }

@@ -57,7 +57,7 @@ enum HardwareCapability {
 
     /// Human-readable summary, e.g. "Apple M1 · 8 GB RAM".
     static var summary: String {
-        "\(chipName) · \(Int(physicalMemoryGB.rounded())) GB RAM"
+        String(localized: "\(chipName) · \(Int(physicalMemoryGB.rounded())) GB RAM")
     }
 
     /// Performance cores on Apple Silicon (`hw.perflevel0.physicalcpu`); physical cores
@@ -111,10 +111,10 @@ enum HardwareCapability {
     static func fit(forEstimatedRAMGB needed: Double, physicalMemoryGB total: Double) -> ModelFit {
         let neededText = String(format: "%.1f", needed)
         if needed > total * 0.70 {
-            return .tooHeavy(reason: "Needs ~\(neededText) GB of memory — more than this Mac (\(Int(total.rounded())) GB) can spare while macOS is running.")
+            return .tooHeavy(reason: String(localized: "Needs ~\(neededText) GB of memory — more than this Mac (\(Int(total.rounded())) GB) can spare while macOS is running."))
         }
         if needed > total * 0.45 {
-            return .heavy(reason: "Needs ~\(neededText) GB of memory — will run, but expect slowdowns on this Mac (\(Int(total.rounded())) GB).")
+            return .heavy(reason: String(localized: "Needs ~\(neededText) GB of memory — will run, but expect slowdowns on this Mac (\(Int(total.rounded())) GB)."))
         }
         return .good
     }

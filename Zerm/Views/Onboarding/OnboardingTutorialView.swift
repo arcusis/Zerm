@@ -47,7 +47,7 @@ struct OnboardingTutorialView: View {
                                 KeyboardShortcutView(shortcut: shortcut)
                                     .scaleEffect(1.2)
                             } else if hotkeyManager.selectedHotkey1 != .none && hotkeyManager.selectedHotkey1 != .custom {
-                                Text(hotkeyManager.selectedHotkey1.displayName)
+                                Text(LocalizedStringKey(hotkeyManager.selectedHotkey1.displayName))
                                     .font(.system(size: 24, weight: .bold, design: .rounded))
                                     .foregroundColor(.accentColor)
                                     .padding(.horizontal, 16)
@@ -165,7 +165,7 @@ struct OnboardingTutorialView: View {
         }
     }
     
-    private func getInstructionText(for step: Int) -> String {
+    private func getInstructionText(for step: Int) -> LocalizedStringKey {
         switch step {
         case 1: return "Click the text area on the right"
         case 2: return "Press your shortcut key"
@@ -175,9 +175,9 @@ struct OnboardingTutorialView: View {
         }
     }
     
-    private func instructionStep(number: Int, text: String) -> some View {
+    private func instructionStep(number: Int, text: LocalizedStringKey) -> some View {
         HStack(spacing: 20) {
-            Text("\(number)")
+            Text(verbatim: "\(number)")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .frame(width: 40, height: 40)

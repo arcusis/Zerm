@@ -245,7 +245,7 @@ private struct SidebarView: View {
             Divider()
             SidebarUpdateBanner(updater: updater)
         }
-        .navigationTitle("Zerm")
+        .navigationTitle(Text(verbatim: "Zerm"))
         .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
     }
 }

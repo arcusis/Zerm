@@ -46,7 +46,7 @@ struct WhisperModelCardView: View {
     
     private var headerSection: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(model.displayName)
+            Text(verbatim: model.displayName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
             
@@ -92,7 +92,7 @@ struct WhisperModelCardView: View {
     }
     
     private var descriptionSection: some View {
-        Text(model.description)
+        Text(verbatim: model.description)
             .font(.system(size: 11))
             .foregroundColor(Color(.secondaryLabelColor))
             .lineLimit(2)
@@ -204,7 +204,7 @@ struct ImportedWhisperModelCardView: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(model.displayName)
+                    Text(verbatim: model.displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color(.labelColor))
                     Spacer()
@@ -266,7 +266,7 @@ struct ImportedWhisperModelCardView: View {
 func progressDotsWithNumber(value: Double) -> some View {
     HStack(spacing: 4) {
         progressDots(value: value)
-        Text(String(format: "%.1f", value))
+        Text(verbatim: String(format: "%.1f", value))
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundColor(Color(.secondaryLabelColor))
     }

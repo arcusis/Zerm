@@ -9,8 +9,8 @@ actor LlamaEngine {
         case loadFailed, generateFailed
         var errorDescription: String? {
             switch self {
-            case .loadFailed: return "Failed to load the on-device model."
-            case .generateFailed: return "On-device generation failed."
+            case .loadFailed: return String(localized: "Failed to load the on-device model.")
+            case .generateFailed: return String(localized: "On-device generation failed.")
             }
         }
     }

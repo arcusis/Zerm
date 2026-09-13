@@ -110,11 +110,10 @@ struct OnboardingView: View {
 // MARK: - Supporting Views
 struct TypewriterRoles: View {
     private let roles = [
-        "Your Writing Assistant",
-        "Your Vibe-Coding Assistant",
-        "Works Everywhere on Mac with a click",
-        "100% offline & private",
-       
+        String(localized: "Your Writing Assistant"),
+        String(localized: "Your Vibe-Coding Assistant"),
+        String(localized: "Works Everywhere on Mac with a click"),
+        String(localized: "100% offline & private"),
     ]
     
     @State private var displayedText = ""
@@ -132,7 +131,7 @@ struct TypewriterRoles: View {
     var body: some View {
         VStack {
             HStack(spacing: 0) {
-                Text(displayedText)
+                Text(verbatim: displayedText)
                     .font(.system(size: 42, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -147,7 +146,7 @@ struct TypewriterRoles: View {
                     )
                 
                 // Blinking cursor
-                Text("|")
+                Text(verbatim: "|")
                     .font(.system(size: 42, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -232,7 +231,7 @@ struct TypewriterRoles: View {
 }
 
 struct SkipButton: View {
-    let text: String
+    let text: LocalizedStringKey
     let action: () -> Void
     
     var body: some View {

@@ -63,7 +63,7 @@ struct VocabularyView: View {
                     .onSubmit { addWords() }
 
                 InfoTip(
-                    "Names, jargon and product names the model keeps mishearing — add them here and they are passed along as context so it knows to expect them. Separate several with commas. This only takes effect with AI enhancement on; for a guaranteed fix regardless, use a Word Replacement instead.",
+                    String(localized: "Names, jargon and product names the model keeps mishearing — add them here and they are passed along as context so it knows to expect them. Separate several with commas. This only takes effect with AI enhancement on; for a guaranteed fix regardless, use a Word Replacement instead."),
                     doc: .dictionary
                 )
 
@@ -116,7 +116,7 @@ struct VocabularyView: View {
         .alert("Vocabulary", isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(alertMessage)
+            Text(verbatim: alertMessage)
         }
     }
     
@@ -139,7 +139,7 @@ struct VocabularyView: View {
         } catch {
             // Rollback the delete to restore UI consistency
             modelContext.rollback()
-            alertMessage = "Failed to remove word: \(error.localizedDescription)"
+            alertMessage = String(localized: "Failed to remove word: \(error.localizedDescription)")
             showAlert = true
         }
     }
@@ -152,7 +152,7 @@ struct VocabularyWordView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(item.word)
+            Text(verbatim: item.word)
                 .font(.system(size: 13))
                 .lineLimit(1)
                 .foregroundColor(.primary)
