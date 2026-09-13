@@ -38,6 +38,21 @@ enum AXTextReplacer {
         case writeFailed
     }
 
+    /// The text that goes where `pastedText` is: the refinement plus the trailing whitespace the
+    /// paste carried ("Append trailing space"), so the caret still sits after a space and the next
+    /// dictation does not run into this one. Nil when the refinement is what was already pasted.
+    ///
+    /// Comparing the refinement with the paste as-is could never match — the paste ends in a space
+    /// the model never returns — so identical text went through a replacement, and apps that
+    /// refuse the write showed a warning on nearly every dictation.
+    static func replacement(forPasted pastedText: String, refined: String) -> String? {
+        let trailingWhitespace = String(pastedText.reversed().prefix(while: \.isWhitespace).reversed())
+        let pastedCore = String(pastedText.dropLast(trailingWhitespace.count))
+        let refinedCore = refined.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !refinedCore.isEmpty, refinedCore != pastedCore else { return nil }
+        return refinedCore + trailingWhitespace
+    }
+
     /// Re-runs every check against live state. Cheap checks first, so an app switch costs
     /// no cross-process reads at all.
     static func canReplace(_ anchor: AXTextAnchor, with enhanced: String) -> Refusal? {

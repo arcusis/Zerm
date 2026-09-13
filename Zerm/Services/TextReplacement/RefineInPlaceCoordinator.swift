@@ -110,24 +110,29 @@ final class RefineInPlaceCoordinator {
             guard case .enhanced = outcome,
                   let record = modelContext.model(for: recordID) as? Transcription,
                   let refined = record.enhancedText else { return }
-            await self.apply(enhanced: refined, anchor: anchor)
+            await self.apply(refined: refined, pastedText: pastedText, anchor: anchor)
         }
     }
 
     // MARK: - Applying
 
-    private func apply(enhanced: String, anchor: AXTextAnchor?) async {
-        guard let anchor else { return offerWithoutReplacing(enhanced) }
+    private func apply(refined: String, pastedText: String, anchor: AXTextAnchor?) async {
+        // Identical text is not a failure and needs neither a write nor a notification.
+        guard let replacement = AXTextReplacer.replacement(forPasted: pastedText, refined: refined) else {
+            logger.notice("Refine returned the text already pasted")
+            return
+        }
+        guard let anchor else { return offerWithoutReplacing(refined) }
         guard !targetWasEdited, !appWasSwitched else {
             logger.notice("Target changed during refine — leaving the pasted text alone")
-            return offerWithoutReplacing(enhanced)
+            return offerWithoutReplacing(refined)
         }
         // The frontmost-app check has to be read here, on the main actor, before handing
         // the rest off.
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         guard frontmostPID == anchor.pid else {
             logger.notice("Refine declined: appChanged")
-            return offerWithoutReplacing(enhanced)
+            return offerWithoutReplacing(refined)
         }
 
         let strategy = await TargetAppCapabilities.shared.verdict(for: anchor)
@@ -137,22 +142,21 @@ final class RefineInPlaceCoordinator {
         // raw paste alone.
         guard strategy == .directAccessibility else {
             logger.notice("Refine declined: \(String(describing: strategy), privacy: .public)")
-            return offerWithoutReplacing(enhanced)
+            return offerWithoutReplacing(refined)
         }
 
         // Gate checks and the write are both synchronous IPC into the target process.
         // Bounded by the 150 ms messaging timeout, but that is still far too long to spend
         // on the main thread, so the whole exchange happens off it.
         let outcome = await Task.detached(priority: .userInitiated) { () -> Refusal? in
-            if let refusal = AXTextReplacer.canReplace(anchor, with: enhanced) { return refusal }
-            return AXTextReplacer.replace(anchor, with: enhanced) ? nil : .writeFailed
+            if let refusal = AXTextReplacer.canReplace(anchor, with: replacement) { return refusal }
+            return AXTextReplacer.replace(anchor, with: replacement) ? nil : .writeFailed
         }.value
 
         guard let outcome else { return }
         logger.notice("Refine declined: \(outcome.rawValue, privacy: .public)")
-        // Identical text is not a failure and needs no notification.
         guard outcome != .nothingToDo else { return }
-        offerWithoutReplacing(enhanced)
+        offerWithoutReplacing(refined)
     }
 
     private typealias Refusal = AXTextReplacer.Refusal

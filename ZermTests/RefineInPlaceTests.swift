@@ -123,6 +123,31 @@ struct RefineInPlaceTests {
         ) == nil)
     }
 
+    // MARK: - Replacement text
+
+    @Test func replacementKeepsTheTrailingSpaceThePasteAdded() {
+        #expect(AXTextReplacer.replacement(forPasted: "ship the build on friday ", refined: "Ship the build on Friday.") == "Ship the build on Friday. ")
+        #expect(AXTextReplacer.replacement(forPasted: "ship the build on friday", refined: "Ship the build on Friday.") == "Ship the build on Friday.")
+    }
+
+    /// The paste ends in the "Append trailing space" space and the model's answer does not, so a
+    /// plain comparison never matched and unchanged text was written — or warned about — anyway.
+    @Test func identicalRefinementNeedsNoReplacement() {
+        #expect(AXTextReplacer.replacement(forPasted: "Ship the build on Friday. ", refined: "Ship the build on Friday.") == nil)
+        #expect(AXTextReplacer.replacement(forPasted: "Ship the build on Friday. ", refined: "  Ship the build on Friday.\n") == nil)
+        #expect(AXTextReplacer.replacement(forPasted: "שלום לכולם, the build is ready ", refined: "שלום לכולם, the build is ready") == nil)
+    }
+
+    @Test func emptyRefinementNeverReplaces() {
+        #expect(AXTextReplacer.replacement(forPasted: "Ship the build on Friday. ", refined: "  \n") == nil)
+    }
+
+    @Test func replacementMeasuresMixedScriptAndEmojiCorrectly() throws {
+        let replacement = try #require(AXTextReplacer.replacement(forPasted: "תודה 👍 see you ", refined: "תודה 👍, see you!"))
+        #expect(replacement == "תודה 👍, see you! ")
+        #expect(replacement.utf16.count == "תודה 👍, see you!".utf16.count + 1)
+    }
+
     // MARK: - Output mode
 
     @Test func onlyInstantSkipsEnhancement() {
