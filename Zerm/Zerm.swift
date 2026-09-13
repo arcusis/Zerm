@@ -49,6 +49,8 @@ struct ZermApp: App {
 
         if !uiTestConfiguration.isEnabled {
             AppDefaults.registerDefaults()
+            // Meetings was removed in 2.8.6: delete its recordings and preferences once.
+            MeetingDataRemovalMigration.run()
         }
 
         if !uiTestConfiguration.isEnabled,
