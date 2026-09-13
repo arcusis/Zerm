@@ -88,6 +88,8 @@ class CloudTranscriptionService: TranscriptionService {
             return text
         } catch let error as CloudTranscriptionError {
             throw error
+        } catch let error as CustomEndpointError {
+            throw error
         } catch let error as LLMKitError {
             throw mapLLMKitError(error, timeout: timeout)
         } catch {
