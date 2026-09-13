@@ -121,7 +121,7 @@ class FluidAudioTranscriptionService: TranscriptionService {
         do {
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
             let result = try await asrManager.transcribe(speechAudio, decoderState: &decoderState)
-            return TextNormalizer.shared.normalizeSentence(result.text)
+            return result.text
         } catch {
             // CoreML model handles can go stale after the app sits idle and memory is paged
             // out, surfacing as "Unable to compute asynchronous prediction using ML Program".
@@ -132,7 +132,7 @@ class FluidAudioTranscriptionService: TranscriptionService {
             guard let reloadedManager = self.asrManager else { throw error }
             var retryDecoderState = TdtDecoderState.make(decoderLayers: await reloadedManager.decoderLayerCount)
             let result = try await reloadedManager.transcribe(speechAudio, decoderState: &retryDecoderState)
-            return TextNormalizer.shared.normalizeSentence(result.text)
+            return result.text
         }
     }
 
