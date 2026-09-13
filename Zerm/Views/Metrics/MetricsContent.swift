@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct MetricsContent: View {
-    @State private var range: UsageRange = .month
+    @AppStorage("dashboardUsageRange") private var range: UsageRange = .month
     @State private var series = UsageChartSeries.empty
     @State private var rangeTotals = UsageTotals()
     @State private var allTimeTotals = UsageTotals()
@@ -76,7 +76,9 @@ struct MetricsContent: View {
 
         allTimeTotals = UsageStatsService.sum(allDays)
 
-        let buckets = UsageSeries.buckets(for: range, days: rangeDays(from: allDays))
+        // All Time already has every row in hand, so the window is applied in memory rather
+        // than paying for a second fetch.
+        let buckets = UsageSeries.buckets(for: range, days: UsageSeries.days(allDays, in: range))
         rangeTotals = UsageSeries.totals(buckets)
         // Derived once, here. The charts must not recompute any of it while the pointer is
         // moving over them.
@@ -87,13 +89,6 @@ struct MetricsContent: View {
         longestStreak = UsageStatsService.longestStreak(activeDays: activeDays)
 
         isLoadingMetrics = false
-    }
-
-    /// All-time already has every row in hand, so the window is applied in memory
-    /// rather than paying for a second fetch.
-    private func rangeDays(from allDays: [UsageDay]) -> [UsageDay] {
-        guard let window = UsageSeries.fetchRange(for: range) else { return allDays }
-        return allDays.filter { window.contains($0.day) }
     }
 
     private var emptyStateView: some View {
@@ -117,28 +112,18 @@ struct MetricsContent: View {
             HStack {
                 Spacer(minLength: 0)
 
-                (Text("You have saved ")
+                heroHeadline
                     .fontWeight(.bold)
                     .foregroundColor(.white.opacity(0.85))
-                 +
-                 Text(formattedTimeSaved)
-                    .fontWeight(.black)
-                    .font(.system(size: 36, design: .rounded))
-                    .foregroundStyle(.white)
-                 +
-                 Text(" with Zerm")
-                    .fontWeight(.bold)
-                    .foregroundColor(.white.opacity(0.85))
-                )
-                .font(.system(size: 30))
-                .multilineTextAlignment(.center)
+                    .font(.system(size: 30))
+                    .multilineTextAlignment(.center)
 
                 Spacer(minLength: 0)
             }
-            .lineLimit(1)
+            .lineLimit(2)
             .minimumScaleFactor(0.5)
 
-            Text(heroSubtitle)
+            Text(verbatim: heroSubtitle)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.white.opacity(0.85))
                 .multilineTextAlignment(.center)
@@ -182,7 +167,7 @@ struct MetricsContent: View {
                 icon: "mic.fill",
                 title: "Sessions Recorded",
                 value: UsageFormatters.number(rangeTotals.sessions),
-                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.sessions)) all time"),
+                detail: allTimeDetail(UsageFormatters.number(allTimeTotals.sessions)),
                 color: .purple
             )
 
@@ -190,7 +175,7 @@ struct MetricsContent: View {
                 icon: "text.alignleft",
                 title: "Words Dictated",
                 value: UsageFormatters.number(rangeTotals.words),
-                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.words)) all time"),
+                detail: allTimeDetail(UsageFormatters.number(allTimeTotals.words)),
                 color: Color(nsColor: .controlAccentColor)
             )
 
@@ -198,7 +183,7 @@ struct MetricsContent: View {
                 icon: "speedometer",
                 title: "Words Per Minute",
                 value: formattedRate(rangeTotals),
-                detail: allTimeDetail("\(formattedRate(allTimeTotals)) all time"),
+                detail: allTimeDetail(formattedRate(allTimeTotals)),
                 color: .yellow
             )
 
@@ -206,7 +191,7 @@ struct MetricsContent: View {
                 icon: "keyboard.fill",
                 title: "Keystrokes Saved",
                 value: UsageFormatters.number(rangeTotals.keystrokesSaved),
-                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.keystrokesSaved)) all time"),
+                detail: allTimeDetail(UsageFormatters.number(allTimeTotals.keystrokesSaved)),
                 color: .orange
             )
 
@@ -214,15 +199,16 @@ struct MetricsContent: View {
                 icon: "speaker.wave.2.fill",
                 title: "Words Read Aloud",
                 value: UsageFormatters.number(rangeTotals.readAloudWords),
-                detail: allTimeDetail("\(UsageFormatters.number(allTimeTotals.readAloudWords)) all time"),
+                detail: allTimeDetail(UsageFormatters.number(allTimeTotals.readAloudWords)),
                 color: .blue
             )
 
             MetricCard(
                 icon: "flame.fill",
                 title: "Current Streak",
-                value: currentStreak == 1 ? "1 day" : "\(currentStreak) days",
-                detail: longestStreak == 1 ? "Longest 1 day" : "Longest \(longestStreak) days",
+                // Streaks are all-time by definition, whatever range is selected.
+                value: String(localized: "usage_days \(currentStreak)"),
+                detail: String(localized: "usage_longest_streak \(longestStreak)"),
                 color: .red
             )
         }
@@ -237,30 +223,50 @@ struct MetricsContent: View {
     /// The range number on its own is ambiguous, so every card names its window and
     /// carries the lifetime figure beside it.
     private func allTimeDetail(_ lifetime: String) -> String {
-        "\(range.caption) · \(lifetime)"
+        let caption = String(localized: range.caption)
+        guard range != .allTime else { return caption }
+        return String(localized: "\(caption) · \(lifetime) all time")
     }
 
     private func formattedRate(_ totals: UsageTotals) -> String {
-        totals.wordsPerMinute > 0 ? String(format: "%.1f", totals.wordsPerMinute) : "–"
+        totals.wordsPerMinute > 0 ? UsageFormatters.decimal(totals.wordsPerMinute, fractionLength: 1) : "–"
     }
 
-    private var formattedTimeSaved: String {
-        UsageFormatters.duration(
-            allTimeTotals.timeSaved,
-            style: .full,
-            fallback: "Time savings coming soon"
-        )
+    /// One format key per range, so each language can place the figure and the period
+    /// wherever its word order needs them.
+    private var heroHeadline: Text {
+        guard let saved = UsageFormatters.duration(rangeTotals.timeSaved, width: .wide) else {
+            switch range {
+            case .week: return Text("No time saved in the last 7 days")
+            case .month: return Text("No time saved in the last 30 days")
+            case .year: return Text("No time saved in the last 12 months")
+            case .allTime: return Text("No time saved with Zerm yet")
+            }
+        }
+
+        let time = Text(verbatim: saved)
+            .fontWeight(.black)
+            .font(.system(size: 36, design: .rounded))
+            .foregroundColor(.white)
+
+        switch range {
+        case .week: return Text("You saved \(time) with Zerm in the last 7 days")
+        case .month: return Text("You saved \(time) with Zerm in the last 30 days")
+        case .year: return Text("You saved \(time) with Zerm in the last 12 months")
+        case .allTime: return Text("You saved \(time) with Zerm")
+        }
     }
 
     private var heroSubtitle: String {
-        guard allTimeTotals.sessions > 0 else {
-            return "Your Zerm journey starts with your first recording."
+        guard rangeTotals.sessions > 0 else {
+            return range == .allTime
+                ? String(localized: "Your Zerm journey starts with your first recording.")
+                : String(localized: "No dictation in this period.")
         }
 
-        let wordsText = UsageFormatters.number(allTimeTotals.words)
-        let sessionText = allTimeTotals.sessions == 1 ? "session" : "sessions"
-
-        return "Dictated \(wordsText) words across \(allTimeTotals.sessions) \(sessionText), all time."
+        let words = String(localized: "usage_words \(rangeTotals.words)")
+        let sessions = String(localized: "usage_across_sessions \(rangeTotals.sessions)")
+        return String(localized: "Dictated \(words) \(sessions).")
     }
 
     private var heroGradient: LinearGradient {

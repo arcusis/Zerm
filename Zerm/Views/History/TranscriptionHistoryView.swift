@@ -99,7 +99,7 @@ struct TranscriptionHistoryView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This action cannot be undone. Are you sure you want to delete \(selectedTranscriptions.count) item\(selectedTranscriptions.count == 1 ? "" : "s")?")
+            Text("history_delete_confirmation \(selectedTranscriptions.count)")
         }
         .overlay {
             Color.black.opacity(isAnalysisPanelPresented ? 0.1 : 0)
@@ -333,6 +333,7 @@ struct TranscriptionHistoryView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Analyze")
+                .accessibilityLabel("Analyze")
 
                 Button(action: {
                     exportService.exportTranscriptionsToCSV(transcriptions: Array(selectedTranscriptions))
@@ -343,6 +344,7 @@ struct TranscriptionHistoryView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Export")
+                .accessibilityLabel("Export")
 
                 Button(action: { showDeleteConfirmation = true }) {
                     Image(systemName: "trash")
@@ -351,12 +353,13 @@ struct TranscriptionHistoryView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Delete")
+                .accessibilityLabel("Delete")
             }
 
             Spacer()
 
             if !selectedTranscriptions.isEmpty {
-                Text("\(selectedTranscriptions.count) selected")
+                Text("history_selected_count \(selectedTranscriptions.count)")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.secondary)
             }

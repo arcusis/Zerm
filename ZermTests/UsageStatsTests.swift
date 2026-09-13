@@ -81,6 +81,56 @@ struct UsageStatsTests {
         #expect(UsageTotals().wordsPerMinute == 0)
     }
 
+    // MARK: - Range totals
+
+    /// What the dashboard does on reload: filter the rows to the range, bucket them, sum the buckets.
+    private static func rangeTotals(_ range: UsageRange, days: [UsageDay], today: Date) -> UsageTotals {
+        let inRange = UsageSeries.days(days, in: range, today: today, calendar: calendar)
+        return UsageSeries.totals(UsageSeries.buckets(for: range, days: inRange, today: today, calendar: calendar))
+    }
+
+    @Test func rangeTotalsCountOnlyTheSelectedWindow() {
+        let today = Self.date(2026, 3, 15, 12, 0)
+        // Words per row, keyed by how many days before today it was recorded.
+        let wordsByAge = [0: 700, 5: 350, 20: 1400, 200: 3500, 800: 7000]
+        let days = wordsByAge.map { age, words in
+            UsageDay(
+                day: Self.calendar.date(byAdding: .day, value: -age, to: Self.date(2026, 3, 15))!,
+                totals: .session(words: words, recordedSeconds: 60, transcribeSeconds: 1, enhanceSeconds: 0, wasEnhanced: false)
+            )
+        }
+
+        let week = Self.rangeTotals(.week, days: days, today: today)
+        let month = Self.rangeTotals(.month, days: days, today: today)
+        let year = Self.rangeTotals(.year, days: days, today: today)
+        let allTime = Self.rangeTotals(.allTime, days: days, today: today)
+
+        #expect(week.sessions == 2)
+        #expect(week.words == 1050)
+        #expect(month.words == 2450)
+        #expect(year.words == 5950)
+        #expect(allTime.words == 12950)
+        #expect(allTime.sessions == 5)
+
+        // The hero's "time saved" is the range total: 1,050 words at 35 wpm is 1,800s, less the
+        // 120s spent dictating.
+        #expect(abs(week.timeSaved - 1680) < 0.001)
+        #expect(week.timeSaved < month.timeSaved)
+        #expect(allTime == days.reduce(into: UsageTotals()) { $0.add($1.totals) })
+    }
+
+    @Test func rangeTotalsAreEmptyWhenNothingFallsInside() {
+        let today = Self.date(2026, 3, 15)
+        let days = [UsageDay(
+            day: Self.date(2025, 1, 1),
+            totals: .session(words: 500, recordedSeconds: 60, transcribeSeconds: 1, enhanceSeconds: 0, wasEnhanced: false)
+        )]
+
+        #expect(Self.rangeTotals(.week, days: days, today: today) == UsageTotals())
+        #expect(Self.rangeTotals(.month, days: days, today: today) == UsageTotals())
+        #expect(Self.rangeTotals(.allTime, days: days, today: today).words == 500)
+    }
+
     // MARK: - Streaks
 
     @Test func streakCountsConsecutiveDaysEndingToday() {

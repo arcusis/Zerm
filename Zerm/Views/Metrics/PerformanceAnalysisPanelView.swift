@@ -56,6 +56,7 @@ struct PerformanceAnalysisPanelView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close")
         }
     }
 
@@ -66,19 +67,19 @@ struct PerformanceAnalysisPanelView: View {
             sectionHeader("Summary")
 
             HStack(spacing: 10) {
-                summaryPill(icon: "doc.text.fill", value: "\(analysis.totalTranscripts)", label: "Total", color: .indigo)
-                summaryPill(icon: "waveform.path.ecg", value: "\(analysis.totalWithTranscriptionData)", label: "Analyzable", color: .teal)
-                summaryPill(icon: "sparkles", value: "\(analysis.totalEnhancedFiles)", label: "Enhanced", color: .mint)
+                summaryPill(icon: "doc.text.fill", value: analysis.totalTranscripts, label: "Total", color: .indigo)
+                summaryPill(icon: "waveform.path.ecg", value: analysis.totalWithTranscriptionData, label: "Analyzable", color: .teal)
+                summaryPill(icon: "sparkles", value: analysis.totalEnhancedFiles, label: "Enhanced", color: .mint)
             }
         }
     }
 
-    private func summaryPill(icon: String, value: String, label: String, color: Color) -> some View {
+    private func summaryPill(icon: String, value: Int, label: LocalizedStringKey, color: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(color)
-            Text(value)
+            Text(verbatim: UsageFormatters.number(value))
                 .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundColor(.primary)
             Text(label)
@@ -116,13 +117,13 @@ struct PerformanceAnalysisPanelView: View {
         }
     }
 
-    private func infoRow(label: String, value: String) -> some View {
+    private func infoRow(label: LocalizedStringKey, value: String) -> some View {
         HStack {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
             Spacer(minLength: 4)
-            Text(value)
+            Text(verbatim: value)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.primary)
                 .lineLimit(1)
@@ -154,11 +155,11 @@ struct PerformanceAnalysisPanelView: View {
         VStack(spacing: 10) {
             // Model name + count
             VStack(spacing: 2) {
-                Text(modelStat.name)
+                Text(verbatim: modelStat.name)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text("\(modelStat.fileCount) transcripts")
+                Text("usage_transcripts \(modelStat.fileCount)")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -166,7 +167,7 @@ struct PerformanceAnalysisPanelView: View {
 
             // Hero metric
             VStack(spacing: 3) {
-                Text(String(format: "%.1fx", modelStat.speedFactor))
+                Text("speed_factor \(UsageFormatters.decimal(modelStat.speedFactor, fractionLength: 1))")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundColor(.mint)
                 Text("Faster than Real-time")
@@ -180,7 +181,7 @@ struct PerformanceAnalysisPanelView: View {
             // Secondary metrics
             HStack(spacing: 0) {
                 VStack(spacing: 2) {
-                    Text(formatDuration(modelStat.avgAudioDuration))
+                    Text(verbatim: UsageFormatters.duration(modelStat.avgAudioDuration, width: .abbreviated) ?? "–")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(.indigo)
                     Text("Avg. Audio")
@@ -194,7 +195,7 @@ struct PerformanceAnalysisPanelView: View {
                     .frame(width: 1, height: 24)
 
                 VStack(spacing: 2) {
-                    Text(String(format: "%.2fs", modelStat.avgProcessingTime))
+                    Text(verbatim: UsageFormatters.seconds(modelStat.avgProcessingTime, fractionLength: 2))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(.teal)
                     Text("Avg. Processing")
@@ -227,11 +228,11 @@ struct PerformanceAnalysisPanelView: View {
         VStack(spacing: 10) {
             // Model name + count
             VStack(spacing: 2) {
-                Text(modelStat.name)
+                Text(verbatim: modelStat.name)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text("\(modelStat.fileCount) transcripts")
+                Text("usage_transcripts \(modelStat.fileCount)")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -239,7 +240,7 @@ struct PerformanceAnalysisPanelView: View {
 
             // Hero metric
             VStack(spacing: 3) {
-                Text(String(format: "%.2f s", modelStat.avgProcessingTime))
+                Text(verbatim: UsageFormatters.seconds(modelStat.avgProcessingTime, fractionLength: 2))
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundColor(.indigo)
                 Text("Avg. Enhancement Time")
@@ -254,18 +255,44 @@ struct PerformanceAnalysisPanelView: View {
 
     // MARK: - Helpers
 
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(.secondary)
             .textCase(.uppercase)
             .tracking(0.5)
     }
+}
 
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute, .second]
-        formatter.unitsStyle = .abbreviated
-        return formatter.string(from: duration) ?? "0s"
+private struct MetricCardBackground: View {
+    let color: Color
+    
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: color.opacity(0.15), location: 0),
+                        .init(color: Color(NSColor.windowBackgroundColor).opacity(0.1), location: 0.6)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(NSColor.quaternaryLabelColor).opacity(0.3),
+                                Color(NSColor.quaternaryLabelColor).opacity(0.1)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.05), radius: 5, y: 3)
     }
 }

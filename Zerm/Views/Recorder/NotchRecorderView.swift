@@ -8,6 +8,9 @@ struct NotchRecorderView<S: RecorderStateProvider & ObservableObject>: View {
     @AppStorage("showLiveTextPreview") private var showLiveTextPreview = true
     @ObservedObject private var powerModeManager = PowerModeManager.shared
     @State private var activePopover: ActivePopoverState = .none
+    /// Bumped on every screen reconfiguration. The notch metrics come from AppKit, which SwiftUI
+    /// cannot observe, so without this the view keeps the sizes it computed last.
+    @State private var screenGeneration = 0
 
     // MARK: - Display State
 
@@ -32,7 +35,8 @@ struct NotchRecorderView<S: RecorderStateProvider & ObservableObject>: View {
     // MARK: - Screen Geometry
 
     private var notchWidth: CGFloat {
-        guard let screen = NSScreen.main else { return 180 }
+        _ = screenGeneration
+        guard let screen = RecorderScreenResolver.resolve() else { return 180 }
         if let left = screen.auxiliaryTopLeftArea?.width,
            let right = screen.auxiliaryTopRightArea?.width {
             return screen.frame.width - left - right
@@ -41,7 +45,8 @@ struct NotchRecorderView<S: RecorderStateProvider & ObservableObject>: View {
     }
 
     private var notchHeight: CGFloat {
-        guard let screen = NSScreen.main else { return 37 }
+        _ = screenGeneration
+        guard let screen = RecorderScreenResolver.resolve() else { return 37 }
         if screen.safeAreaInsets.top > 0 { return screen.safeAreaInsets.top }
         return NSApplication.shared.mainMenu?.menuBarHeight ?? NSStatusBar.system.thickness
     }
@@ -94,6 +99,9 @@ struct NotchRecorderView<S: RecorderStateProvider & ObservableObject>: View {
                 pill.position(x: geo.size.width / 2, y: pillHeight / 2)
             }
             .animation(pillAnimation, value: displayState)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+                screenGeneration += 1
+            }
         }
     }
 

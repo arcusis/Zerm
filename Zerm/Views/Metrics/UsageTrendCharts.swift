@@ -41,8 +41,10 @@ struct UsageTrendCharts: View {
         VStack(alignment: .leading, spacing: 20) {
             chartCard(
                 title: "Words Dictated",
-                subtitle: range.caption,
-                readout: selectedBucket.map { "\(UsageFormatters.number($0.totals.words)) words" }
+                subtitle: String(localized: range.caption),
+                readout: selectedBucket.map {
+                    String(localized: "usage_words \($0.totals.words)")
+                }
             ) {
                 wordsChart
             }
@@ -50,11 +52,11 @@ struct UsageTrendCharts: View {
             if series.hasRateSeries {
                 chartCard(
                     title: "Words Per Minute",
-                    subtitle: "Dictation speed, \(range.caption.lowercased())",
-                    readout: selectedBucket.flatMap { bucket in
+                    subtitle: String(localized: "Dictation speed · \(String(localized: range.caption))"),
+                    readout: selectedBucket.map { bucket in
                         bucket.totals.recordedSeconds > 0
-                            ? String(format: "%.0f wpm", bucket.totals.wordsPerMinute)
-                            : "No dictation"
+                            ? String(localized: "\(UsageFormatters.decimal(bucket.totals.wordsPerMinute, fractionLength: 0)) wpm")
+                            : String(localized: "No dictation")
                     }
                 ) {
                     rateChart
@@ -107,7 +109,7 @@ struct UsageTrendCharts: View {
                 )
                 .opacity(0)
                 .annotation(position: .top, spacing: 4) {
-                    Text(UsageFormatters.number(bucket.totals.words))
+                    Text(verbatim: UsageFormatters.number(bucket.totals.words))
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
                 }
@@ -145,7 +147,7 @@ struct UsageTrendCharts: View {
                 .foregroundStyle(UsageChartPalette.rate)
                 .annotation(position: .top, spacing: 4) {
                     if point.isLast && labelsLastPoint {
-                        Text(String(format: "%.0f", point.wordsPerMinute))
+                        Text(verbatim: UsageFormatters.decimal(point.wordsPerMinute, fractionLength: 0))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.secondary)
                     }
@@ -210,7 +212,7 @@ struct UsageTrendCharts: View {
     // MARK: - Card chrome
 
     private func chartCard<Content: View>(
-        title: String,
+        title: LocalizedStringKey,
         subtitle: String,
         readout: String?,
         @ViewBuilder content: () -> Content
@@ -220,7 +222,7 @@ struct UsageTrendCharts: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
-                    Text(subtitle)
+                    Text(verbatim: subtitle)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
@@ -229,10 +231,10 @@ struct UsageTrendCharts: View {
 
                 if let selectedBucket {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(bucketLabel(selectedBucket.start))
+                        Text(verbatim: bucketLabel(selectedBucket.start))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
-                        Text(readout ?? "–")
+                        Text(verbatim: readout ?? "–")
                             .font(.system(size: 12, weight: .semibold))
                             .monospacedDigit()
                     }
@@ -287,7 +289,7 @@ private struct UsageDataTable: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Sessions").frame(width: 70, alignment: .trailing)
             Text("Words").frame(width: 70, alignment: .trailing)
-            Text("WPM").frame(width: 60, alignment: .trailing)
+            Text("WPM").frame(width: 80, alignment: .trailing)
         }
         .font(.system(size: 11, weight: .semibold))
         .foregroundColor(.secondary)
@@ -296,16 +298,16 @@ private struct UsageDataTable: View {
 
     private func row(_ bucket: UsageBucket) -> some View {
         HStack {
-            Text(bucket.start.formatted(range.isMonthly
+            Text(bucket.start, format: range.isMonthly
                 ? .dateTime.month(.abbreviated).year()
-                : .dateTime.month(.abbreviated).day()))
+                : .dateTime.month(.abbreviated).day())
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("\(bucket.totals.sessions)").frame(width: 70, alignment: .trailing)
-            Text(UsageFormatters.number(bucket.totals.words)).frame(width: 70, alignment: .trailing)
-            Text(bucket.totals.recordedSeconds > 0
-                ? String(format: "%.0f", bucket.totals.wordsPerMinute)
+            Text(verbatim: UsageFormatters.number(bucket.totals.sessions)).frame(width: 70, alignment: .trailing)
+            Text(verbatim: UsageFormatters.number(bucket.totals.words)).frame(width: 70, alignment: .trailing)
+            Text(verbatim: bucket.totals.recordedSeconds > 0
+                ? UsageFormatters.decimal(bucket.totals.wordsPerMinute, fractionLength: 0)
                 : "–")
-                .frame(width: 60, alignment: .trailing)
+                .frame(width: 80, alignment: .trailing)
         }
         .font(.system(size: 11))
         .monospacedDigit()

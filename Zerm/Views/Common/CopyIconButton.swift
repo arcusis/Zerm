@@ -15,6 +15,7 @@ struct CopyIconButton: View {
         }
         .buttonStyle(.plain)
         .help("Copy to clipboard")
+        .accessibilityLabel(copied ? "Copied" : "Copy to clipboard")
     }
 
     private func copy() {

@@ -30,10 +30,10 @@ class MiniRecorderPanel: NSPanel {
         standardWindowButton(.closeButton)?.isHidden = true
     }
     
-    static func calculateWindowMetrics() -> NSRect {
-        guard let screen = NSScreen.main else {
-            return NSRect(x: 0, y: 0, width: 300, height: 120)
-        }
+    /// `nil` when there is no screen at all, so the panel is skipped rather than placed at the
+    /// global origin.
+    static func calculateWindowMetrics() -> NSRect? {
+        guard let screen = RecorderScreenResolver.resolve() else { return nil }
 
         // Fixed window size — large enough to accommodate live transcript content
         let width: CGFloat = 300
@@ -54,7 +54,7 @@ class MiniRecorderPanel: NSPanel {
     }
 
     func show() {
-        let metrics = MiniRecorderPanel.calculateWindowMetrics()
+        guard let metrics = MiniRecorderPanel.calculateWindowMetrics() else { return }
         setFrame(metrics, display: true)
         orderFrontRegardless()
     }
