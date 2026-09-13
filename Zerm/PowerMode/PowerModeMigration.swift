@@ -10,15 +10,16 @@ import os
 ///
 /// 1. An interrupted session snapshot (`powerModeActiveSession.v1`). 2.8.5 restored it on the next
 ///    launch; this does the same once, because 2.8.6 no longer has sessions to restore.
-/// 2. Configs full of frozen values. The heuristic that clears them:
-///    - The three seeded configs (General, Code, Writing) never had a user-chosen model, language,
-///      prompt, provider, AI model or formatting value, so all of those are cleared.
-///    - For user configs the formatting fields had no UI, so a value equal to what the old
-///      initializer wrote (off / keep / off) is cleared. `PowerModeConfig`'s decoder does this.
-///    - A user config's model, language, prompt or provider that equals the current global value
-///      is cleared: dictation behaves exactly as it does today, and now follows future changes.
-///      A value that differs is kept, because it may be a choice made in the editor.
+/// 2. Configs full of frozen values. The heuristic that clears them, for every config:
+///    - The formatting fields had no UI, so a value equal to what the old initializer wrote
+///      (off / keep / off) is cleared.
+///    - A model, language, prompt, provider or AI model that equals the current global value is
+///      cleared: dictation behaves exactly as it does today, and now follows future changes. A value
+///      that differs is kept, because it may be a choice made in the editor.
+///    - The seeded configs (General, Code, Writing) could be edited too, so they follow the same
+///      rules, plus: the Default prompt and "en", which seeding wrote into all three, are cleared.
 ///    - A provider that only transcribes (ElevenLabs, Deepgram, …) is cleared; it cannot enhance.
+///      An On-Device model name is cleared: 2.8.5 stored the Read Aloud model there and ignored it.
 ///    - The legacy enhancement override becomes an output-mode override: "always off" is Instant,
 ///      "always on" keeps today's behaviour against the output mode and toggle in effect now.
 ///
@@ -135,50 +136,60 @@ enum PowerModeMigration {
 
     /// Operates on raw JSON so the result does not depend on how `PowerModeConfig` decodes
     /// legacy fields, and so it composes with other raw-JSON migrations of the same key.
+    ///
+    /// Every override is written in the 2.8.6 shape, `null` included, so nothing is left for the
+    /// decoder to guess from a legacy field — a leftover `isAIEnhancementEnabled` would otherwise
+    /// turn enhancement on for that app.
     static func migrate(_ configs: [[String: Any]], globals: Globals) -> [[String: Any]] {
         configs.map { original in
             var config = original
             let isSeeded = (config["id"] as? String).flatMap(UUID.init(uuidString:)).map(seededIDs.contains) ?? false
 
-            if config["outputMode"] == nil {
-                let legacyOverride = config["enhancementOverride"] as? String
-                    ?? ((config["isAIEnhancementEnabled"] as? Bool) == true ? "on" : "inherit")
-                switch legacyOverride {
-                case "off":
-                    config["outputMode"] = DictationOutputMode.instant.rawValue
-                case "on" where globals.outputMode != .instant && !globals.enhancementEnabled:
-                    // The only case where "always on" changed anything: the toggle was off but
-                    // the mode would have enhanced.
-                    config["outputMode"] = globals.outputMode.rawValue
-                default:
-                    break
-                }
-            }
-            config.removeValue(forKey: "enhancementOverride")
-
-            if isSeeded {
-                for key in ["selectedTranscriptionModelName", "selectedWhisperModel", "selectedLanguage",
-                            "selectedPrompt", "selectedAIProvider", "selectedAIModel",
-                            "isTextFormattingEnabled", "punctuationCleanupMode", "removePunctuation",
-                            "lowercaseTranscription"] {
-                    config.removeValue(forKey: key)
-                }
+            if config.keys.contains("outputMode") {
+                // Already in the 2.8.6 shape.
                 return config
             }
 
+            config["outputMode"] = outputMode(for: config, globals: globals)?.rawValue ?? NSNull()
+            config["contextAwareness"] = (config["useScreenCapture"] as? Bool) == true ? true : NSNull()
+            // Formatting had no UI, so off / keep / off is what the old initializer wrote, not a choice.
+            config["textFormatting"] = (config["isTextFormattingEnabled"] as? Bool) == true ? true : NSNull()
+            let punctuation = (config["punctuationCleanupMode"] as? String).flatMap(PunctuationCleanupMode.init(rawValue:))
+                ?? ((config["removePunctuation"] as? Bool) == true ? .removeAll : .keep)
+            config["punctuationCleanup"] = punctuation == .keep ? NSNull() : punctuation.rawValue
+            config["lowercase"] = (config["lowercaseTranscription"] as? Bool) == true ? true : NSNull()
+            for key in ["enhancementOverride", "isTextFormattingEnabled", "punctuationCleanupMode",
+                        "removePunctuation", "lowercaseTranscription"] {
+                config.removeValue(forKey: key)
+            }
+            // Kept only for the 2.8.5 decoder, which requires them.
+            config["isAIEnhancementEnabled"] = (config["outputMode"] as? String)
+                .flatMap(DictationOutputMode.init(rawValue:))?.usesEnhancement == true
+            config["useScreenCapture"] = (config["contextAwareness"] as? Bool) == true
+
+            if let legacyModel = config.removeValue(forKey: "selectedWhisperModel"), config["selectedTranscriptionModelName"] == nil {
+                config["selectedTranscriptionModelName"] = legacyModel
+            }
             if let model = config["selectedTranscriptionModelName"] as? String, model == globals.transcriptionModelName {
                 config.removeValue(forKey: "selectedTranscriptionModelName")
             }
-            if let language = config["selectedLanguage"] as? String, language == globals.language {
+            if let language = config["selectedLanguage"] as? String,
+               language == globals.language || (isSeeded && language == "en") {
+                // Seeding wrote "en" into all three configs.
                 config.removeValue(forKey: "selectedLanguage")
             }
-            if let prompt = config["selectedPrompt"] as? String, prompt == globals.promptId {
+            if let prompt = config["selectedPrompt"] as? String,
+               prompt == globals.promptId || (isSeeded && prompt == PredefinedPrompts.defaultPromptId.uuidString) {
+                // Seeding wrote the Default prompt into all three configs.
                 config.removeValue(forKey: "selectedPrompt")
             }
             if let provider = config["selectedAIProvider"] as? String {
                 let isTranscriptionOnly = AIProvider(rawValue: provider)?.isTranscriptionOnly ?? true
                 if isTranscriptionOnly || provider == globals.aiProvider {
                     config.removeValue(forKey: "selectedAIProvider")
+                } else if provider == AIProvider.localLLM.rawValue {
+                    // 2.8.5 stored the Read Aloud model's name here and never used it.
+                    config.removeValue(forKey: "selectedAIModel")
                 } else if let model = config["selectedAIModel"] as? String, model == globals.aiModelForProvider(provider) {
                     config.removeValue(forKey: "selectedAIModel")
                 }
@@ -187,6 +198,22 @@ enum PowerModeMigration {
                 config.removeValue(forKey: "selectedAIModel")
             }
             return config
+        }
+    }
+
+    /// "Always off" is Instant. "Always on" only changed anything while the enhancement toggle was
+    /// off and the output mode would have enhanced; that case keeps the mode it had, everything
+    /// else inherits.
+    private static func outputMode(for config: [String: Any], globals: Globals) -> DictationOutputMode? {
+        let legacyOverride = config["enhancementOverride"] as? String
+            ?? ((config["isAIEnhancementEnabled"] as? Bool) == true ? "on" : "inherit")
+        switch legacyOverride {
+        case "off":
+            return .instant
+        case "on" where globals.outputMode != .instant && !globals.enhancementEnabled:
+            return globals.outputMode
+        default:
+            return nil
         }
     }
 }

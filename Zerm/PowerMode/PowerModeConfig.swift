@@ -109,14 +109,15 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
 
         // Legacy configs store values that were never a choice: the toggles were seeded `false`
         // and the formatting fields had no UI. Only a value that changes something survives as an
-        // override. Stored configs pass through `PowerModeMigration` first, which also maps a
-        // legacy "always on" against the output mode that was active at the time.
+        // override. Stored configs pass through `PowerModeMigration` first, which maps a legacy
+        // "always on" against the output mode that was active at the time. Here — an imported
+        // 2.8.5 settings file — "always on" cannot be resolved and inherits: turning AI on for an
+        // app from ambiguous data could send dictation to a cloud provider the user never chose.
         if container.contains(.outputMode) {
             outputMode = try container.decodeIfPresent(DictationOutputMode.self, forKey: .outputMode)
         } else {
             let legacyOverride = try container.decodeIfPresent(String.self, forKey: .enhancementOverride)
-            let legacyEnabled = try container.decodeIfPresent(Bool.self, forKey: .isAIEnhancementEnabled) ?? false
-            outputMode = Self.outputMode(forLegacyOverride: legacyOverride ?? (legacyEnabled ? "on" : "inherit"))
+            outputMode = legacyOverride == "off" ? .instant : nil
         }
         if container.contains(.contextAwareness) {
             contextAwareness = try container.decodeIfPresent(Bool.self, forKey: .contextAwareness)
@@ -173,16 +174,6 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         // every Power Mode and reseed the defaults.
         try container.encode(outputMode?.usesEnhancement == true, forKey: .isAIEnhancementEnabled)
         try container.encode(contextAwareness == true, forKey: .useScreenCapture)
-    }
-
-    /// The legacy tri-state has no output mode of its own. "Always on" becomes Instant + Refine
-    /// here; `PowerModeMigration` resolves it against the mode that was active when it runs.
-    static func outputMode(forLegacyOverride override: String) -> DictationOutputMode? {
-        switch override {
-        case "off": return .instant
-        case "on": return .instantRefine
-        default: return nil
-        }
     }
 
     static func == (lhs: PowerModeConfig, rhs: PowerModeConfig) -> Bool {

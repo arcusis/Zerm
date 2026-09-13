@@ -180,33 +180,42 @@ final class LocalLLMModelManager: ObservableObject {
     }
 
     /// Package for a job.
-    ///
-    /// Enhancement uses exactly the enhancement model the user picked. Without a pick it uses the
-    /// default, or the first enhancement model already on disk. It never borrows the Read Aloud
-    /// model: some of those are unfit for cleanup, and the picker would not show it as selected.
     nonisolated static func package(for role: LocalLLMRole) -> LocalLLMPackage {
         switch role {
         case .reading:
             return current
         case .enhancement:
-            let enhancementPackages = packages(for: .enhancement)
-            let saved = UserDefaults.standard.string(forKey: enhancementModelKey)
-            if let selected = enhancementPackages.first(where: { $0.fileName == saved }) {
-                return selected
-            }
-            if isDownloadedOnDisk(enhancementDefaultPackage) {
-                return enhancementDefaultPackage
-            }
-            return enhancementPackages.first(where: isDownloadedOnDisk) ?? enhancementDefaultPackage
+            return enhancementPackage(
+                saved: UserDefaults.standard.string(forKey: enhancementModelKey),
+                reading: current,
+                isDownloaded: isDownloadedOnDisk
+            )
         }
     }
 
-    /// An enhancement package by display name or file name — the forms a Power Mode or prompt
-    /// stores — falling back to the selected enhancement model when `name` is not one of them.
-    nonisolated static func enhancementPackage(named name: String) -> LocalLLMPackage? {
+    /// The enhancement model to use: the user's pick while it is on disk, else the default, else
+    /// the installed Read Aloud model when it can also enhance (Gemma 4 E2B is both jobs' default,
+    /// and is the only model many installs have), else any installed enhancement model. A model
+    /// that is only fit for Read Aloud is never borrowed. With nothing installed, the pick or the
+    /// default is returned so settings can offer its download.
+    nonisolated static func enhancementPackage(
+        saved: String?,
+        reading: LocalLLMPackage,
+        isDownloaded: (LocalLLMPackage) -> Bool
+    ) -> LocalLLMPackage {
         let enhancementPackages = packages(for: .enhancement)
-        return enhancementPackages.first { $0.displayName == name || $0.fileName == name }
-            ?? (name.isEmpty ? package(for: .enhancement) : nil)
+        let selected = enhancementPackages.first { $0.fileName == saved }
+        if let selected, isDownloaded(selected) { return selected }
+        if isDownloaded(enhancementDefaultPackage) { return enhancementDefaultPackage }
+        if reading.jobs.contains(.enhancement), isDownloaded(reading) { return reading }
+        return enhancementPackages.first(where: isDownloaded) ?? selected ?? enhancementDefaultPackage
+    }
+
+    /// An enhancement package by the display or file name a prompt or Power Mode stores. Any other
+    /// name — a Read Aloud model 2.8.5 saved there — resolves to the enhancement model in use.
+    nonisolated static func enhancementPackage(named name: String) -> LocalLLMPackage {
+        packages(for: .enhancement).first { $0.displayName == name || $0.fileName == name }
+            ?? package(for: .enhancement)
     }
 
     nonisolated static func isDownloaded(_ package: LocalLLMPackage) -> Bool {
@@ -262,6 +271,8 @@ final class LocalLLMModelManager: ObservableObject {
             set.insert(package.fileName)
         }
         installedFiles = set
+        // Which enhancement model is in use depends on what is on disk.
+        enhancementFileName = Self.package(for: .enhancement).fileName
     }
 
     func isDownloaded(_ package: LocalLLMPackage) -> Bool { installedFiles.contains(package.fileName) }

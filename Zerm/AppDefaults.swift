@@ -173,7 +173,11 @@ enum AppDefaults {
         PowerModeMigration.run(defaults: defaults)
 
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 7 {
-            DictationOutputMode.migrateLegacyEnhancementToggle(in: defaults)
+            DictationOutputMode.migrateLegacyEnhancementToggle(
+                in: defaults,
+                onDeviceEnhancementInstalled: LocalLLMModelManager.packages(for: .enhancement)
+                    .contains(where: LocalLLMModelManager.isDownloaded)
+            )
             AIService.migrateOllamaModelKey(in: defaults)
             // Power Modes no longer change global settings, so nothing is left to persist.
             defaults.removeObject(forKey: "powerModePersistConfig")

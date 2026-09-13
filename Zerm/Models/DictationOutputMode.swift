@@ -97,13 +97,21 @@ enum DictationOutputMode: String, Codable, CaseIterable, Identifiable {
     /// mode that enhances with the switch off becomes Instant, and the mode it had is remembered so
     /// switching enhancement back on returns to it. Reads the registered-default fallbacks the old
     /// keys had. Removes `isAIEnhancementEnabled` and the `InstantTranscriptionMode` mirror.
-    static func migrateLegacyEnhancementToggle(in defaults: UserDefaults) {
+    ///
+    /// Untouched defaults — Instant + Refine on the On-Device provider with no enhancement model
+    /// downloaded — silently behaved as Instant in 2.8.5. Those installs become Instant, so they
+    /// see no new "model missing" warnings, and turning enhancement on returns to Instant + Refine.
+    static func migrateLegacyEnhancementToggle(in defaults: UserDefaults, onDeviceEnhancementInstalled: Bool) {
         let enabled = defaults.object(forKey: "isAIEnhancementEnabled") as? Bool ?? true
         let mode = DictationOutputMode(rawValue: defaults.string(forKey: storageKey) ?? "") ?? .instantRefine
         if mode.usesEnhancement {
             defaults.set(mode.rawValue, forKey: lastEnhancingModeKey)
         }
-        defaults.set((enabled ? mode : .instant).rawValue, forKey: storageKey)
+        let provider = defaults.string(forKey: "selectedAIProvider") ?? AIProvider.localLLM.rawValue
+        let silentlyInstant = mode == .instantRefine
+            && provider == AIProvider.localLLM.rawValue
+            && !onDeviceEnhancementInstalled
+        defaults.set((enabled && !silentlyInstant ? mode : .instant).rawValue, forKey: storageKey)
         defaults.removeObject(forKey: "isAIEnhancementEnabled")
         defaults.removeObject(forKey: "InstantTranscriptionMode")
     }

@@ -276,9 +276,7 @@ class AIService: ObservableObject {
     func endpoint(for provider: AIProvider, model: String) -> Result<EnhancementEndpoint, EnhancementUnavailableReason> {
         switch provider {
         case .localLLM:
-            guard let package = LocalLLMModelManager.enhancementPackage(named: model) else {
-                return .failure(.onDeviceModelMissing(modelName: model))
-            }
+            let package = LocalLLMModelManager.enhancementPackage(named: model)
             guard LocalLLMModelManager.isDownloaded(package) else {
                 return .failure(.onDeviceModelMissing(modelName: package.displayName))
             }

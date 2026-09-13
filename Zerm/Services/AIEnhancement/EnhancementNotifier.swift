@@ -3,9 +3,10 @@ import Foundation
 /// Makes every enhancement the user expected but did not get visible.
 ///
 /// Dictation that silently pastes raw text while enhancement is switched on is indistinguishable
-/// from enhancement being broken. Automatic dictation reports are rate-limited per reason, so a
-/// provider that stays unconfigured produces one notification, not one per sentence. Manual
-/// actions from History always report.
+/// from enhancement being broken. Automatic dictation reports are limited: a setup problem (no
+/// model, no key) is reported once per launch for each reason, and transient failures (timeout,
+/// unreachable provider, rejected result) at most once every quiet period. Manual actions from
+/// History always report.
 @MainActor
 final class EnhancementNotifier {
     static let shared = EnhancementNotifier()
@@ -39,8 +40,9 @@ final class EnhancementNotifier {
         }
         if purpose != .manual {
             let time = now()
-            if let last = lastShown[key], time.timeIntervalSince(last) < quietPeriod {
-                return false
+            if let last = lastShown[key] {
+                if case .skipped(.notConfigured) = outcome { return false }
+                if time.timeIntervalSince(last) < quietPeriod { return false }
             }
             lastShown[key] = time
         }
@@ -51,7 +53,7 @@ final class EnhancementNotifier {
     static func rateLimitKey(for outcome: EnhancementOutcome) -> String? {
         switch outcome {
         case .enhanced, .cancelled, .skipped(.shortTranscription): return nil
-        case .skipped(.notConfigured): return "notConfigured"
+        case .skipped(.notConfigured(let reason)): return "notConfigured:\(reason)"
         case .failed(.providerUnreachable): return "unreachable"
         case .failed(.timeout): return "timeout"
         case .failed: return "failed"

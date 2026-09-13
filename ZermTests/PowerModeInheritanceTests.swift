@@ -94,6 +94,20 @@ struct PowerModeInheritanceTests {
         #expect(config.contextAwareness == true)
     }
 
+    /// An imported 2.8.5 file cannot say what "always on" meant; it must never turn AI on.
+    @Test func legacyAlwaysOnDecodesAsInherit() throws {
+        let config = try decode("""
+        {"id":"\(UUID().uuidString)","name":"Mail","emoji":"✉️",
+         "isAIEnhancementEnabled":true,"enhancementOverride":"on","useScreenCapture":false}
+        """)
+        #expect(config.outputMode == nil)
+        let boolOnly = try decode("""
+        {"id":"\(UUID().uuidString)","name":"Mail","emoji":"✉️",
+         "isAIEnhancementEnabled":true,"useScreenCapture":false}
+        """)
+        #expect(boolOnly.outputMode == nil)
+    }
+
     // MARK: - Migration
 
     private func globals(
@@ -115,34 +129,73 @@ struct PowerModeInheritanceTests {
         )
     }
 
+    /// Migrates legacy dictionaries and decodes the result the way `PowerModeManager` loads it.
+    private func migrateAndDecode(
+        _ legacy: [[String: Any]],
+        globals: PowerModeMigration.Globals
+    ) throws -> [PowerModeConfig] {
+        let migrated = PowerModeMigration.migrate(legacy, globals: globals)
+        let data = try JSONSerialization.data(withJSONObject: migrated)
+        let decoded = try JSONDecoder().decode([PowerModeConfig].self, from: data)
+        // Saving and loading again must not change anything.
+        let reloaded = try JSONDecoder().decode([PowerModeConfig].self, from: JSONEncoder().encode(decoded))
+        for (first, second) in zip(decoded, reloaded) {
+            #expect(first.outputMode == second.outputMode)
+            #expect(first.contextAwareness == second.contextAwareness)
+            #expect(first.selectedAIProvider == second.selectedAIProvider)
+        }
+        return decoded
+    }
+
+    /// What 2.8.5 wrote when it seeded General, Code and Writing with the global model frozen in.
     private func legacySeed(_ id: UUID) -> [String: Any] {
         [
             "id": id.uuidString, "name": "General", "emoji": "⚡",
             "isAIEnhancementEnabled": false, "enhancementOverride": "inherit",
             "selectedPrompt": PredefinedPrompts.defaultPromptId.uuidString,
-            "selectedLanguage": "en", "selectedTranscriptionModelName": "ggml-large-v3-turbo",
-            "selectedAIProvider": "On-Device", "useScreenCapture": false,
+            "selectedLanguage": "en", "selectedTranscriptionModelName": "parakeet-tdt-0.6b-v3",
+            "selectedAIProvider": "OpenAI", "useScreenCapture": false,
             "isTextFormattingEnabled": false, "punctuationCleanupMode": "keep",
             "removePunctuation": false, "lowercaseTranscription": false, "isDefault": true
         ]
     }
 
-    @Test func seededConfigsInheritEverything() throws {
+    @Test func seededConfigsInheritWhatSeedingWrote() throws {
         for id in PowerModeMigration.seededIDs {
-            let migrated = PowerModeMigration.migrate([legacySeed(id)], globals: globals())
-            let data = try JSONSerialization.data(withJSONObject: migrated)
-            let config = try #require(try JSONDecoder().decode([PowerModeConfig].self, from: data).first)
+            let config = try #require(try migrateAndDecode([legacySeed(id)], globals: globals(prompt: nil)).first)
             #expect(config.selectedTranscriptionModelName == nil)
             #expect(config.selectedLanguage == nil)
             #expect(config.selectedPrompt == nil)
             #expect(config.selectedAIProvider == nil)
             #expect(config.selectedAIModel == nil)
             #expect(config.outputMode == nil)
+            #expect(config.contextAwareness == nil)
             #expect(config.isTextFormattingEnabled == nil)
             #expect(config.punctuationCleanupMode == nil)
             #expect(config.lowercaseTranscription == nil)
             #expect(config.isDefault)
         }
+    }
+
+    /// 2.8.5 let users edit the seeded configs; those edits survive.
+    @Test func editedSeededConfigsKeepTheUsersChoices() throws {
+        var edited = legacySeed(PowerModeMigration.seededCodeID)
+        edited["selectedPrompt"] = PredefinedPrompts.codingPromptId.uuidString
+        edited["selectedLanguage"] = "he"
+        edited["selectedTranscriptionModelName"] = "ggml-large-v3-turbo"
+        edited["selectedAIProvider"] = "Anthropic"
+        edited["selectedAIModel"] = "claude-haiku-4-5"
+        edited["enhancementOverride"] = "off"
+        edited["punctuationCleanupMode"] = "removeTrailingPeriod"
+
+        let config = try #require(try migrateAndDecode([edited], globals: globals()).first)
+        #expect(config.selectedPrompt == PredefinedPrompts.codingPromptId.uuidString)
+        #expect(config.selectedLanguage == "he")
+        #expect(config.selectedTranscriptionModelName == "ggml-large-v3-turbo")
+        #expect(config.selectedAIProvider == "Anthropic")
+        #expect(config.selectedAIModel == "claude-haiku-4-5")
+        #expect(config.outputMode == .instant)
+        #expect(config.punctuationCleanupMode == .removeTrailingPeriod)
     }
 
     @Test func userConfigsDropValuesEqualToTheGlobalSetting() throws {
@@ -155,14 +208,13 @@ struct PowerModeInheritanceTests {
             "selectedAIProvider": "OpenAI", "selectedAIModel": "gpt-5.4",
             "isTextFormattingEnabled": false, "punctuationCleanupMode": "keep", "lowercaseTranscription": false
         ]
-        let migrated = PowerModeMigration.migrate([legacy], globals: globals())
-        let data = try JSONSerialization.data(withJSONObject: migrated)
-        let config = try #require(try JSONDecoder().decode([PowerModeConfig].self, from: data).first)
+        let config = try #require(try migrateAndDecode([legacy], globals: globals()).first)
         #expect(config.selectedTranscriptionModelName == nil)
         #expect(config.selectedLanguage == nil)
         #expect(config.selectedPrompt == nil)
         #expect(config.selectedAIProvider == nil)
         #expect(config.selectedAIModel == nil)
+        #expect(config.outputMode == nil)
         #expect(config.isTextFormattingEnabled == nil)
     }
 
@@ -170,16 +222,14 @@ struct PowerModeInheritanceTests {
         let chatPrompt = PredefinedPrompts.chatPromptId.uuidString
         let legacy: [String: Any] = [
             "id": UUID().uuidString, "name": "Mail", "emoji": "✉️",
-            "isAIEnhancementEnabled": true, "useScreenCapture": true,
+            "isAIEnhancementEnabled": false, "useScreenCapture": true,
             "selectedTranscriptionModelName": "ggml-large-v3-turbo",
             "selectedLanguage": "he",
             "selectedPrompt": chatPrompt,
             "selectedAIProvider": "Anthropic", "selectedAIModel": "claude-haiku-4-5",
             "lowercaseTranscription": true
         ]
-        let migrated = PowerModeMigration.migrate([legacy], globals: globals())
-        let data = try JSONSerialization.data(withJSONObject: migrated)
-        let config = try #require(try JSONDecoder().decode([PowerModeConfig].self, from: data).first)
+        let config = try #require(try migrateAndDecode([legacy], globals: globals()).first)
         #expect(config.selectedTranscriptionModelName == "ggml-large-v3-turbo")
         #expect(config.selectedLanguage == "he")
         #expect(config.selectedPrompt == chatPrompt)
@@ -192,29 +242,59 @@ struct PowerModeInheritanceTests {
     @Test func transcriptionOnlyProvidersAreCleared() throws {
         let legacy: [String: Any] = [
             "id": UUID().uuidString, "name": "Notes", "emoji": "📝",
-            "isAIEnhancementEnabled": true, "useScreenCapture": false,
+            "isAIEnhancementEnabled": false, "useScreenCapture": false,
             "selectedAIProvider": "ElevenLabs", "selectedAIModel": "scribe_v1"
         ]
-        let migrated = PowerModeMigration.migrate([legacy], globals: globals())
-        #expect(migrated.first?["selectedAIProvider"] == nil)
-        #expect(migrated.first?["selectedAIModel"] == nil)
+        let config = try #require(try migrateAndDecode([legacy], globals: globals()).first)
+        #expect(config.selectedAIProvider == nil)
+        #expect(config.selectedAIModel == nil)
     }
 
-    /// "Always on" only did something while the global toggle was off; that behaviour is kept
-    /// as an explicit output mode, and otherwise it inherits.
-    @Test func legacyAlwaysOnKeepsTodaysBehaviour() {
+    /// 2.8.5 stored the Read Aloud model's name for On-Device and never used it.
+    @Test func onDeviceModelNamesAreCleared() throws {
+        let legacy: [String: Any] = [
+            "id": UUID().uuidString, "name": "Notes", "emoji": "📝",
+            "isAIEnhancementEnabled": false, "useScreenCapture": false,
+            "selectedAIProvider": "On-Device", "selectedAIModel": "Gemma 3 1B"
+        ]
+        let config = try #require(try migrateAndDecode([legacy], globals: globals()).first)
+        #expect(config.selectedAIProvider == "On-Device")
+        #expect(config.selectedAIModel == nil)
+    }
+
+    /// "Always on" only did something while the global toggle was off; that behaviour is kept as an
+    /// explicit output mode. Otherwise it inherits — it must never switch an app to Refine, or send
+    /// an Instant user's dictation to a cloud provider.
+    @Test func legacyAlwaysOnKeepsTodaysBehaviour() throws {
         let alwaysOn: [String: Any] = [
             "id": UUID().uuidString, "name": "Mail", "emoji": "✉️",
-            "isAIEnhancementEnabled": true, "enhancementOverride": "on", "useScreenCapture": false
+            "isAIEnhancementEnabled": true, "enhancementOverride": "on", "useScreenCapture": false,
+            "selectedAIProvider": "Anthropic", "selectedPrompt": PredefinedPrompts.chatPromptId.uuidString
         ]
-        let toggleOff = PowerModeMigration.migrate([alwaysOn], globals: globals(mode: .enhanced, enabled: false))
-        #expect(toggleOff.first?["outputMode"] as? String == "enhanced")
+        let toggleOff = try migrateAndDecode([alwaysOn], globals: globals(mode: .enhanced, enabled: false))
+        #expect(toggleOff.first?.outputMode == .enhanced)
 
-        let toggleOn = PowerModeMigration.migrate([alwaysOn], globals: globals(mode: .enhanced, enabled: true))
-        #expect(toggleOn.first?["outputMode"] == nil)
+        let globalEnhanced = try migrateAndDecode([alwaysOn], globals: globals(mode: .enhanced, enabled: true))
+        #expect(globalEnhanced.first?.outputMode == nil)
+        #expect(globalEnhanced.first?.configuredOrGlobal(.enhanced) == .enhanced)
 
-        let instant = PowerModeMigration.migrate([alwaysOn], globals: globals(mode: .instant, enabled: false))
-        #expect(instant.first?["outputMode"] == nil)
+        let globalInstant = try migrateAndDecode([alwaysOn], globals: globals(mode: .instant, enabled: false))
+        #expect(globalInstant.first?.outputMode == nil)
+        #expect(globalInstant.first?.configuredOrGlobal(.instant) == .instant)
+
+        // Without the legacy override key at all, only the bool.
+        var boolOnly = alwaysOn
+        boolOnly.removeValue(forKey: "enhancementOverride")
+        let boolOnlyDecoded = try migrateAndDecode([boolOnly], globals: globals(mode: .instantRefine, enabled: true))
+        #expect(boolOnlyDecoded.first?.outputMode == nil)
+    }
+
+    @Test func alreadyMigratedConfigsAreLeftAlone() throws {
+        let encoded = try JSONEncoder().encode([PowerModeConfig(name: "Mail", emoji: "✉️", selectedLanguage: "auto", outputMode: .enhanced)])
+        let current = try #require(try JSONSerialization.jsonObject(with: encoded) as? [[String: Any]])
+        let config = try #require(try migrateAndDecode(current, globals: globals()).first)
+        #expect(config.outputMode == .enhanced)
+        #expect(config.selectedLanguage == "auto")
     }
 
     @Test func migrationRunsOnceAgainstStoredConfigurations() throws {
@@ -268,5 +348,11 @@ struct PowerModeInheritanceTests {
         #expect(defaults.bool(forKey: "IsTextFormattingEnabled"))
         #expect(PunctuationCleanupMode.current(in: defaults) == .removeTrailingPeriod)
         #expect(defaults.data(forKey: PowerModeMigration.legacySessionKey) == nil)
+    }
+}
+
+private extension PowerModeConfig {
+    func configuredOrGlobal(_ global: DictationOutputMode) -> DictationOutputMode {
+        outputMode ?? global
     }
 }
