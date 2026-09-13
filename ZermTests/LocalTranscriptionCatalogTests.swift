@@ -98,6 +98,86 @@ struct LocalTranscriptionCatalogTests {
         #expect(FluidAudioModelManager.modelVersionMap["parakeet-tdt-0.6b-v2"] == nil)
     }
 
+    // MARK: - FluidAudio cache states
+
+    /// A cache folder named like FluidAudio's, holding the given files.
+    private func parakeetCache(folderName: String, files: [String]) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ParakeetCache-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(folderName, isDirectory: true)
+        for file in files {
+            if file.hasSuffix(".mlmodelc") {
+                try FileManager.default.createDirectory(at: folder.appendingPathComponent(file), withIntermediateDirectories: true)
+            } else {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                #expect(FileManager.default.createFile(atPath: folder.appendingPathComponent(file).path, contents: Data("{}".utf8)))
+            }
+        }
+        return folder
+    }
+
+    private let v3 = "parakeet-tdt-0.6b-v3"
+    private let v3Folder = "parakeet-tdt-0.6b-v3"
+
+    /// Exactly what a pre-2.8.6 (FluidAudio before 0.15.7) V3 download left on disk.
+    private let preUpdateV3Files = [
+        "Preprocessor.mlmodelc", "Encoder.mlmodelc", "Decoder.mlmodelc", "JointDecision.mlmodelc", "parakeet_vocab.json"
+    ]
+
+    @Test func preUpdateParakeetV3CacheStillCountsAsInstalled() throws {
+        let folder = try parakeetCache(folderName: v3Folder, files: preUpdateV3Files)
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: v3, in: folder) == .needsUpdate)
+    }
+
+    @Test func currentParakeetV3CacheIsComplete() throws {
+        let folder = try parakeetCache(folderName: v3Folder, files: preUpdateV3Files + ["JointDecisionv3.mlmodelc"])
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: v3, in: folder) == .complete)
+    }
+
+    @Test func missingOrHalfDeletedParakeetV3CacheNeedsADownload() throws {
+        let absent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ParakeetCache-\(UUID().uuidString)/\(v3Folder)", isDirectory: true)
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: v3, in: absent) == .missing)
+
+        let empty = try parakeetCache(folderName: v3Folder, files: [])
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: v3, in: empty) == .missing)
+
+        let noEncoder = try parakeetCache(
+            folderName: v3Folder,
+            files: preUpdateV3Files.filter { $0 != "Encoder.mlmodelc" } + ["JointDecisionv3.mlmodelc"]
+        )
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: v3, in: noEncoder) == .missing)
+
+        let noVocabulary = try parakeetCache(folderName: v3Folder, files: preUpdateV3Files.filter { $0 != "parakeet_vocab.json" })
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: v3, in: noVocabulary) == .missing)
+    }
+
+    /// 110M and Unified are new in 2.8.6, so only a full download counts.
+    @Test func newParakeetModelsNeedTheirFullFileSet() throws {
+        let tdtCtcFolder = "parakeet-tdt-ctc-110m"
+        let full110M = ["Preprocessor.mlmodelc", "Decoder.mlmodelc", "JointDecision.mlmodelc", "parakeet_vocab.json"]
+        let complete = try parakeetCache(folderName: tdtCtcFolder, files: full110M)
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: "parakeet-tdt-ctc-110m", in: complete) == .complete)
+        let partial = try parakeetCache(folderName: tdtCtcFolder, files: full110M.filter { $0 != "JointDecision.mlmodelc" })
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: "parakeet-tdt-ctc-110m", in: partial) == .missing)
+
+        let unified = FluidAudioModelManager.unifiedModelName
+        let unifiedComplete = try parakeetCache(folderName: "parakeet-unified-en-0.6b", files: FluidAudioModelManager.unifiedRequiredFiles)
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: unified, in: unifiedComplete) == .complete)
+        let unifiedPartial = try parakeetCache(
+            folderName: "parakeet-unified-en-0.6b",
+            files: Array(FluidAudioModelManager.unifiedRequiredFiles.dropFirst())
+        )
+        #expect(FluidAudioModelManager.cacheState(forModelNamed: unified, in: unifiedPartial) == .missing)
+    }
+
+    @Test func updateDownloadErrorSaysWhatIsNeeded() {
+        let message = FluidAudioModelError.updateDownloadRequired.errorDescription ?? ""
+        #expect(message.contains("one-time update download"))
+        #expect(TranscriptionPipeline.describeTranscriptionFailure(FluidAudioModelError.updateDownloadRequired) == message)
+    }
+
     // MARK: - Hebrew fine-tunes force Hebrew
 
     @Test func ivritModelsForceHebrewUnlessEnglishIsChosen() throws {

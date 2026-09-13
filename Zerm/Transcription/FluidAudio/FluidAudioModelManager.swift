@@ -3,6 +3,25 @@ import FluidAudio
 import AppKit
 import os
 
+/// What a FluidAudio model's cache folder holds.
+enum FluidAudioCacheState: Equatable {
+    /// Everything the current FluidAudio loader needs.
+    case complete
+    /// A download from an older release. It loads once FluidAudio fetches the few files it
+    /// added; the dictation load path fetches them itself and keeps the existing files.
+    case needsUpdate
+    /// Never downloaded, or deleted or half-migrated (#173): download required.
+    case missing
+}
+
+enum FluidAudioModelError: LocalizedError {
+    case updateDownloadRequired
+
+    var errorDescription: String? {
+        String(localized: "Parakeet needs a one-time update download. Connect to the internet and try again.")
+    }
+}
+
 @MainActor
 class FluidAudioModelManager: ObservableObject {
     @Published var parakeetDownloadStates: [String: Bool] = [:]
@@ -40,15 +59,48 @@ class FluidAudioModelManager: ObservableObject {
         ModelNames.ParakeetUnified.vocab,
     ]
 
+    /// Parakeet V3 files every download made before FluidAudio 0.15.7 has. 0.15.7 added
+    /// `JointDecisionv3.mlmodelc`, which its loader fetches on first load.
+    nonisolated static let legacyV3Files = [
+        ModelNames.ASR.preprocessorFile,
+        ModelNames.ASR.encoderFile,
+        ModelNames.ASR.decoderFile,
+        ModelNames.ASR.vocabularyFile,
+    ]
+
+    /// `directory` is the model's own cache folder, named as FluidAudio names it (FluidAudio resolves
+    /// the folder by name); injectable for tests.
+    nonisolated static func cacheState(forModelNamed modelName: String, in directory: URL? = nil) -> FluidAudioCacheState {
+        func allExist(_ files: [String], in folder: URL) -> Bool {
+            files.allSatisfy { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        }
+
+        if modelName == unifiedModelName {
+            return allExist(unifiedRequiredFiles, in: directory ?? unifiedCacheDirectory) ? .complete : .missing
+        }
+
+        let version = asrVersion(for: modelName)
+        let folder = directory ?? AsrModels.defaultCacheDirectory(for: version)
+        if AsrModels.modelsExist(at: folder, version: version) {
+            return .complete
+        }
+        if version == .v3, allExist(legacyV3Files, in: folder) {
+            return .needsUpdate
+        }
+        return .missing
+    }
+
     init() {}
 
     // MARK: - Query helpers
 
-    /// Downloaded means the download finished once and the files the loader needs are still on
-    /// disk. A folder emptied by a storage migration or cleanup shows as "download required"
-    /// instead of failing at dictation time. (#173)
+    /// Downloaded means the download finished once and its files are still on disk, including a
+    /// cache from an older release that only lacks files FluidAudio fetches on load. A folder
+    /// emptied by a storage migration or cleanup shows as "download required" instead of failing
+    /// at dictation time. (#173)
     func isFluidAudioModelDownloaded(named modelName: String) -> Bool {
-        UserDefaults.standard.bool(forKey: parakeetDefaultsKey(for: modelName)) && modelFilesExist(named: modelName)
+        UserDefaults.standard.bool(forKey: parakeetDefaultsKey(for: modelName))
+            && Self.cacheState(forModelNamed: modelName) != .missing
     }
 
     func isFluidAudioModelDownloaded(_ model: FluidAudioModel) -> Bool {
@@ -143,15 +195,5 @@ class FluidAudioModelManager: ObservableObject {
             return Self.unifiedCacheDirectory
         }
         return AsrModels.defaultCacheDirectory(for: Self.asrVersion(for: modelName))
-    }
-
-    private func modelFilesExist(named modelName: String) -> Bool {
-        if modelName == Self.unifiedModelName {
-            return Self.unifiedRequiredFiles.allSatisfy {
-                FileManager.default.fileExists(atPath: Self.unifiedCacheDirectory.appendingPathComponent($0).path)
-            }
-        }
-        let version = Self.asrVersion(for: modelName)
-        return AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: version), version: version)
     }
 }

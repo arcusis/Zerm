@@ -40,10 +40,9 @@ class ParakeetUnifiedTranscriptionService: TranscriptionService {
         if let manager { return manager }
 
         let directory = FluidAudioModelManager.unifiedCacheDirectory
-        let filesPresent = FluidAudioModelManager.unifiedRequiredFiles.allSatisfy {
-            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        guard FluidAudioModelManager.cacheState(forModelNamed: FluidAudioModelManager.unifiedModelName, in: directory) == .complete else {
+            throw ServiceError.modelNotDownloaded
         }
-        guard filesPresent else { throw ServiceError.modelNotDownloaded }
 
         let manager = UnifiedAsrManager()
         do {
