@@ -156,7 +156,7 @@ jobs:
           project = project_path.read_text()
           app_settings = [
               block for block in re.findall(r"buildSettings = \{(.*?)\n\s*\};", project, re.DOTALL)
-              if re.search(r"^\s*PRODUCT_BUNDLE_IDENTIFIER = com\.arcusis\.zerm;$", block, re.MULTILINE)
+              if re.search(r'^\s*PRODUCT_BUNDLE_IDENTIFIER = "?com\.arcusis\.zerm(\$\(ZERM_BUNDLE_ID_SUFFIX\))?"?;$', block, re.MULTILINE)
           ]
           if len(app_settings) != 2:
               raise SystemExit(f"expected Debug and Release settings for the Zerm app target, found {len(app_settings)}")
