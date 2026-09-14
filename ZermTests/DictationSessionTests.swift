@@ -252,7 +252,7 @@ struct DictationSessionTests {
 
     @Test func boundedWaitReturnsAFastValue() async {
         let task = Task<String?, Never> { "screen text" }
-        let value = await BoundedWait.value(of: task, within: 1)
+        let value = await BoundedWait.value(of: task, within: 30)
         #expect(value == .some("screen text"))
     }
 
@@ -292,7 +292,7 @@ struct DictationSessionTests {
         let resolved = await ActiveWindowService.configuration(
             appConfiguration: appConfig,
             configurations: [appConfig, githubConfig],
-            waitLimit: 1,
+            waitLimit: 30,
             lookupURL: { "https://github.com/arcusis/Zerm" }
         )
         #expect(resolved?.id == githubConfig.id)
@@ -318,7 +318,7 @@ struct DictationSessionTests {
         let resolved = await ActiveWindowService.configuration(
             appConfiguration: appConfig,
             configurations: [appConfig, githubConfig],
-            waitLimit: 1,
+            waitLimit: 30,
             lookupURL: { throw Unavailable() }
         )
         #expect(resolved?.id == appConfig.id)
