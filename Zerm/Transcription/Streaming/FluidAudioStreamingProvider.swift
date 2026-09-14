@@ -2,7 +2,8 @@ import FluidAudio
 import Foundation
 import os
 
-/// Agreement-based on-device streaming transcription using FluidAudio ASR.
+/// On-device streaming using FluidAudio ASR. Agreement-based passes drive the live preview; the
+/// committed transcript is one pass over the whole recording, identical to batch transcription.
 final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "FluidAudioStreaming")
@@ -10,13 +11,14 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     private var eventsContinuation: AsyncStream<StreamingTranscriptionEvent>.Continuation?
 
     private(set) var transcriptionEvents: AsyncStream<StreamingTranscriptionEvent>
+    let finishesEventsOnCommit = true
 
+    // The whole recording: the final pass needs all of it, previews slice from the seek point.
     private var audioBuffer: [Float] = []
     private let bufferLock = NSLock()
     private let sampleRate: Double = 16000.0
-    // Samples trimmed from buffer front; subtract from absolute indices for buffer-relative access.
-    private var trimmedSampleCount: Int = 0
 
+    private var model: (any TranscriptionModel)?
     private var asrManager: AsrManager?
     private var decoderLayerCount: Int = 0
     private let agreementEngine: WordAgreementEngine
@@ -61,10 +63,10 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         try await manager.loadModels(models)
         self.asrManager = manager
         self.decoderLayerCount = await manager.decoderLayerCount
+        self.model = model
 
         agreementEngine.reset()
-        audioBuffer = []
-        trimmedSampleCount = 0
+        withBufferLock { audioBuffer = [] }
         lastTranscribedSampleCount = 0
 
         startTranscriptionLoop()
@@ -79,13 +81,25 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     }
 
     func commit() async throws {
+        // Stop the preview loop first so no preview pass runs alongside the final pass.
         transcriptionTask?.cancel()
         await transcriptionTask?.value
         transcriptionTask = nil
 
-        // Run a clean final ASR pass on the unconfirmed audio portion.
-        let remainingText = await transcribeRemainingAudio() ?? ""
-        eventsContinuation?.yield(.committed(text: remainingText))
+        guard let model else { throw StreamingTranscriptionError.notConnected }
+        let samples = withBufferLock { audioBuffer }
+
+        // Transcribe the complete recording through the batch path rather than stitching
+        // confirmed preview chunks to a remainder pass: agreement seams, a preview pass still
+        // running at stop, or a short trailing remainder can then never drop the last words.
+        let text = try await TranscriptionInferenceScheduler.shared.run(
+            provider: .fluidAudio,
+            priority: .dictation
+        ) {
+            try await self.fluidAudioService.transcribe(samples: samples, model: model)
+        }
+        eventsContinuation?.yield(.committed(text: text))
+        eventsContinuation?.finish()
     }
 
     func disconnect() async {
@@ -97,10 +111,8 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         asrManager = nil
         decoderLayerCount = 0
 
-        withBufferLock {
-            audioBuffer = []
-            trimmedSampleCount = 0
-        }
+        withBufferLock { audioBuffer = [] }
+        model = nil
         agreementEngine.reset()
 
         eventsContinuation?.finish()
@@ -129,10 +141,10 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         guard !isTranscribing else { return }
         guard let asrManager else { return }
 
-        let absoluteSampleCount = withBufferLock { trimmedSampleCount + audioBuffer.count }
+        let sampleCount = withBufferLock { audioBuffer.count }
 
-        guard absoluteSampleCount - lastTranscribedSampleCount >= minNewSamples else { return }
-        guard absoluteSampleCount >= Int(sampleRate) else { return }
+        guard sampleCount - lastTranscribedSampleCount >= minNewSamples else { return }
+        guard sampleCount >= Int(sampleRate) else { return }
 
         isTranscribing = true
         defer { isTranscribing = false }
@@ -144,10 +156,8 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         let seekSample = max(0, Int(seekTime * sampleRate))
 
         guard var audioSlice = withBufferLock({ () -> [Float]? in
-            let bufferRelativeSeek = max(0, seekSample - trimmedSampleCount)
-            let sliceEnd = audioBuffer.count
-            guard bufferRelativeSeek < sliceEnd else { return nil }
-            return Array(audioBuffer[bufferRelativeSeek..<sliceEnd])
+            guard seekSample < sampleCount else { return nil }
+            return Array(audioBuffer[seekSample..<sampleCount])
         }) else { return }
 
         // Pad with 1s trailing silence for punctuation capture
@@ -162,7 +172,9 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         do {
             var state = TdtDecoderState.make(decoderLayers: decoderLayerCount)
             let result = try await asrManager.transcribe(audioSlice, decoderState: &state)
-            lastTranscribedSampleCount = absoluteSampleCount
+            // Commit cancelled this pass; its preview is stale and the final pass covers its audio.
+            guard !Task.isCancelled else { return }
+            lastTranscribedSampleCount = sampleCount
 
             guard let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty else {
                 if !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -177,66 +189,14 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
 
             let agreementResult = agreementEngine.processTranscriptionResult(words: words, resultConfidence: result.confidence)
 
-            if !agreementResult.newlyConfirmedText.isEmpty {
-                let normalizedConfirmed = TextNormalizer.shared.normalizeSentence(agreementResult.newlyConfirmedText)
-                eventsContinuation?.yield(.committed(text: normalizedConfirmed))
-            }
+            // Confirmed words only stabilise the preview; the committed text comes from commit().
             if !agreementResult.fullText.isEmpty {
                 eventsContinuation?.yield(.partial(text: agreementResult.fullText))
             }
-
-            // Trim audio up to the hypothesis start point, keeping unconfirmed audio intact.
-            let newHypothesisStartTime = agreementEngine.hypothesisStartTime
-            if newHypothesisStartTime > 0 {
-                let safeTrimPoint = max(0, Int(newHypothesisStartTime * sampleRate))
-                let samplesToTrim = safeTrimPoint - trimmedSampleCount
-                if samplesToTrim > 0 {
-                    withBufferLock {
-                        let actualTrim = min(samplesToTrim, audioBuffer.count)
-                        audioBuffer.removeFirst(actualTrim)
-                        trimmedSampleCount += actualTrim
-                    }
-                }
-            }
-
         } catch {
+            guard !Task.isCancelled else { return }
             logger.error("Transcription pass failed: \(error.localizedDescription, privacy: .public)")
             eventsContinuation?.yield(.error(error))
-        }
-    }
-
-    // Final transcription of audio after the last confirmed word.
-    private func transcribeRemainingAudio() async -> String? {
-        guard let asrManager else { return nil }
-
-        let seekTime = agreementEngine.hypothesisStartTime > 0
-            ? agreementEngine.hypothesisStartTime
-            : agreementEngine.confirmedEndTime
-        let seekSample = max(0, Int(seekTime * sampleRate))
-
-        guard var samples = withBufferLock({ () -> [Float]? in
-            let bufferRelativeSeek = max(0, seekSample - trimmedSampleCount)
-            guard bufferRelativeSeek < audioBuffer.count else { return nil }
-            return Array(audioBuffer[bufferRelativeSeek...])
-        }) else { return nil }
-
-        guard samples.count >= Int(sampleRate) else { return nil }
-
-        let trailingSilenceSamples = 16_000
-        let maxSingleChunkSamples = 240_000
-        if samples.count + trailingSilenceSamples <= maxSingleChunkSamples {
-            samples += [Float](repeating: 0, count: trailingSilenceSamples)
-        }
-
-        do {
-            var state = TdtDecoderState.make(decoderLayers: decoderLayerCount)
-            let result = try await asrManager.transcribe(samples, decoderState: &state)
-            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return nil }
-            return TextNormalizer.shared.normalizeSentence(text)
-        } catch {
-            logger.error("Final transcription failed: \(error.localizedDescription, privacy: .public)")
-            return nil
         }
     }
 

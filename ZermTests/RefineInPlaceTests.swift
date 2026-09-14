@@ -123,6 +123,31 @@ struct RefineInPlaceTests {
         ) == nil)
     }
 
+    // MARK: - Replacement text
+
+    @Test func replacementKeepsTheTrailingSpaceThePasteAdded() {
+        #expect(AXTextReplacer.replacement(forPasted: "ship the build on friday ", refined: "Ship the build on Friday.") == "Ship the build on Friday. ")
+        #expect(AXTextReplacer.replacement(forPasted: "ship the build on friday", refined: "Ship the build on Friday.") == "Ship the build on Friday.")
+    }
+
+    /// The paste ends in the "Append trailing space" space and the model's answer does not, so a
+    /// plain comparison never matched and unchanged text was written — or warned about — anyway.
+    @Test func identicalRefinementNeedsNoReplacement() {
+        #expect(AXTextReplacer.replacement(forPasted: "Ship the build on Friday. ", refined: "Ship the build on Friday.") == nil)
+        #expect(AXTextReplacer.replacement(forPasted: "Ship the build on Friday. ", refined: "  Ship the build on Friday.\n") == nil)
+        #expect(AXTextReplacer.replacement(forPasted: "שלום לכולם, the build is ready ", refined: "שלום לכולם, the build is ready") == nil)
+    }
+
+    @Test func emptyRefinementNeverReplaces() {
+        #expect(AXTextReplacer.replacement(forPasted: "Ship the build on Friday. ", refined: "  \n") == nil)
+    }
+
+    @Test func replacementMeasuresMixedScriptAndEmojiCorrectly() throws {
+        let replacement = try #require(AXTextReplacer.replacement(forPasted: "תודה 👍 see you ", refined: "תודה 👍, see you!"))
+        #expect(replacement == "תודה 👍, see you! ")
+        #expect(replacement.utf16.count == "תודה 👍, see you!".utf16.count + 1)
+    }
+
     // MARK: - Output mode
 
     @Test func onlyInstantSkipsEnhancement() {
@@ -197,40 +222,5 @@ struct RefineInPlaceTests {
         let medium = String(repeating: "a", count: 600)
         let budget = AIEnhancementService.tokenBudget(forInput: medium)
         #expect(budget > 64 && budget < 512)
-    }
-
-    // MARK: - Power Mode enhancement override
-
-    /// An explicit `true` was a deliberate choice and must survive. A `false` was almost
-    /// always just the seeded default, and treating it as an instruction to suppress
-    /// enhancement is what made the global toggle look broken.
-    @Test func legacyConfigsMigrateOffToInherit() throws {
-        let legacy = """
-        {"id":"\(UUID().uuidString)","name":"General","emoji":"💼",
-         "isAIEnhancementEnabled":false,"useScreenCapture":false}
-        """
-        let config = try JSONDecoder().decode(PowerModeConfig.self, from: Data(legacy.utf8))
-        #expect(config.enhancementOverride == .inherit)
-    }
-
-    @Test func legacyConfigsMigrateOnToOn() throws {
-        let legacy = """
-        {"id":"\(UUID().uuidString)","name":"Email","emoji":"✉️",
-         "isAIEnhancementEnabled":true,"useScreenCapture":false}
-        """
-        let config = try JSONDecoder().decode(PowerModeConfig.self, from: Data(legacy.utf8))
-        #expect(config.enhancementOverride == .on)
-    }
-
-    @Test func explicitOverrideSurvivesARoundTrip() throws {
-        let config = PowerModeConfig(
-            name: "Terminal",
-            emoji: "⌨️",
-            isAIEnhancementEnabled: false,
-            enhancementOverride: .off
-        )
-        let data = try JSONEncoder().encode(config)
-        let decoded = try JSONDecoder().decode(PowerModeConfig.self, from: data)
-        #expect(decoded.enhancementOverride == .off)
     }
 }

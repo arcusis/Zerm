@@ -22,42 +22,34 @@ class NativeAppleTranscriptionService: TranscriptionService {
         var errorDescription: String? {
             switch self {
             case .unsupportedOS:
-                return "SpeechAnalyzer requires macOS 26 or later."
+                return String(localized: "SpeechAnalyzer requires macOS 26 or later.")
             case .transcriptionFailed:
-                return "Transcription failed using SpeechAnalyzer."
+                return String(localized: "Transcription failed using SpeechAnalyzer.")
             case .localeNotSupported:
-                return "The selected language is not supported by SpeechAnalyzer."
+                return String(localized: "The selected language is not supported by SpeechAnalyzer.")
             case .invalidModel:
-                return "Invalid model type provided for Native Apple transcription."
+                return String(localized: "Invalid model type provided for Native Apple transcription.")
             case .assetDownloadRequired(let displayName):
-                return "Download required for \(displayName)."
+                return String(localized: "Download required for \(displayName).")
             case .resultStreamTimedOut:
-                return "Apple Speech did not finish returning transcription results."
+                return String(localized: "Apple Speech did not finish returning transcription results.")
             }
         }
     }
 
     private func languageDisplayName(for localeIdentifier: String) -> String {
-        LanguageDictionary.appleNative[localeIdentifier]
-            ?? Locale.current.localizedString(forIdentifier: localeIdentifier)
+        Locale.current.localizedString(forIdentifier: localeIdentifier)
+            ?? LanguageDictionary.appleNative[localeIdentifier]
             ?? localeIdentifier
     }
 
-    static func meetingSupportedLocaleIdentifiers() async -> [String] {
-        guard #available(macOS 26, *) else { return [] }
-        #if canImport(Speech) && ENABLE_NATIVE_SPEECH_ANALYZER
-        let supportedLocales = await SpeechTranscriber.supportedLocales
-        return supportedLocales.map { $0.identifier(.bcp47) }
-        #else
-        return []
-        #endif
-    }
-
-    static func persistedMeetingLocale(
+    /// A per-operation language override must already be a concrete supported locale; it is
+    /// never reinterpreted against the current machine locale.
+    static func overrideLocale(
         _ localeIdentifier: String,
         supportedIdentifiers: [String]
     ) throws -> String {
-        guard let exact = MeetingLanguageResolver.exactNativeAppleLocaleCode(
+        guard let exact = SpeechLocaleResolver.exactLocaleCode(
             requestedCode: localeIdentifier,
             supportedIdentifiers: supportedIdentifiers
         ) else {
@@ -87,20 +79,18 @@ class NativeAppleTranscriptionService: TranscriptionService {
         let supportedIdentifiers = Set(supportedLocales.map { $0.identifier(.bcp47) })
         let installedIdentifiers = Set(installedLocales.map { $0.identifier(.bcp47) })
 
-        // `auto` is Zerm's provider-neutral sentinel, not a locale identifier. Meeting jobs have
-        // already persisted one concrete locale; ordinary Dictation resolves the sentinel once
-        // for this operation using the same deterministic policy.
+        // `auto` is Zerm's provider-neutral sentinel, not a locale identifier. An operation
+        // override is already one concrete locale; ordinary Dictation resolves the sentinel once
+        // for this operation using a deterministic policy.
         let selectedLanguage = LanguagePreference.selectedCode()
         let selectedLocaleIdentifier: String
         if LanguagePreference.operationOverrideCode != nil {
-            // A meeting override is already a persisted, runtime-validated locale. Never
-            // reinterpret it using the current machine locale during review/reprocessing.
-            selectedLocaleIdentifier = try Self.persistedMeetingLocale(
+            selectedLocaleIdentifier = try Self.overrideLocale(
                 selectedLanguage,
                 supportedIdentifiers: supportedLocales.map { $0.identifier(.bcp47) }
             )
         } else {
-            selectedLocaleIdentifier = MeetingLanguageResolver.nativeAppleLocaleCode(
+            selectedLocaleIdentifier = SpeechLocaleResolver.localeCode(
                 requestedCode: selectedLanguage,
                 supportedIdentifiers: supportedLocales.map { $0.identifier(.bcp47) }
             )

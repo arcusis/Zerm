@@ -51,7 +51,7 @@ private struct KeyChip: View {
     let label: String
 
     var body: some View {
-        Text(label)
+        Text(verbatim: label)
             .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundColor(.primary)
             .padding(.horizontal, 8)

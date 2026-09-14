@@ -3,10 +3,9 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var menuBarManager: MenuBarManager?
-    /// Synchronous last-chance cleanup for capture sessions before native-runtime teardown is
-    /// skipped with `_exit`. Recording code must stop callbacks, close writers, and journal an
-    /// interrupted state here; lengthy inference and network work must already be cancelled.
-    var onWillTerminate: (() -> Void)?
+    weak var fileTranscriptionQueue: FileTranscriptionQueue?
+    private var hasFinishedLaunching = false
+    private var receivedFilesDuringLaunch = false
 
     #if DEBUG
     private var uiTestWindowPresentationAttemptsRemaining = 40
@@ -32,6 +31,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             menuBarManager?.applyActivationPolicy()
             MetricKitReporter.shared.start()
+        }
+        hasFinishedLaunching = true
+        if receivedFilesDuringLaunch {
+            // Files opened Zerm: show them over the launch activation policy just applied.
+            DispatchQueue.main.async { [weak self] in self?.menuBarManager?.focusMainWindow() }
+        }
+    }
+
+    /// Finder "Open With" and files dropped on the Dock icon go to Transcribe File.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let fileTranscriptionQueue else { return }
+        fileTranscriptionQueue.add(urls)
+        fileTranscriptionQueue.isRevealRequested = true
+        if hasFinishedLaunching {
+            menuBarManager?.focusMainWindow()
+        } else {
+            receivedFilesDuringLaunch = true
         }
     }
 
@@ -76,11 +92,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Stop background prewarms from entering onnxruntime / llama.cpp session construction
         // while the process is shutting down. See ProcessLifecycle.
         ProcessLifecycle.isTerminating = true
-
-        // Capture owns open audio files that are not covered by SwiftData/defaults. Give the
-        // application-scoped recording coordinator a synchronous chance to finalize them before
-        // `_exit` intentionally bypasses Swift and C++ destructors.
-        onWillTerminate?()
 
         // Flush anything that genuinely needs writing, then leave via _exit().
         //

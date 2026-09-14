@@ -5,7 +5,6 @@ import os
 
 class WhisperTranscriptionService: TranscriptionService {
 
-    private var whisperContext: WhisperContext?
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperTranscriptionService")
     private let modelsDirectory: URL
     private weak var modelProvider: (any WhisperModelProvider)?
@@ -24,52 +23,28 @@ class WhisperTranscriptionService: TranscriptionService {
 
         logger.notice("Initiating local transcription for model: \(model.displayName, privacy: .public)")
 
-        // Read the provider's loaded-model state in ONE hop onto the main actor.
-        //
-        // This used to be four chained `await`s against @MainActor properties. Each one is a
-        // separate suspension that has to be scheduled behind whatever else the main actor is
-        // doing — and at this exact moment the main actor is busy publishing `.transcribing`
-        // to the recorder views. Measured across eight dictations, those hops cost a median of
-        // 402 ms (range 270–449 ms) between "Starting transcription" and this method's first
-        // line of real work. Collapsing them also makes the read atomic: previously the model
-        // could be unloaded between the `isModelLoaded` check and the `whisperContext` read.
-        struct LoadedModelState {
-            let context: WhisperContext?
-            let name: String?
-        }
-        var loaded: LoadedModelState?
-        if let provider = modelProvider {
-            loaded = await MainActor.run {
-                LoadedModelState(
-                    context: provider.isModelLoaded ? provider.whisperContext : nil,
-                    name: provider.loadedWhisperModel?.name
-                )
-            }
-        }
-
-        if let loadedContext = loaded?.context, loaded?.name == model.name {
-            logger.notice("Using already loaded model: \(model.name, privacy: .public)")
-            whisperContext = loadedContext
+        // With a model provider the context is the provider's resident one, loaded once and kept
+        // warm; its fast path is a single main-actor hop. Without one (warmup of a freshly
+        // downloaded model) a temporary context is loaded and released after this dictation.
+        let whisperContext: WhisperContext
+        let ownsContext: Bool
+        if let modelProvider {
+            whisperContext = try await modelProvider.loadModel(named: model.name)
+            ownsContext = false
         } else {
-            // Resolve the on-disk URL using the provider's availableModels (covers imports)
-            let resolvedURL: URL? = await modelProvider?.availableModels.first(where: { $0.name == model.name })?.url
-            guard let modelURL = resolvedURL, FileManager.default.fileExists(atPath: modelURL.path) else {
+            let modelURL = modelsDirectory.appendingPathComponent("\(model.name).bin")
+            guard FileManager.default.fileExists(atPath: modelURL.path) else {
                 logger.error("❌ Model file not found for: \(model.name, privacy: .public)")
                 throw ZermEngineError.modelLoadFailed
             }
-
-            logger.notice("Loading model: \(model.name, privacy: .public)")
+            logger.notice("Loading temporary model: \(model.name, privacy: .public)")
             do {
                 whisperContext = try await WhisperContext.createContext(path: modelURL.path)
             } catch {
                 logger.error("❌ Failed to load model: \(model.name, privacy: .public) - \(error.localizedDescription, privacy: .public)")
                 throw ZermEngineError.modelLoadFailed
             }
-        }
-
-        guard let whisperContext = whisperContext else {
-            logger.error("❌ Cannot transcribe: Model could not be loaded")
-            throw ZermEngineError.modelLoadFailed
+            ownsContext = true
         }
 
         // Read audio data — use AVAudioFile-based resampler so variable-length WAV
@@ -94,7 +69,7 @@ class WhisperTranscriptionService: TranscriptionService {
         }
 
         // Merge style prompt with custom dictionary so Whisper biases toward user terms.
-        let basePrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
+        let basePrompt = WhisperPrompt.resolvedPrompt(for: selectedLanguage)
         let dictionarySuffix: String
         if let modelContext {
             dictionarySuffix = VocabularyTerms.whisperPromptSuffix(from: modelContext)
@@ -170,10 +145,8 @@ class WhisperTranscriptionService: TranscriptionService {
         logger.notice("Whisper transcription completed: \(text.count, privacy: .public) characters")
         DebugLogger.shared.log("Whisper", "result chars=\(text.count) empty=\(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
 
-        // Only release resources if we created a new context (not using the shared one)
-        if await modelProvider?.whisperContext !== whisperContext {
+        if ownsContext {
             await whisperContext.releaseResources()
-            self.whisperContext = nil
         }
 
         return text

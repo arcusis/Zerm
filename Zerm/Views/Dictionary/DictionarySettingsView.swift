@@ -11,12 +11,12 @@ struct DictionarySettingsView: View {
         case replacements = "Word Replacements"
         case spellings = "Vocabulary"
         
-        var description: String {
+        var description: LocalizedStringKey {
             switch self {
             case .spellings:
                 return "Add words to help Zerm recognize them properly"
             case .replacements:
-                return "Automatically replace specific words/phrases with custom formatted text "
+                return "Automatically replace specific words/phrases with custom formatted text"
             }
         }
         
@@ -51,8 +51,8 @@ struct DictionarySettingsView: View {
     private var heroSection: some View {
         CompactHeroSection(
             icon: "brain.filled.head.profile",
-            title: "Dictionary Settings",
-            description: "Enhance Zerm's transcription accuracy by teaching it your vocabulary",
+            title: String(localized: "Dictionary Settings"),
+            description: String(localized: "Enhance Zerm's transcription accuracy by teaching it your vocabulary"),
             maxDescriptionWidth: 500
         )
     }
@@ -75,7 +75,7 @@ struct DictionarySettingsView: View {
                         .fontWeight(.semibold)
 
                     InfoTip(
-                        "Two different tools. Word Replacements rewrite text after transcription — always exact, always applied, no AI needed. Vocabulary instead tells the model which unusual names and terms to expect, so it is more likely to hear them correctly in the first place.",
+                        String(localized: "Two different tools. Word Replacements rewrite text after transcription — always exact, always applied, no AI needed. Vocabulary instead tells the model which unusual names and terms to expect, so it is more likely to hear them correctly in the first place."),
                         doc: .dictionary
                     )
                 }
@@ -140,7 +140,7 @@ struct SectionCard: View {
                     .foregroundStyle(isSelected ? .blue : .secondary)
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(section.rawValue)
+                    Text(LocalizedStringKey(section.rawValue))
                         .font(.headline)
                     
                     Text(section.description)

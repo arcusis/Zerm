@@ -83,7 +83,7 @@ struct WordReplacementView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 13))
 
-                Image(systemName: "arrow.right")
+                Image(systemName: "arrow.forward")
                     .foregroundColor(.secondary)
                     .font(.system(size: 10))
                     .frame(width: 10)
@@ -94,7 +94,7 @@ struct WordReplacementView: View {
                     .onSubmit { addReplacement() }
 
                 InfoTip(
-                    "Every transcript is scanned for the original text and the replacement is swapped in before pasting. Use it for spellings the model always gets wrong, or as an expander — say \"my email\" and have your address typed out. Comma-separate several originals to map them all to the same replacement.",
+                    String(localized: "Every transcript is scanned for the original text and the replacement is swapped in before pasting. Use it for spellings the model always gets wrong, or as an expander — say \"my email\" and have your address typed out. Comma-separate several originals to map them all to the same replacement."),
                     doc: .dictionary
                 )
 
@@ -132,7 +132,7 @@ struct WordReplacementView: View {
                         .buttonStyle(.plain)
                         .help("Sort by original")
 
-                        Image(systemName: "arrow.right")
+                        Image(systemName: "arrow.forward")
                             .foregroundColor(.secondary)
                             .font(.system(size: 10))
                             .frame(width: 10)
@@ -187,7 +187,7 @@ struct WordReplacementView: View {
         .alert("Word Replacement", isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(alertMessage)
+            Text(verbatim: alertMessage)
         }
     }
 
@@ -211,7 +211,7 @@ struct WordReplacementView: View {
         } catch {
             // Rollback the delete to restore UI consistency
             modelContext.rollback()
-            alertMessage = "Failed to remove replacement: \(error.localizedDescription)"
+            alertMessage = String(localized: "Failed to remove replacement: \(error.localizedDescription)")
             showAlert = true
         }
     }
@@ -228,7 +228,7 @@ struct WordReplacementInfoPopover: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                Text("Voicing, Voice ink, Voiceing")
+                Text(verbatim: "Voicing, Voice ink, Voiceing")
                     .font(.callout)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -252,7 +252,7 @@ struct WordReplacementInfoPopover: View {
                             .font(.callout)
                     }
 
-                    Image(systemName: "arrow.right")
+                    Image(systemName: "arrow.forward")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -260,7 +260,7 @@ struct WordReplacementInfoPopover: View {
                         Text("Replacement:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("https://arcusis.github.io/Zerm/")
+                        Text(verbatim: "https://arcusis.github.io/Zerm/")
                             .font(.callout)
                     }
                 }
@@ -274,11 +274,11 @@ struct WordReplacementInfoPopover: View {
                         Text("Original:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Voicing, Voice ink")
+                        Text(verbatim: "Voicing, Voice ink")
                             .font(.callout)
                     }
 
-                    Image(systemName: "arrow.right")
+                    Image(systemName: "arrow.forward")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -286,7 +286,7 @@ struct WordReplacementInfoPopover: View {
                         Text("Replacement:")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Zerm")
+                        Text(verbatim: "Zerm")
                             .font(.callout)
                     }
                 }
@@ -311,18 +311,18 @@ struct ReplacementRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(original)
+            Text(verbatim: original)
                 .font(.system(size: 13))
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Image(systemName: "arrow.right")
+            Image(systemName: "arrow.forward")
                 .foregroundColor(.secondary)
                 .font(.system(size: 10))
                 .frame(width: 10)
 
             ZStack(alignment: .trailing) {
-                Text(replacement)
+                Text(verbatim: replacement)
                     .font(.system(size: 13))
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)

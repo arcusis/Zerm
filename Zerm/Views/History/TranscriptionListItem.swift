@@ -7,6 +7,8 @@ struct TranscriptionListItem: View {
     let onSelect: () -> Void
     let onToggleCheck: () -> Void
 
+    @State private var isFileTranscriptOpen = false
+
     var body: some View {
         HStack(spacing: 8) {
             Toggle("", isOn: Binding(
@@ -23,7 +25,7 @@ struct TranscriptionListItem: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     if transcription.duration > 0 {
-                        Text(transcription.duration.formatTiming())
+                        Text(Duration.seconds(transcription.duration), format: .time(pattern: .minuteSecond))
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
@@ -35,10 +37,15 @@ struct TranscriptionListItem: View {
                     }
                 }
 
-                Text(transcription.displayText)
-                    .font(.system(size: 12, weight: .regular))
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
+                HStack(alignment: .top, spacing: 6) {
+                    Text(verbatim: transcription.displayText)
+                        .font(.system(size: 12, weight: .regular))
+                        .lineLimit(2)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    CopyIconButton(textToCopy: transcription.displayText)
+                }
             }
         }
         .padding(10)
@@ -53,6 +60,13 @@ struct TranscriptionListItem: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
+        .contextMenu {
+            Button("Copy") {
+                _ = ClipboardManager.copyToClipboard(transcription.displayText)
+            }
+            OpenFileTranscriptButton(transcriptionID: transcription.id) { isFileTranscriptOpen = true }
+        }
+        .fileTranscriptSheet(for: transcription.id, isPresented: $isFileTranscriptOpen)
     }
 }
 

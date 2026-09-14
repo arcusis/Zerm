@@ -10,6 +10,7 @@ struct ModelCardView: View {
     let downloadProgress: [String: Double]
     let modelURL: URL?
     let isWarming: Bool
+    let downloadError: String?
 
     // Actions
     var deleteAction: () -> Void
@@ -28,6 +29,7 @@ struct ModelCardView: View {
                         downloadProgress: downloadProgress,
                         modelURL: modelURL,
                         isWarming: isWarming,
+                        downloadError: downloadError,
                         deleteAction: deleteAction,
                         setDefaultAction: setDefaultAction,
                         downloadAction: downloadAction

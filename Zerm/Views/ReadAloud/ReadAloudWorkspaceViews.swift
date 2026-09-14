@@ -24,13 +24,13 @@ struct ReadAloudSpeakView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         Picker("Reading mode", selection: $modeRaw) {
                             ForEach(ReadAloudMode.allCases) { mode in
-                                Text(mode.title).tag(mode.rawValue)
+                                Text(verbatim: mode.title).tag(mode.rawValue)
                             }
                         }
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("read-aloud-mode-picker")
 
-                        Text(mode.subtitle)
+                        Text(verbatim: mode.subtitle)
                             .foregroundStyle(.secondary)
 
                         if mode.usesLocalAI {
@@ -65,7 +65,7 @@ struct ReadAloudSpeakView: View {
 
                 if let prepared = controller.lastPreparedText, !prepared.isEmpty {
                     GroupBox("Last Prepared Version") {
-                        Text(prepared)
+                        Text(verbatim: prepared)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
@@ -134,16 +134,16 @@ struct ReadAloudHistoryView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(item.spokenText)
+                        Text(verbatim: item.spokenText)
                             .lineLimit(4)
                             .textSelection(.enabled)
                         HStack {
-                            Text(item.providerName)
-                            Text("•")
-                            Text(item.voiceName)
+                            Text(verbatim: item.providerName)
+                            Text(verbatim: "•")
+                            Text(verbatim: item.voiceName)
                             if let model = item.localModelName {
-                                Text("•")
-                                Text(model)
+                                Text(verbatim: "•")
+                                Text(verbatim: model)
                             }
                             Spacer()
                             Button("Copy") {

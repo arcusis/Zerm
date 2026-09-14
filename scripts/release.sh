@@ -30,7 +30,7 @@ APP_BUILD_SETTINGS=$(awk '
     /buildSettings = \{/ { in_settings = 1; settings = $0 ORS; next }
     in_settings { settings = settings $0 ORS }
     in_settings && /^[[:space:]]*};/ {
-        if (settings ~ /PRODUCT_BUNDLE_IDENTIFIER = com\.arcusis\.zerm;/) {
+        if (settings ~ /PRODUCT_BUNDLE_IDENTIFIER = "?com\.arcusis\.zerm(\$\(ZERM_BUNDLE_ID_SUFFIX\))?"?;/) {
             printf "%s", settings
         }
         in_settings = 0

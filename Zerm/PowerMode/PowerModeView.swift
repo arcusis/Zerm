@@ -23,7 +23,7 @@ enum ConfigurationMode: Hashable {
         return false
     }
     
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
         case .add: return "Add Power Mode"
         case .edit: return "Edit Power Mode"
@@ -80,7 +80,7 @@ struct PowerModeView: View {
                                     .foregroundColor(.primary)
                                 
                                 InfoTip(
-                                    "A Power Mode is a set of dictation settings — model, language, enhancement prompt, auto-send key — that switches itself on when you are in a particular app or on a particular website. Zerm checks the frontmost app first, then the browser's current address, and applies the first mode that matches. If none does, the mode marked as default is used.",
+                                    String(localized: "A Power Mode is a set of dictation settings — model, language, enhancement prompt, auto-send key — that switches itself on when you are in a particular app or on a particular website. Zerm checks the frontmost app first, then the browser's current address, and applies the first mode that matches. If none does, the mode marked as default is used."),
                                     doc: .powerMode
                                 )
                             }
@@ -130,7 +130,7 @@ struct PowerModeView: View {
                             .buttonStyle(PlainButtonStyle())
 
                             InfoTip(
-                                "Order decides which mode wins when more than one could match — the topmost match is applied. Put your most specific modes above the broader ones.",
+                                String(localized: "Order decides which mode wins when more than one could match — the topmost match is applied. Put your most specific modes above the broader ones."),
                                 doc: .powerMode
                             )
                         }
@@ -284,11 +284,11 @@ struct ReorderPanelView: View {
                             Circle()
                                 .fill(Color(NSColor.controlBackgroundColor))
                                 .frame(width: 36, height: 36)
-                            Text(config.emoji)
+                            Text(verbatim: config.emoji)
                                 .font(.system(size: 18))
                         }
 
-                        Text(config.name)
+                        Text(verbatim: config.name)
                             .font(.system(size: 14, weight: .medium))
 
                         Spacer()
@@ -337,7 +337,7 @@ struct ReorderPanelView: View {
 
 
 struct SectionHeader: View {
-    let title: String
+    let title: LocalizedStringKey
 
     var body: some View {
         Text(title)

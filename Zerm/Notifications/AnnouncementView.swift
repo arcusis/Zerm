@@ -9,7 +9,7 @@ struct AnnouncementView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
-                Text(title)
+                Text(verbatim: title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(2)
@@ -27,7 +27,7 @@ struct AnnouncementView: View {
 
             if !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ScrollView {
-                    Text(description)
+                    Text(verbatim: description)
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.9))
                         .multilineTextAlignment(.leading)

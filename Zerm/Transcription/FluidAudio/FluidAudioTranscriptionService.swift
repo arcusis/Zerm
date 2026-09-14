@@ -67,23 +67,40 @@ class FluidAudioTranscriptionService: TranscriptionService {
             if loadingTask?.version == version {
                 self.loadingTask = nil
             }
-            throw error
+            if error is CancellationError { throw error }
+            // A pre-2.8.6 V3 cache loads once FluidAudio fetches the file it added. If that fetch
+            // failed (offline), say what is needed instead of a generic load failure.
+            if version == .v3, FluidAudioModelManager.cacheState(forModelNamed: "parakeet-tdt-0.6b-v3") == .needsUpdate {
+                logger.error("❌ Parakeet update download failed: \(error.localizedDescription, privacy: .public)")
+                throw FluidAudioModelError.updateDownloadRequired
+            }
+            // Missing or partially migrated model files (#173) must reach the user as a load
+            // failure with a re-download hint, not as an opaque CoreML error or a silent fallback.
+            logger.error("❌ Parakeet model load failed: \(error.localizedDescription, privacy: .public)")
+            throw ZermEngineError.modelLoadFailed
         }
     }
 
     func loadModel(for model: FluidAudioModel) async throws {
+        // Parakeet Unified has its own service; don't warm TDT v3 through the version fallback.
+        guard FluidAudioModelManager.modelVersionMap[model.name] != nil else { return }
         try await ensureModelsLoaded(for: version(for: model))
     }
 
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
+        let audioSamples = try await AudioProcessor().processAudioToSamples(audioURL)
+        return try await transcribe(samples: audioSamples, model: model)
+    }
+
+    /// Transcribes 16 kHz mono samples. Streaming commits through here so its final text is the
+    /// same as a batch run over the recording.
+    func transcribe(samples audioSamples: [Float], model: any TranscriptionModel) async throws -> String {
         let targetVersion = version(for: model)
         try await ensureModelsLoaded(for: targetVersion)
 
         guard let asrManager = asrManager else {
             throw ASRError.notInitialized
         }
-
-        let audioSamples = try await AudioProcessor().processAudioToSamples(audioURL)
 
         let durationSeconds = Double(audioSamples.count) / 16000.0
         let isVADEnabled = UserDefaults.standard.bool(forKey: "IsVADEnabled")
@@ -121,30 +138,30 @@ class FluidAudioTranscriptionService: TranscriptionService {
         do {
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
             let result = try await asrManager.transcribe(speechAudio, decoderState: &decoderState)
-            return TextNormalizer.shared.normalizeSentence(result.text)
+            return result.text
         } catch {
             // CoreML model handles can go stale after the app sits idle and memory is paged
             // out, surfacing as "Unable to compute asynchronous prediction using ML Program".
             // The manager still reports as loaded, so a plain retry reuses the broken handles —
             // reload the models from disk and re-create the manager once, then retry. (VoiceInk #614)
             logger.notice("ASR prediction failed; reloading models and retrying once: \(error.localizedDescription, privacy: .public)")
-            await reloadModels(for: targetVersion)
+            try await reloadModels(for: targetVersion)
             guard let reloadedManager = self.asrManager else { throw error }
             var retryDecoderState = TdtDecoderState.make(decoderLayers: await reloadedManager.decoderLayerCount)
             let result = try await reloadedManager.transcribe(speechAudio, decoderState: &retryDecoderState)
-            return TextNormalizer.shared.normalizeSentence(result.text)
+            return result.text
         }
     }
 
     /// Forces a fresh model reload from disk, discarding cached (possibly stale) CoreML handles. (VoiceInk #614)
-    private func reloadModels(for version: AsrModelVersion) async {
+    private func reloadModels(for version: AsrModelVersion) async throws {
         await asrManager?.cleanup()
         asrManager = nil
         vadManager = nil
         activeVersion = nil
         cachedModels = nil
         loadingTask = nil
-        try? await ensureModelsLoaded(for: version)
+        try await ensureModelsLoaded(for: version)
     }
 
     // Releases ASR/VAD resources but preserves cached models for reuse

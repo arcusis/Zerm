@@ -51,10 +51,8 @@ class MiniRecorderShortcutManager: ObservableObject {
     private var isCancelHandlerSetup = false
     
     // Double-tap Escape handling
-    private var escFirstPressTime: Date? = nil
-    private let escSecondPressThreshold: TimeInterval = 1.5
+    private let escapeDoublePress = EscapeDoublePressTracker()
     private var isEscapeHandlerSetup = false
-    private var escapeTimeoutTask: Task<Void, Never>?
     
     init(engine: ZermEngine, recorderUIManager: RecorderUIManager) {
         self.engine = engine
@@ -98,25 +96,17 @@ class MiniRecorderShortcutManager: ObservableObject {
                 // Don't process if custom shortcut is configured
                 guard KeyboardShortcuts.getShortcut(for: .cancelRecorder) == nil else { return }
 
-                let now = Date()
-                if let firstTime = self.escFirstPressTime,
-                   now.timeIntervalSince(firstTime) <= self.escSecondPressThreshold {
-                    self.escFirstPressTime = nil
+                switch self.escapeDoublePress.press() {
+                case .confirmed:
                     await self.recorderUIManager.cancelActiveOperation()
-                } else {
-                    self.escFirstPressTime = now
+                case .armed(let showsHint):
                     SoundManager.shared.playEscSound()
+                    guard showsHint else { return }
                     NotificationManager.shared.showNotification(
-                        title: "Press ESC again to cancel recording",
+                        title: String(localized: "Press ESC again to cancel recording"),
                         type: .info,
-                        duration: self.escSecondPressThreshold
+                        duration: self.escapeDoublePress.window
                     )
-                    self.escapeTimeoutTask = Task { [weak self] in
-                        try? await Task.sleep(nanoseconds: UInt64((self?.escSecondPressThreshold ?? 1.5) * 1_000_000_000))
-                        await MainActor.run {
-                            self?.escFirstPressTime = nil
-                        }
-                    }
                 }
             }
         }
@@ -150,9 +140,7 @@ class MiniRecorderShortcutManager: ObservableObject {
     
     private func deactivateEscapeShortcut() {
         KeyboardShortcuts.setShortcut(nil, for: .escapeRecorder)
-        escFirstPressTime = nil
-        escapeTimeoutTask?.cancel()
-        escapeTimeoutTask = nil
+        escapeDoublePress.reset()
     }
     
     private func deactivateCancelShortcut() {
@@ -165,7 +153,8 @@ class MiniRecorderShortcutManager: ObservableObject {
                 guard let self = self,
                       self.recorderUIManager.isMiniRecorderVisible,
                       let enhancementService = self.engine.getEnhancementService() else { return }
-                enhancementService.isEnhancementEnabled.toggle()
+                // Applies to this recording only.
+                self.engine.dictationSession.toggleEnhancement(global: enhancementService.outputMode)
             }
         }
 
@@ -209,9 +198,7 @@ class MiniRecorderShortcutManager: ObservableObject {
                 if !powerModeManager.enabledConfigurations.isEmpty {
                     let availableConfigurations = powerModeManager.enabledConfigurations
                     if index < availableConfigurations.count {
-                        let selectedConfig = availableConfigurations[index]
-                        powerModeManager.setActiveConfiguration(selectedConfig)
-                        await PowerModeSessionManager.shared.beginSession(with: selectedConfig)
+                        powerModeManager.selectInRecorder(availableConfigurations[index])
                     }
                 }
             }
@@ -257,11 +244,10 @@ class MiniRecorderShortcutManager: ObservableObject {
                 
                 let availablePrompts = enhancementService.allPrompts
                 if index < availablePrompts.count {
-                    if !enhancementService.isEnhancementEnabled {
-                        enhancementService.isEnhancementEnabled = true
-                    }
-                    
-                    enhancementService.setActivePrompt(availablePrompts[index])
+                    self.engine.dictationSession.selectPrompt(
+                        availablePrompts[index].id,
+                        global: enhancementService.outputMode
+                    )
                 }
             }
         }
@@ -287,7 +273,6 @@ class MiniRecorderShortcutManager: ObservableObject {
     
     deinit {
         visibilityTask?.cancel()
-        escapeTimeoutTask?.cancel()
         Task { @MainActor in
             MiniRecorderShortcutManager.clearManagedShortcuts()
         }

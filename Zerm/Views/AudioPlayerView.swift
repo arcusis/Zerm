@@ -2,16 +2,16 @@ import SwiftUI
 import AVFoundation
 
 extension TimeInterval {
+    /// Formatted for the app's language, so a Hebrew UI never shows English units.
     func formatTiming() -> String {
+        let duration = Duration.seconds(self)
         if self < 1 {
-            return String(format: "%.0fms", self * 1000)
+            return duration.formatted(.units(allowed: [.milliseconds], width: .abbreviated))
         }
         if self < 60 {
-            return String(format: "%.1fs", self)
+            return duration.formatted(.units(allowed: [.seconds], width: .abbreviated, fractionalPart: .show(length: 1)))
         }
-        let minutes = Int(self) / 60
-        let seconds = self.truncatingRemainder(dividingBy: 60)
-        return String(format: "%dm %.0fs", minutes, seconds)
+        return duration.formatted(.units(allowed: [.minutes, .seconds], width: .abbreviated))
     }
 }
 
@@ -344,7 +344,7 @@ private struct StatusBanner: View {
         HStack(spacing: 8) {
             Image(systemName: isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                 .foregroundColor(isError ? .red : .green)
-            Text(message)
+            Text(verbatim: message)
                 .font(.system(size: 14, weight: .medium))
         }
         .padding(.horizontal, 16)
@@ -419,7 +419,7 @@ struct AudioPlayerView: View {
                             .fill(Color.primary.opacity(playerManager.playbackRate == 1.0 ? 0.06 : 0.14))
                             .frame(width: 32, height: 32)
                             .overlay(
-                                Text(playerManager.playbackRate == 1.0 ? "1×" : playerManager.playbackRate == 1.5 ? "1.5×" : "2×")
+                                Text(verbatim: playerManager.playbackRate == 1.0 ? "1×" : playerManager.playbackRate == 1.5 ? "1.5×" : "2×")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.primary)
                             )
@@ -434,7 +434,11 @@ struct AudioPlayerView: View {
                     .opacity(enhancementService.isEnhancementEnabled ? 1.0 : 0.4)
                     .help("Select enhancement prompt")
                     .popover(isPresented: $showPromptPopover, arrowEdge: .bottom) {
-                        EnhancementPromptPopover()
+                        EnhancementPromptPopover(
+                            isEnhancementEnabled: $enhancementService.isEnhancementEnabled,
+                            selectedPromptID: enhancementService.selectedPromptId,
+                            onSelectPrompt: { enhancementService.setActivePrompt($0) }
+                        )
                             .environmentObject(enhancementService)
                     }
 
@@ -465,8 +469,8 @@ struct AudioPlayerView: View {
                             showSuccess: bannerState == .reEnhanceSuccess,
                             action: reEnhanceOnly
                         )
-                        .disabled(isOperationInProgress || !enhancementService.isEnhancementEnabled || !enhancementService.isConfigured)
-                        .opacity(enhancementService.isEnhancementEnabled && enhancementService.isConfigured ? 1.0 : 0.4)
+                        .disabled(isOperationInProgress || !enhancementService.isConfigured)
+                        .opacity(enhancementService.isConfigured ? 1.0 : 0.4)
                         .help("Re-enhance with selected prompt")
                     }
 
@@ -498,13 +502,13 @@ struct AudioPlayerView: View {
                 if let state = bannerState {
                     switch state {
                     case .retranscribeSuccess:
-                        StatusBanner(message: "Retranscription successful", isError: false)
+                        StatusBanner(message: String(localized: "Retranscription successful"), isError: false)
                     case .reEnhanceSuccess:
-                        StatusBanner(message: "Re-enhancement successful", isError: false)
+                        StatusBanner(message: String(localized: "Re-enhancement successful"), isError: false)
                     case .retranscribeError(let message):
-                        StatusBanner(message: message.isEmpty ? "Retranscription failed" : message, isError: true)
+                        StatusBanner(message: message.isEmpty ? String(localized: "Retranscription failed") : message, isError: true)
                     case .reEnhanceError(let message):
-                        StatusBanner(message: message.isEmpty ? "Re-enhancement failed" : message, isError: true)
+                        StatusBanner(message: message.isEmpty ? String(localized: "Re-enhancement failed") : message, isError: true)
                     }
                 }
                 Spacer()
@@ -528,41 +532,23 @@ struct AudioPlayerView: View {
     private func reEnhanceOnly() {
         guard let transcription = transcription else { return }
 
-        guard enhancementService.isEnhancementEnabled, enhancementService.isConfigured else {
-            showTemporaryBanner(.reEnhanceError("AI Enhancement is not enabled or configured"))
-            return
-        }
-
         isReEnhancing = true
         bannerState = nil
 
-        Task {
-            do {
-                let (enhancedText, enhancementDuration, promptName) = try await enhancementService.enhance(transcription.text)
-                await MainActor.run {
-                    transcription.enhancedText = enhancedText
-                    transcription.aiEnhancementModelName = enhancementService.getAIService()?.currentModel
-                    transcription.promptName = promptName
-                    transcription.enhancementDuration = enhancementDuration
-                    transcription.aiRequestSystemMessage = enhancementService.lastSystemMessageSent
-                    transcription.aiRequestUserMessage = enhancementService.lastUserMessageSent
-                    try? modelContext.save()
-
-                    isReEnhancing = false
-                    showTemporaryBanner(.reEnhanceSuccess)
-                }
-            } catch {
-                await MainActor.run {
-                    isReEnhancing = false
-                    showTemporaryBanner(.reEnhanceError(error.localizedDescription))
-                }
+        Task { @MainActor in
+            let outcome = await enhancementService.reenhance(transcription)
+            isReEnhancing = false
+            if case .enhanced = outcome {
+                showTemporaryBanner(.reEnhanceSuccess)
+            } else {
+                showTemporaryBanner(.reEnhanceError(EnhancementNotifier.message(for: outcome)?.title ?? ""))
             }
         }
     }
 
     private func retranscribeAudio() {
         guard let currentTranscriptionModel = engine.transcriptionModelManager.currentTranscriptionModel else {
-            showTemporaryBanner(.retranscribeError("No transcription model selected"))
+            showTemporaryBanner(.retranscribeError(String(localized: "No transcription model selected")))
             return
         }
 

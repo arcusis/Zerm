@@ -5,13 +5,13 @@ import Foundation
 class WhisperPrompt: ObservableObject {
     @Published var transcriptionPrompt: String = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? ""
     
-    private let customPromptsKey = "CustomLanguagePrompts"
-    
+    nonisolated private static let customPromptsKey = "CustomLanguagePrompts"
+
     // Store user-customized prompts
     private var customPrompts: [String: String] = [:]
-    
+
     // Language-specific base prompts
-    private let languagePrompts: [String: String] = [
+    nonisolated private static let languagePrompts: [String: String] = [
         // English — number words included to reduce Whisper's tendency to transcribe
         // spoken numbers as digits (e.g. "one way" → "1 way").  The initial prompt is
         // a style/vocabulary guide; examples with written-out numbers shift probability
@@ -42,7 +42,7 @@ class WhisperPrompt: ObservableObject {
         // Middle Eastern Languages
         "ar": "مرحباً، كيف حالك؟ سعيد بلقائك.",
         "fa": "سلام، حال شما چطور است؟ از آشنایی با شما خوشوقتم.",
-        "he": ",שלום, מה שלומך? נעים להכיר",
+        "he": "שלום, מה שלומך? נעים להכיר.",
         
         // South Asian Languages
         "ta": "வணக்கம், எப்படி இருக்கிறீர்கள்? உங்களை சந்தித்ததில் மகிழ்ச்சி.",
@@ -77,13 +77,13 @@ class WhisperPrompt: ObservableObject {
     }
     
     private func loadCustomPrompts() {
-        if let savedPrompts = UserDefaults.standard.dictionary(forKey: customPromptsKey) as? [String: String] {
+        if let savedPrompts = UserDefaults.standard.dictionary(forKey: Self.customPromptsKey) as? [String: String] {
             customPrompts = savedPrompts
         }
     }
     
     private func saveCustomPrompts() {
-        UserDefaults.standard.set(customPrompts, forKey: customPromptsKey)
+        UserDefaults.standard.set(customPrompts, forKey: Self.customPromptsKey)
         UserDefaults.standard.synchronize() // Force immediate synchronization
     }
     
@@ -104,13 +104,26 @@ class WhisperPrompt: ObservableObject {
     }
     
     func getLanguagePrompt(for language: String) -> String {
+        Self.prompt(for: language, customPrompts: customPrompts)
+    }
+
+    /// The Output Format text for the language a request actually uses. Read per request, so a
+    /// Hebrew dictation or a per-job language never receives the prompt of the language that
+    /// happened to be selected when settings last published `TranscriptionPrompt`.
+    nonisolated static func resolvedPrompt(for language: String?, defaults: UserDefaults = .standard) -> String {
+        guard let language, !language.isEmpty else { return "" }
+        let savedPrompts = defaults.dictionary(forKey: customPromptsKey) as? [String: String] ?? [:]
+        return prompt(for: language, customPrompts: savedPrompts)
+    }
+
+    nonisolated private static func prompt(for language: String, customPrompts: [String: String]) -> String {
         // First check if there's a custom prompt for this language
         if let customPrompt = customPrompts[language], !customPrompt.isEmpty {
             return customPrompt
         }
 
         // Auto detection must remain language-neutral. An English initial prompt materially
-        // biases short meeting windows and made Hebrew and mixed-language meetings appear
+        // biases short audio and made Hebrew and mixed-language speech appear
         // English-only even though the model itself supports them.
         if language == LanguagePreference.autoCode {
             return languagePrompts["default"] ?? ""

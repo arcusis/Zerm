@@ -14,8 +14,7 @@ struct ConfigurationView: View {
     @State private var selectedEmoji: String = "💼"
     @State private var isShowingEmojiPicker = false
     @State private var isShowingAppPicker = false
-    @State private var isAIEnhancementEnabled: Bool
-    @State private var enhancementOverride: PowerModeEnhancementOverride = .inherit
+    @State private var outputMode: DictationOutputMode?
     @State private var selectedPromptId: UUID?
     @State private var selectedTranscriptionModelName: String?
     @State private var selectedLanguage: String?
@@ -28,7 +27,10 @@ struct ConfigurationView: View {
     @State private var selectedAppConfigs: [AppConfig] = []
     @State private var websiteConfigs: [URLConfig] = []
     @State private var newWebsiteURL: String = ""
-    @State private var useScreenCapture = false
+    @State private var contextAwareness: Bool?
+    @State private var isTextFormattingEnabled: Bool?
+    @State private var punctuationCleanupMode: PunctuationCleanupMode?
+    @State private var lowercaseTranscription: Bool?
     @State private var autoSendKey: AutoSendKey = .none
     @State private var isDefault = false
     @State private var isShowingDeleteConfirmation = false
@@ -36,6 +38,29 @@ struct ConfigurationView: View {
 
     private var effectiveModelName: String? {
         selectedTranscriptionModelName ?? transcriptionModelManager.currentTranscriptionModel?.name
+    }
+
+    private var effectiveModel: (any TranscriptionModel)? {
+        transcriptionModelManager.allAvailableModels.first { $0.name == effectiveModelName }
+    }
+
+    /// Usable models, plus a saved override that is no longer usable so the picker still shows it.
+    private var modelChoices: [any TranscriptionModel] {
+        var models = transcriptionModelManager.usableModels
+        if let name = selectedTranscriptionModelName,
+           !models.contains(where: { $0.name == name }),
+           let saved = transcriptionModelManager.allAvailableModels.first(where: { $0.name == name }) {
+            models.append(saved)
+        }
+        return models
+    }
+
+    private var providerChoices: [AIProvider] {
+        var providers = aiService.connectedEnhancementProviders
+        if let saved = selectedAIProvider.flatMap({ AIProvider(rawValue: $0) }), !providers.contains(saved) {
+            providers.append(saved)
+        }
+        return providers
     }
 
     private var filteredApps: [(url: URL, name: String, bundleId: String, icon: NSImage)] {
@@ -48,11 +73,11 @@ struct ConfigurationView: View {
 
     private var canSave: Bool { !configName.isEmpty }
 
+    /// Multilingual models that detect the language themselves. English-only models of the same
+    /// providers get the English-only presentation instead of "Autodetected".
     private func languageSelectionDisabled() -> Bool {
-        guard let selectedModelName = effectiveModelName,
-              let model = transcriptionModelManager.allAvailableModels.first(where: { $0.name == selectedModelName })
-        else { return false }
-        return model.provider == .fluidAudio || model.provider == .gemini
+        guard let model = effectiveModel else { return false }
+        return (model.provider == .fluidAudio || model.provider == .gemini) && model.isMultilingualModel
     }
 
     init(mode: ConfigurationMode, powerModeManager: PowerModeManager, onDismiss: @escaping () -> Void) {
@@ -62,27 +87,15 @@ struct ConfigurationView: View {
 
         switch mode {
         case .add:
-            let newId = UUID()
-            _powerModeConfigId = State(initialValue: newId)
-            _isAIEnhancementEnabled = State(initialValue: false)
-            _enhancementOverride = State(initialValue: .inherit)
-            _selectedPromptId = State(initialValue: nil)
-            _selectedTranscriptionModelName = State(initialValue: nil)
-            _selectedLanguage = State(initialValue: nil)
+            // A new Power Mode starts out overriding nothing.
+            _powerModeConfigId = State(initialValue: UUID())
             _configName = State(initialValue: "")
             _selectedEmoji = State(initialValue: "✏️")
-            _useScreenCapture = State(initialValue: false)
-            _autoSendKey = State(initialValue: .none)
-            _isDefault = State(initialValue: false)
-            // Use UserDefaults directly since EnvironmentObjects aren't available in init
-            _selectedAIProvider = State(initialValue: UserDefaults.standard.string(forKey: "selectedAIProvider"))
-            _selectedAIModel = State(initialValue: nil)
         case .edit(let config):
             // Fetch latest version in case config was modified elsewhere
             let latestConfig = powerModeManager.getConfiguration(with: config.id) ?? config
             _powerModeConfigId = State(initialValue: latestConfig.id)
-            _isAIEnhancementEnabled = State(initialValue: latestConfig.isAIEnhancementEnabled)
-            _enhancementOverride = State(initialValue: latestConfig.enhancementOverride)
+            _outputMode = State(initialValue: latestConfig.outputMode)
             _selectedPromptId = State(initialValue: latestConfig.selectedPrompt.flatMap { UUID(uuidString: $0) })
             _selectedTranscriptionModelName = State(initialValue: latestConfig.selectedTranscriptionModelName)
             _selectedLanguage = State(initialValue: latestConfig.selectedLanguage)
@@ -90,7 +103,10 @@ struct ConfigurationView: View {
             _selectedEmoji = State(initialValue: latestConfig.emoji)
             _selectedAppConfigs = State(initialValue: latestConfig.appConfigs ?? [])
             _websiteConfigs = State(initialValue: latestConfig.urlConfigs ?? [])
-            _useScreenCapture = State(initialValue: latestConfig.useScreenCapture)
+            _contextAwareness = State(initialValue: latestConfig.contextAwareness)
+            _isTextFormattingEnabled = State(initialValue: latestConfig.isTextFormattingEnabled)
+            _punctuationCleanupMode = State(initialValue: latestConfig.punctuationCleanupMode)
+            _lowercaseTranscription = State(initialValue: latestConfig.lowercaseTranscription)
             _autoSendKey = State(initialValue: latestConfig.autoSendKey)
             _isDefault = State(initialValue: latestConfig.isDefault)
             _selectedAIProvider = State(initialValue: latestConfig.selectedAIProvider)
@@ -131,7 +147,7 @@ struct ConfigurationView: View {
                         Button {
                             isShowingEmojiPicker.toggle()
                         } label: {
-                            Text(selectedEmoji)
+                            Text(verbatim: selectedEmoji)
                                 .font(.system(size: 22))
                                 .frame(width: 32, height: 32)
                                 .background(
@@ -158,7 +174,7 @@ struct ConfigurationView: View {
                         HStack {
                             Text("Applications")
                             InfoTip(
-                                "This mode switches on whenever one of these apps is the one you are working in. Apps are matched exactly, so adding Mail here has no effect while you are in a browser reading webmail — use a website trigger for that.",
+                                String(localized: "This mode switches on whenever one of these apps is the one you are working in. Apps are matched exactly, so adding Mail here has no effect while you are in a browser reading webmail — use a website trigger for that."),
                                 doc: .powerMode
                             )
                             Spacer()
@@ -222,7 +238,7 @@ struct ConfigurationView: View {
                         HStack {
                             Text("Websites")
                             InfoTip(
-                                "Matching is a substring test, not an exact one. Both the address you are on and the entry you type here are lowercased and stripped of \"https://\", \"http://\" and \"www.\" first, then Zerm checks whether the address contains your entry. So \"github.com\" matches every page on the site, and \"github.com/arcusis\" narrows it to one account. The first time this runs, macOS asks to let Zerm control your browser — that is how it reads the current address.",
+                                String(localized: "Matching is a substring test, not an exact one. Both the address you are on and the entry you type here are lowercased and stripped of \"https://\", \"http://\" and \"www.\" first, then Zerm checks whether the address contains your entry. So \"github.com\" matches every page on the site, and \"github.com/arcusis\" narrows it to one account. The first time this runs, macOS asks to let Zerm control your browser — that is how it reads the current address."),
                                 doc: .powerMode
                             )
                         }
@@ -247,7 +263,7 @@ struct ConfigurationView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "globe")
                                             .foregroundColor(.secondary)
-                                        Text(urlConfig.url)
+                                        Text(verbatim: urlConfig.url)
                                             .lineLimit(1)
                                         Spacer(minLength: 0)
                                         Button {
@@ -272,35 +288,20 @@ struct ConfigurationView: View {
                     .padding(.vertical, 2)
                 }
 
-                Section("Transcription") {
+                Section {
                     if transcriptionModelManager.usableModels.isEmpty {
                         Text("No transcription models available. Please connect to a cloud service or download a local model in the AI Models tab.")
                             .foregroundColor(.secondary)
                     } else {
-                        let modelBinding = Binding<String?>(
-                            get: { selectedTranscriptionModelName ?? transcriptionModelManager.currentTranscriptionModel?.name },
-                            set: { selectedTranscriptionModelName = $0 }
-                        )
-
-                        Picker(selection: modelBinding) {
-                            ForEach(transcriptionModelManager.usableModels, id: \.name) { model in
-                                Text(model.displayName).tag(model.name as String?)
+                        Picker(selection: $selectedTranscriptionModelName) {
+                            Text("Use global setting").tag(String?.none)
+                            ForEach(modelChoices, id: \.name) { model in
+                                Text(verbatim: model.displayName).tag(model.name as String?)
                             }
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Model")
-                                InfoTip(
-                                    "The transcription model used while this mode is active, overriding your usual one. Worth setting when an app calls for something different — a larger model for accuracy in long-form writing, a fast local one for quick chat replies.",
-                                    doc: .models
-                                )
-                            }
-                        }
-                        .onChange(of: selectedTranscriptionModelName) { _, newModelName in
-                            // Auto-set language to "auto" for models that only support auto-detection
-                            if let modelName = newModelName ?? transcriptionModelManager.currentTranscriptionModel?.name,
-                               let model = transcriptionModelManager.allAvailableModels.first(where: { $0.name == modelName }),
-                               model.provider == .fluidAudio || model.provider == .gemini {
-                                selectedLanguage = "auto"
+                                InfoTip(String(localized: "The transcription model used while this mode is active. \"Use global setting\" always follows the model selected in Dictation Models."))
                             }
                         }
                     }
@@ -312,121 +313,92 @@ struct ConfigurationView: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Language")
-                                InfoTip("The model above works out the language on its own, so there is nothing to choose here. Switch to a different model if you need to pin one language.")
+                                InfoTip(String(localized: "The model above works out the language on its own, so there is nothing to choose here. Switch to a different model if you need to pin one language."))
                             }
                         }
-                        .onAppear {
-                            selectedLanguage = "auto"
+                    } else if let modelInfo = effectiveModel, !modelInfo.isMultilingualModel {
+                        LabeledContent {
+                            Text("English")
+                                .foregroundColor(.secondary)
+                        } label: {
+                            Text("Language")
                         }
-                    } else if let selectedModel = effectiveModelName,
-                              let modelInfo = transcriptionModelManager.allAvailableModels.first(where: { $0.name == selectedModel }),
-                              modelInfo.isMultilingualModel {
-                        let languageBinding = Binding<String?>(
-                            get: { selectedLanguage ?? UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto" },
-                            set: { selectedLanguage = $0 }
-                        )
-
-                        Picker(selection: languageBinding) {
+                    } else if let modelInfo = effectiveModel, modelInfo.isMultilingualModel {
+                        Picker(selection: $selectedLanguage) {
+                            Text("Use global setting").tag(String?.none)
                             ForEach(modelInfo.supportedLanguages.sorted(by: {
                                 if $0.key == "auto" { return true }
                                 if $1.key == "auto" { return false }
                                 return $0.value < $1.value
                             }), id: \.key) { key, value in
-                                Text(value).tag(key as String?)
+                                Text(verbatim: FileTranscriptionOptionsView.languageName(key, for: modelInfo)).tag(key as String?)
                             }
                         } label: {
                             HStack(spacing: 4) {
                                 Text("Language")
-                                InfoTip("The language you will be speaking while this mode is active. Naming it explicitly is more accurate than Auto-detect, which is the point of setting it per mode — say, German in your work chat and English everywhere else.")
+                                InfoTip(String(localized: "The language you speak while this mode is active. \"Use global setting\" follows the language chosen in Dictation Models."))
                             }
                         }
-                    } else if let selectedModel = effectiveModelName,
-                              let modelInfo = transcriptionModelManager.allAvailableModels.first(where: { $0.name == selectedModel }),
-                              !modelInfo.isMultilingualModel {
-                        EmptyView()
-                            .onAppear {
-                                if selectedLanguage == nil {
-                                    selectedLanguage = "en"
-                                }
-                            }
                     }
+                } header: {
+                    Text("Transcription")
                 }
 
-                Section("AI Enhancement") {
-                    Picker(selection: $enhancementOverride) {
-                        ForEach(PowerModeEnhancementOverride.allCases) { option in
-                            Text(option.displayName).tag(option)
+                Section {
+                    OptionalBoolPicker(selection: $isTextFormattingEnabled) {
+                        Text("Text Formatting")
+                    }
+
+                    Picker(selection: $punctuationCleanupMode) {
+                        Text("Use global setting").tag(PunctuationCleanupMode?.none)
+                        Text("Keep punctuation").tag(PunctuationCleanupMode?.some(.keep))
+                        Text("Remove all punctuation").tag(PunctuationCleanupMode?.some(.removeAll))
+                        Text("Remove trailing period").tag(PunctuationCleanupMode?.some(.removeTrailingPeriod))
+                    } label: {
+                        Text("Punctuation")
+                    }
+
+                    OptionalBoolPicker(selection: $lowercaseTranscription) {
+                        Text("Lowercase")
+                    }
+                } header: {
+                    Text("Text")
+                }
+
+                Section {
+                    Picker(selection: $outputMode) {
+                        Text("Use global setting").tag(DictationOutputMode?.none)
+                        ForEach(DictationOutputMode.allCases) { mode in
+                            Text(verbatim: mode.title).tag(DictationOutputMode?.some(mode))
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            Text("AI Enhancement")
+                            Text("Output")
                             InfoTip(
-                                "Choose whether this Power Mode changes AI enhancement at all. \"Use global setting\" leaves your Enhancement setting exactly as it is — pick that unless this app specifically needs enhancement forced on or off.",
+                                String(localized: "Whether this Power Mode pastes instantly or uses AI enhancement. \"Use global setting\" follows the Output setting in Enhancement."),
                                 learnMoreURL: Links.docString(.powerMode)
                             )
                         }
                     }
                     .pickerStyle(.menu)
-                    .onChange(of: enhancementOverride) { _, newValue in
-                        isAIEnhancementEnabled = (newValue == .on)
-                    }
-                    .onChange(of: isAIEnhancementEnabled) { _, newValue in
-                            if newValue {
-                                if selectedAIProvider == nil {
-                                    selectedAIProvider = aiService.selectedProvider.rawValue
-                                }
-                                if selectedAIModel == nil {
-                                    selectedAIModel = aiService.currentModel
-                                }
-                                if selectedPromptId == nil {
-                                    selectedPromptId = enhancementService.allPrompts.first?.id
-                                }
+
+                    if outputMode != .instant {
+                        Picker(selection: $selectedAIProvider) {
+                            Text("Use global setting").tag(String?.none)
+                            ForEach(providerChoices, id: \.self) { provider in
+                                Text(LocalizedStringKey(provider.rawValue)).tag(provider.rawValue as String?)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("AI Provider")
+                                InfoTip(String(localized: "Which connected service enhances transcripts in this mode. Handy for keeping work text on a local provider while using a cloud one elsewhere. Only providers you have already connected appear here."))
                             }
                         }
-
-                    let providerBinding = Binding<AIProvider>(
-                        get: {
-                            if let providerName = selectedAIProvider,
-                               let provider = AIProvider(rawValue: providerName) {
-                                return provider
-                            }
-                            return aiService.selectedProvider
-                        },
-                        set: { newValue in
-                            selectedAIProvider = newValue.rawValue
+                        .onChange(of: selectedAIProvider) { _, _ in
                             selectedAIModel = nil
                         }
-                    )
 
-                    // Shown for "inherit" too: those settings still apply whenever the
-                    // global switch has enhancement on.
-                    if enhancementOverride != .off {
-                        if aiService.connectedProviders.isEmpty {
-                            LabeledContent("AI Provider") {
-                                Text("No providers connected")
-                                    .foregroundColor(.secondary)
-                                    .italic()
-                            }
-                        } else {
-                            Picker(selection: providerBinding) {
-                                ForEach(aiService.connectedProviders.filter { $0 != .elevenLabs && $0 != .deepgram }, id: \.self) { provider in
-                                    Text(provider.rawValue).tag(provider)
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text("AI Provider")
-                                    InfoTip("Which connected service enhances transcripts in this mode. Handy for keeping work text on a local provider while using a cloud one elsewhere. Only providers you have already connected appear here.")
-                                }
-                            }
-                            .onChange(of: selectedAIProvider) { _, newValue in
-                                if let provider = newValue.flatMap({ AIProvider(rawValue: $0) }) {
-                                    selectedAIModel = provider.defaultModel
-                                }
-                            }
-                        }
-
-                        let providerName = selectedAIProvider ?? aiService.selectedProvider.rawValue
-                        if let provider = AIProvider(rawValue: providerName),
+                        if let provider = selectedAIProvider.flatMap({ AIProvider(rawValue: $0) }),
                            provider != .custom {
                             let models = aiService.availableModels(for: provider)
                             if models.isEmpty {
@@ -436,24 +408,15 @@ struct ConfigurationView: View {
                                         .italic()
                                 }
                             } else {
-                                let modelBinding = Binding<String>(
-                                    get: {
-                                        if let model = selectedAIModel, !model.isEmpty { return model }
-                                        return aiService.currentModel
-                                    },
-                                    set: { newModelValue in
-                                        selectedAIModel = newModelValue
-                                    }
-                                )
-
-                                Picker(selection: modelBinding) {
+                                Picker(selection: $selectedAIModel) {
+                                    Text("Use global setting").tag(String?.none)
                                     ForEach(models, id: \.self) { model in
-                                        Text(model).tag(model)
+                                        Text(verbatim: model).tag(model as String?)
                                     }
                                 } label: {
                                     HStack(spacing: 4) {
                                         Text("AI Model")
-                                        InfoTip("The specific model from that provider. Smaller models return faster and cost less, which suits quick messages; larger ones handle long or carefully worded text better.")
+                                        InfoTip(String(localized: "The specific model from that provider. Smaller models return faster and cost less, which suits quick messages; larger ones handle long or carefully worded text better."))
                                     }
                                 }
 
@@ -466,61 +429,57 @@ struct ConfigurationView: View {
                             }
                         }
 
-                        if enhancementService.allPrompts.isEmpty {
-                            LabeledContent("Enhancement Prompt") {
-                                Text("No prompts available")
-                                    .foregroundColor(.secondary)
+                        Picker(selection: $selectedPromptId) {
+                            Text("Use global setting").tag(UUID?.none)
+                            ForEach(enhancementService.allPrompts) { prompt in
+                                Text(verbatim: prompt.displayTitle).tag(prompt.id as UUID?)
                             }
-                        } else {
-                            Picker(selection: $selectedPromptId) {
-                                ForEach(enhancementService.allPrompts) { prompt in
-                                    Text(prompt.title).tag(prompt.id as UUID?)
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text("Enhancement Prompt")
-                                    InfoTip(
-                                        "The instructions the AI follows in this mode — this is what makes a Power Mode feel tailored. Pick your email prompt for the mail app, a terse one for chat, a note-taking one for your editor.",
-                                        doc: .enhancement
-                                    )
-                                }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Enhancement Prompt")
+                                InfoTip(
+                                    String(localized: "The instructions the AI follows in this mode — this is what makes a Power Mode feel tailored. Pick your email prompt for the mail app, a terse one for chat, a note-taking one for your editor."),
+                                    doc: .enhancement
+                                )
                             }
                         }
 
-                        Toggle(isOn: $useScreenCapture) {
+                        OptionalBoolPicker(selection: $contextAwareness) {
                             HStack(spacing: 4) {
                                 Text("Context Awareness")
                                 InfoTip(
-                                    "Reads the text visible on screen and passes it to the AI along with your transcript, so replies can pick up names and details from what you are looking at. Needs Screen Recording permission, and means on-screen text is sent to your enhancement provider.",
+                                    String(localized: "Reads the text visible on screen and passes it to the AI along with your transcript. Used in Enhanced output only. Needs Screen Recording permission, and means on-screen text is sent to your enhancement provider."),
                                     doc: .contextualAwareness
                                 )
                             }
                         }
                     }
+                } header: {
+                    Text("AI Enhancement")
                 }
 
                 Section("Advanced") {
                     Toggle(isOn: $isDefault) {
                         HStack(spacing: 6) {
                             Text("Set as default")
-                            InfoTip("Default power mode is used when no specific app or website matches are found.")
+                            InfoTip(String(localized: "Default power mode is used when no specific app or website matches are found."))
                         }
                     }
 
                     Picker(selection: $autoSendKey) {
                         ForEach(AutoSendKey.allCases, id: \.self) { key in
-                            Text(key.displayName).tag(key)
+                            Text(LocalizedStringKey(key.displayName)).tag(key)
                         }
                     } label: {
                         HStack(spacing: 6) {
                             Text("Auto Send")
-                            InfoTip("Automatically presses a key combination after pasting text. Useful for chat applications or forms that use different send shortcuts.")
+                            InfoTip(String(localized: "Automatically presses a key combination after pasting text. Useful for chat applications or forms that use different send shortcuts."))
                         }
                     }
 
                     HStack {
                         Text("Keyboard Shortcut")
-                        InfoTip("Assign a unique keyboard shortcut to instantly activate this Power Mode and start recording.")
+                        InfoTip(String(localized: "Assign a unique keyboard shortcut to instantly activate this Power Mode and start recording."))
 
                         Spacer()
 
@@ -552,20 +511,6 @@ struct ConfigurationView: View {
             }
             .powerModeValidationAlert(errors: validationErrors, isPresented: $showValidationAlert)
             .onAppear {
-                // Set AI provider/model after EnvironmentObjects are available
-                if case .add = mode {
-                    if selectedAIProvider == nil {
-                        selectedAIProvider = aiService.selectedProvider.rawValue
-                    }
-                    if selectedAIModel == nil || selectedAIModel?.isEmpty == true {
-                        selectedAIModel = aiService.currentModel
-                    }
-                }
-
-                if isAIEnhancementEnabled && selectedPromptId == nil {
-                    selectedPromptId = enhancementService.allPrompts.first?.id
-                }
-
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     isNameFieldFocused = true
                 }
@@ -618,45 +563,32 @@ struct ConfigurationView: View {
         let shortcut = KeyboardShortcuts.getShortcut(for: .powerMode(id: powerModeConfigId))
         let hotkeyString = shortcut != nil ? "configured" : nil
 
+        var config: PowerModeConfig
         switch mode {
         case .add:
-            return PowerModeConfig(
-                id: powerModeConfigId,
-                name: configName,
-                emoji: selectedEmoji,
-                appConfigs: selectedAppConfigs.isEmpty ? nil : selectedAppConfigs,
-                urlConfigs: websiteConfigs.isEmpty ? nil : websiteConfigs,
-                isAIEnhancementEnabled: isAIEnhancementEnabled,
-                enhancementOverride: enhancementOverride,
-                selectedPrompt: selectedPromptId?.uuidString,
-                selectedTranscriptionModelName: selectedTranscriptionModelName,
-                selectedLanguage: selectedLanguage,
-                useScreenCapture: useScreenCapture,
-                selectedAIProvider: selectedAIProvider,
-                selectedAIModel: selectedAIModel,
-                autoSendKey: autoSendKey,
-                isDefault: isDefault,
-                hotkeyShortcut: hotkeyString
-            )
-        case .edit(let config):
-            var updatedConfig = config
-            updatedConfig.name = configName
-            updatedConfig.emoji = selectedEmoji
-            updatedConfig.isAIEnhancementEnabled = isAIEnhancementEnabled
-            updatedConfig.enhancementOverride = enhancementOverride
-            updatedConfig.selectedPrompt = selectedPromptId?.uuidString
-            updatedConfig.selectedTranscriptionModelName = selectedTranscriptionModelName
-            updatedConfig.selectedLanguage = selectedLanguage
-            updatedConfig.appConfigs = selectedAppConfigs.isEmpty ? nil : selectedAppConfigs
-            updatedConfig.urlConfigs = websiteConfigs.isEmpty ? nil : websiteConfigs
-            updatedConfig.useScreenCapture = useScreenCapture
-            updatedConfig.autoSendKey = autoSendKey
-            updatedConfig.selectedAIProvider = selectedAIProvider
-            updatedConfig.selectedAIModel = selectedAIModel
-            updatedConfig.isDefault = isDefault
-            updatedConfig.hotkeyShortcut = hotkeyString
-            return updatedConfig
+            config = PowerModeConfig(id: powerModeConfigId, name: configName, emoji: selectedEmoji)
+        case .edit(let existing):
+            config = existing
         }
+        config.name = configName
+        config.emoji = selectedEmoji
+        config.appConfigs = selectedAppConfigs.isEmpty ? nil : selectedAppConfigs
+        config.urlConfigs = websiteConfigs.isEmpty ? nil : websiteConfigs
+        config.selectedTranscriptionModelName = selectedTranscriptionModelName
+        config.selectedLanguage = selectedLanguage
+        config.isTextFormattingEnabled = isTextFormattingEnabled
+        config.punctuationCleanupMode = punctuationCleanupMode
+        config.lowercaseTranscription = lowercaseTranscription
+        config.outputMode = outputMode
+        config.selectedPrompt = selectedPromptId?.uuidString
+        config.selectedAIProvider = selectedAIProvider
+        // A model belongs to the provider it was picked for.
+        config.selectedAIModel = selectedAIProvider == nil ? nil : selectedAIModel
+        config.contextAwareness = contextAwareness
+        config.autoSendKey = autoSendKey
+        config.isDefault = isDefault
+        config.hotkeyShortcut = hotkeyString
+        return config
     }
 
     private func loadInstalledApps() {
@@ -757,5 +689,21 @@ struct ConfigurationView: View {
         }
 
         onDismiss()
+    }
+}
+
+/// A Power Mode switch that can also leave the global setting alone.
+private struct OptionalBoolPicker<Label: View>: View {
+    @Binding var selection: Bool?
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        Picker(selection: $selection) {
+            Text("Use global setting").tag(Bool?.none)
+            Text("On").tag(Bool?.some(true))
+            Text("Off").tag(Bool?.some(false))
+        } label: {
+            label()
+        }
     }
 }

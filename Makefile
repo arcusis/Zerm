@@ -14,8 +14,13 @@ ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
 LLAMA_DIR := $(DEPS_DIR)/llama
 LLAMA_XCFRAMEWORK := $(LLAMA_DIR)/build-apple/llama.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
+# Development builds use their own bundle identifier, so their UserDefaults, Application
+# Support data, TCC grants and updater never touch an installed Zerm. See AppStoragePaths.
+DEV_BUNDLE_SUFFIX := .dev
+DEV_DERIVED_DATA := $(CURDIR)/.dev-build
+DEV_APP := $(DEV_DERIVED_DATA)/Zerm Dev.app
 
-.PHONY: all clean whisper sherpa llama setup build test local check healthcheck help dev run install reset-permissions release site
+.PHONY: all clean whisper sherpa llama setup build test dev-app local check healthcheck help dev run install reset-permissions release site
 
 # Default target
 all: check build
@@ -187,12 +192,36 @@ clean:
 # nothing invoked it — no make target and no CI step — so the suite never ran.
 # Debug is required, not incidental: `@testable import Zerm` needs ENABLE_TESTABILITY,
 # which Release turns off, and the tests fail to compile without it.
+# The test host launches the whole app, so it runs under the development bundle identifier:
+# otherwise launch-time migrations would run against the installed app's data.
 test: setup
 	xcodebuild test -project Zerm.xcodeproj -scheme Zerm \
 		-configuration Debug \
 		-destination 'platform=macOS' \
+		-derivedDataPath "$(DEV_DERIVED_DATA)" \
 		-only-testing:ZermTests \
+		ZERM_BUNDLE_ID_SUFFIX=$(DEV_BUNDLE_SUFFIX) \
 		CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+# Build "Zerm Dev.app" (com.arcusis.zerm.dev) for hands-on testing beside the installed app.
+# Never installed to /Applications. Give it hotkeys that differ from the installed app's
+# before granting it Accessibility.
+dev-app: check setup
+	xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug \
+		-derivedDataPath "$(DEV_DERIVED_DATA)" \
+		-xcconfig LocalBuild.xcconfig \
+		ZERM_BUNDLE_ID_SUFFIX=$(DEV_BUNDLE_SUFFIX) \
+		CODE_SIGN_IDENTITY="-" \
+		CODE_SIGNING_REQUIRED=NO \
+		CODE_SIGNING_ALLOWED=YES \
+		DEVELOPMENT_TEAM="" \
+		CODE_SIGN_ENTITLEMENTS=$(CURDIR)/Zerm/Zerm.local.entitlements \
+		SWIFT_ACTIVE_COMPILATION_CONDITIONS='$$(inherited) LOCAL_BUILD' \
+		build
+	@rm -rf "$(DEV_APP)"
+	@ditto "$(DEV_DERIVED_DATA)/Build/Products/Debug/Zerm.app" "$(DEV_APP)"
+	@xattr -cr "$(DEV_APP)"
+	@echo "Built $(DEV_APP) ($$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$(DEV_APP)/Contents/Info.plist"))"
 
 # Help
 help:

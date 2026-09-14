@@ -121,7 +121,7 @@ struct InlineHistoryView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This action cannot be undone. Are you sure you want to delete \(selectedTranscriptions.count) item\(selectedTranscriptions.count == 1 ? "" : "s")?")
+            Text("history_delete_confirmation \(selectedTranscriptions.count)")
         }
         .onAppear {
             isViewCurrentlyVisible = true
@@ -173,7 +173,7 @@ struct InlineHistoryView: View {
 
     private var selectionBar: some View {
         HStack(spacing: 16) {
-            Text("\(selectedTranscriptions.count) selected")
+            Text("history_selected_count \(selectedTranscriptions.count)")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.secondary)
 
@@ -423,6 +423,7 @@ struct InlineHistoryView: View {
                 print("Error deleting audio file: \(error.localizedDescription)")
             }
         }
+        FileTranscriptStore.recordings.remove(transcription.id)
 
         if expandedId == transcription.id {
             expandedId = nil
@@ -494,7 +495,27 @@ private struct HistoryCardRow: View {
     let onToggleCheck: () -> Void
     let onShowInfo: () -> Void
 
-    @State private var selectedTab: TranscriptionTab = .original
+    @Environment(\.layoutDirection) private var layoutDirection
+    @State private var selectedTab: TranscriptionTab
+    @State private var isFileTranscriptOpen = false
+
+    init(
+        transcription: Transcription,
+        isExpanded: Bool,
+        isChecked: Bool,
+        onToggleExpand: @escaping () -> Void,
+        onToggleCheck: @escaping () -> Void,
+        onShowInfo: @escaping () -> Void
+    ) {
+        self.transcription = transcription
+        self.isExpanded = isExpanded
+        self.isChecked = isChecked
+        self.onToggleExpand = onToggleExpand
+        self.onToggleCheck = onToggleCheck
+        self.onShowInfo = onShowInfo
+        // Open on the text the collapsed preview was showing.
+        _selectedTab = State(initialValue: transcription.hasEnhancement ? .enhanced : .original)
+    }
 
     private var displayText: String {
         switch selectedTab {
@@ -530,7 +551,7 @@ private struct HistoryCardRow: View {
                         .foregroundColor(.secondary)
 
                     if !isExpanded {
-                        Text(transcription.displayText)
+                        Text(verbatim: transcription.displayText)
                             .font(.system(size: 13))
                             .lineLimit(2)
                             .foregroundColor(.primary)
@@ -539,20 +560,34 @@ private struct HistoryCardRow: View {
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
+                // The expanded view has its own copy button for the selected tab.
+                if !isExpanded {
+                    CopyIconButton(textToCopy: transcription.displayText)
+                }
+
+                // `chevron.forward` already points left in right-to-left layouts, so it has to
+                // turn the other way to point down.
+                Image(systemName: "chevron.forward")
                     .font(.caption2.weight(.semibold))
                     .foregroundColor(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .rotationEffect(.degrees(isExpanded ? (layoutDirection == .rightToLeft ? -90 : 90) : 0))
                     .animation(.easeInOut(duration: 0.2), value: isExpanded)
             }
             .contentShape(Rectangle())
             .onTapGesture { onToggleExpand() }
+            .contextMenu {
+                Button("Copy") {
+                    _ = ClipboardManager.copyToClipboard(transcription.displayText)
+                }
+                OpenFileTranscriptButton(transcriptionID: transcription.id) { isFileTranscriptOpen = true }
+            }
 
             if isExpanded {
                 expandedContent
                     .padding(.top, 10)
             }
         }
+        .fileTranscriptSheet(for: transcription.id, isPresented: $isFileTranscriptOpen)
     }
 
     // MARK: - Expanded Content
@@ -568,7 +603,7 @@ private struct HistoryCardRow: View {
                                 selectedTab = tab
                             }
                         } label: {
-                            Text(tab.rawValue)
+                            Text(tab.title)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(selectedTab == tab ? .primary : .secondary)
                                 .padding(.horizontal, 10)
@@ -585,7 +620,7 @@ private struct HistoryCardRow: View {
             }
 
             ScrollView {
-                Text(displayText)
+                Text(verbatim: displayText)
                     .font(.body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -595,6 +630,9 @@ private struct HistoryCardRow: View {
                 CopyIconButton(textToCopy: displayText)
                     .padding(8)
             }
+
+            OpenFileTranscriptButton(transcriptionID: transcription.id) { isFileTranscriptOpen = true }
+                .controlSize(.small)
 
             if hasAudioFile, let urlString = transcription.audioFileURL,
                let url = URL(string: urlString) {
@@ -611,6 +649,7 @@ private struct HistoryCardRow: View {
                     }
                     .buttonStyle(.plain)
                     .help("View details")
+                    .accessibilityLabel("View details")
                 }
             }
         }

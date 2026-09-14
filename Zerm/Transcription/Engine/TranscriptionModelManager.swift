@@ -45,7 +45,7 @@ class TranscriptionModelManager: ObservableObject {
             case .nativeApple:
                 if #available(macOS 26, *) { return true } else { return false }
             case .custom:
-                return true
+                return (model as? CustomCloudModel)?.isUsable ?? false
             default:
                 if let cloudProvider = CloudProviderRegistry.provider(for: model.provider) {
                     return APIKeyManager.shared.hasAPIKey(forProvider: cloudProvider.providerKey)
@@ -70,10 +70,9 @@ class TranscriptionModelManager: ObservableObject {
         self.currentTranscriptionModel = model
         UserDefaults.standard.set(model.name, forKey: "CurrentTranscriptionModel")
 
-        if model.provider != .whisper {
-            whisperModelManager?.loadedWhisperModel = nil
-            whisperModelManager?.isModelLoaded = true
-        }
+        // Free a Whisper context the new selection won't use. The selected Whisper model loads
+        // once on the next dictation or prewarm and then stays resident.
+        whisperModelManager?.releaseModel(otherThan: model.name)
 
         NotificationCenter.default.post(name: .didChangeModel, object: nil, userInfo: ["modelName": model.name])
         NotificationCenter.default.post(name: .AppSettingsDidChange, object: nil)
@@ -114,8 +113,7 @@ class TranscriptionModelManager: ObservableObject {
         if currentTranscriptionModel?.name == modelName {
             currentTranscriptionModel = nil
             UserDefaults.standard.removeObject(forKey: "CurrentTranscriptionModel")
-            whisperModelManager?.loadedWhisperModel = nil
-            whisperModelManager?.isModelLoaded = false
+            whisperModelManager?.unloadModel()
             UserDefaults.standard.removeObject(forKey: "CurrentModel")
         }
         refreshAllAvailableModels()

@@ -98,55 +98,6 @@ class CursorPaster {
         await performPasteSession(text, captureAnchor: true)
     }
 
-    /// Replaces a range that `AXTextAnchorCapture` has already verified by selecting it through
-    /// Accessibility and posting the standard Paste command. Clipboard contents are restored
-    /// under the same session-ownership guard as ordinary dictation paste.
-    @MainActor
-    static func replaceVerifiedSelectionByPasting(
-        _ text: String,
-        anchor: AXTextAnchor
-    ) async -> PasteResult {
-        let pasteboard = NSPasteboard.general
-        // Deferred refinement is not the user's direct paste action. It must never silently
-        // replace their clipboard, regardless of the preference used for ordinary dictation.
-        let savedContents = snapshotClipboard(from: pasteboard)
-        let sessionID = UUID().uuidString
-
-        guard ClipboardManager.setClipboard(
-            text,
-            transient: true,
-            sessionID: sessionID,
-            on: pasteboard
-        ) else {
-            logger.error("Failed to prepare refined text for replacement paste")
-            return .commandNotPosted
-        }
-
-        let refusal = await Task.detached(priority: .userInitiated) {
-            AXTextReplacer.prepareSelectionForPaste(anchor, with: text)
-        }.value
-
-        guard refusal == nil,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == anchor.pid else {
-            restoreClipboardImmediatelyIfOwned(
-                savedContents,
-                expectedText: text,
-                sessionID: sessionID,
-                on: pasteboard
-            )
-            return .commandNotPosted
-        }
-
-        let result = await postPasteCommand()
-        scheduleClipboardRestore(
-            savedContents,
-            expectedText: text,
-            sessionID: sessionID,
-            on: pasteboard
-        )
-        return result
-    }
-
     @MainActor
     @discardableResult
     private static func performPasteSession(
@@ -256,23 +207,6 @@ class CursorPaster {
             pasteboard.string(forType: ClipboardManager.pasteSessionType) == sessionID
     }
 
-    private static func restoreClipboardImmediatelyIfOwned(
-        _ savedContents: ClipboardSnapshot,
-        expectedText: String,
-        sessionID: String,
-        on pasteboard: NSPasteboard
-    ) {
-        guard pasteboardStillOwnedByPasteSession(
-            pasteboard,
-            expectedText: expectedText,
-            sessionID: sessionID
-        ) else { return }
-        pasteboard.clearContents()
-        if !savedContents.isEmpty {
-            pasteboard.writeObjects(pasteboardItems(from: savedContents))
-        }
-    }
-
     private static func pasteboardItems(from snapshot: ClipboardSnapshot) -> [NSPasteboardItem] {
         snapshot.map { itemSnapshot in
             let item = NSPasteboardItem()
@@ -334,7 +268,7 @@ class CursorPaster {
             logger.error("Accessibility permission is required to paste with simulated key events")
             Task { @MainActor in
                 NotificationManager.shared.showNotification(
-                    title: "Enable Accessibility for reliable auto-paste",
+                    title: String(localized: "Enable Accessibility for reliable auto-paste"),
                     type: .warning
                 )
             }

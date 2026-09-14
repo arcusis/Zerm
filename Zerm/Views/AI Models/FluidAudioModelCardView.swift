@@ -41,6 +41,9 @@ struct FluidAudioModelCardView: View {
                 if !isDownloaded {
                     HardwareFitNotice(fit: model.hardwareFit)
                 }
+                if let downloadError = fluidAudioModelManager.downloadErrors[model.name], !isDownloading {
+                    DownloadErrorNotice(message: downloadError)
+                }
                 progressSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -53,7 +56,7 @@ struct FluidAudioModelCardView: View {
 
     private var headerSection: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(model.displayName)
+            Text(verbatim: model.displayName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
 
@@ -69,7 +72,7 @@ struct FluidAudioModelCardView: View {
                     .help(streamingEnabled ? "Live streaming enabled — click to switch to batch" : "Batch mode — click to enable live streaming")
 
                 InfoTip(
-                    "On, the model transcribes as you speak and the text appears in the recorder live. Off, it waits for the full recording, which tends to read better on long dictations because it has the whole sentence to work with.",
+                    String(localized: "On, the model transcribes as you speak and the text appears in the recorder live. Off, it waits for the full recording, which tends to read better on long dictations because it has the whole sentence to work with."),
                     doc: .models
                 )
             }
@@ -99,7 +102,7 @@ struct FluidAudioModelCardView: View {
     }
 
     private var descriptionSection: some View {
-        Text(model.description)
+        Text(verbatim: model.description)
             .font(.system(size: 11))
             .foregroundColor(Color(.secondaryLabelColor))
             .lineLimit(2)
@@ -151,7 +154,7 @@ struct FluidAudioModelCardView: View {
                     }
                 }) {
                     HStack(spacing: 4) {
-                        Text(isDownloading ? "Downloading..." : "Download")
+                        Text(isDownloading ? "Downloading..." : (fluidAudioModelManager.downloadErrors[model.name] == nil ? "Download" : "Retry Download"))
                         Image(systemName: "arrow.down.circle")
                     }
                     .font(.system(size: 12, weight: .medium))

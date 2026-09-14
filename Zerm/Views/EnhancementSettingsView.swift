@@ -7,7 +7,6 @@ struct EnhancementSettingsView: View {
     @State private var isShowingSettings = false
     @State private var selectedPromptForEdit: CustomPrompt?
     @State private var panelID = UUID()
-    @State private var outputMode: DictationOutputMode = .current
 
     private let panelWidth: CGFloat = 400
 
@@ -42,20 +41,10 @@ struct EnhancementSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: $enhancementService.isEnhancementEnabled) {
-                    HStack(spacing: 4) {
-                        Text("Enable Enhancement")
-                        InfoTip(
-                            "AI enhancement lets you pass the transcribed audio through LLMs to post-process using different prompts suitable for different use cases like e-mails, summary, writing, etc.",
-                            learnMoreURL: Links.docString(.enhancement)
-                        )
-                    }
-                }
-                .toggleStyle(.switch)
-
-                Picker(selection: $outputMode) {
+                // The output mode is the only enhancement switch: Instant never uses AI.
+                Picker(selection: $enhancementService.outputMode) {
                     ForEach(DictationOutputMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(verbatim: mode.title).tag(mode)
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -67,14 +56,8 @@ struct EnhancementSettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .onChange(of: outputMode) { _, newValue in
-                    DictationOutputMode.setCurrent(newValue)
-                    // Keep the toggle and the mode telling the same story: picking a mode
-                    // that uses the AI turns enhancement on, picking Instant turns it off.
-                    enhancementService.isEnhancementEnabled = newValue.usesEnhancement
-                }
 
-                Text(outputMode.subtitle)
+                Text(verbatim: enhancementService.outputMode.subtitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -37,9 +37,8 @@ struct PowerModePopover: View {
                                 config: config,
                                 isSelected: selectedConfig?.id == config.id,
                                 action: {
-                                    powerModeManager.setActiveConfiguration(config)
+                                    powerModeManager.selectInRecorder(config)
                                     selectedConfig = config
-                                    applySelectedConfiguration()
                                 }
                             )
                         }
@@ -60,14 +59,6 @@ struct PowerModePopover: View {
             selectedConfig = newValue
         }
     }
-    
-    private func applySelectedConfiguration() {
-        Task {
-            if let config = selectedConfig {
-                await PowerModeSessionManager.shared.beginSession(with: config)
-            }
-        }
-    }
 }
 
 struct PowerModeRow: View {
@@ -78,10 +69,10 @@ struct PowerModeRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Text(config.emoji)
+                Text(verbatim: config.emoji)
                     .font(.system(size: 14))
 
-                Text(config.name)
+                Text(verbatim: config.name)
                     .foregroundColor(.white.opacity(0.9))
                     .font(.system(size: 13))
                     .lineLimit(1)

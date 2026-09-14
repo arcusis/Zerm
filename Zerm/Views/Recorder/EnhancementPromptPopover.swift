@@ -3,41 +3,37 @@ import SwiftUI
 // Enhancement Prompt Popover for recorder views
 struct EnhancementPromptPopover: View {
     @EnvironmentObject var enhancementService: AIEnhancementService
-    @State private var selectedPrompt: CustomPrompt?
-    
+    /// In the recorder these act on the recording in progress; in History, on the settings.
+    let isEnhancementEnabled: Binding<Bool>
+    let selectedPromptID: UUID?
+    let onSelectPrompt: (CustomPrompt) -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Enhancement Toggle at the top
             HStack(spacing: 8) {
-                Toggle("AI Enhancement", isOn: $enhancementService.isEnhancementEnabled)
+                Toggle("AI Enhancement", isOn: isEnhancementEnabled)
                     .foregroundColor(.white.opacity(0.9))
                     .font(.headline)
                     .lineLimit(1)
-                
+
                 Spacer()
             }
             .padding(.horizontal)
             .padding(.top, 8)
-            
+
             Divider()
                 .background(Color.white.opacity(0.1))
-            
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     // Available Enhancement Prompts
                     ForEach(enhancementService.allPrompts) { prompt in
                         EnhancementPromptRow(
                             prompt: prompt,
-                            isSelected: selectedPrompt?.id == prompt.id,
-                            isDisabled: !enhancementService.isEnhancementEnabled,
-                            action: {
-                                // If enhancement is disabled, enable it first
-                                if !enhancementService.isEnhancementEnabled {
-                                    enhancementService.isEnhancementEnabled = true
-                                }
-                                enhancementService.setActivePrompt(prompt)
-                                selectedPrompt = prompt
-                            }
+                            isSelected: selectedPromptID == prompt.id,
+                            isDisabled: !isEnhancementEnabled.wrappedValue,
+                            action: { onSelectPrompt(prompt) }
                         )
                     }
                 }
@@ -49,13 +45,6 @@ struct EnhancementPromptPopover: View {
         .padding(.vertical, 8)
         .background(Color.black)
         .environment(\.colorScheme, .dark)
-        .onAppear {
-            // Set the initially selected prompt
-            selectedPrompt = enhancementService.activePrompt
-        }
-        .onChange(of: enhancementService.selectedPromptId) { oldValue, newValue in
-            selectedPrompt = enhancementService.activePrompt
-        }
     }
 }
 
@@ -74,7 +63,7 @@ struct EnhancementPromptRow: View {
                     .font(.system(size: 14))
                     .foregroundColor(isDisabled ? .white.opacity(0.4) : .white.opacity(0.7))
 
-                Text(prompt.title)
+                Text(verbatim: prompt.displayTitle)
                     .foregroundColor(isDisabled ? .white.opacity(0.4) : .white.opacity(0.9))
                     .font(.system(size: 13))
                     .lineLimit(1)

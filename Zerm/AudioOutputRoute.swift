@@ -46,7 +46,7 @@ enum AudioOutputRoute: Equatable {
 
         // Stream terminal metadata is the strongest public signal. In particular, Bluetooth
         // transport alone is not sufficient: Bluetooth speakers report the same transport as
-        // AirPods and must remain unsafe during a meeting.
+        // AirPods and must not be treated as headphones.
         let roomTerminals: Set<UInt32> = [
             kAudioStreamTerminalTypeLine,
             kAudioStreamTerminalTypeDigitalAudioInterface,

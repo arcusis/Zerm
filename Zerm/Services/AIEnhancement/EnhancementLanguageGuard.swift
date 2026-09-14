@@ -19,15 +19,29 @@ enum EnhancementLanguageGuard {
     /// Script fidelity plus “the model started talking about itself.” A Gemma
     /// self-introduction is English-on-English, so the script check alone lets it through.
     static func isUsable(original: String, enhanced: String) -> Bool {
-        if looksLikeSelfIntroduction(enhanced, original: original) { return false }
-        if !accept(original: original, enhanced: enhanced) { return false }
+        rejection(original: original, enhanced: enhanced, policy: .preserveScript) == nil
+    }
+
+    /// Why an enhancement must be discarded, or nil when it may be used.
+    ///
+    /// A prompt that is meant to translate, answer or expand (`.mayChangeLanguage`) opts out
+    /// entirely: its output legitimately changes script and length, and an assistant answer can
+    /// mention being an AI.
+    static func rejection(
+        original: String,
+        enhanced: String,
+        policy: EnhancementLanguagePolicy
+    ) -> EnhancementRejection? {
+        guard policy == .preserveScript else { return nil }
+        if looksLikeSelfIntroduction(enhanced, original: original) { return .selfIntroduction }
+        if !accept(original: original, enhanced: enhanced) { return .languageChanged }
 
         let sourceWords = original.split(whereSeparator: \.isWhitespace).count
         let outputWords = enhanced.split(whereSeparator: \.isWhitespace).count
         if sourceWords >= 2, outputWords > max(sourceWords * 4, sourceWords + 30) {
-            return false
+            return .tooLong
         }
-        return true
+        return nil
     }
 
     static func looksLikeSelfIntroduction(_ text: String, original: String) -> Bool {

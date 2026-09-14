@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ZermButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let action: () -> Void
     var isDisabled: Bool = false
     
@@ -70,7 +70,7 @@ struct PowerModeConfigurationsGrid: View {
 
 /// Small, consistent icon-only add button used across Power Mode configuration rows.
 struct AddIconButton: View {
-    let helpText: String
+    let helpText: LocalizedStringKey
     var isDisabled: Bool = false
     let action: () -> Void
 
@@ -110,14 +110,16 @@ struct ConfigurationRow: View {
            let model = transcriptionModelManager.allAvailableModels.first(where: { $0.name == modelName }) {
             return model.displayName
         }
-        return "Default"
+        return nil
     }
     
     private var selectedLanguage: String? {
         if let langCode = config.selectedLanguage {
-            if langCode == "auto" { return "Auto" }
-            if langCode == "en" { return "English" }
-            
+            if langCode == "auto" { return String(localized: "Auto-detect") }
+
+            if let name = Locale.current.localizedString(forLanguageCode: langCode) {
+                return name
+            }
             if let modelName = config.selectedTranscriptionModelName,
                let model = transcriptionModelManager.allAvailableModels.first(where: { $0.name == modelName }),
                let langName = model.supportedLanguages[langCode] {
@@ -125,20 +127,24 @@ struct ConfigurationRow: View {
             }
             return langCode.uppercased()
         }
-        return "Default"
+        return nil
     }
     
+    private var hasOverrideBadges: Bool {
+        config.selectedTranscriptionModelName != nil || config.selectedLanguage != nil
+            || config.outputMode != nil || config.selectedAIProvider != nil
+            || selectedPrompt != nil || config.contextAwareness == true || config.autoSendKey.isEnabled
+    }
+
     private var appCount: Int { return config.appConfigs?.count ?? 0 }
     private var websiteCount: Int { return config.urlConfigs?.count ?? 0 }
     
-    private var websiteText: String {
-        if websiteCount == 0 { return "" }
-        return websiteCount == 1 ? "1 Website" : "\(websiteCount) Websites"
+    private var websiteText: LocalizedStringKey {
+        "power_mode_websites \(websiteCount)"
     }
-    
-    private var appText: String {
-        if appCount == 0 { return "" }
-        return appCount == 1 ? "1 App" : "\(appCount) Apps"
+
+    private var appText: LocalizedStringKey {
+        "power_mode_apps \(appCount)"
     }
     
     private var extraAppsCount: Int {
@@ -157,13 +163,13 @@ struct ConfigurationRow: View {
                         .fill(Color(NSColor.controlBackgroundColor))
                         .frame(width: 40, height: 40)
                     
-                    Text(config.emoji)
+                    Text(verbatim: config.emoji)
                         .font(.system(size: 20))
                 }
                 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(config.name)
+                        Text(verbatim: config.name)
                             .font(.system(size: 15, weight: .semibold))
                         
                         if config.isDefault {
@@ -211,15 +217,15 @@ struct ConfigurationRow: View {
             .padding(.vertical, 12)
             .padding(.horizontal, 14)
             
-            if selectedModel != nil || selectedLanguage != nil || config.isAIEnhancementEnabled || config.autoSendKey.isEnabled {
+            if hasOverrideBadges {
                 Divider()
                 
                 HStack(spacing: 8) {
-                    if let model = selectedModel, model != "Default" {
+                    if let model = selectedModel {
                         HStack(spacing: 4) {
                             Image(systemName: "waveform")
                                 .font(.system(size: 10))
-                            Text(model)
+                            Text(verbatim: model)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
@@ -232,11 +238,11 @@ struct ConfigurationRow: View {
                         )
                     }
                     
-                    if let language = selectedLanguage, language != "Default" {
+                    if let language = selectedLanguage {
                         HStack(spacing: 4) {
                             Image(systemName: "globe")
                                 .font(.system(size: 10))
-                            Text(language)
+                            Text(verbatim: language)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
@@ -249,11 +255,28 @@ struct ConfigurationRow: View {
                         )
                     }
                     
-                    if config.isAIEnhancementEnabled, let modelName = config.selectedAIModel, !modelName.isEmpty {
+                    if let outputMode = config.outputMode {
+                        HStack(spacing: 4) {
+                            Image(systemName: outputMode.usesEnhancement ? "wand.and.stars" : "bolt")
+                                .font(.system(size: 10))
+                            Text(verbatim: outputMode.title)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule()
+                            .fill(Color(NSColor.controlBackgroundColor)))
+                        .overlay(
+                            Capsule()
+                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
+                    }
+
+                    if let aiLabel = config.selectedAIModel ?? config.selectedAIProvider, !aiLabel.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "cpu")
                                 .font(.system(size: 10))
-                            Text(modelName.count > 20 ? String(modelName.prefix(18)) + "..." : modelName)
+                            Text(verbatim: aiLabel.count > 20 ? String(aiLabel.prefix(18)) + "..." : aiLabel)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
@@ -270,7 +293,7 @@ struct ConfigurationRow: View {
                         HStack(spacing: 4) {
                             Image(systemName: "keyboard")
                                 .font(.system(size: 10))
-                            Text(config.autoSendKey.displayName)
+                            Text(LocalizedStringKey(config.autoSendKey.displayName))
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
@@ -282,28 +305,28 @@ struct ConfigurationRow: View {
                                 .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
                         )
                     }
-                    if config.isAIEnhancementEnabled {
-                        if config.useScreenCapture {
-                            HStack(spacing: 4) {
-                                Image(systemName: "camera.viewfinder")
-                                    .font(.system(size: 10))
-                                Text("Context Awareness")
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule()
-                                .fill(Color(NSColor.controlBackgroundColor)))
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
-                            )
+                    if config.contextAwareness == true {
+                        HStack(spacing: 4) {
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 10))
+                            Text("Context Awareness")
+                                .font(.caption)
                         }
-                        
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule()
+                            .fill(Color(NSColor.controlBackgroundColor)))
+                        .overlay(
+                            Capsule()
+                                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                        )
+                    }
+
+                    if let selectedPrompt {
                         HStack(spacing: 4) {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 10))
-                            Text(selectedPrompt?.title ?? "AI")
+                            Text(verbatim: selectedPrompt.displayTitle)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 6)
@@ -341,11 +364,11 @@ struct ConfigurationRow: View {
         }
         Button(role: .destructive, action: {
             let alert = NSAlert()
-            alert.messageText = "Delete Power Mode?"
-            alert.informativeText = "Are you sure you want to delete the '\(config.name)' power mode? This action cannot be undone."
+            alert.messageText = String(localized: "Delete Power Mode?")
+            alert.informativeText = String(localized: "Are you sure you want to delete the '\(config.name)' power mode? This action cannot be undone.")
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: String(localized: "Delete"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
             alert.buttons[0].hasDestructiveAction = true
             
             if alert.runModal() == .alertFirstButtonReturn {
@@ -393,7 +416,7 @@ struct AppGridItem: View {
                     .frame(width: 40, height: 40)
                     .cornerRadius(8)
                     .shadow(color: Color(NSColor.shadowColor).opacity(0.1), radius: 2, x: 0, y: 1)
-                Text(app.name)
+                Text(verbatim: app.name)
                     .font(.system(size: 10))
                     .lineLimit(2)
                     .multilineTextAlignment(.center)

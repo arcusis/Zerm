@@ -4,6 +4,7 @@ import SwiftUI
 /// documentation page for it.
 struct InfoTip: View {
     // Content configuration
+    /// Already localized: callers pass `String(localized:)`.
     var message: String
     var learnMoreLink: URL?
 
@@ -38,7 +39,7 @@ struct InfoTip: View {
         .help(message)
         .popover(isPresented: $isShowingTip, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(message)
+                Text(verbatim: message)
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

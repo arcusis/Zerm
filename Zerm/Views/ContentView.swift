@@ -10,9 +10,7 @@ enum AppRoute: String, Hashable, Identifiable {
     case dictationHistory
     case dictationModels
     case dictationVocabulary
-    case meetingsRecord
-    case meetingsHistory
-    case meetingsModels
+    case transcribeFile
     case readAloudSpeak
     case readAloudHistory
     case readAloudModels
@@ -30,9 +28,7 @@ enum AppRoute: String, Hashable, Identifiable {
         case .dictationHistory: "History"
         case .dictationModels: "Models"
         case .dictationVocabulary: "Vocabulary"
-        case .meetingsRecord: "Record"
-        case .meetingsHistory: "History"
-        case .meetingsModels: "Models"
+        case .transcribeFile: "Transcribe File"
         case .readAloudSpeak: "Speak"
         case .readAloudHistory: "History"
         case .readAloudModels: "Models & Voices"
@@ -50,9 +46,7 @@ enum AppRoute: String, Hashable, Identifiable {
         case .dictationHistory: "clock.arrow.circlepath"
         case .dictationModels: "waveform.badge.magnifyingglass"
         case .dictationVocabulary: "character.book.closed"
-        case .meetingsRecord: "record.circle"
-        case .meetingsHistory: "clock.arrow.circlepath"
-        case .meetingsModels: "waveform.badge.magnifyingglass"
+        case .transcribeFile: "waveform.and.person.filled"
         case .readAloudSpeak: "speaker.wave.2"
         case .readAloudHistory: "clock.arrow.circlepath"
         case .readAloudModels: "person.wave.2"
@@ -69,9 +63,6 @@ enum AppRoute: String, Hashable, Identifiable {
     init?(legacyDestination: String) {
         switch legacyDestination {
         case "Dashboard": self = .dashboard
-        case "Recording", "Meetings", "Meeting Record": self = .meetingsRecord
-        case "Meeting History": self = .meetingsHistory
-        case "Meeting Models": self = .meetingsModels
         case "History": self = .dictationHistory
         case "Dictation Models", "Models": self = .dictationModels
         case "Enhancement": self = .enhancement
@@ -108,12 +99,11 @@ struct VisualEffectView: NSViewRepresentable {
 
 struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
-    @EnvironmentObject private var meetingRecordingController: MeetingRecordingController
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
+    @EnvironmentObject private var fileTranscriptionQueue: FileTranscriptionQueue
     @AppStorage("powerModeUIFlag") private var powerModeUIFlag = false
     @AppStorage("sidebarDictationExpanded") private var isDictationExpanded = true
-    @AppStorage("sidebarMeetingsExpanded") private var isMeetingsExpanded = true
     @AppStorage("sidebarReadAloudExpanded") private var isReadAloudExpanded = true
     @State private var selectedRoute: AppRoute? = .dashboard
 
@@ -124,7 +114,6 @@ struct ContentView: View {
             SidebarView(
                 selectedRoute: $selectedRoute,
                 isDictationExpanded: $isDictationExpanded,
-                isMeetingsExpanded: $isMeetingsExpanded,
                 isReadAloudExpanded: $isReadAloudExpanded,
                 showsPowerModes: powerModeUIFlag,
                 updater: updaterViewModel
@@ -138,18 +127,22 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 760, minHeight: 560)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                MeetingGlobalStatusButton(controller: meetingRecordingController)
-            }
-        }
         .onAppear {
             logger.notice("ContentView appeared")
+            revealFileTranscriptionIfRequested()
         }
         .onDisappear {
             logger.notice("ContentView disappeared")
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination), perform: navigate)
+        .onChange(of: fileTranscriptionQueue.isRevealRequested) { revealFileTranscriptionIfRequested() }
+    }
+
+    /// Files opened from Finder or dropped on the Dock icon.
+    private func revealFileTranscriptionIfRequested() {
+        guard fileTranscriptionQueue.isRevealRequested else { return }
+        fileTranscriptionQueue.isRevealRequested = false
+        selectedRoute = .transcribeFile
     }
 
     private func navigate(_ notification: Notification) {
@@ -179,7 +172,6 @@ struct ContentView: View {
 private struct SidebarView: View {
     @Binding var selectedRoute: AppRoute?
     @Binding var isDictationExpanded: Bool
-    @Binding var isMeetingsExpanded: Bool
     @Binding var isReadAloudExpanded: Bool
 
     let showsPowerModes: Bool
@@ -204,16 +196,6 @@ private struct SidebarView: View {
                             .accessibilityIdentifier("dictation-navigation-group")
                     }
 
-                    DisclosureGroup(isExpanded: $isMeetingsExpanded) {
-                        SidebarLink(route: .meetingsRecord, prominence: .secondary)
-                        SidebarLink(route: .meetingsHistory, prominence: .secondary)
-                        SidebarLink(route: .meetingsModels, prominence: .secondary)
-                    } label: {
-                        Label("Meetings", systemImage: "person.2.wave.2")
-                            .fontWeight(.semibold)
-                            .accessibilityIdentifier("meetings-navigation-group")
-                    }
-
                     DisclosureGroup(isExpanded: $isReadAloudExpanded) {
                         SidebarLink(route: .readAloudSpeak, prominence: .secondary)
                         SidebarLink(route: .readAloudHistory, prominence: .secondary)
@@ -224,6 +206,7 @@ private struct SidebarView: View {
                             .accessibilityIdentifier("read-aloud-navigation-group")
                     }
 
+                    SidebarLink(route: .transcribeFile, prominence: .primary)
                     SidebarLink(route: .enhancement, prominence: .primary)
                 } header: {
                     SidebarSectionHeader("Speech", identifier: "sidebar-group-speech")
@@ -262,7 +245,7 @@ private struct SidebarView: View {
             Divider()
             SidebarUpdateBanner(updater: updater)
         }
-        .navigationTitle("Zerm")
+        .navigationTitle(Text(verbatim: "Zerm"))
         .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
     }
 }
@@ -328,12 +311,8 @@ private struct DetailDestination: View {
             ModelManagementView()
         case .dictationVocabulary:
             DictionarySettingsView(whisperPrompt: whisperModelManager.whisperPrompt)
-        case .meetingsRecord:
-            MeetingRecordingView(initialDestination: .meeting)
-        case .meetingsHistory:
-            MeetingRecordingView(initialDestination: .library)
-        case .meetingsModels:
-            MeetingModelsView()
+        case .transcribeFile:
+            TranscribeFileView()
         case .readAloudSpeak:
             ReadAloudSpeakView()
         case .readAloudHistory:
@@ -350,52 +329,6 @@ private struct DetailDestination: View {
             AudioInputSettingsView()
         case .settings:
             SettingsRootView()
-        }
-    }
-}
-
-private struct MeetingGlobalStatusButton: View {
-    @ObservedObject var controller: MeetingRecordingController
-    @AppStorage("meetingSummarise") private var summariseAfterMeeting = true
-    @State private var didStopSimulatedMeeting = false
-
-    private var simulatesActiveMeeting: Bool {
-        UITestLaunchConfiguration.current.isEnabled
-            && UITestLaunchConfiguration.current.scenario == .activeMeeting
-            && !didStopSimulatedMeeting
-    }
-
-    var body: some View {
-        Group {
-            switch simulatesActiveMeeting ? .capturing : controller.lifecycle.phase {
-            case .capturing:
-                Button(action: stopMeeting) {
-                    Label("Stop Meeting", systemImage: "stop.circle.fill")
-                        .foregroundStyle(.red)
-                }
-                .help("Stop the active meeting recording")
-                .accessibilityIdentifier("global-stop-meeting")
-            case .stopping, .processing:
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Processing Meeting")
-                }
-                .accessibilityElement(children: .combine)
-            default:
-                EmptyView()
-            }
-        }
-    }
-
-    private func stopMeeting() {
-        if simulatesActiveMeeting {
-            didStopSimulatedMeeting = true
-            return
-        }
-        Task {
-            await controller.stopAndSummarise(
-                ifRequested: summariseAfterMeeting && controller.isLocalSummaryAvailable == true
-            )
         }
     }
 }

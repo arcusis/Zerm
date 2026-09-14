@@ -8,6 +8,7 @@ struct WhisperModelCardView: View {
     let downloadProgress: [String: Double]
     let modelURL: URL?
     let isWarming: Bool
+    let downloadError: String?
     
     // Actions
     var deleteAction: () -> Void
@@ -24,9 +25,13 @@ struct WhisperModelCardView: View {
             VStack(alignment: .leading, spacing: 6) {
                 headerSection
                 metadataSection
+                ModelBadgesRow(model: model)
                 descriptionSection
                 if !isDownloaded {
                     HardwareFitNotice(fit: model.hardwareFit)
+                }
+                if let downloadError, !isDownloading {
+                    DownloadErrorNotice(message: downloadError)
                 }
                 progressSection
             }
@@ -41,7 +46,7 @@ struct WhisperModelCardView: View {
     
     private var headerSection: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(model.displayName)
+            Text(verbatim: model.displayName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
             
@@ -87,7 +92,7 @@ struct WhisperModelCardView: View {
     }
     
     private var descriptionSection: some View {
-        Text(model.description)
+        Text(verbatim: model.description)
             .font(.system(size: 11))
             .foregroundColor(Color(.secondaryLabelColor))
             .lineLimit(2)
@@ -142,7 +147,7 @@ struct WhisperModelCardView: View {
             } else {
                 Button(action: downloadAction) {
                     HStack(spacing: 4) {
-                        Text(isDownloading ? "Downloading..." : "Download")
+                        Text(isDownloading ? "Downloading..." : (downloadError == nil ? "Download" : "Retry Download"))
                             .font(.system(size: 12, weight: .medium))
                         Image(systemName: "arrow.down.circle")
                             .font(.system(size: 12, weight: .medium))
@@ -199,7 +204,7 @@ struct ImportedWhisperModelCardView: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(model.displayName)
+                    Text(verbatim: model.displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color(.labelColor))
                     Spacer()
@@ -261,7 +266,7 @@ struct ImportedWhisperModelCardView: View {
 func progressDotsWithNumber(value: Double) -> some View {
     HStack(spacing: 4) {
         progressDots(value: value)
-        Text(String(format: "%.1f", value))
+        Text(verbatim: String(format: "%.1f", value))
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundColor(Color(.secondaryLabelColor))
     }

@@ -17,7 +17,6 @@ The same contract applies outside dictation enhancement:
 
 - Read Aloud only takes the Hebrew-only instruction path when the source is ≥65% Hebrew letters. Mixed HE+EN does not.
 - A script-flipped Read Aloud rewrite is rejected the same way as a flipped enhancement.
-- Meeting summaries are told to keep the original script, not to pick a "predominant" language.
 
 Enhancement and Read Aloud both default to **Gemma 4 E2B**. The 2.8.3 move to Qwen3 was reversed on measurement: Gemma 4 E2B is the only catalogue model that keeps mixed Hebrew/English/Russian in its original script (22/22 across three runs), while every smaller candidate translated it. See [[Zerm On-Device LLM]] and GitHub #302, #307.
 

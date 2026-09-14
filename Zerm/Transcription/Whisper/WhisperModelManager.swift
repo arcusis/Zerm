@@ -13,10 +13,6 @@ struct WhisperModelFile: Identifiable {
     var coreMLEncoderURL: URL? // Path to the unzipped .mlmodelc directory
     var isCoreMLDownloaded: Bool { coreMLEncoderURL != nil }
 
-    var downloadURL: String {
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(filename)"
-    }
-
     var filename: String {
         "\(name).bin"
     }
@@ -26,11 +22,16 @@ struct WhisperModelFile: Identifiable {
         ModelIntegrity.whisperSHA256[name]
     }
 
+    /// Only non-quantized whisper.cpp releases ship a Core ML encoder; fine-tunes from other
+    /// repositories (ivrit.ai) run on Metal alone.
+    static func hasCoreMLEncoder(modelName: String) -> Bool {
+        modelName.hasPrefix("ggml-") && !modelName.contains("q5") && !modelName.contains("q8")
+    }
+
     // Core ML related properties
     var coreMLZipDownloadURL: String? {
-        // Only non-quantized models have Core ML versions
-        guard !name.contains("q5") && !name.contains("q8") else { return nil }
-        return "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(ModelIntegrity.whisperRepoCommit)/\(name)-encoder.mlmodelc.zip"
+        guard Self.hasCoreMLEncoder(modelName: name) else { return nil }
+        return ModelIntegrity.PinnedFile.whisperCpp(fileName: "\(name)-encoder.mlmodelc.zip").downloadURL
     }
 
     var coreMLEncoderDirectoryName: String? {
@@ -62,6 +63,8 @@ private class TaskDelegate: NSObject, URLSessionTaskDelegate {
 class WhisperModelManager: ObservableObject {
     @Published var availableModels: [WhisperModelFile] = []
     @Published var downloadProgress: [String: Double] = [:]
+    /// Last download failure per model name, shown on the model card with a retry.
+    @Published var downloadErrors: [String: String] = [:]
     @Published var whisperContext: WhisperContext?
     @Published var isModelLoaded = false
     @Published var loadedWhisperModel: WhisperModelFile?
@@ -80,8 +83,16 @@ class WhisperModelManager: ObservableObject {
 
     let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperModelManager")
 
-    init(modelsDirectory: URL) {
+    private let contextLoader: (URL) async throws -> WhisperContext
+    /// The load in flight, so concurrent requests for the same model share one context.
+    private var pendingLoad: (name: String, task: Task<WhisperContext, Error>)?
+
+    init(
+        modelsDirectory: URL,
+        contextLoader: @escaping (URL) async throws -> WhisperContext = { try await WhisperContext.createContext(path: $0.path) }
+    ) {
         self.modelsDirectory = modelsDirectory
+        self.contextLoader = contextLoader
     }
 
     // MARK: - Model Directory Management
@@ -108,23 +119,82 @@ class WhisperModelManager: ObservableObject {
 
     // MARK: - Model Loading
 
-    func loadModel(_ model: WhisperModelFile) async throws {
-        guard whisperContext == nil else { return }
+    /// Returns the resident context for `model`, loading it once if needed. A different
+    /// resident model is released first so only one Whisper context is ever held.
+    @discardableResult
+    func loadModel(_ model: WhisperModelFile) async throws -> WhisperContext {
+        if let whisperContext, loadedWhisperModel?.name == model.name {
+            return whisperContext
+        }
+        if let pendingLoad, pendingLoad.name == model.name {
+            return try await pendingLoad.task.value
+        }
 
+        let previousContext = whisperContext
+        resetLoadedState()
+
+        let loader = contextLoader
+        let url = model.url
+        let task = Task { try await loader(url) }
+        pendingLoad = (model.name, task)
         isModelLoading = true
-        defer { isModelLoading = false }
 
+        await previousContext?.releaseResources()
+
+        let context: WhisperContext
         do {
-            whisperContext = try await WhisperContext.createContext(path: model.url.path)
-
-            let currentPrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? whisperPrompt.transcriptionPrompt
-            await whisperContext?.setPrompt(currentPrompt)
-
-            isModelLoaded = true
-            loadedWhisperModel = model
+            context = try await task.value
         } catch {
+            if pendingLoad?.task == task {
+                pendingLoad = nil
+                isModelLoading = false
+            }
+            logger.error("❌ Failed to load model \(model.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             throw ZermEngineError.modelLoadFailed
         }
+
+        // The model was switched or released while loading; don't resurrect it.
+        guard pendingLoad?.task == task else {
+            await context.releaseResources()
+            throw CancellationError()
+        }
+
+        let currentPrompt = UserDefaults.standard.string(forKey: "TranscriptionPrompt") ?? whisperPrompt.transcriptionPrompt
+        await context.setPrompt(currentPrompt)
+
+        pendingLoad = nil
+        isModelLoading = false
+        whisperContext = context
+        loadedWhisperModel = model
+        isModelLoaded = true
+        return context
+    }
+
+    /// Returns the resident context for the model named `name`, loading it once if needed.
+    func loadModel(named name: String) async throws -> WhisperContext {
+        if let whisperContext, loadedWhisperModel?.name == name {
+            return whisperContext
+        }
+        guard let model = availableModels.first(where: { $0.name == name }),
+              FileManager.default.fileExists(atPath: model.url.path) else {
+            logger.error("❌ Model file not found for: \(name, privacy: .public)")
+            throw ZermEngineError.modelLoadFailed
+        }
+        return try await loadModel(model)
+    }
+
+    /// Releases the resident or loading model unless it is the one named `name`.
+    func releaseModel(otherThan name: String) {
+        guard let current = loadedWhisperModel?.name ?? pendingLoad?.name, current != name else { return }
+        unloadModel()
+    }
+
+    private func resetLoadedState() {
+        whisperContext = nil
+        loadedWhisperModel = nil
+        isModelLoaded = false
+        pendingLoad = nil
+        isModelLoading = false
     }
 
     // MARK: - Model Download & Management
@@ -205,7 +275,16 @@ class WhisperModelManager: ObservableObject {
         await performModelDownload(model, url)
     }
 
+    private enum DownloadError: LocalizedError {
+        case checksumMismatch
+
+        var errorDescription: String? {
+            String(localized: "The downloaded file did not match its published checksum and was discarded. Try again.")
+        }
+    }
+
     private func performModelDownload(_ model: WhisperModel, _ url: URL) async {
+        downloadErrors[model.name] = nil
         do {
             var whisperModel = try await downloadMainModel(model, from: url)
 
@@ -238,7 +317,7 @@ class WhisperModelManager: ObservableObject {
         if !ModelIntegrity.verify(fileURL: destinationURL, expectedSHA256: ModelIntegrity.whisperSHA256[model.name]) {
             try? FileManager.default.removeItem(at: destinationURL)
             logger.error("Checksum mismatch for model \(model.name, privacy: .public); download rejected")
-            throw ZermEngineError.modelLoadFailed
+            throw DownloadError.checksumMismatch
         }
 
         return WhisperModelFile(name: model.name, url: destinationURL)
@@ -337,6 +416,8 @@ class WhisperModelManager: ObservableObject {
     private func handleModelDownloadError(_ model: WhisperModel, _ error: Error) {
         self.downloadProgress.removeValue(forKey: model.name + "_main")
         self.downloadProgress.removeValue(forKey: model.name + "_coreml")
+        downloadErrors[model.name] = error.localizedDescription
+        logError("Download failed for \(model.name)", error)
     }
 
     func deleteModel(_ model: WhisperModelFile) async {
@@ -362,10 +443,10 @@ class WhisperModelManager: ObservableObject {
     }
 
     func unloadModel() {
+        let context = whisperContext
+        resetLoadedState()
         Task {
-            await whisperContext?.releaseResources()
-            whisperContext = nil
-            isModelLoaded = false
+            await context?.releaseResources()
         }
     }
 
@@ -386,9 +467,9 @@ class WhisperModelManager: ObservableObject {
     /// Does NOT call serviceRegistry.cleanup() — that is ZermEngine's responsibility.
     func cleanupResources() async {
         logger.notice("WhisperModelManager.cleanupResources: releasing whisper context")
-        await whisperContext?.releaseResources()
-        whisperContext = nil
-        isModelLoaded = false
+        let context = whisperContext
+        resetLoadedState()
+        await context?.releaseResources()
         logger.notice("WhisperModelManager.cleanupResources: completed")
     }
 
@@ -402,7 +483,7 @@ class WhisperModelManager: ObservableObject {
 
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             NotificationManager.shared.showNotification(
-                title: "A model named \(baseName).bin already exists",
+                title: String(localized: "A model named \(baseName).bin already exists"),
                 type: .warning,
                 duration: 4.0
             )
@@ -419,14 +500,14 @@ class WhisperModelManager: ObservableObject {
             onModelsChanged?()
 
             NotificationManager.shared.showNotification(
-                title: "Imported \(destinationURL.lastPathComponent)",
+                title: String(localized: "Imported \(destinationURL.lastPathComponent)"),
                 type: .success,
                 duration: 3.0
             )
         } catch {
             logError("Failed to import local model", error)
             NotificationManager.shared.showNotification(
-                title: "Failed to import model: \(error.localizedDescription)",
+                title: String(localized: "Failed to import model: \(error.localizedDescription)"),
                 type: .error,
                 duration: 5.0
             )
@@ -461,7 +542,7 @@ struct DownloadProgressView: View {
     }
 
     private var supportsCoreML: Bool {
-        !modelName.contains("q5") && !modelName.contains("q8")
+        WhisperModelFile.hasCoreMLEncoder(modelName: modelName)
     }
 
     private var totalProgress: Double {
@@ -470,14 +551,14 @@ struct DownloadProgressView: View {
 
     private var downloadPhase: String {
         if supportsCoreML && downloadProgress[modelName + "_coreml"] != nil {
-            return "Downloading Core ML Model for \(modelName)"
+            return String(localized: "Downloading Core ML Model for \(modelName)")
         }
-        return "Downloading \(modelName) Model"
+        return String(localized: "Downloading \(modelName) Model")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(downloadPhase)
+            Text(verbatim: downloadPhase)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Color(.secondaryLabelColor))
 
@@ -496,7 +577,7 @@ struct DownloadProgressView: View {
 
             HStack {
                 Spacer()
-                Text("\(Int(totalProgress * 100))%")
+                Text(verbatim: "\(Int(totalProgress * 100))%")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(Color(.secondaryLabelColor))
             }

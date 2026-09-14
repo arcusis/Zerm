@@ -20,6 +20,7 @@ struct PromptEditorView: View {
     let mode: Mode
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var enhancementService: AIEnhancementService
+    @EnvironmentObject private var aiService: AIService
     var onDismiss: (() -> Void)?
     @State private var title: String
     @State private var promptText: String
@@ -27,8 +28,22 @@ struct PromptEditorView: View {
     @State private var description: String
     @State private var triggerWords: [String]
     @State private var useSystemInstructions: Bool
+    @State private var providerOverride: String?
+    @State private var modelOverride: String?
+    @State private var allowsLanguageChange: Bool
     @State private var showingIconPicker = false
     
+    private var headerTitle: LocalizedStringKey {
+        if isEditingPredefinedPrompt { return "Edit Trigger Words" }
+        return mode == .add ? "New Prompt" : "Edit Prompt"
+    }
+
+    /// Built-in prompts show their translated title.
+    private var editingTitle: String {
+        if case .edit(let prompt) = mode { return prompt.displayTitle }
+        return title
+    }
+
     private var isEditingPredefinedPrompt: Bool {
         if case .edit(let prompt) = mode {
             return prompt.isPredefined
@@ -47,6 +62,7 @@ struct PromptEditorView: View {
             _description = State(initialValue: "")
             _triggerWords = State(initialValue: [])
             _useSystemInstructions = State(initialValue: true)
+            _allowsLanguageChange = State(initialValue: false)
         case .edit(let prompt):
             _title = State(initialValue: prompt.title)
             _promptText = State(initialValue: prompt.promptText)
@@ -54,6 +70,54 @@ struct PromptEditorView: View {
             _description = State(initialValue: prompt.description ?? "")
             _triggerWords = State(initialValue: prompt.triggerWords)
             _useSystemInstructions = State(initialValue: prompt.useSystemInstructions)
+            _providerOverride = State(initialValue: prompt.providerOverride)
+            _modelOverride = State(initialValue: prompt.modelOverride)
+            _allowsLanguageChange = State(initialValue: prompt.allowsLanguageChange)
+        }
+    }
+
+    private var providerChoices: [AIProvider] {
+        var providers = aiService.connectedEnhancementProviders
+        if let saved = providerOverride.flatMap(AIProvider.init(rawValue:)), !providers.contains(saved) {
+            providers.append(saved)
+        }
+        return providers
+    }
+
+    /// A prompt can use its own provider and model, e.g. a fast one for cleanup and a stronger one
+    /// for rewrites. A Power Mode's provider still wins.
+    private var modelSection: some View {
+        Section {
+            Picker(selection: $providerOverride) {
+                Text("Use global setting").tag(String?.none)
+                ForEach(providerChoices, id: \.self) { provider in
+                    Text(LocalizedStringKey(provider.rawValue)).tag(provider.rawValue as String?)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("AI Provider")
+                    InfoTip(String(localized: "The provider this prompt uses. \"Use global setting\" follows the provider selected in Enhancement. A Power Mode that sets its own provider takes precedence."))
+                }
+            }
+            .onChange(of: providerOverride) { _, _ in
+                modelOverride = nil
+            }
+
+            if let provider = providerOverride.flatMap(AIProvider.init(rawValue:)), provider != .custom {
+                let models = aiService.availableModels(for: provider)
+                if !models.isEmpty {
+                    Picker(selection: $modelOverride) {
+                        Text("Use global setting").tag(String?.none)
+                        ForEach(models, id: \.self) { model in
+                            Text(verbatim: model).tag(model as String?)
+                        }
+                    } label: {
+                        Text("AI Model")
+                    }
+                }
+            }
+        } header: {
+            Text("AI Model")
         }
     }
     
@@ -69,7 +133,7 @@ struct PromptEditorView: View {
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 12) {
-                Text(isEditingPredefinedPrompt ? "Edit Trigger Words" : (mode == .add ? "New Prompt" : "Edit Prompt"))
+                Text(headerTitle)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
@@ -139,12 +203,14 @@ struct PromptEditorView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             } header: {
-                Text("Editing: \(title)")
+                Text("Editing: \(editingTitle)")
             }
 
             Section {
                 TriggerWordsEditor(triggerWords: $triggerWords)
             }
+
+            modelSection
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -182,7 +248,7 @@ struct PromptEditorView: View {
             } header: {
                 HStack(spacing: 4) {
                     Text("Details")
-                    InfoTip("The name and icon you will see on the prompt grid and in the recorder when switching prompts mid-dictation. The description is a reminder for you — it is not sent to the AI.")
+                    InfoTip(String(localized: "The name and icon you will see on the prompt grid and in the recorder when switching prompts mid-dictation. The description is a reminder for you — it is not sent to the AI."))
                 }
             }
 
@@ -205,7 +271,15 @@ struct PromptEditorView: View {
                 Toggle(isOn: $useSystemInstructions) {
                     HStack(spacing: 4) {
                         Text("Use System Template")
-                        InfoTip("If enabled, your instructions are combined with a general-purpose template to improve transcription quality.\n\nDisable for full control over the AI's system prompt (for advanced users).")
+                        InfoTip(String(localized: "If enabled, your instructions are combined with a general-purpose template to improve transcription quality.\n\nDisable for full control over the AI's system prompt (for advanced users)."))
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Toggle(isOn: $allowsLanguageChange) {
+                    HStack(spacing: 4) {
+                        Text("May change language or length")
+                        InfoTip(String(localized: "Turn on for prompts that translate, answer or expand the text, such as writing an email. Otherwise Zerm discards a result that switches language or grows far longer than what you said, and keeps your original text."))
                     }
                 }
                 .toggleStyle(.switch)
@@ -213,7 +287,7 @@ struct PromptEditorView: View {
                 HStack(spacing: 4) {
                     Text("Instructions")
                     InfoTip(
-                        "What the AI is told to do with each transcript — \"rewrite this as a short, polite email\", \"keep my wording but fix the punctuation\". Write it as directions to a person; the transcript is handed to the model along with this text.",
+                        String(localized: "What the AI is told to do with each transcript — \"rewrite this as a short, polite email\", \"keep my wording but fix the punctuation\". Write it as directions to a person; the transcript is handed to the model along with this text."),
                         doc: .enhancement
                     )
                 }
@@ -224,9 +298,11 @@ struct PromptEditorView: View {
             } header: {
                 HStack(spacing: 4) {
                     Text("Trigger Words")
-                    InfoTip("Add words that automatically activate this prompt. For example, 'summarize', 'email', 'translate'.")
+                    InfoTip(String(localized: "Add words that automatically activate this prompt. For example, 'summarize', 'email', 'translate'."))
                 }
             }
+
+            modelSection
 
             if case .add = mode {
                 Section {
@@ -237,6 +313,7 @@ struct PromptEditorView: View {
                                 promptText = template.promptText
                                 selectedIcon = template.icon
                                 description = template.description
+                                allowsLanguageChange = template.allowsLanguageChange
                             } label: {
                                 Label(template.title, systemImage: template.icon)
                             }
@@ -261,19 +338,24 @@ struct PromptEditorView: View {
                 icon: selectedIcon,
                 description: description.isEmpty ? nil : description,
                 triggerWords: triggerWords,
-                useSystemInstructions: useSystemInstructions
+                useSystemInstructions: useSystemInstructions,
+                providerOverride: providerOverride,
+                modelOverride: modelOverride,
+                allowsLanguageChange: allowsLanguageChange
             )
         case .edit(let prompt):
             let updatedPrompt = CustomPrompt(
                 id: prompt.id,
                 title: prompt.isPredefined ? prompt.title : title,
                 promptText: prompt.isPredefined ? prompt.promptText : promptText,
-                isActive: prompt.isActive,
                 icon: prompt.isPredefined ? prompt.icon : selectedIcon,
                 description: prompt.isPredefined ? prompt.description : (description.isEmpty ? nil : description),
                 isPredefined: prompt.isPredefined,
                 triggerWords: triggerWords,
-                useSystemInstructions: useSystemInstructions
+                useSystemInstructions: useSystemInstructions,
+                providerOverride: providerOverride,
+                modelOverride: modelOverride,
+                allowsLanguageChange: prompt.isPredefined ? prompt.allowsLanguageChange : allowsLanguageChange
             )
             enhancementService.updatePrompt(updatedPrompt)
         }
@@ -339,7 +421,7 @@ struct TriggerWordItemView: View {
     
     var body: some View {
         HStack(spacing: 4) {
-                Text(word)
+                Text(verbatim: word)
                     .font(.system(size: 12))
                     .lineLimit(1)
                     .truncationMode(.tail)

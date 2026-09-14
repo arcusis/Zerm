@@ -22,8 +22,7 @@ final class TranscriptionAutoCleanupService {
     }
 
     private var recordingsDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        AppStoragePaths.root
             .appendingPathComponent("Recordings")
     }
 
@@ -107,6 +106,7 @@ final class TranscriptionAutoCleanupService {
                 logger.error("Failed to delete audio file: \(error.localizedDescription, privacy: .public)")
             }
         }
+        FileTranscriptStore.recordings.remove(transcription.id)
 
         modelContext.delete(transcription)
 
@@ -148,6 +148,7 @@ final class TranscriptionAutoCleanupService {
                    FileManager.default.fileExists(atPath: url.path) {
                     try? FileManager.default.removeItem(at: url)
                 }
+                FileTranscriptStore.recordings.remove(transcription.id)
                 backgroundContext.delete(transcription)
                 deletedCount += 1
             }
@@ -178,14 +179,16 @@ final class TranscriptionAutoCleanupService {
             let backgroundContext = ModelContext(modelContainer)
 
             var descriptor = FetchDescriptor<Transcription>()
-            descriptor.propertiesToFetch = [\.audioFileURL]
+            descriptor.propertiesToFetch = [\.id, \.audioFileURL]
 
             let transcriptions = try backgroundContext.fetch(descriptor)
-            let referencedFiles = Set(transcriptions.compactMap { transcription -> String? in
+            var referencedFiles = Set(transcriptions.compactMap { transcription -> String? in
                 guard let urlString = transcription.audioFileURL,
                       let url = URL(string: urlString) else { return nil }
                 return url.lastPathComponent
             })
+            // File transcriptions keep their structured transcript beside the audio.
+            referencedFiles.formUnion(transcriptions.map { FileTranscriptStore.fileName(for: $0.id) })
 
             guard FileManager.default.fileExists(atPath: recordingsDirectory.path) else { return }
             let filesInDirectory = try FileManager.default.contentsOfDirectory(

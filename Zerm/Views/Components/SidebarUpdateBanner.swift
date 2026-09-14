@@ -35,7 +35,7 @@ struct SidebarUpdateBanner: View {
                     Text("Update available")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
-                    Text(versionLine)
+                    Text(verbatim: versionLine)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.85))
                 }
@@ -99,7 +99,7 @@ struct SidebarUpdateBanner: View {
                     .font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 0)
             }
-            Text(message)
+            Text(verbatim: message)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
@@ -121,7 +121,7 @@ struct SidebarUpdateBanner: View {
         HStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
-            Text(updater.statusText ?? "Checking for updates…")
+            Text(verbatim: updater.statusText ?? String(localized: "Checking for updates…"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -133,12 +133,12 @@ struct SidebarUpdateBanner: View {
     private var idleFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("v\(updater.currentVersion)")
+                Text(verbatim: "v\(updater.currentVersion)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let status = updater.statusText {
-                    Text(status)
+                    Text(verbatim: status)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -168,7 +168,7 @@ struct SidebarUpdateBanner: View {
 
     private var versionLine: String {
         let next = updater.availableVersion ?? "?"
-        return "\(updater.currentVersion) → \(next)"
+        return String(localized: "\(updater.currentVersion) → \(next)")
     }
 
     private func cardBackground(tint: Color) -> some View {

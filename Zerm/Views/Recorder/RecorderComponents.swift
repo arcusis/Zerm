@@ -31,7 +31,7 @@ struct RecorderToggleButton: View {
         Button(action: action) {
             Group {
                 if isEmoji {
-                    Text(icon).font(.system(size: 14))
+                    Text(verbatim: icon).font(.system(size: 14))
                 } else {
                     Image(systemName: icon).font(.system(size: 13))
                 }
@@ -161,6 +161,8 @@ struct ProgressAnimation: View {
 
 struct RecorderPromptButton: View {
     @EnvironmentObject private var enhancementService: AIEnhancementService
+    /// Shows and changes the recording in progress, never the settings.
+    @EnvironmentObject private var dictationSession: DictationSessionTracker
     @Binding var activePopover: ActivePopoverState
     let buttonSize: CGFloat
     let padding: EdgeInsets
@@ -177,14 +179,16 @@ struct RecorderPromptButton: View {
 
     var body: some View {
         RecorderToggleButton(
-            isEnabled: enhancementService.isEnhancementEnabled,
-            icon: enhancementService.activePrompt?.icon ?? enhancementService.allPrompts.first(where: { $0.id == PredefinedPrompts.defaultPromptId })?.icon ?? "checkmark.seal.fill",
+            isEnabled: isEnhancementEnabled.wrappedValue,
+            icon: enhancementService.allPrompts.first(where: { $0.id == selectedPromptID })?.icon
+                ?? enhancementService.allPrompts.first(where: { $0.id == PredefinedPrompts.defaultPromptId })?.icon
+                ?? "checkmark.seal.fill",
             disabled: false
         ) {
-            if enhancementService.isEnhancementEnabled {
+            if isEnhancementEnabled.wrappedValue {
                 activePopover = activePopover == .enhancement ? .none : .enhancement
             } else {
-                enhancementService.isEnhancementEnabled = true
+                isEnhancementEnabled.wrappedValue = true
             }
         }
         .frame(width: buttonSize)
@@ -194,13 +198,33 @@ struct RecorderPromptButton: View {
             syncPopoverVisibility()
         }
         .popover(isPresented: .constant(activePopover == .enhancement), arrowEdge: .bottom) {
-            EnhancementPromptPopover()
+            EnhancementPromptPopover(
+                isEnhancementEnabled: isEnhancementEnabled,
+                selectedPromptID: selectedPromptID,
+                onSelectPrompt: { prompt in
+                    dictationSession.selectPrompt(prompt.id, global: enhancementService.outputMode)
+                }
+            )
                 .environmentObject(enhancementService)
                 .onHover {
                     isHoveringPopover = $0
                     syncPopoverVisibility()
                 }
         }
+    }
+
+    private var isEnhancementEnabled: Binding<Bool> {
+        Binding(
+            get: { dictationSession.effectiveOutputMode(global: enhancementService.outputMode).usesEnhancement },
+            set: { newValue in
+                guard newValue != dictationSession.effectiveOutputMode(global: enhancementService.outputMode).usesEnhancement else { return }
+                dictationSession.toggleEnhancement(global: enhancementService.outputMode)
+            }
+        )
+    }
+
+    private var selectedPromptID: UUID? {
+        dictationSession.effectivePromptID(global: enhancementService.selectedPromptId)
     }
 
     private func syncPopoverVisibility() {
@@ -288,7 +312,7 @@ struct LiveTranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                Text(text)
+                Text(verbatim: text)
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.8))
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -1,5 +1,5 @@
 {
-  "originHash" : "c2e2df8a2e09b563e3062683ce11c69b2712372c34c99d2bc78f0b526c730c55",
+  "originHash" : "2104ced44219ae6c3e55c3b88146b2b9d42d32e130db375048ca3ad93ee8a2a1",
   "pins" : [
     {
       "identity" : "axswift",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidInference/FluidAudio",
       "state" : {
-        "branch" : "main",
-        "revision" : "04747b3e77c824917c2b422a7210ab9de9d3b029"
+        "revision" : "41540ea237350afe5117a082b5c28eda642d0612",
+        "version" : "0.15.7"
       }
     },
     {
@@ -51,8 +51,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Beingpax/LLMkit.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "bbfbf5c4cf903d660010ad23f80fbfb7f76ba416"
+        "revision" : "1fc213b8e37ea8b8a755dd30eaf50fa090cd4241"
       }
     },
     {

@@ -46,16 +46,21 @@ final class RefineInPlaceCoordinator {
     ///     target exposes no usable accessibility text — refine still runs, it just goes
     ///     straight to the fallback.
     ///   - pastedText: Exactly what was pasted, trailing space included.
+    ///   - request: Built before the recorder dismissed, so nothing the dismissal resets can
+    ///     change what the refine sends.
+    ///   - textCleanup: The recording's preferences, re-applied to the refined text.
     ///   - isSuperseded: True once a newer recording has started. A stale refine writing
     ///     into a field that now holds a *newer* transcript would be the worst outcome
     ///     this whole design can produce, so it is checked at every step.
     func start(
         snapshot: AXTextAnchorCapture.PrePasteSnapshot?,
         pastedText: String,
+        request: EnhancementRequest,
+        textCleanup: TextCleanupPreferences,
         transcription: Transcription,
         modelContext: ModelContext,
         enhancementService: AIEnhancementService,
-        isSuperseded: @escaping () -> Bool
+        isSuperseded: @escaping @MainActor @Sendable () -> Bool
     ) {
         cancel()
 
@@ -65,10 +70,6 @@ final class RefineInPlaceCoordinator {
 
         let recordID = transcription.persistentModelID
         let started = Date()
-        // Read now, not when the request goes out: dismissing the recorder ends the Power
-        // Mode session and restores the global prompt selection, which would otherwise
-        // land mid-refine.
-        let promptID = enhancementService.selectedPromptId
 
         task = Task { [weak self] in
             guard let self else { return }
@@ -87,64 +88,51 @@ final class RefineInPlaceCoordinator {
 
             guard !Task.isCancelled, !isSuperseded() else { return }
 
-            let enhanced: String
-            let duration: TimeInterval
-            let promptName: String?
-            do {
-                (enhanced, duration, promptName) = try await enhancementService.enhance(
-                    pastedText.trimmingCharacters(in: .whitespacesAndNewlines),
-                    isCancelled: { [weak self] in
-                        Task.isCancelled
-                            || isSuperseded()
-                            || (self?.shouldYield?() ?? false)
-                            || Date().timeIntervalSince(started) > Self.hardDeadline
-                    },
-                    contextPolicy: .minimal,
-                    usingPrompt: promptID
-                )
-            } catch is CancellationError {
-                return
-            } catch {
-                self.logger.notice("Refine did not complete: \(error.localizedDescription, privacy: .public)")
-                return
+            let isStale: @MainActor @Sendable () -> Bool = { [weak self] in
+                self?.task?.isCancelled ?? true
+                    || isSuperseded()
+                    || (self?.shouldYield?() ?? false)
+                    || Date().timeIntervalSince(started) > Self.hardDeadline
             }
+            let outcome = await enhancementService.perform(request, isCancelled: isStale)
 
-            guard !Task.isCancelled, !isSuperseded() else { return }
-            guard Date().timeIntervalSince(started) <= Self.hardDeadline else {
-                self.logger.notice("Refine finished past its deadline — discarding")
+            guard outcome != .cancelled, !Task.isCancelled, !isSuperseded() else {
+                self.logger.notice("Refine cancelled or superseded")
                 return
             }
 
             // Persist regardless of whether the swap happens. This is lossless and free,
             // and it is what makes History and the "paste last enhancement" shortcut work
             // even in apps that can never be written to.
-            self.persist(
-                enhanced: enhanced,
-                duration: duration,
-                promptName: promptName,
-                recordID: recordID,
-                modelContext: modelContext,
-                enhancementService: enhancementService
-            )
+            self.persist(outcome, of: request, textCleanup: textCleanup, recordID: recordID, modelContext: modelContext)
+            EnhancementNotifier.shared.report(outcome, purpose: .refine)
 
-            await self.apply(enhanced: enhanced, anchor: anchor)
+            guard case .enhanced = outcome,
+                  let record = modelContext.model(for: recordID) as? Transcription,
+                  let refined = record.enhancedText else { return }
+            await self.apply(refined: refined, pastedText: pastedText, anchor: anchor)
         }
     }
 
     // MARK: - Applying
 
-    private func apply(enhanced: String, anchor: AXTextAnchor?) async {
-        guard let anchor else { return offerWithoutReplacing(enhanced) }
+    private func apply(refined: String, pastedText: String, anchor: AXTextAnchor?) async {
+        // Identical text is not a failure and needs neither a write nor a notification.
+        guard let replacement = AXTextReplacer.replacement(forPasted: pastedText, refined: refined) else {
+            logger.notice("Refine returned the text already pasted")
+            return
+        }
+        guard let anchor else { return offerWithoutReplacing(refined) }
         guard !targetWasEdited, !appWasSwitched else {
             logger.notice("Target changed during refine — leaving the pasted text alone")
-            return offerWithoutReplacing(enhanced)
+            return offerWithoutReplacing(refined)
         }
         // The frontmost-app check has to be read here, on the main actor, before handing
         // the rest off.
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         guard frontmostPID == anchor.pid else {
             logger.notice("Refine declined: appChanged")
-            return offerWithoutReplacing(enhanced)
+            return offerWithoutReplacing(refined)
         }
 
         let strategy = await TargetAppCapabilities.shared.verdict(for: anchor)
@@ -154,22 +142,21 @@ final class RefineInPlaceCoordinator {
         // raw paste alone.
         guard strategy == .directAccessibility else {
             logger.notice("Refine declined: \(String(describing: strategy), privacy: .public)")
-            return offerWithoutReplacing(enhanced)
+            return offerWithoutReplacing(refined)
         }
 
         // Gate checks and the write are both synchronous IPC into the target process.
         // Bounded by the 150 ms messaging timeout, but that is still far too long to spend
         // on the main thread, so the whole exchange happens off it.
         let outcome = await Task.detached(priority: .userInitiated) { () -> Refusal? in
-            if let refusal = AXTextReplacer.canReplace(anchor, with: enhanced) { return refusal }
-            return AXTextReplacer.replace(anchor, with: enhanced) ? nil : .writeFailed
+            if let refusal = AXTextReplacer.canReplace(anchor, with: replacement) { return refusal }
+            return AXTextReplacer.replace(anchor, with: replacement) ? nil : .writeFailed
         }.value
 
         guard let outcome else { return }
         logger.notice("Refine declined: \(outcome.rawValue, privacy: .public)")
-        // Identical text is not a failure and needs no notification.
         guard outcome != .nothingToDo else { return }
-        offerWithoutReplacing(enhanced)
+        offerWithoutReplacing(refined)
     }
 
     private typealias Refusal = AXTextReplacer.Refusal
@@ -191,24 +178,20 @@ final class RefineInPlaceCoordinator {
     }
 
     private func persist(
-        enhanced: String,
-        duration: TimeInterval,
-        promptName: String?,
+        _ outcome: EnhancementOutcome,
+        of request: EnhancementRequest,
+        textCleanup: TextCleanupPreferences,
         recordID: PersistentIdentifier,
-        modelContext: ModelContext,
-        enhancementService: AIEnhancementService
+        modelContext: ModelContext
     ) {
         // The record can have been deleted by a cancellation path while we were away.
         guard let record = modelContext.model(for: recordID) as? Transcription else { return }
-        record.enhancedText = enhanced
-        record.enhancementDuration = duration
-        record.promptName = promptName
-        record.aiEnhancementModelName = enhancementService.getAIService()?.currentModel
-        record.aiRequestSystemMessage = enhancementService.lastSystemMessageSent
-        record.aiRequestUserMessage = enhancementService.lastUserMessageSent
+        record.record(outcome, of: request, finalize: textCleanup.applyPreferences(to:))
         try? modelContext.save()
 
-        UsageStatsService.shared.recordDeferredEnhancement(seconds: duration)
+        if case .enhanced(_, let duration) = outcome {
+            UsageStatsService.shared.recordDeferredEnhancement(seconds: duration)
+        }
     }
 
     // MARK: - Observers

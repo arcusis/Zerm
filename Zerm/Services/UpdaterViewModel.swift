@@ -124,7 +124,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             return
         }
         lastErrorMessage = nil
-        statusText = "Checking for updates…"
+        statusText = String(localized: "Checking for updates…")
         isChecking = true
         updaterController.checkForUpdates(nil)
     }
@@ -160,7 +160,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             return
         }
         lastErrorMessage = nil
-        statusText = "Opening installer…"
+        statusText = String(localized: "Opening installer…")
         isChecking = true
         // Brings the update alert into focus / continues install.
         updaterController.checkForUpdates(nil)
@@ -183,13 +183,13 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         Task { @MainActor in
             self.isChecking = false
             self.lastCheckedAt = Date()
-            self.clearAvailableUpdate(status: "You're up to date")
+            self.clearAvailableUpdate(status: String(localized: "You're up to date"))
             let ns = error as NSError
             let reason = ns.userInfo[SPUNoUpdateFoundReasonKey] as? Int
             self.logger.notice("No update found reason=\(reason.map(String.init) ?? "?", privacy: .public) err=\(error.localizedDescription, privacy: .public)")
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
-                if self.statusText == "You're up to date" {
+                if self.statusText == String(localized: "You're up to date") {
                     self.statusText = nil
                 }
             }
@@ -248,13 +248,13 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         Task { @MainActor in
             // Ignore callbacks for items that are not actually newer (post-install stale UI).
             guard self.isStrictlyNewer(build: update.versionString) else {
-                self.clearAvailableUpdate(status: "You're up to date")
+                self.clearAvailableUpdate(status: String(localized: "You're up to date"))
                 self.logger.notice("Ignoring non-newer update UI for \(update.versionString, privacy: .public) (running \(self.currentBuild, privacy: .public))")
                 return
             }
             self.applyFoundUpdate(update)
             if !handleShowingUpdate {
-                self.statusText = "Update available"
+                self.statusText = String(localized: "Update available")
                 self.logger.notice("Gentle reminder: update \(update.displayVersionString, privacy: .public) shown in sidebar")
             }
         }
@@ -270,7 +270,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             self.lastCheckedAt = Date()
             // Critical: after install, dismiss, or "already current", drop stale banners.
             self.clearIfNotActuallyNewer()
-            if !self.updateAvailable, self.statusText == "Opening installer…" || self.statusText == "Checking for updates…" {
+            if !self.updateAvailable, self.statusText == String(localized: "Opening installer…") || self.statusText == String(localized: "Checking for updates…") {
                 self.statusText = nil
             }
         }
@@ -280,7 +280,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     private func applyFoundUpdate(_ item: SUAppcastItem) {
         guard isStrictlyNewer(build: item.versionString) else {
-            clearAvailableUpdate(status: "You're up to date")
+            clearAvailableUpdate(status: String(localized: "You're up to date"))
             logger.notice("Rejected update \(item.versionString, privacy: .public) — not newer than \(self.currentBuild, privacy: .public)")
             return
         }
@@ -288,7 +288,7 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         availableBuild = item.versionString
         updateAvailable = true
         lastErrorMessage = nil
-        statusText = "Update available"
+        statusText = String(localized: "Update available")
         isChecking = false
         lastCheckedAt = Date()
     }

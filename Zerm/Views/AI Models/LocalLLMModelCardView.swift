@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The downloadable on-device models for one job. Enhancement and Read Aloud
-/// do not share a catalog — Gemma 4 is a Read Aloud model and will introduce
-/// itself if asked to clean a transcript.
+/// The downloadable on-device models for one job. Enhancement and Read Aloud each keep their own
+/// selection; the enhancement list only offers models measured fit for cleanup.
 struct LocalLLMModelListView: View {
     var role: LocalLLMRole = .reading
     @ObservedObject private var manager = LocalLLMModelManager.shared
@@ -15,16 +14,12 @@ struct LocalLLMModelListView: View {
         LocalLLMModelManager.package(for: role)
     }
 
-    private var activeIsOffCatalog: Bool {
-        !activePackage.jobs.contains(role)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(role.title)
+                Text(verbatim: role.title)
                     .font(.subheadline.weight(.semibold))
-                Text(role.jobDescription)
+                Text(verbatim: role.jobDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -39,16 +34,6 @@ struct LocalLLMModelListView: View {
                      : "Download \(activePackage.displayName) to use this job on-device")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            if activeIsOffCatalog {
-                Label(
-                    "Using \(activePackage.displayName) until you download an enhancement model. Gemma will introduce itself instead of cleaning the line.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
             }
 
             ForEach(visiblePackages) { package in
@@ -85,8 +70,8 @@ struct LocalLLMModelCardView: View {
             HStack {
                 Image(systemName: role == .enhancement ? "wand.and.stars" : "text.bubble")
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(package.displayName).font(.subheadline.weight(.medium))
-                    Text(package.blurb)
+                    Text(verbatim: package.displayName).font(.subheadline.weight(.medium))
+                    Text(verbatim: package.blurb)
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -96,11 +81,14 @@ struct LocalLLMModelCardView: View {
                         .font(.caption2).foregroundStyle(.green)
                 }
                 if isRecommended {
-                    Label(role == .enhancement ? "Instant default" : "Read Aloud default", systemImage: "memorychip")
+                    Label(
+                        role == .enhancement ? String(localized: "Enhancement default") : String(localized: "Read Aloud default"),
+                        systemImage: "memorychip"
+                    )
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                Text(package.approxSize).font(.caption).foregroundStyle(.secondary)
+                Text(verbatim: package.approxSize).font(.caption).foregroundStyle(.secondary)
             }
 
             if isDownloaded {
@@ -124,7 +112,7 @@ struct LocalLLMModelCardView: View {
                         Text("Downloading…").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         if let p = progress {
-                            Text("\(Int(p * 100))%").font(.caption.monospacedDigit())
+                            Text(verbatim: "\(Int(p * 100))%").font(.caption.monospacedDigit())
                         }
                         Button("Cancel") { manager.cancelDownload(package) }.controlSize(.small)
                     }

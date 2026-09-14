@@ -43,6 +43,7 @@ struct CloudModelCardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     headerSection
                     metadataSection
+                    ModelBadgesRow(model: model)
                     descriptionSection
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -68,7 +69,7 @@ struct CloudModelCardView: View {
     
     private var headerSection: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(model.displayName)
+            Text(verbatim: model.displayName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
 
@@ -93,7 +94,7 @@ struct CloudModelCardView: View {
                 .help(streamingEnabled ? "Live streaming enabled — click to switch to batch" : "Batch mode — click to enable live streaming")
 
             InfoTip(
-                "On, words are sent as you speak and appear in the recorder live, so the transcript is ready the moment you stop. Off, the whole recording is uploaded once you finish, which is usually a little more accurate on long or noisy audio.",
+                String(localized: "On, words are sent as you speak and appear in the recorder live, so the transcript is ready the moment you stop. Off, the whole recording is uploaded once you finish, which is usually a little more accurate on long or noisy audio."),
                 doc: .models
             )
         }
@@ -137,7 +138,7 @@ struct CloudModelCardView: View {
     }
     
     private var descriptionSection: some View {
-        Text(model.description)
+        Text(verbatim: model.description)
             .font(.system(size: 11))
             .foregroundColor(Color(.secondaryLabelColor))
             .lineLimit(2)
@@ -205,7 +206,14 @@ struct CloudModelCardView: View {
             Text("API Key Configuration")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(.labelColor))
-            
+
+            if let documentationURL = CloudProviderRegistry.provider(for: model.provider)?.documentationURL {
+                Link(destination: documentationURL) {
+                    Label("\(model.provider.rawValue) speech-to-text documentation", systemImage: "arrow.up.right.square")
+                        .font(.caption)
+                }
+            }
+
             HStack(spacing: 8) {
                 SecureField("Enter your \(model.provider.rawValue) API key", text: $apiKey)
                     .textFieldStyle(.roundedBorder)
@@ -238,7 +246,7 @@ struct CloudModelCardView: View {
             
             if verificationStatus == .failure {
                 if let error = verificationError {
-                    Text(error)
+                    Text(verbatim: error)
                         .font(.caption)
                         .foregroundColor(Color(.systemRed))
                 } else {
@@ -275,7 +283,7 @@ struct CloudModelCardView: View {
         guard let cloudProvider = CloudProviderRegistry.provider(for: model.provider) else {
             isVerifying = false
             verificationStatus = .failure
-            verificationError = "Unsupported provider"
+            verificationError = String(localized: "Unsupported provider")
             return
         }
 

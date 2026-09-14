@@ -41,8 +41,7 @@ final class MetricKitReporter: NSObject, MXMetricManagerSubscriber {
 
     private func persistDiagnostic(_ data: Data) {
         queue.async {
-            let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.arcusis.zerm")
+            let dir = AppStoragePaths.root
                 .appendingPathComponent("Diagnostics")
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let url = dir.appendingPathComponent("metrickit-\(Int(Date().timeIntervalSince1970)).json")

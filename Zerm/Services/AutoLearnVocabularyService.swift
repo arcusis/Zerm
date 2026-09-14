@@ -218,9 +218,9 @@ final class AutoLearnVocabularyService {
 
         let title: String
         if addedWords.count == 1 {
-            title = "Added \"\(addedWords[0].word)\" to Vocabulary"
+            title = String(localized: "Added \"\(addedWords[0].word)\" to Vocabulary")
         } else {
-            title = "Added \(addedWords.count) words to Vocabulary"
+            title = String(localized: "Added \(addedWords.count) words to Vocabulary")
         }
 
         Task { @MainActor in
@@ -228,7 +228,7 @@ final class AutoLearnVocabularyService {
                 title: title,
                 type: .success,
                 duration: 4.0,
-                actionButton: ("Undo", {
+                actionButton: (String(localized: "Undo"), {
                     for word in addedWords {
                         context.delete(word)
                     }

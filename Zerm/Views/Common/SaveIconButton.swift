@@ -28,8 +28,8 @@ struct SaveIconButton: View {
     private func saveFile(as contentType: UTType, extension fileExtension: String) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [contentType]
-        panel.nameFieldStringValue = "\(generateFileName()).\(fileExtension)"
-        panel.title = "Save Transcription"
+        panel.nameFieldStringValue = "\(Self.suggestedFileName(for: textToSave)).\(fileExtension)"
+        panel.title = String(localized: "Save Transcription")
 
         if panel.runModal() == .OK {
             guard let url = panel.url else { return }
@@ -46,25 +46,21 @@ struct SaveIconButton: View {
         }
     }
 
-    private func generateFileName() -> String {
-        let cleanedText = textToSave
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-
-        let words = cleanedText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        let wordCount = min(words.count, words.count <= 3 ? words.count : (words.count <= 6 ? 6 : 8))
-        let selectedWords = Array(words.prefix(wordCount))
-
-        if selectedWords.isEmpty { return "transcription" }
-
-        let fileName = selectedWords.joined(separator: "-")
+    /// The first words of the text, joined with hyphens. Letters and digits of every script are
+    /// kept, so a Hebrew transcript gets a Hebrew name instead of always falling back.
+    nonisolated static func suggestedFileName(for text: String) -> String {
+        let name = text
+            .split(whereSeparator: \.isWhitespace)
+            .prefix(8)
+            .map { word in
+                String(String.UnicodeScalarView(word.unicodeScalars.filter(CharacterSet.alphanumerics.contains)))
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
             .lowercased()
-            .replacingOccurrences(of: "[^a-z0-9\\-]", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "--+", with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 
-        return fileName.isEmpty ? "transcription" : String(fileName.prefix(50))
+        let trimmed = String(name.prefix(50)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? String(localized: "Transcription") : trimmed
     }
 
     private func formatAsMarkdown(_ text: String) -> String {

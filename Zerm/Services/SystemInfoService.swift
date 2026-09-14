@@ -53,7 +53,6 @@ class SystemInfoService {
 
         POWER MODE:
         Power Mode Enabled: \(UserDefaults.standard.bool(forKey: "powerModeUIFlag"))
-        Persist Configured Preferences: \(UserDefaults.standard.bool(forKey: "powerModePersistConfig"))
 
         DATA CLEANUP SETTINGS:
         Auto-Delete Transcriptions: \(UserDefaults.standard.bool(forKey: "IsTranscriptionCleanupEnabled"))
@@ -162,8 +161,7 @@ class SystemInfoService {
     }
 
     private func getAIEnhancementStatus() -> String {
-        let enhancementEnabled = UserDefaults.standard.bool(forKey: "isAIEnhancementEnabled")
-        return enhancementEnabled ? "Enabled" : "Disabled"
+        DictationOutputMode.current.rawValue
     }
 
     private func getAIProvider() -> String {

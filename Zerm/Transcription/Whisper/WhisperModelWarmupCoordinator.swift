@@ -38,10 +38,8 @@ final class WhisperModelWarmupCoordinator: ObservableObject {
 
     private func runWarmup(for model: WhisperModel, whisperModelManager: WhisperModelManager) async throws {
         guard let sampleURL = warmupSampleURL() else { return }
-        let service = WhisperTranscriptionService(
-            modelsDirectory: whisperModelManager.modelsDirectory,
-            modelProvider: whisperModelManager
-        )
+        // No model provider: warm up on a temporary context so the resident model stays loaded.
+        let service = WhisperTranscriptionService(modelsDirectory: whisperModelManager.modelsDirectory)
         _ = try await service.transcribe(audioURL: sampleURL, model: model)
     }
 

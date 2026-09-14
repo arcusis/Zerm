@@ -30,8 +30,7 @@ final class DebugLogger: @unchecked Sendable {
     }
 
     private init() {
-        let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.arcusis.zerm")
+        let appSupportDirectory = AppStoragePaths.root
         logsDirectory = appSupportDirectory.appendingPathComponent("Logs")
         logFileURL = logsDirectory.appendingPathComponent("zerm-debug.log")
 

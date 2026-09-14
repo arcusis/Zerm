@@ -7,6 +7,7 @@ enum AutoSendKey: String, Codable, CaseIterable {
     case shiftEnter = "shiftEnter"
     case commandEnter = "commandEnter"
 
+    /// English; views look it up with `LocalizedStringKey(displayName)`.
     var displayName: String {
         switch self {
         case .none: return "None"
@@ -21,66 +22,55 @@ enum AutoSendKey: String, Codable, CaseIterable {
     }
 }
 
-/// What a Power Mode does to AI enhancement when it becomes active.
+/// Settings a Power Mode may override while it is active.
 ///
-/// The old plain `isAIEnhancementEnabled` bool could not express "leave it alone", so
-/// every Power Mode — including the seeded default one, which matches when nothing else
-/// does — forced enhancement off on every recording. Turning enhancement on in Settings
-/// therefore appeared to do nothing.
-enum PowerModeEnhancementOverride: String, Codable, CaseIterable, Identifiable {
-    case inherit
-    case on
-    case off
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .inherit: return "Use global setting"
-        case .on: return "Always on"
-        case .off: return "Always off"
-        }
-    }
-}
-
+/// Every override is optional, and `nil` means "use the global setting". A Power Mode never
+/// writes to global settings: its overrides are read into the per-recording
+/// `DictationSessionConfiguration` when recording starts. Earlier versions filled a missing model,
+/// language and provider with whatever was global when the config was created, then wrote them
+/// back on every recording, so the model a dictation used depended on which app was in front.
 struct PowerModeConfig: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
     var emoji: String
     var appConfigs: [AppConfig]?
     var urlConfigs: [URLConfig]?
-    var isAIEnhancementEnabled: Bool
-    var enhancementOverride: PowerModeEnhancementOverride = .inherit
-    var selectedPrompt: String?
     var selectedTranscriptionModelName: String?
     var selectedLanguage: String?
-    var isTextFormattingEnabled: Bool = false
-    var punctuationCleanupMode: PunctuationCleanupMode = .keep
-    var lowercaseTranscription: Bool = false
-    var useScreenCapture: Bool
+    var outputMode: DictationOutputMode?
+    var selectedPrompt: String?
     var selectedAIProvider: String?
+    /// Only meaningful together with `selectedAIProvider`; without one the provider's own
+    /// global model selection applies.
     var selectedAIModel: String?
+    /// On-screen text as enhancement context.
+    var contextAwareness: Bool?
+    var isTextFormattingEnabled: Bool?
+    var punctuationCleanupMode: PunctuationCleanupMode?
+    var lowercaseTranscription: Bool?
     var autoSendKey: AutoSendKey = .none
     var isEnabled: Bool = true
     var isDefault: Bool = false
     var hotkeyShortcut: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, name, emoji, appConfigs, urlConfigs, isAIEnhancementEnabled, enhancementOverride, selectedPrompt, selectedLanguage
+        case id, name, emoji, appConfigs, urlConfigs
+        case selectedTranscriptionModelName, selectedLanguage, outputMode, selectedPrompt
+        case selectedAIProvider, selectedAIModel, contextAwareness
+        case textFormatting, punctuationCleanup, lowercase
+        case autoSendKey, isEnabled, isDefault, hotkeyShortcut
+        // Keys written by 2.8.5 and earlier.
+        case isAIEnhancementEnabled, enhancementOverride, useScreenCapture
         case isTextFormattingEnabled, punctuationCleanupMode, removePunctuation, lowercaseTranscription
-        case useScreenCapture, selectedAIProvider, selectedAIModel, isAutoSendEnabled, autoSendKey
-        case isEnabled, isDefault, hotkeyShortcut
-        case selectedWhisperModel
-        case selectedTranscriptionModelName
+        case isAutoSendEnabled, selectedWhisperModel
     }
 
     init(id: UUID = UUID(), name: String, emoji: String, appConfigs: [AppConfig]? = nil,
-         urlConfigs: [URLConfig]? = nil, isAIEnhancementEnabled: Bool,
-         enhancementOverride: PowerModeEnhancementOverride? = nil, selectedPrompt: String? = nil,
-         selectedTranscriptionModelName: String? = nil, selectedLanguage: String? = nil, useScreenCapture: Bool = false,
-         isTextFormattingEnabled: Bool = false, punctuationCleanupMode: PunctuationCleanupMode = .keep,
-         lowercaseTranscription: Bool = false,
-         selectedAIProvider: String? = nil, selectedAIModel: String? = nil,
+         urlConfigs: [URLConfig]? = nil, selectedTranscriptionModelName: String? = nil,
+         selectedLanguage: String? = nil, outputMode: DictationOutputMode? = nil,
+         selectedPrompt: String? = nil, selectedAIProvider: String? = nil, selectedAIModel: String? = nil,
+         contextAwareness: Bool? = nil, isTextFormattingEnabled: Bool? = nil,
+         punctuationCleanupMode: PunctuationCleanupMode? = nil, lowercaseTranscription: Bool? = nil,
          autoSendKey: AutoSendKey = .none, isEnabled: Bool = true, isDefault: Bool = false,
          hotkeyShortcut: String? = nil) {
         self.id = id
@@ -88,18 +78,17 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         self.emoji = emoji
         self.appConfigs = appConfigs
         self.urlConfigs = urlConfigs
-        self.isAIEnhancementEnabled = isAIEnhancementEnabled
-        self.enhancementOverride = enhancementOverride ?? (isAIEnhancementEnabled ? .on : .inherit)
+        self.selectedTranscriptionModelName = selectedTranscriptionModelName
+        self.selectedLanguage = selectedLanguage
+        self.outputMode = outputMode
         self.selectedPrompt = selectedPrompt
-        self.useScreenCapture = useScreenCapture
+        self.selectedAIProvider = selectedAIProvider
+        self.selectedAIModel = selectedAIModel
+        self.contextAwareness = contextAwareness
         self.isTextFormattingEnabled = isTextFormattingEnabled
         self.punctuationCleanupMode = punctuationCleanupMode
         self.lowercaseTranscription = lowercaseTranscription
         self.autoSendKey = autoSendKey
-        self.selectedAIProvider = selectedAIProvider ?? UserDefaults.standard.string(forKey: "selectedAIProvider")
-        self.selectedAIModel = selectedAIModel
-        self.selectedTranscriptionModelName = selectedTranscriptionModelName ?? UserDefaults.standard.string(forKey: "CurrentTranscriptionModel")
-        self.selectedLanguage = selectedLanguage ?? UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "en"
         self.isEnabled = isEnabled
         self.isDefault = isDefault
         self.hotkeyShortcut = hotkeyShortcut
@@ -112,32 +101,42 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         emoji = try container.decode(String.self, forKey: .emoji)
         appConfigs = try container.decodeIfPresent([AppConfig].self, forKey: .appConfigs)
         urlConfigs = try container.decodeIfPresent([URLConfig].self, forKey: .urlConfigs)
-        isAIEnhancementEnabled = try container.decode(Bool.self, forKey: .isAIEnhancementEnabled)
-        // Migrate from the plain bool. An explicit `true` was always a deliberate choice
-        // and is preserved; a `false` was almost always just the seeded default rather
-        // than an instruction to suppress enhancement, so it becomes "inherit" and the
-        // global setting wins.
-        if let raw = try container.decodeIfPresent(String.self, forKey: .enhancementOverride),
-           let override = PowerModeEnhancementOverride(rawValue: raw) {
-            enhancementOverride = override
-        } else {
-            enhancementOverride = isAIEnhancementEnabled ? .on : .inherit
-        }
-        selectedPrompt = try container.decodeIfPresent(String.self, forKey: .selectedPrompt)
+        selectedTranscriptionModelName = try container.decodeIfPresent(String.self, forKey: .selectedTranscriptionModelName)
+            ?? container.decodeIfPresent(String.self, forKey: .selectedWhisperModel)
         selectedLanguage = try container.decodeIfPresent(String.self, forKey: .selectedLanguage)
-        isTextFormattingEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTextFormattingEnabled) ?? false
-        // Migrate from legacy removePunctuation bool to punctuationCleanupMode enum
-        if let mode = try container.decodeIfPresent(PunctuationCleanupMode.self, forKey: .punctuationCleanupMode) {
-            punctuationCleanupMode = mode
-        } else {
-            let removePunctuation = try container.decodeIfPresent(Bool.self, forKey: .removePunctuation) ?? false
-            punctuationCleanupMode = removePunctuation ? .removeAll : .keep
-        }
-        lowercaseTranscription = try container.decodeIfPresent(Bool.self, forKey: .lowercaseTranscription) ?? false
-        useScreenCapture = try container.decode(Bool.self, forKey: .useScreenCapture)
+        selectedPrompt = try container.decodeIfPresent(String.self, forKey: .selectedPrompt)
         selectedAIProvider = try container.decodeIfPresent(String.self, forKey: .selectedAIProvider)
         selectedAIModel = try container.decodeIfPresent(String.self, forKey: .selectedAIModel)
-        // Migrate from old isAutoSendEnabled bool to new autoSendKey enum
+
+        // Legacy configs store values that were never a choice: the toggles were seeded `false`
+        // and the formatting fields had no UI. Only a value that changes something survives as an
+        // override. Stored configs pass through `PowerModeMigration` first, which maps a legacy
+        // "always on" against the output mode that was active at the time. Here — an imported
+        // 2.8.5 settings file — "always on" cannot be resolved and inherits: turning AI on for an
+        // app from ambiguous data could send dictation to a cloud provider the user never chose.
+        if container.contains(.outputMode) {
+            outputMode = try container.decodeIfPresent(DictationOutputMode.self, forKey: .outputMode)
+        } else {
+            let legacyOverride = try container.decodeIfPresent(String.self, forKey: .enhancementOverride)
+            outputMode = legacyOverride == "off" ? .instant : nil
+        }
+        if container.contains(.contextAwareness) {
+            contextAwareness = try container.decodeIfPresent(Bool.self, forKey: .contextAwareness)
+        } else {
+            contextAwareness = try container.decodeIfPresent(Bool.self, forKey: .useScreenCapture) == true ? true : nil
+        }
+        if container.contains(.textFormatting) {
+            isTextFormattingEnabled = try container.decodeIfPresent(Bool.self, forKey: .textFormatting)
+            punctuationCleanupMode = try container.decodeIfPresent(PunctuationCleanupMode.self, forKey: .punctuationCleanup)
+            lowercaseTranscription = try container.decodeIfPresent(Bool.self, forKey: .lowercase)
+        } else {
+            isTextFormattingEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTextFormattingEnabled) == true ? true : nil
+            let legacyPunctuation = try container.decodeIfPresent(PunctuationCleanupMode.self, forKey: .punctuationCleanupMode)
+                ?? (container.decodeIfPresent(Bool.self, forKey: .removePunctuation) == true ? .removeAll : .keep)
+            punctuationCleanupMode = legacyPunctuation == .keep ? nil : legacyPunctuation
+            lowercaseTranscription = try container.decodeIfPresent(Bool.self, forKey: .lowercaseTranscription) == true ? true : nil
+        }
+
         if let rawValue = try container.decodeIfPresent(String.self, forKey: .autoSendKey),
            let newKey = AutoSendKey(rawValue: rawValue) {
             autoSendKey = newKey
@@ -149,14 +148,6 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         hotkeyShortcut = try container.decodeIfPresent(String.self, forKey: .hotkeyShortcut)
-
-        if let newModelName = try container.decodeIfPresent(String.self, forKey: .selectedTranscriptionModelName) {
-            selectedTranscriptionModelName = newModelName
-        } else if let oldModelName = try container.decodeIfPresent(String.self, forKey: .selectedWhisperModel) {
-            selectedTranscriptionModelName = oldModelName
-        } else {
-            selectedTranscriptionModelName = nil
-        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -166,25 +157,26 @@ struct PowerModeConfig: Codable, Identifiable, Equatable {
         try container.encode(emoji, forKey: .emoji)
         try container.encodeIfPresent(appConfigs, forKey: .appConfigs)
         try container.encodeIfPresent(urlConfigs, forKey: .urlConfigs)
-        try container.encode(isAIEnhancementEnabled, forKey: .isAIEnhancementEnabled)
-        try container.encode(enhancementOverride.rawValue, forKey: .enhancementOverride)
-        try container.encodeIfPresent(selectedPrompt, forKey: .selectedPrompt)
+        try container.encodeIfPresent(selectedTranscriptionModelName, forKey: .selectedTranscriptionModelName)
         try container.encodeIfPresent(selectedLanguage, forKey: .selectedLanguage)
-        try container.encode(isTextFormattingEnabled, forKey: .isTextFormattingEnabled)
-        try container.encode(punctuationCleanupMode, forKey: .punctuationCleanupMode)
-        try container.encode(punctuationCleanupMode == .removeAll, forKey: .removePunctuation)
-        try container.encode(lowercaseTranscription, forKey: .lowercaseTranscription)
-        try container.encode(useScreenCapture, forKey: .useScreenCapture)
+        try container.encode(outputMode, forKey: .outputMode)
+        try container.encodeIfPresent(selectedPrompt, forKey: .selectedPrompt)
         try container.encodeIfPresent(selectedAIProvider, forKey: .selectedAIProvider)
         try container.encodeIfPresent(selectedAIModel, forKey: .selectedAIModel)
+        try container.encode(contextAwareness, forKey: .contextAwareness)
+        try container.encode(isTextFormattingEnabled, forKey: .textFormatting)
+        try container.encode(punctuationCleanupMode, forKey: .punctuationCleanup)
+        try container.encode(lowercaseTranscription, forKey: .lowercase)
         try container.encode(autoSendKey, forKey: .autoSendKey)
-        try container.encodeIfPresent(selectedTranscriptionModelName, forKey: .selectedTranscriptionModelName)
         try container.encode(isEnabled, forKey: .isEnabled)
         try container.encode(isDefault, forKey: .isDefault)
         try container.encodeIfPresent(hotkeyShortcut, forKey: .hotkeyShortcut)
+        // 2.8.5 and earlier decode these two as required; without them a downgrade would drop
+        // every Power Mode and reseed the defaults.
+        try container.encode(outputMode?.usesEnhancement == true, forKey: .isAIEnhancementEnabled)
+        try container.encode(contextAwareness == true, forKey: .useScreenCapture)
     }
-    
-    
+
     static func == (lhs: PowerModeConfig, rhs: PowerModeConfig) -> Bool {
         lhs.id == rhs.id
     }
@@ -194,13 +186,13 @@ struct AppConfig: Codable, Identifiable, Equatable {
     let id: UUID
     var bundleIdentifier: String
     var appName: String
-    
+
     init(id: UUID = UUID(), bundleIdentifier: String, appName: String) {
         self.id = id
         self.bundleIdentifier = bundleIdentifier
         self.appName = appName
     }
-    
+
     static func == (lhs: AppConfig, rhs: AppConfig) -> Bool {
         lhs.id == rhs.id
     }
@@ -209,12 +201,12 @@ struct AppConfig: Codable, Identifiable, Equatable {
 struct URLConfig: Codable, Identifiable, Equatable {
     let id: UUID
     var url: String
-    
+
     init(id: UUID = UUID(), url: String) {
         self.id = id
         self.url = url
     }
-    
+
     static func == (lhs: URLConfig, rhs: URLConfig) -> Bool {
         lhs.id == rhs.id
     }
@@ -225,7 +217,7 @@ class PowerModeManager: ObservableObject {
     @Published var configurations: [PowerModeConfig] = []
     @Published var activeConfiguration: PowerModeConfig?
 
-    private let configKey = "powerModeConfigurationsV2"
+    static let configKey = "powerModeConfigurationsV2"
     private let activeConfigIdKey = "activeConfigurationId"
 
     private init() {
@@ -241,7 +233,7 @@ class PowerModeManager: ObservableObject {
     }
 
     private func loadConfigurations() {
-        if let data = UserDefaults.standard.data(forKey: configKey),
+        if let data = UserDefaults.standard.data(forKey: Self.configKey),
            let configs = try? JSONDecoder().decode([PowerModeConfig].self, from: data) {
             configurations = configs
         }
@@ -251,24 +243,21 @@ class PowerModeManager: ObservableObject {
         let defaults = UserDefaults.standard
         let seedVersionKey = "ZermPowerModeSeedVersion"
         let seededVersion = defaults.integer(forKey: seedVersionKey)
-        let defaultPromptId = PredefinedPrompts.defaultPromptId.uuidString
 
         var didChange = false
 
         if configurations.isEmpty {
+            // Seeds carry triggers only. Every setting inherits, so a fresh install dictates with
+            // the same model, language and prompt in every app.
             configurations = [
                 PowerModeConfig(
-                    id: UUID(uuidString: "D3A0F9E1-6C37-4813-9C2D-111111111111")!,
+                    id: PowerModeMigration.seededGeneralID,
                     name: "General",
                     emoji: "⚡",
-                    isAIEnhancementEnabled: false,
-                    selectedPrompt: defaultPromptId,
-                    selectedLanguage: "en",
-                    useScreenCapture: false,
                     isDefault: true
                 ),
                 PowerModeConfig(
-                    id: UUID(uuidString: "D3A0F9E1-6C37-4813-9C2D-222222222222")!,
+                    id: PowerModeMigration.seededCodeID,
                     name: "Code",
                     emoji: "⌘",
                     appConfigs: [
@@ -281,14 +270,10 @@ class PowerModeManager: ObservableObject {
                     ],
                     urlConfigs: [
                         URLConfig(url: "github.com")
-                    ],
-                    isAIEnhancementEnabled: false,
-                    selectedPrompt: defaultPromptId,
-                    selectedLanguage: "en",
-                    useScreenCapture: false
+                    ]
                 ),
                 PowerModeConfig(
-                    id: UUID(uuidString: "D3A0F9E1-6C37-4813-9C2D-333333333333")!,
+                    id: PowerModeMigration.seededWritingID,
                     name: "Writing",
                     emoji: "✎",
                     appConfigs: [
@@ -296,11 +281,7 @@ class PowerModeManager: ObservableObject {
                         AppConfig(bundleIdentifier: "com.apple.Notes", appName: "Notes"),
                         AppConfig(bundleIdentifier: "com.google.Chrome", appName: "Google Chrome"),
                         AppConfig(bundleIdentifier: "com.apple.Safari", appName: "Safari")
-                    ],
-                    isAIEnhancementEnabled: false,
-                    selectedPrompt: defaultPromptId,
-                    selectedLanguage: "en",
-                    useScreenCapture: false
+                    ]
                 )
             ]
             didChange = true
@@ -319,7 +300,7 @@ class PowerModeManager: ObservableObject {
 
     func saveConfigurations() {
         if let data = try? JSONEncoder().encode(configurations) {
-            UserDefaults.standard.set(data, forKey: configKey)
+            UserDefaults.standard.set(data, forKey: Self.configKey)
         }
         NotificationCenter.default.post(name: NSNotification.Name("PowerModeConfigurationsDidChange"), object: nil)
     }
@@ -354,41 +335,38 @@ class PowerModeManager: ObservableObject {
     }
 
     func getConfigurationForURL(_ url: String) -> PowerModeConfig? {
-        let cleanedURL = cleanURL(url)
-        
-        for config in configurations.filter({ $0.isEnabled }) {
-            if let urlConfigs = config.urlConfigs {
-                for urlConfig in urlConfigs {
-                    let configURL = cleanURL(urlConfig.url)
-                    
-                    if cleanedURL.contains(configURL) {
-                        return config
-                    }
-                }
-            }
-        }
-        return nil
+        Self.configuration(forURL: url, in: configurations)
     }
-    
+
     func getConfigurationForApp(_ bundleId: String) -> PowerModeConfig? {
-        for config in configurations.filter({ $0.isEnabled }) {
-            if let appConfigs = config.appConfigs {
-                if appConfigs.contains(where: { $0.bundleIdentifier == bundleId }) {
-                    return config
-                }
-            }
-        }
-        return nil
+        Self.configuration(forApp: bundleId, in: configurations)
     }
-    
+
     func getDefaultConfiguration() -> PowerModeConfig? {
-        return configurations.first { $0.isEnabled && $0.isDefault }
+        Self.defaultConfiguration(in: configurations)
     }
-    
+
+    static func configuration(forURL url: String, in configurations: [PowerModeConfig]) -> PowerModeConfig? {
+        let cleanedURL = cleanURL(url)
+        return configurations.first { config in
+            config.isEnabled && (config.urlConfigs ?? []).contains { cleanedURL.contains(cleanURL($0.url)) }
+        }
+    }
+
+    static func configuration(forApp bundleId: String, in configurations: [PowerModeConfig]) -> PowerModeConfig? {
+        configurations.first { config in
+            config.isEnabled && (config.appConfigs ?? []).contains { $0.bundleIdentifier == bundleId }
+        }
+    }
+
+    static func defaultConfiguration(in configurations: [PowerModeConfig]) -> PowerModeConfig? {
+        configurations.first { $0.isEnabled && $0.isDefault }
+    }
+
     func hasDefaultConfiguration() -> Bool {
         return configurations.contains { $0.isDefault }
     }
-    
+
     func setAsDefault(configId: UUID, skipSave: Bool = false) {
         for index in configurations.indices {
             configurations[index].isDefault = false
@@ -402,21 +380,21 @@ class PowerModeManager: ObservableObject {
             saveConfigurations()
         }
     }
-    
+
     func enableConfiguration(with id: UUID) {
         if let index = configurations.firstIndex(where: { $0.id == id }) {
             configurations[index].isEnabled = true
             saveConfigurations()
         }
     }
-    
+
     func disableConfiguration(with id: UUID) {
         if let index = configurations.firstIndex(where: { $0.id == id }) {
             configurations[index].isEnabled = false
             saveConfigurations()
         }
     }
-    
+
     var enabledConfigurations: [PowerModeConfig] {
         return configurations.filter { $0.isEnabled }
     }
@@ -454,6 +432,10 @@ class PowerModeManager: ObservableObject {
     }
 
     func cleanURL(_ url: String) -> String {
+        Self.cleanURL(url)
+    }
+
+    static func cleanURL(_ url: String) -> String {
         return url.lowercased()
             .replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
@@ -467,6 +449,12 @@ class PowerModeManager: ObservableObject {
         self.objectWillChange.send()
     }
 
+    /// An explicit pick from the recorder. It applies to the recording in progress.
+    func selectInRecorder(_ config: PowerModeConfig) {
+        setActiveConfiguration(config)
+        NotificationCenter.default.post(name: .powerModeSelectedInRecorder, object: config)
+    }
+
     var currentActiveConfiguration: PowerModeConfig? {
         return activeConfiguration
     }
@@ -478,4 +466,4 @@ class PowerModeManager: ObservableObject {
     func isEmojiInUse(_ emoji: String) -> Bool {
         return configurations.contains { $0.emoji == emoji }
     }
-} 
+}

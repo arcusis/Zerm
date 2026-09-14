@@ -517,7 +517,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 285;
+				CURRENT_PROJECT_VERSION = 286;
 				DEVELOPMENT_ASSET_PATHS = "\"Zerm/Preview Content\"";
 				DEVELOPMENT_TEAM = V6J6A3VWY2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -532,8 +532,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.4;
-				MARKETING_VERSION = 2.8.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.arcusis.zerm;
+				MARKETING_VERSION = 2.8.6;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.arcusis.zerm$(ZERM_BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ENABLE_NATIVE_SPEECH_ANALYZER $(inherited)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -563,7 +563,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 285;
+				CURRENT_PROJECT_VERSION = 286;
 				DEVELOPMENT_ASSET_PATHS = "\"Zerm/Preview Content\"";
 				DEVELOPMENT_TEAM = V6J6A3VWY2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -578,8 +578,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.4;
-				MARKETING_VERSION = 2.8.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.arcusis.zerm;
+				MARKETING_VERSION = 2.8.6;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.arcusis.zerm$(ZERM_BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "ENABLE_NATIVE_SPEECH_ANALYZER $(inherited)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -701,8 +701,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/FluidInference/FluidAudio";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = exactVersion;
+				version = 0.15.7;
 			};
 		};
 		E1342C1D2EB4844800CED8A2 /* XCRemoteSwiftPackageReference "swift-atomics" */ = {
@@ -717,8 +717,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/Beingpax/LLMkit.git";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = 1fc213b8e37ea8b8a755dd30eaf50fa090cd4241;
 			};
 		};
 		E1A261102CC143AC00B233D1 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {

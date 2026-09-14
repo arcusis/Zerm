@@ -18,12 +18,12 @@ struct ZermApp: App {
     @StateObject private var whisperModelManager: WhisperModelManager
     @StateObject private var fluidAudioModelManager: FluidAudioModelManager
     @StateObject private var transcriptionModelManager: TranscriptionModelManager
+    @StateObject private var fileTranscriptionQueue: FileTranscriptionQueue
     @StateObject private var recorderUIManager: RecorderUIManager
     @StateObject private var hotkeyManager: HotkeyManager
     @StateObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var menuBarManager: MenuBarManager
     @StateObject private var ttsController: TTSController
-    @StateObject private var meetingRecordingController: MeetingRecordingController
     @StateObject private var aiService = AIService()
     @StateObject private var enhancementService: AIEnhancementService
     @StateObject private var activeWindowService = ActiveWindowService.shared
@@ -50,6 +50,8 @@ struct ZermApp: App {
 
         if !uiTestConfiguration.isEnabled {
             AppDefaults.registerDefaults()
+            // Meetings was removed in 2.8.6: delete its recordings and preferences once.
+            MeetingDataRemovalMigration.run()
         }
 
         if !uiTestConfiguration.isEnabled,
@@ -84,10 +86,10 @@ struct ZermApp: App {
             // Show alert to user about storage issue
             DispatchQueue.main.async {
                 let alert = NSAlert()
-                alert.messageText = "Storage Warning"
-                alert.informativeText = "Zerm couldn't access its storage location. Your transcriptions will not be saved between sessions."
+                alert.messageText = String(localized: "Storage Warning")
+                alert.informativeText = String(localized: "Zerm couldn't access its storage location. Your transcriptions will not be saved between sessions.")
                 alert.alertStyle = .warning
-                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: String(localized: "OK"))
                 alert.runModal()
             }
         }
@@ -109,7 +111,10 @@ struct ZermApp: App {
         let aiService = AIService()
         _aiService = StateObject(wrappedValue: aiService)
 
-        let updaterViewModel = UpdaterViewModel(startsUpdater: !uiTestConfiguration.isEnabled)
+        // A development bundle must never update itself into the released app.
+        let updaterViewModel = UpdaterViewModel(
+            startsUpdater: !uiTestConfiguration.isEnabled && AppStoragePaths.isProductionBundle
+        )
         _updaterViewModel = StateObject(wrappedValue: updaterViewModel)
 
         let enhancementService = AIEnhancementService(aiService: aiService, modelContext: container.mainContext)
@@ -117,8 +122,7 @@ struct ZermApp: App {
 
         // 1. Create modelsDirectory URL
         let appSupportDirectory = uiTestConfiguration.storageRoot
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.arcusis.zerm")
+            ?? AppStoragePaths.root
         let modelsDirectory = appSupportDirectory.appendingPathComponent("WhisperModels")
 
         // 2. Create model managers
@@ -149,6 +153,8 @@ struct ZermApp: App {
         if !uiTestConfiguration.isEnabled {
             StreamingKeysMigration.run()
             RetiredLocalLLMMigration.run()
+            RetiredCloudTranscriptionMigration.run()
+            RetiredLocalTranscriptionModelMigration.run(whisperModelsDirectory: modelsDirectory)
             // Restores History rows blanked by 2.8.3's empty on-device enhancements.
             if !containerInitializationFailed {
                 EmptyEnhancementRepair.run(modelContext: container.mainContext)
@@ -170,11 +176,12 @@ struct ZermApp: App {
         _recorderUIManager = StateObject(wrappedValue: recorderUIManager)
         _engine = StateObject(wrappedValue: engine)
 
-        // Meeting capture is application-scoped. Views only observe this coordinator so
-        // navigation, window closure, and menu-bar-only operation can never orphan an active
-        // recording or remove its only Stop action.
-        let meetingRecordingController = MeetingRecordingController(engine: engine)
-        _meetingRecordingController = StateObject(wrappedValue: meetingRecordingController)
+        let fileTranscriptionQueue = FileTranscriptionQueue.live(
+            engine: engine,
+            modelManager: transcriptionModelManager,
+            modelContext: container.mainContext
+        )
+        _fileTranscriptionQueue = StateObject(wrappedValue: fileTranscriptionQueue)
 
         // 7. Create other services that depend on engine
         let hotkeyManager = HotkeyManager(engine: engine, recorderUIManager: recorderUIManager)
@@ -192,27 +199,19 @@ struct ZermApp: App {
         let ttsController = TTSController(engine: engine, recorderUIManager: recorderUIManager)
         hotkeyManager.onReadAloudTriggered = { [weak ttsController] in ttsController?.toggle() }
         recorderUIManager.onCancelSpeaking = { [weak ttsController] in ttsController?.stop() }
-        meetingRecordingController.onWillStartCapture = { [weak ttsController] in
-            ttsController?.prepareForMeetingCapture()
-        }
         _ttsController = StateObject(wrappedValue: ttsController)
 
-        let activeWindowService = ActiveWindowService.shared
-        activeWindowService.configure(with: enhancementService)
-        _activeWindowService = StateObject(wrappedValue: activeWindowService)
+        _activeWindowService = StateObject(wrappedValue: ActiveWindowService.shared)
 
         prewarmService = uiTestConfiguration.isEnabled
             ? nil
             : ModelPrewarmService(
                 transcriptionModelManager: transcriptionModelManager,
-                whisperModelManager: whisperModelManager,
-                modelContext: container.mainContext
+                serviceRegistry: engine.serviceRegistry
             )
 
         appDelegate.menuBarManager = menuBarManager
-        appDelegate.onWillTerminate = { [weak meetingRecordingController] in
-            meetingRecordingController?.prepareForTermination()
-        }
+        appDelegate.fileTranscriptionQueue = fileTranscriptionQueue
 
         // Ensure no lingering recording state from previous runs
         if !uiTestConfiguration.isEnabled {
@@ -258,8 +257,7 @@ struct ZermApp: App {
     private static func createPersistentContainer(schema: Schema, logger: Logger) -> ModelContainer? {
         do {
             // Create app-specific Application Support directory URL
-            let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.arcusis.zerm", isDirectory: true)
+            let appSupportURL = AppStoragePaths.root
 
             // Create the directory if it doesn't exist
             try? FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
@@ -381,12 +379,12 @@ struct ZermApp: App {
                     .environmentObject(whisperModelManager)
                     .environmentObject(fluidAudioModelManager)
                     .environmentObject(transcriptionModelManager)
+                    .environmentObject(fileTranscriptionQueue)
                     .environmentObject(recorderUIManager)
                     .environmentObject(hotkeyManager)
                     .environmentObject(updaterViewModel)
                     .environmentObject(menuBarManager)
                     .environmentObject(ttsController)
-                    .environmentObject(meetingRecordingController)
                     .environmentObject(aiService)
                     .environmentObject(enhancementService)
                     .modelContainer(container)
@@ -395,10 +393,10 @@ struct ZermApp: App {
                         // Check if container initialization failed
                         if containerInitializationFailed {
                             let alert = NSAlert()
-                            alert.messageText = "Critical Storage Error"
-                            alert.informativeText = "Zerm cannot initialize its storage system. The app cannot continue.\n\nPlease try reinstalling the app or contact support if the issue persists."
+                            alert.messageText = String(localized: "Critical Storage Error")
+                            alert.informativeText = String(localized: "Zerm cannot initialize its storage system. The app cannot continue.\n\nPlease try reinstalling the app or contact support if the issue persists.")
                             alert.alertStyle = .critical
-                            alert.addButton(withTitle: "Quit")
+                            alert.addButton(withTitle: String(localized: "Quit"))
                             alert.runModal()
 
                             NSApplication.shared.terminate(nil)
@@ -475,7 +473,6 @@ struct ZermApp: App {
                 .environmentObject(updaterViewModel)
                 .environmentObject(menuBarManager)
                 .environmentObject(ttsController)
-                .environmentObject(meetingRecordingController)
                 .environmentObject(enhancementService)
                 .modelContainer(container)
                 .uiTestEnvironment(uiTestConfiguration)
@@ -491,7 +488,6 @@ struct ZermApp: App {
                 .environmentObject(hotkeyManager)
                 .environmentObject(menuBarManager)
                 .environmentObject(updaterViewModel)
-                .environmentObject(meetingRecordingController)
                 .environmentObject(aiService)
                 .environmentObject(enhancementService)
                 .uiTestEnvironment(uiTestConfiguration)

@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Dictation and Read Aloud share one short-form engine and recorder widget. Meeting recording is a separate application-scoped coordinator so it can remain active while the user navigates the app and uses Dictation. Read Aloud may coexist with a meeting only on a confirmed safe headphone/headset route.
+Dictation and Read Aloud share one short-form engine and recorder widget. The Meetings module was removed in 2.8.6; its reusable long-file pieces (16 kHz conversion, windowed transcription with overlap reconciliation, offline diarization, speaker attribution) live in `Zerm/Transcription/FileTranscription/`.
 
 ```mermaid
 flowchart TB
@@ -19,13 +19,9 @@ flowchart TB
     ENH -.optional.-> LLM
     ENG --> UI[RecorderUIManager widget]
     TC --> UI
-    MC[MeetingRecordingController] --> CAP[Room + selected-app capture]
-    CAP --> MSTT[Snapshotted Dictation STT]
-    MC --> LIB[Durable meeting library]
-    MON[MeetingActivityMonitor + AudioOutputRouteMonitor] --> TC
 ```
 
-See [[Zerm Meeting Recording]], [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]].
+See [[Zerm Three Model Platform]], [[Zerm Read Aloud]], [[Zerm Smart Reading]], [[Zerm On-Device LLM]].
 
 ## Tech Stack
 
@@ -54,13 +50,11 @@ See [[Zerm Meeting Recording]], [[Zerm Three Model Platform]], [[Zerm Read Aloud
 | `WordReplacementService` | Post-transcription text substitution |
 | `AIEnhancementService` | LLM enhancement pipeline |
 | `ModelPrewarmService` | Pre-run model on app launch + wake |
-| `MeetingRecordingController` | Application-scoped meeting capture, processing and recovery |
-| `MeetingActivityMonitor` | Thread-safe meeting-active policy signal |
-| `AudioOutputRouteMonitor` | Headphone/headset safety and disconnect observation |
+| `AudioOutputRouteMonitor` | Headphone/headset route observation |
 
 ## Recording State Machine
 
-`RecordingState` (on `ZermEngine`) is the source of truth for short-form Dictation and Read Aloud. Meeting capture has its own `MeetingRecordingLifecycle`; Dictation remains available during meetings. Read Aloud start and route changes consult the process-wide meeting activity and output-route monitors.
+`RecordingState` (on `ZermEngine`) is the source of truth for short-form Dictation and Read Aloud.
 
 ```mermaid
 stateDiagram-v2
@@ -81,8 +75,6 @@ stateDiagram-v2
 ```
 
 The widget label is driven directly by the state: **Transcribing / Enhancing** (dictation), **Thinking… / Preparing… / live bars** (Read Aloud).
-
-Meeting lifecycle and timing invariants are documented in [[Zerm Meeting Recording]].
 
 ## Whisper Model Loading
 

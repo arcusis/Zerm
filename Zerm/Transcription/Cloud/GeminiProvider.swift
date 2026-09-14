@@ -1,57 +1,49 @@
 import Foundation
-import SwiftData
 import LLMkit
 
+/// Gemini's dedicated transcription model through LLMkit. Language goes in `language_codes` and
+/// Dictionary terms in `custom_vocabulary`; the model has no prompt field.
+/// https://ai.google.dev/gemini-api/docs/transcribe
 struct GeminiProvider: CloudProvider {
     let modelProvider: ModelProvider = .gemini
     let providerKey: String = "Gemini"
     let languageCodes: [String]? = nil
     let includesAutoDetect: Bool = false
+    let documentationURL = URL(string: "https://ai.google.dev/gemini-api/docs/transcribe")!
+
+    /// The only Gemini model LLMkit's dedicated transcription client accepts.
+    static let transcribeModelName = "gemini-3.5-transcribe"
 
     var models: [CloudModel] {[
         CloudModel(
-            name: "gemini-3.5-flash",
-            displayName: "Gemini 3.5 Flash",
-            description: "Google's latest fast model with high-quality transcription",
-            provider: .gemini,
-            speed: 0.92,
-            accuracy: 0.96,
-            isMultilingual: true,
-            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini)
-        ),
-        CloudModel(
-            name: "gemini-2.5-pro",
-            displayName: "Gemini 2.5 Pro",
-            description: "Google's advanced model with high-quality transcription capabilities",
-            provider: .gemini,
-            speed: 0.7,
-            accuracy: 0.97,
-            isMultilingual: true,
-            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini)
-        ),
-        CloudModel(
-            name: "gemini-2.5-flash",
-            displayName: "Gemini 2.5 Flash",
-            description: "Google's optimized model for low-latency transcription",
+            name: Self.transcribeModelName,
+            displayName: "Gemini 3.5 Transcribe",
+            description: String(localized: "Google's dedicated speech-to-text model with custom vocabulary support"),
             provider: .gemini,
             speed: 0.9,
-            accuracy: 0.95,
+            accuracy: 0.97,
             isMultilingual: true,
-            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini)
+            supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .gemini),
+            capabilities: [.vocabulary, .languageHint, .diarization],
+            isHebrewOptimized: true,
+            isRecommended: true
         )
     ]}
 
-    func transcribe(audioData: Data, fileName: String, apiKey: String, model: String, language: String?, prompt: String?, customVocabulary: [String]) async throws -> String {
-        return try await GeminiTranscriptionClient.transcribe(
-            audioData: audioData,
-            apiKey: apiKey,
-            model: model
+    func transcribe(_ request: CloudTranscriptionRequest) async throws -> String {
+        try await GeminiTranscriptionClient.transcribe(
+            audioData: request.audioData,
+            apiKey: request.apiKey,
+            model: request.model,
+            mimeType: request.audioMimeType,
+            fileName: request.fileName,
+            language: request.language,
+            customVocabulary: request.vocabulary,
+            timeout: request.timeout
         )
     }
 
-    func makeStreamingProvider(modelContext: ModelContext) -> (any StreamingTranscriptionProvider)? { nil }
-
     func verifyAPIKey(_ key: String) async -> (isValid: Bool, errorMessage: String?) {
-        return await GeminiTranscriptionClient.verifyAPIKey(key)
+        await GeminiTranscriptionClient.verifyAPIKey(key)
     }
 }

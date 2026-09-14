@@ -18,7 +18,7 @@ struct HardwareFitNotice: View {
         }
     }
 
-    private func notice(icon: String, color: Color, title: String, detail: String) -> some View {
+    private func notice(icon: String, color: Color, title: LocalizedStringKey, detail: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
@@ -27,7 +27,30 @@ struct HardwareFitNotice: View {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(color)
-                Text(detail)
+                Text(verbatim: detail)
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(.secondaryLabelColor))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+/// Inline failure shown on a model card after a download did not complete.
+struct DownloadErrorNotice: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.red)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Download failed")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.red)
+                Text(verbatim: message)
                     .font(.system(size: 10))
                     .foregroundColor(Color(.secondaryLabelColor))
                     .fixedSize(horizontal: false, vertical: true)
