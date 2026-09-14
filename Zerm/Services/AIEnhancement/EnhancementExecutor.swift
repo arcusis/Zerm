@@ -88,6 +88,8 @@ struct EnhancementExecutor {
     let client: EnhancementClient
     var maxAttempts = 3
     var initialRetryDelay: TimeInterval = 1
+    /// Called just before waiting to retry. Lets tests cancel exactly inside the retry wait.
+    var willWaitBeforeRetry: (@MainActor () -> Void)?
 
     private static let logger = Logger(subsystem: "com.arcusis.zerm", category: "EnhancementExecutor")
     nonisolated private static let pollInterval: UInt64 = 50_000_000
@@ -136,6 +138,7 @@ struct EnhancementExecutor {
                 }
                 Self.logger.warning("Enhancement attempt \(attempt, privacy: .public) failed, retrying")
                 if failure != .timeout {
+                    willWaitBeforeRetry?()
                     guard await sleep(retryDelay, unless: isCancelled) else { return .cancelled }
                     retryDelay *= 2
                 }

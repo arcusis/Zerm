@@ -258,19 +258,11 @@ struct EnhancementRequestTests {
         let client = FakeEnhancementClient([.failure(EnhancementFailure.network), .text("late")])
         var executor = EnhancementExecutor(client: client)
         executor.initialRetryDelay = 60
-        // Cancel shortly after the first attempt has been sent, so the cancellation lands in the
-        // retry sleep. A fixed wall-clock deadline could expire before the first attempt on a busy
-        // machine, and cancelling immediately would be caught before the sleep starts.
+        // Cancel exactly when the retry wait begins, independent of how busy the machine is.
+        var waiting = false
+        executor.willWaitBeforeRetry = { waiting = true }
         let started = Date()
-        let firstSent = OSAllocatedUnfairLock<Date?>(initialState: nil)
-        let outcome = await executor.run(try request("hello there friend"), isCancelled: {
-            guard !client.sent.isEmpty else { return false }
-            let sentAt = firstSent.withLock { value -> Date in
-                if value == nil { value = Date() }
-                return value!
-            }
-            return Date().timeIntervalSince(sentAt) > 0.2
-        })
+        let outcome = await executor.run(try request("hello there friend"), isCancelled: { waiting })
         #expect(outcome == .cancelled)
         #expect(Date().timeIntervalSince(started) < 30)
         #expect(client.sent.count == 1)
