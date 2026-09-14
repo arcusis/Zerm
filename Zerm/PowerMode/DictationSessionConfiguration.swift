@@ -23,12 +23,19 @@ enum BoundedWait {
                 if shouldResume { continuation.resume(returning: value) }
             }
             Task { finish(await task.value) }
+            // The deadline never waits on the main actor, so a busy main thread cannot stretch it.
+            Task.detached {
+                try? await Task.sleep(nanoseconds: UInt64(max(seconds, 0) * 1_000_000_000))
+                finish(nil)
+            }
             Task {
-                let deadline = Date().addingTimeInterval(seconds)
-                while Date() < deadline, !(await isCancelled()), !resumed.withLock({ $0 }) {
+                while !resumed.withLock({ $0 }) {
+                    if await isCancelled() {
+                        finish(nil)
+                        return
+                    }
                     try? await Task.sleep(nanoseconds: pollInterval)
                 }
-                finish(nil)
             }
         }
     }

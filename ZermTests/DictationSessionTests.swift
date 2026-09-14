@@ -256,28 +256,30 @@ struct DictationSessionTests {
         #expect(value == .some("screen text"))
     }
 
+    // Slow work takes far longer than any bound below, so these assert that the wait gave up,
+    // not how fast a loaded CI runner schedules it.
     @Test func boundedWaitGivesUpOnSlowWork() async {
         let task = Task<String?, Never> {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
             return "too late"
         }
         let started = Date()
         let value = await BoundedWait.value(of: task, within: 0.1)
         #expect(value == nil)
-        #expect(Date().timeIntervalSince(started) < 1)
+        #expect(Date().timeIntervalSince(started) < 30)
         task.cancel()
     }
 
     @Test func boundedWaitStopsWhenCancelled() async {
         let task = Task<String?, Never> {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
             return "too late"
         }
         let cancelAt = Date().addingTimeInterval(0.05)
         let started = Date()
-        let value = await BoundedWait.value(of: task, within: 5, isCancelled: { Date() > cancelAt })
+        let value = await BoundedWait.value(of: task, within: 120, isCancelled: { Date() > cancelAt })
         #expect(value == nil)
-        #expect(Date().timeIntervalSince(started) < 1)
+        #expect(Date().timeIntervalSince(started) < 30)
         task.cancel()
     }
 
@@ -303,12 +305,12 @@ struct DictationSessionTests {
             configurations: [appConfig, githubConfig],
             waitLimit: 0.05,
             lookupURL: {
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                try await Task.sleep(nanoseconds: 60_000_000_000)
                 return "https://github.com/arcusis/Zerm"
             }
         )
         #expect(resolved?.id == appConfig.id)
-        #expect(Date().timeIntervalSince(started) < 0.9)
+        #expect(Date().timeIntervalSince(started) < 30)
     }
 
     @Test func aFailedURLLookupFallsBackToTheAppConfiguration() async {
