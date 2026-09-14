@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Transcribe File — Zerm</title>
+    <meta name="description" content="Drop in an audio or video file and get a full transcript, with each speaker identified, renameable, and ready to export." />
+    <meta name="theme-color" content="#0b0b0c" />
+    <meta property="og:title" content="Transcribe File — Zerm" />
+    <meta property="og:description" content="Drop in an audio or video file and get a full transcript, with each speaker identified, renameable, and ready to export." />
+    <meta property="og:image" content="../icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="../icon.png" />
+    <link rel="apple-touch-icon" href="../icon.png" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="../" aria-label="Zerm home">
+          <img src="../icon.png" alt="" class="brand-logo" width="28" height="28" />
+          <span>Zerm</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="../#models">Models</a>
+          <a href="../#dictation">Dictation</a>
+          <a href="../#read-aloud">Read aloud</a>
+          <a href="../docs/" aria-current="page">Docs</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../changelog.html">Changelog</a>
+        </nav>
+        <div class="topbar-actions">
+          <a class="ghost-link" href="https://github.com/arcusis/Zerm">GitHub</a>
+          <a class="btn btn-light btn-sm" href="../#download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page">
+      <section class="page-hero">
+        <p class="eyebrow">Speech</p>
+        <h1>Transcribe File</h1>
+        <p class="lede">Drop in an audio or video file and get a full transcript, with each speaker identified, renameable, and ready to export.</p>
+      </section>
+      <section class="doc"><div class="prose">
+<p>Transcribe File turns an existing recording into text: an interview, a lecture, a voice<br>
+memo, a video call you recorded elsewhere. It uses the same models as dictation and,<br>
+when you want it, works out who said what.</p>
+<h2>Adding files</h2>
+<p>Open <strong>Transcribe File</strong> in the sidebar, then either:</p>
+<ul>
+<li><strong>Drop files</strong> anywhere on the page, or</li>
+<li><strong>Choose Files…</strong> to pick one or more.</li>
+</ul>
+<p>You can also start from Finder: <strong>Open With → Zerm</strong> on any audio or video file, or drop<br>
+it on Zerm's Dock icon. The file joins the queue and Zerm opens Transcribe File.</p>
+<p>MP3, M4A, WAV, FLAC, MP4, MOV, and most other audio and video formats work. For a video,<br>
+only its first audio track is transcribed. There is no length limit; hour-long files are<br>
+fine.</p>
+<h2>Options</h2>
+<p>The <strong>Options</strong> box applies to the files you add next. Each file keeps the options it<br>
+was added with.</p>
+<ul>
+<li><strong>Model</strong> — any downloaded local model, or any cloud model you have added a key for.<br>
+It starts as your dictation model. See <a href="models.html">models</a>.</li>
+<li><strong>Language</strong> — the language to transcribe. Models that detect the language themselves<br>
+show that instead.</li>
+<li><strong>Identify speakers</strong> — on by default. Labels each part of the transcript with the<br>
+voice that spoke it.</li>
+<li><strong>Speakers</strong> — <strong>Detect automatically</strong>, or tell Zerm how many people are in the<br>
+recording, from 2 to 10. A known count helps when voices sound alike.</li>
+</ul>
+<p>Speaker identification runs on your Mac. Its model downloads the first time you use it.</p>
+<h2>The queue</h2>
+<p>Files are transcribed one at a time, in the order you added them. Each row shows its<br>
+progress — preparing audio, identifying speakers, transcribing — and a <strong>Cancel</strong><br>
+button.</p>
+<p>A failed or cancelled file offers <strong>Retry</strong>. <strong>Clear Finished</strong> tidies the list. The<br>
+queue is not kept when you quit Zerm, but finished transcripts are, in History.</p>
+<h2>The transcript</h2>
+<p>Click a finished file, or <strong>View Transcript</strong>, to open it.</p>
+<ul>
+<li><strong>Speakers.</strong> Each voice gets a colour and a name field. Type a real name and press<br>
+Return; every line and export uses it. Clear the field to go back to "Speaker 1".<br>
+Speaker 1 is always the first voice heard.</li>
+<li><strong>Timestamps.</strong> Each paragraph starts with the speaker and the time. Click the time to<br>
+play the audio from there.</li>
+<li><strong>Copy</strong> puts the whole transcript, with speaker names, on the clipboard.</li>
+</ul>
+<h2>Exporting</h2>
+<p>The <strong>Export</strong> menu saves the transcript in five formats:</p>
+<table role="table">
+<thead>
+<tr>
+<th>Format</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plain Text (.txt)</td>
+<td>reading, with a timestamp and speaker on every line</td>
+</tr>
+<tr>
+<td>Markdown (.md)</td>
+<td>notes and documents</td>
+</tr>
+<tr>
+<td>SubRip Subtitles (.srt)</td>
+<td>subtitles for most video players and editors</td>
+</tr>
+<tr>
+<td>WebVTT Subtitles (.vtt)</td>
+<td>subtitles for the web</td>
+</tr>
+<tr>
+<td>JSON (.json)</td>
+<td>scripts and other tools: segments, timings, and speakers</td>
+</tr>
+</tbody>
+</table>
+<p>Subtitle cues are kept short: at most seven seconds and two lines each. Hebrew and<br>
+English mixed in one line keep their correct direction.</p>
+<h2>History</h2>
+<p>Every finished file is saved to History like a dictation, with its audio. Right-click the<br>
+entry, or expand it, and choose <strong>Open Transcript</strong> to get the full speaker view back,<br>
+including renaming and export.</p>
+<p><a href="privacy-retention.html">Retention settings</a> apply to file transcripts too. When the<br>
+audio is deleted, the transcript still opens, without playback.</p>
+<h2>What gets applied</h2>
+<p>Your <a href="dictionary.html">dictionary</a> helps here as it does in dictation: word replacements<br>
+are applied, and vocabulary is passed to models that use it. AI enhancement and prompts<br>
+are not applied to file transcripts.</p>
+<h2>When speakers are not identified</h2>
+<ul>
+<li><strong>Identify speakers is off.</strong> You get a plain transcript with timestamps.</li>
+<li><strong>Speaker identification failed</strong>, usually because its model could not download. The<br>
+file still completes, marked <strong>Completed without speakers</strong>. Check your connection and<br>
+retry the file.</li>
+<li><strong>Part of the file could not be transcribed.</strong> The transcript says which time ranges<br>
+are missing.</li>
+</ul>
+<p>A file with no recognisable speech fails with "No speech was recognized in this file."</p>
+        </div>
+        <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <div class="foot-inner">
+        <div class="foot-brand">
+          <img src="../icon.png" alt="" width="24" height="24" />
+          <span>Zerm</span>
+        </div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="../#download">Download</a>
+          <a href="../docs/">Documentation</a>
+          <a href="../changelog.html">Changelog</a>
+          <a href="../privacy.html">Privacy</a>
+          <a href="../building.html">Build from source</a>
+          <a href="../notice.html">Attribution</a>
+          <a href="../license.html">License</a>
+        </nav>
+        <p class="foot-legal">
+          © <span id="year"></span> Arcusis · GPLv3 · Based on VoiceInk by Beingpax
+        </p>
+      </div>
+    </footer>
+
+    <script src="../site.js" defer></script>
+  </body>
+</html>

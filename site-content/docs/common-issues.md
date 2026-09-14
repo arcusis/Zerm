@@ -15,14 +15,14 @@ granted, or macOS has not noticed that it is. Grant it, then quit Zerm completel
 [permissions](permissions.html).
 
 **It works in some apps and not others.** A few applications reject synthetic
-keystrokes. Turn on **AppleScript paste** in Settings, which uses a different insertion
-path.
+keystrokes. Turn on **Use AppleScript Paste** in Settings, which uses a different
+insertion path.
 
-**Text goes to the wrong place.** Zerm pastes at whatever had focus when the recording
-started. If you clicked elsewhere mid-recording, that is where it lands.
+**Text goes to the wrong place.** Zerm pastes at whatever has focus when the text is
+ready. If you clicked elsewhere mid-recording, that is where it lands.
 
-**Nothing at all, and no error.** Check whether the recording was cancelled — Escape
-during a recording discards it silently by design.
+**Nothing at all, and no error.** Check whether the recording was cancelled — pressing
+Escape twice while the recorder is showing discards it by design.
 
 ## Refined text is not replacing what was typed
 
@@ -32,19 +32,18 @@ that in-place replacement needs, so Zerm offers the refined text instead of chan
 what you already have. This is documented behaviour, not a fault — see
 [output modes](output-modes.html).
 
-If you want final text on the first paste in those apps, use **Enhanced** mode.
+If you want final text on the first paste in those apps, use **Enhanced**, globally or in
+a [Power Mode](power-mode.html) for those apps.
 
 ## The recording stops while I am still talking
 
-Auto-stop on silence is ending it. Two causes:
+Auto-stop on silence is ending a toggle-style recording. The usual cause is a microphone
+level too low for your speech to register over the threshold. Raise the input gain in
+System Settings → Sound, and check the level in Zerm's microphone test. See
+[audio input](audio-input.html).
 
-- **Your pauses are longer than the threshold.** Increase the silence duration in
-  Settings.
-- **Your microphone level is too low** for the level threshold to register as speech.
-  Raise the input gain in System Settings → Sound, or test it in Zerm's microphone
-  test. See [audio input](audio-input.html).
-
-You can also turn auto-stop off entirely and stop recordings yourself.
+If you pause for long stretches, use push to talk: releasing the key is then the only
+thing that stops the recording.
 
 ## Recording does not start
 
@@ -56,44 +55,68 @@ You can also turn auto-stop off entirely and stop recordings yourself.
   is intentional so your function row keeps working.
 - **Zerm ignores triggers while it is busy** transcribing, enhancing, or speaking. Wait
   for the current one to finish.
+- **The model is not downloaded.** After an update that retired your model, the Default
+  Model card on the Models screen asks you to download its replacement. See
+  [models](models.html).
+
+## My model changed after updating
+
+Zerm 2.8.6 retired Whisper Tiny, Base, and Small and Parakeet V2, and moved anyone using
+one to its replacement — Parakeet Unified or Large v3 Turbo (Quantized) — including in
+Power Modes. Download the replacement, or pick another model under **Recommended**. See
+[models](models.html).
 
 ## Enhancement is not running
 
-Go through these in order:
+Zerm shows a notification when it skips or fails an enhancement, with the reason. If you
+saw none, go through these in order:
 
-1. The [output mode](output-modes.html) is **Instant**, which never calls a model.
-2. The transcript was at or under the **skip-short-transcriptions** threshold — three
+1. The **Output** is **Instant**, which never calls a model. Check both the Enhancement
+   page and the active [Power Mode](power-mode.html) for this app or website.
+2. The transcript was at or under the **Skip short transcriptions** threshold — three
    words by default.
-3. No provider is configured, or its API key stopped validating. Zerm switches
-   enhancement off when a key fails rather than erroring on every recording.
-4. The active [Power Mode](power-mode.html) has enhancement switched off for this app
-   or website.
+
+If you did get a notification:
+
+- **Enhancement skipped** — the provider is not set up. Download the on-device model,
+  add or fix the API key, choose a model, or check the server address. The notification
+  opens Enhancement settings for you.
+- **Enhancement failed** — the provider could not be reached or returned an error.
+  For Ollama, check that the server is running.
+- **Enhancement discarded** — the model changed the language or the length too much.
+  See the next section.
+
+Your original text is kept in every case. See [AI enhancement](enhancement.html).
 
 ## The text came out in the wrong language
 
 **Everything became Hebrew, or Hebrew appeared in English or Russian speech.** Set
-the dictation language to the language you are actually speaking. Auto plus a Hebrew
-keyboard will try a Hebrew recovery pass on short phrases; a Power Mode pinned to
-Hebrew will force Hebrew on every utterance, including English.
+the dictation language to the language you are actually speaking. A Power Mode pinned
+to Hebrew will force Hebrew on every utterance, including English. The ivrit.ai models
+treat Auto as Hebrew; choose English on them for English-only dictation.
 
 Enhancement is not allowed to translate. Mixed Hebrew and English stays mixed. If a
-model still returns a different writing system, Zerm keeps the raw transcript.
+model still returns a different writing system, Zerm keeps the raw transcript and tells
+you it discarded the rewrite. A prompt meant to translate needs **May change language or
+length** turned on.
 
 **A Power Mode is not English and the result is broken.** That mode's language setting
-is what Whisper hears. Pin `en` for English-only apps, `he` only when you will speak
-Hebrew there, and Auto only when you actually switch languages in that app.
+is what the speech model hears. Pin English for English-only apps, Hebrew only when you
+will speak Hebrew there, and Auto only when you actually switch languages in that app —
+or leave it on **Use global setting**.
 
 ## Enhancement is slow, or times out
 
-Raise the **timeout duration** in enhancement settings — 15 seconds is the default and a
+Raise the **Timeout duration** in Enhancement settings — 15 seconds is the default and a
 large cloud model on a slow connection can need more. Set **On timeout** to *Retry*.
 
-A timeout never costs you the words: you get the raw transcript.
+A timeout never costs you the words: you get the raw transcript, and a notification
+says it timed out.
 
 Instant + Refine pastes the raw text first, so a slow model cannot block the
 cursor. If you are in Enhanced mode, you are waiting on purpose.
 
-For consistently low latency, use the on-device provider or a small hosted model.
+For consistently low latency, use a small hosted model or a fast provider.
 
 ## Power Mode is not switching
 
@@ -102,7 +125,10 @@ same app is a different identifier — remove and re-add it from the app picker.
 
 **Website triggers** need Automation permission for that specific browser. macOS asks
 once per browser; if you declined, re-enable Zerm under System Settings → Privacy &
-Security → Automation.
+Security → Automation. Firefox and Zen are not supported.
+
+**The browser answered too late.** Zerm waits at most half a second for the tab's URL.
+A browser that is busy falls back to application triggers for that recording.
 
 **Matching is a substring match on a cleaned URL**, which catches more than people
 expect. A short trigger like `mail` matches a great many pages. See
@@ -111,65 +137,86 @@ expect. A short trigger like `mail` matches a great many pages. See
 **Order matters.** The first enabled mode that matches wins. Move the specific mode
 above the general one.
 
+## A Power Mode changed my global settings
+
+It no longer can. Since Zerm 2.8.6 a Power Mode applies its choices only to dictations in
+its own apps and websites, and every setting you have not changed shows **Use global
+setting**. If a mode still uses a model or prompt you do not want, open it and set that
+field back to **Use global setting**.
+
 ## Transcription accuracy is poor
 
-- **Use a larger model.** Large v3 Turbo (Quantized) is the best accuracy-per-megabyte
-  in the list. See [models](models.html).
+- **Use the recommended model.** The **Recommended** filter on the Models screen picks
+  the best English, multilingual, and Hebrew models for your Mac. See
+  [models](models.html).
+- **For Hebrew, use an ivrit.ai model**, or a cloud model marked **Great in Hebrew**.
 - **Set the language explicitly** if you always dictate the same one. Automatic
   detection occasionally guesses wrong on short recordings.
 - **Add the words it gets wrong** to your [dictionary](dictionary.html).
 - **Check your microphone**, not the model. A laptop mic across a room is the usual
   culprit.
-- **Try turning echo cancellation off** if you enabled it. It changes the audio
+- **Try turning Echo Cancel / AGC off** if you enabled it. It changes the audio
   character and can cost accuracy in a quiet room.
+
+## Transcribe File problems
+
+- **"Completed without speakers."** Speaker identification could not run, usually
+  because its model could not download. Check your connection and retry the file.
+- **The model is not downloaded, or needs an API key.** The Model picker in Options lists
+  only models you can use; download one or add a key on the Models screen.
+- **"This file type is not supported."** Zerm needs an audio or video file. Convert
+  anything else first.
+- **The queue is empty after relaunching.** The queue is not kept between launches.
+  Finished transcripts are in History — use **Open Transcript**.
+
+See [Transcribe File](transcribe-file.html).
 
 ## Local models will not run
 
-On **Intel Macs**, local models do not run reliably and Zerm says so. Use Apple Speech
-or a cloud provider.
+On **Intel Macs**, local models do not run reliably and Zerm says so. Use a cloud model.
 
-Apple Speech requires **macOS 26**.
+Parakeet models need Apple Silicon. Apple Speech requires **macOS 26**.
 
 If a model download failed partway, delete it and download again.
 
 ## Read Aloud says nothing
 
-- The **Read Aloud hotkey is unset by default.** Assign one.
+- The **Read Aloud trigger key is unset by default.** Assign one, and check **Enable Read
+  Aloud** is on.
 - Reading the selection needs **Accessibility permission**.
-- A cloud voice needs a valid API key; the bundled Kokoro voice needs its model
-  downloaded.
+- A cloud voice needs a valid API key; the Kokoro voice needs its model downloaded.
+- **The text is not English** and no Apple voice for that language is installed. Kokoro
+  and Deepgram speak English only; install a voice in System Settings.
 
 See [read aloud](read-aloud.html).
 
 ## History is empty, or emptier than expected
 
-Transcript auto-delete is probably on. With the retention period at zero, each
-transcript is deleted the moment it completes.
+**Auto-delete Transcripts** is probably on. Set to Immediately, each transcript is
+deleted the moment it completes.
 
-Audio auto-delete is a **different setting** and removes only the audio, keeping the
-text. See [privacy and retention](privacy-retention.html).
+**Auto-delete Audio Files** is a **different setting** and removes only the audio,
+keeping the text. See [privacy and retention](privacy-retention.html).
 
 ## My statistics changed unexpectedly
 
 Usage statistics live in their own store and are not affected by deleting transcripts.
 If your totals moved, it was not history cleanup.
 
-Two things do change them. **Reset Statistics** in Privacy settings clears them
-permanently, and it cannot be undone. And the upgrade to this version backfills your
-history from the transcripts that still exist — if earlier retention had already deleted
-them, those sessions cannot be counted retrospectively.
+Check the Dashboard range first: totals and time saved follow the range you select, so
+**7 Days** shows far less than **All Time**.
 
-If your statistics are empty after a reset, that is final: keeping transcripts will not
-bring them back. See [privacy and retention](privacy-retention.html).
+**Reset Statistics** clears them permanently, and it cannot be undone. Keeping
+transcripts will not bring them back. See [privacy and retention](privacy-retention.html).
 
 ## Reporting something else
 
-Enable **debug logging** in Settings, reproduce the problem, then export the logs. Open
-an issue at [github.com/arcusis/Zerm/issues](https://github.com/arcusis/Zerm/issues)
-with:
+Turn on **Debug Logging** in Settings → Advanced, reproduce the problem, then use
+**Export Logs**. Open an issue at
+[github.com/arcusis/Zerm/issues](https://github.com/arcusis/Zerm/issues) with:
 
 - What you did, what you expected, and what happened instead.
-- Your macOS version and Mac model.
+- Your Zerm version, macOS version, and Mac model.
 - The model and provider you were using.
 - The exported log, and a short screen recording if the problem is visual.
 

@@ -6,7 +6,8 @@ summary: Teach Zerm the names, products and jargon that transcription models rel
 
 Every speech model mishears the same category of word: proper nouns, product names,
 internal jargon, and anything spelled unusually. The dictionary is where you fix that
-once instead of every time.
+once instead of every time. It lives under **Vocabulary** in the sidebar, in the
+Dictation group.
 
 It has two halves that work in completely different ways, and picking the right one
 matters.
@@ -23,8 +24,11 @@ Use it for names and terms whose *spelling* is the problem — colleagues' names
 names, libraries, medical or legal terms.
 
 Vocabulary is guidance, not a rule. It shifts the odds; it does not guarantee. It is
-also only consulted where the pipeline can use it, which means it helps most when
-[enhancement](enhancement.html) is running.
+used in two places:
+
+- **By the speech model**, when the model supports it. Those models carry a
+  **Uses Dictionary** badge — see [models](models.html). Nothing needs switching on.
+- **By [enhancement](enhancement.html)**, as spelling guidance, whenever it runs.
 
 Add several at once by separating them with commas. Duplicates are rejected rather than
 silently added twice.
@@ -32,7 +36,8 @@ silently added twice.
 ## Word replacement — an exact rule
 
 A replacement is a find-and-replace applied to the finished transcript, locally, before
-the text reaches your cursor. It always fires, on every recording, in every output mode.
+the text reaches your cursor. It always fires, on every recording, in every output mode,
+and in [Transcribe File](transcribe-file.html).
 
 Use it when you know exactly what comes out and exactly what you want instead:
 
@@ -62,7 +67,7 @@ Each rule can be switched off without deleting it.
 | --- | --- | --- |
 | What it does | tells the model what to expect | rewrites the finished text |
 | Certainty | improves the odds | always applies |
-| Needs enhancement | mostly | no |
+| Where it works | models marked Uses Dictionary, and enhancement | everywhere |
 | Good for | names, jargon, unusual spellings | fixed phrases, expansions, known mistakes |
 
 If the model already produces something recognisable and you just want it spelled
@@ -77,4 +82,5 @@ the moment you notice a mistake, rather than the moment you remember to fix it. 
 
 ## Import and export
 
-The dictionary can be exported and imported, so it moves with you between Macs.
+**Export Settings** and **Import Settings**, in Settings, include the dictionary along
+with your prompts, Power Modes, and custom models, so it moves with you between Macs.

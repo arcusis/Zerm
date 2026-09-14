@@ -35,7 +35,7 @@ twice. Only the two most recent are kept.
 
 ## Turning it off
 
-Settings → **Announcements**. Off means no fetch at all, not a fetch with the banner
+Settings → **Show Announcements**. Off means no fetch at all, not a fetch with the banner
 hidden.
 
 You will still get release notes on the [changelog](../changelog.html), and update
@@ -44,8 +44,8 @@ checks are a separate setting.
 ## Update checks
 
 Zerm also checks for new versions through Sparkle, against a signed feed hosted here.
-That is **Automatic update checks** in Settings, independent of announcements, and can
-be switched off on its own.
+That is **Auto-check Updates** in Settings, independent of announcements, and can be
+switched off on its own.
 
 Every advertised update carries a signature that is verified before installation, and
 builds are served from GitHub Releases. Neither check sends anything about you.

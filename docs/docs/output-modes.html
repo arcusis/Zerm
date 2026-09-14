@@ -47,8 +47,9 @@
       <section class="doc"><div class="prose">
 <p>When a recording finishes, Zerm has to decide between two things you cannot have at<br>
 once: text in front of you immediately, or text that the AI has already improved. The<br>
-output mode is where you make that trade explicitly.</p>
-<p><img src="img/output-modes.png" alt="The output mode picker" style="max-width: 100%;"></p>
+<strong>Output</strong> setting, at the top of Enhancement, is where you make that trade explicitly.</p>
+<p>It is also the only switch for AI enhancement. Instant means no AI; the other two use<br>
+it. There is no separate on/off toggle.</p>
 <h2>Instant</h2>
 <p>The transcript is pasted at your cursor the moment transcription finishes. No language<br>
 model is involved at any point — nothing is sent to a provider, nothing is waited on.</p>
@@ -56,14 +57,16 @@ model is involved at any point — nothing is sent to a provider, nothing is wai
 <a href="dictionary.html">dictionary</a> replacements, and formatting still apply, because those<br>
 run locally and cost nothing.</p>
 <p>Choose Instant if you dictate short messages, if you are offline, or if you would rather<br>
-fix the occasional word yourself than wait. Instant + Refine is the shipped default.</p>
+fix the occasional word yourself than wait.</p>
+<p>A fresh install starts on Instant, because the on-device enhancement model is not<br>
+downloaded yet. Once you set up a provider, Instant + Refine is the everyday choice.</p>
 <h2>Instant + Refine</h2>
 <p>The transcript is pasted immediately — byte-for-byte the same path as Instant, with the<br>
 same latency. The enhancement then runs in the background and, when it comes back,<br>
 quietly replaces what was already typed.</p>
-<p>The paste never waits for the model. If the enhancement fails, times out, or you have<br>
-already moved on, what you have is the raw transcript, which is exactly what Instant<br>
-would have given you.</p>
+<p>The paste never waits for the model. Refine has a short budget of its own, about eight<br>
+seconds. If the enhancement fails, times out, or you have already moved on, what you<br>
+have is the raw transcript, which is exactly what Instant would have given you.</p>
 <h3>Where in-place replacement works, and where it does not</h3>
 <p>Rewriting text that has already been typed into another application means writing<br>
 through the macOS Accessibility API, and not every application implements the parts<br>
@@ -96,9 +99,11 @@ final text is ready.</p>
 <p>It is the slowest of the three by exactly the round-trip time of your provider, and it<br>
 is the right choice when you want the pasted text to be final the moment it appears —<br>
 into a document, or into an app where Refine could only offer rather than replace.</p>
+<p>Enhanced is also the only mode that can include what is on your screen as context. See<br>
+<a href="contextual-awareness.html">contextual awareness</a>.</p>
 <p>The wait is bounded by the enhancement timeout, which defaults to 15 seconds. If it<br>
-expires, Zerm falls back to the raw transcript rather than losing what you said. See<br>
-<a href="enhancement.html">AI enhancement</a> for the timeout and retry settings.</p>
+expires, Zerm pastes the raw transcript rather than losing what you said, and tells you<br>
+it timed out. See <a href="enhancement.html">AI enhancement</a> for the timeout and retry settings.</p>
 <h2>Choosing</h2>
 <table role="table">
 <thead>
@@ -120,7 +125,7 @@ expires, Zerm falls back to the raw transcript rather than losing what you said.
 <td><strong>Instant + Refine</strong></td>
 <td>immediately</td>
 <td>afterwards, in native apps</td>
-<td>everyday dictation (the default)</td>
+<td>everyday dictation</td>
 </tr>
 <tr>
 <td><strong>Enhanced</strong></td>
@@ -130,8 +135,12 @@ expires, Zerm falls back to the raw transcript rather than losing what you said.
 </tr>
 </tbody>
 </table>
-<p>The mode is a global setting, but a <a href="power-mode.html">Power Mode</a> can turn enhancement<br>
-on or off per app and per website, which in practice is the finer control.</p>
+<p>The mode is a global setting. A <a href="power-mode.html">Power Mode</a> can choose a different<br>
+output for one app or website, and ⌘E in the recorder switches between Instant and your<br>
+AI mode for a single recording — see<br>
+<a href="enhancement-shortcuts.html">enhancement shortcuts</a>.</p>
+<p>A Power Mode with <strong>Auto Send</strong> uses Enhanced instead of Instant + Refine, because the<br>
+message is sent before a refinement could replace it.</p>
         </div>
         <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
       </section>

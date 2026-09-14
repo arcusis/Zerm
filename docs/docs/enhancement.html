@@ -47,51 +47,58 @@
       <section class="doc"><div class="prose">
 <p>Enhancement takes the raw transcript and runs it through a language model —<br>
 fixing punctuation, structure, and the words a speech model reliably mishears.</p>
-<p>The shipped default is <a href="output-modes.html">Instant + Refine</a>: the raw transcript<br>
-is pasted immediately, then the model cleans it in the background. Zerm still<br>
-dictates perfectly well if you switch to Instant and turn enhancement off.</p>
-<p><img src="img/enhancement.png" alt="Enhancement settings" style="max-width: 100%;"></p>
+<p>Whether it runs is decided by one setting: <strong>Output</strong>, at the top of the Enhancement<br>
+page. Instant never uses AI; <a href="output-modes.html">Instant + Refine and Enhanced</a> do.<br>
+Zerm dictates perfectly well on Instant.</p>
+<p>Each dictation is enhanced with exactly the prompt, provider, model, and context it<br>
+started with. Editing settings while a dictation is being processed does not change it;<br>
+the <a href="enhancement-shortcuts.html">recorder shortcuts</a> are how you change the one in<br>
+progress.</p>
 <h2>Providers</h2>
 <p>Enhancement is provider-agnostic. Whatever you pick, the transcript and the active<br>
 prompt are what get sent, and nothing else leaves your Mac unless you switch context<br>
 options on.</p>
-<p><strong>On device.</strong> The bundled local model runs through <code class="notranslate">llama.cpp</code> with no network access<br>
-at all. It is the only provider that keeps enhancement entirely offline.</p>
+<p><strong>On-Device.</strong> A local model runs through <code class="notranslate">llama.cpp</code> with no network access at all:<br>
+<strong>Gemma 4 E2B</strong> by default, or <strong>Qwen3 4B Instruct</strong> as a smaller option. It is the only<br>
+provider that keeps enhancement entirely offline.</p>
 <p><strong>Ollama.</strong> Points at a local Ollama server, so the model still runs on your own<br>
 hardware — useful if you already keep models there.</p>
 <p><strong>Local CLI.</strong> Shells out to a command-line tool you nominate. For anything you host<br>
 yourself that has no HTTP API worth wiring up.</p>
-<p><strong>Cloud.</strong> Anthropic, OpenAI, Gemini, Groq, Cerebras, OpenRouter, and Mistral are<br>
+<p><strong>Cloud.</strong> Cerebras, Groq, Gemini, Anthropic, OpenAI, OpenRouter, and Mistral are<br>
 configured with an API key. A <strong>Custom</strong> option accepts any OpenAI-compatible chat<br>
 completions endpoint.</p>
-<p>No provider is contacted until you add a key and select it. If a key stops validating,<br>
-enhancement switches itself off rather than failing silently on every recording.</p>
+<p>No provider is contacted until you add a key and select it. A key is verified when you<br>
+add it, and is not saved if verification fails. Providers that only transcribe speech<br>
+are not offered here.</p>
 <h2>Prompts</h2>
-<p>A prompt is the instruction the model gets alongside your transcript. Zerm ships with a<br>
-set of predefined prompts and you can add your own; each has a title, the instruction<br>
-text, and an icon.</p>
+<p>A prompt is the instruction the model gets alongside your transcript. Zerm ships with<br>
+<strong>Default</strong>, <strong>Assistant</strong>, <strong>Coding</strong>, and <strong>Chat</strong>, and you can add your own from<br>
+templates or from scratch.</p>
 <p>The active prompt is what runs. Switch it from the recorder with ⌘1 through ⌘0 — see<br>
 <a href="enhancement-shortcuts.html">enhancement shortcuts</a> — or pin a prompt to a<br>
 <a href="power-mode.html">Power Mode</a> so it changes with the app you are in.</p>
+<h3>A provider and model per prompt</h3>
+<p>A prompt can use its own <strong>AI Provider</strong> and <strong>AI Model</strong> instead of the global ones. A<br>
+quick cleanup prompt can stay on the on-device model while a long rewrite uses a larger<br>
+cloud model. When both set one, a Power Mode's choice wins over the prompt's.</p>
+<h3>May change language or length</h3>
+<p>Enhancement is normally not allowed to translate or to balloon your text; see<br>
+the language section below. A prompt whose job is exactly that — translating,<br>
+expanding notes into an email — can turn on <strong>May change language or length</strong>, and those<br>
+checks are skipped for it. The built-in Assistant prompt has it on.</p>
 <h3>Trigger words</h3>
-<p>A prompt can carry trigger words. If a transcript begins with one, Zerm strips it,<br>
-switches to that prompt, turns enhancement on for that one recording, and restores your<br>
-previous settings afterwards. Saying "summarise, here are my notes from the standup…"<br>
-can select the summarising prompt without touching the interface.</p>
-<p>Trigger-word detection is a separate setting from enhancement itself.</p>
+<p>The prompt editor has a <strong>Trigger Words</strong> field. Trigger-word switching is currently<br>
+turned off, so starting a dictation with a trigger word does not change the prompt.</p>
 <h2>Context</h2>
-<p>By default the model sees the transcript and nothing else. Three optional context<br>
-sources can be added; each is its own switch. How much of that context is actually<br>
-read depends on the <a href="output-modes.html">output mode</a>.</p>
-<p><strong>Selected text.</strong> Whatever is highlighted in the frontmost app is included, so<br>
-instructions like "rewrite this properly" have something to act on. Needs Accessibility<br>
-permission. This is only read in <strong>Enhanced</strong> mode, while Zerm is still waiting to<br>
-paste. Instant + Refine does not copy the current selection — that would fire a<br>
-synthetic ⌘C into the app you just pasted into.</p>
-<p><strong>Clipboard.</strong> The clipboard is read when the recording starts, not when the model<br>
-runs. Useful when you are dictating a reply to something you just copied.</p>
-<p><strong>Screen.</strong> On-screen text is captured and included. Needs Screen Recording permission.<br>
-Like selected text, this only runs in <strong>Enhanced</strong> mode.</p>
+<p>By default the model sees the transcript and nothing else. Two optional context sources<br>
+can be added in Enhancement settings; each is its own switch.</p>
+<p><strong>Clipboard Context.</strong> The clipboard is read when the recording starts, not when the<br>
+model runs. Useful when you are dictating a reply to something you just copied. Used by<br>
+both Instant + Refine and Enhanced.</p>
+<p><strong>Screen Context.</strong> On-screen text is captured and included. Needs Screen Recording<br>
+permission. Used only in <strong>Enhanced</strong>: Instant + Refine has already pasted by the time<br>
+the screen could be read.</p>
 <p>The details of what is captured, when, and what is kept are on the<br>
 <a href="contextual-awareness.html">contextual awareness</a> page. Your<br>
 <a href="dictionary.html">dictionary</a> vocabulary is also passed along as spelling guidance<br>
@@ -99,36 +106,47 @@ whenever enhancement runs.</p>
 <h2>Language</h2>
 <p>Enhancement cleans the transcript. It does not translate it.</p>
 <p>Mixed-language dictation stays mixed. Hebrew stays Hebrew, English stays English,<br>
-Russian stays Russian. If a model returns a different writing system than you spoke,<br>
-Zerm discards that rewrite and keeps the raw transcript.</p>
+Russian stays Russian. Zerm discards a rewrite and keeps your original text when the<br>
+model:</p>
+<ul>
+<li>returns a different writing system than you spoke,</li>
+<li>grows the text far beyond what you said, or</li>
+<li>starts talking about itself instead of rewriting.</li>
+</ul>
+<p>Prompts with <strong>May change language or length</strong> are exempt.</p>
 <p>If you always speak one language in an app, pin that language on the<br>
 <a href="power-mode.html">Power Mode</a> rather than leaving Auto. Pinning Hebrew when you are<br>
 about to speak English will make the speech model hear everything as Hebrew.</p>
 <h2>Skipping short transcriptions</h2>
 <p>"Yes", "thanks", and "on my way" do not benefit from a language model, and sending them<br>
 adds latency for nothing. <strong>Skip short transcriptions</strong> is on by default and bypasses<br>
-enhancement whenever the transcript is at or under the word threshold, which defaults to<br>
-three words and is adjustable from one to fifteen.</p>
-<p>A transcript that matched a trigger word is enhanced regardless of length — you asked<br>
-for it explicitly.</p>
+enhancement whenever the transcript is at or under <strong>Minimum words</strong>, which defaults to<br>
+three and is adjustable from one to fifteen.</p>
 <h2>Timeouts and retries</h2>
-<p><strong>Timeout duration</strong> bounds how long Zerm waits for the model, from 3 to 60 seconds. The<br>
-default is 15. It applies to Enhanced mode, where you are sitting there waiting; Refine<br>
-runs after the paste has already happened and uses its own, much shorter budget.</p>
-<p><strong>On timeout</strong> decides what happens when the budget runs out: <em>Retry</em> (the default) or<br>
-<em>Fail immediately</em>. Either way you end up with the raw transcript rather than nothing —<br>
-a slow model costs you the improvement, never the words.</p>
-<p>Network errors, server errors, and rate limits are retried up to three times with<br>
-exponential backoff, independently of the timeout setting.</p>
+<p><strong>Timeout duration</strong> bounds how long Enhanced output waits for the model, from 3 to 60<br>
+seconds. The default is 15. Instant + Refine runs after the paste has already happened<br>
+and uses its own, much shorter limit.</p>
+<p><strong>On timeout</strong> decides what happens when the time runs out: <em>Retry</em> (the default), up to<br>
+three attempts, or <em>Fail immediately</em>. Either way you end up with the raw transcript<br>
+rather than nothing — a slow model costs you the improvement, never the words.</p>
+<p>Network errors, server errors, and rate limits are retried with a short backoff.</p>
 <h2>When enhancement does not run</h2>
-<p>Enhancement is skipped, quietly and by design, when:</p>
+<p>Zerm tells you when it cannot enhance, instead of silently pasting the raw text. A<br>
+notification explains what happened, and your original text is always kept:</p>
 <ul>
-<li>The output mode is <strong>Instant</strong>. No model is involved in that mode at all.</li>
-<li>The transcript is at or under the short-transcription threshold.</li>
-<li>No provider is configured, or its key stopped validating.</li>
-<li>The active <a href="power-mode.html">Power Mode</a> has enhancement switched off.</li>
+<li><strong>Skipped</strong> — the provider is not set up: a model is not downloaded, an API key or<br>
+model is missing, or a server address is wrong. The notification links straight to<br>
+Enhancement settings, and appears once per launch.</li>
+<li><strong>Failed</strong> — the provider could not be reached, returned nothing, hit a rate limit, or<br>
+had a server error.</li>
+<li><strong>Timed out</strong> — the timeout ran out.</li>
+<li><strong>Discarded</strong> — the model changed the language or the wording too much.</li>
 </ul>
-<p>If enhancement looks like it is not running, that list is the place to start.</p>
+<p>Enhancement is skipped without a notification when:</p>
+<ul>
+<li>The output is <strong>Instant</strong>, globally or in the active <a href="power-mode.html">Power Mode</a>.</li>
+<li>The transcript is at or under the short-transcription threshold.</li>
+</ul>
         </div>
         <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
       </section>

@@ -45,11 +45,13 @@
         <p class="lede">Every shortcut Zerm offers — global triggers, recorder controls, and the ones that are unset until you choose them.</p>
       </section>
       <section class="doc"><div class="prose">
-<p>Zerm is driven from the keyboard. Nothing here is fixed: every shortcut on this page can<br>
-be rebound, and most start unset so they cannot collide with what you already use.</p>
+<p>Zerm is driven from the keyboard. Nothing here is fixed: almost every shortcut on this<br>
+page can be rebound, and most start unset so they cannot collide with what you already<br>
+use.</p>
 <p><img src="img/shortcuts.png" alt="Shortcut settings" style="max-width: 100%;"></p>
 <h2>Dictation</h2>
-<p>You can configure two independent dictation shortcuts, each with its own trigger style.</p>
+<p>You can configure two independent dictation shortcuts, <strong>Shortcut 1</strong> and<br>
+<strong>Shortcut 2</strong>, each with its own trigger style. Shortcut 1 starts as Right Command.</p>
 <p>A shortcut can be a <strong>bare modifier key</strong> — Right Option, Left Option, Right Command,<br>
 Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason<br>
 Zerm feels quick: no chord to remember, just a key your other hand is not using.</p>
@@ -80,8 +82,8 @@ Zerm feels quick: no chord to remember, just a key your other hand is not using.
 <p><strong>Fn is handled specially.</strong> Pressing Fn together with another key — Fn+F1, Fn+F11,<br>
 brightness, volume — cancels the recording trigger, so binding Zerm to Fn does not break<br>
 your function row.</p>
-<p><strong>Middle click</strong> can also start and stop recording, with a configurable hold delay. Off<br>
-by default.</p>
+<p><strong>Middle-Click Recording</strong> starts and stops recording with the middle mouse button, with<br>
+a configurable activation delay. Off by default.</p>
 <h2>Read Aloud</h2>
 <p>Read Aloud has its own trigger, configured the same way — a bare modifier or a custom<br>
 combination. Unset by default. See <a href="read-aloud.html">read aloud</a>.</p>
@@ -97,24 +99,26 @@ you are typing into.</p>
 </thead>
 <tbody>
 <tr>
-<td><code class="notranslate">Esc</code></td>
-<td>Cancel. Nothing is transcribed, written, or saved.</td>
+<td><code class="notranslate">Esc</code> <code class="notranslate">Esc</code></td>
+<td>Cancel. Press twice within a second and a half. Nothing is transcribed, written, or saved.</td>
 </tr>
 <tr>
 <td><code class="notranslate">⌘E</code></td>
-<td>Toggle AI enhancement for this recording.</td>
+<td>Switch AI enhancement on or off for this recording.</td>
 </tr>
 <tr>
 <td><code class="notranslate">⌘1</code> – <code class="notranslate">⌘0</code></td>
 <td>Select one of the first ten enhancement prompts.</td>
 </tr>
 <tr>
-<td><code class="notranslate">⌘1</code> – <code class="notranslate">⌘0</code></td>
-<td>Select one of the first ten Power Modes, when the recorder is showing them.</td>
+<td><code class="notranslate">⌥1</code> – <code class="notranslate">⌥0</code></td>
+<td>Select one of the first ten enabled Power Modes.</td>
 </tr>
 </tbody>
 </table>
-<p>A second, custom cancel shortcut can be assigned if Escape is taken.</p>
+<p>The first Escape press shows a reminder to press again. If Escape is taken, assign a<br>
+<strong>Custom Cancel Shortcut</strong>: it cancels with a single press, and replaces Escape while it<br>
+is set.</p>
 <p>See <a href="enhancement-shortcuts.html">enhancement shortcuts</a> for what the enhancement keys<br>
 do in detail.</p>
 <h2>Global shortcuts</h2>
@@ -128,30 +132,29 @@ do in detail.</p>
 </thead>
 <tbody>
 <tr>
-<td>Paste last transcription</td>
-<td>Re-pastes the most recent transcript at your cursor.</td>
+<td>Paste Last Transcription (Original)</td>
+<td>Re-pastes the raw transcript of your most recent dictation.</td>
 </tr>
 <tr>
-<td>Paste last enhancement</td>
-<td>Re-pastes the enhanced version instead of the raw one.</td>
+<td>Paste Last Transcription (Enhanced)</td>
+<td>Re-pastes the enhanced version instead. Nothing is sent to the provider again.</td>
 </tr>
 <tr>
-<td>Retry last transcription</td>
-<td>Runs the last recording through the pipeline again.</td>
+<td>Retry Last Transcription</td>
+<td>Runs the last recording through transcription again, with the model and language selected now.</td>
 </tr>
 <tr>
-<td>Open history</td>
+<td>Open History Window</td>
 <td>Opens the history window from anywhere.</td>
 </tr>
 <tr>
-<td>Quick add to dictionary</td>
-<td>Adds a word to your <a href="dictionary.html">dictionary</a> without opening the app.</td>
+<td>Quick Add to Dictionary</td>
+<td>Adds a word or replacement to your <a href="dictionary.html">dictionary</a> without opening the app.</td>
 </tr>
 </tbody>
 </table>
 <p><em>Retry</em> is the one to know about: it re-runs the audio you already captured, so<br>
-switching model or prompt after a disappointing result does not mean saying it all<br>
-again.</p>
+switching model after a disappointing result does not mean saying it all again.</p>
 <h2>Power Mode shortcuts</h2>
 <p>Any <a href="power-mode.html">Power Mode</a> can be given its own global shortcut, which activates<br>
 that mode and starts recording in one press.</p>

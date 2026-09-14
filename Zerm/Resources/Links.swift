@@ -39,6 +39,7 @@ enum Links {
         case privacyRetention = "privacy-retention"
         case readAloud = "read-aloud"
         case shortcuts = "shortcuts"
+        case transcribeFile = "transcribe-file"
     }
 
     static func doc(_ page: Doc) -> URL {

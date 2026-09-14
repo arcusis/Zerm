@@ -75,9 +75,10 @@
               exactly as it does to any other app.
             </li>
             <li>
-              On the local transcription path — Whisper, FluidAudio, or Apple
+              On the local transcription path — Parakeet, Whisper, or Apple
               Speech — the audio is processed on the machine and is never
-              transmitted.
+              transmitted. That includes files you transcribe, and identifying
+              their speakers.
             </li>
             <li>
               If you select a cloud transcription provider, the audio for that
@@ -86,7 +87,11 @@
             </li>
             <li>
               Recordings are kept locally alongside their transcripts in History,
-              and can be deleted individually or wholesale.
+              and can be deleted individually or wholesale, or automatically after
+              a period you choose.
+            </li>
+            <li>
+              Zerm records your microphone only. It does not capture system audio.
             </li>
           </ul>
 
@@ -97,8 +102,9 @@
               retry them. Deleting an entry deletes it.
             </li>
             <li>
-              AI enhancement runs on the on-device model by default. Choosing a
-              cloud provider sends the transcript to that provider instead.
+              AI enhancement runs only when your Output setting uses it. The
+              on-device provider keeps it on your Mac; choosing a cloud provider
+              sends the transcript to that provider instead.
             </li>
             <li>
               Storage of AI request payloads is a separate setting from making the
@@ -133,8 +139,13 @@
               </tr>
               <tr>
                 <td>Screen Recording</td>
-                <td>Power Mode reading the active window or browser URL</td>
-                <td>Power Mode context features stay off; everything else works</td>
+                <td>Screen context for enhancement, in Enhanced output</td>
+                <td>Enhancement works from the transcript alone; everything else works</td>
+              </tr>
+              <tr>
+                <td>Automation (per browser)</td>
+                <td>Power Mode reading the current browser URL</td>
+                <td>Website triggers never match; app triggers still work</td>
               </tr>
             </tbody>
           </table>
@@ -146,17 +157,17 @@
 
           <h2>Power Mode context</h2>
           <p>
-            Power Mode adapts the prompt to where you are writing, which means it
+            Power Mode adapts dictation to where you are writing, which means it
             reads the frontmost application and, for browsers, the current URL.
-            That context is used to select a prompt for workflows you have
-            configured. It is not accumulated into a history or a profile.
+            That context is used only to pick the Power Mode for the recording.
+            It is not accumulated into a history or a profile.
           </p>
 
           <h2>Network</h2>
           <p>
-            Zerm reaches the network for three things: downloading the models on
-            first use, checking for application updates, and any cloud provider you
-            have explicitly configured. With models already downloaded and no cloud
+            Zerm reaches the network for four things: downloading the models on
+            first use, checking for application updates, fetching announcements
+            from this site, and any cloud provider you have explicitly configured. With models already downloaded and no cloud
             provider selected, the dictation and read-aloud loop works with the
             network off entirely.
           </p>

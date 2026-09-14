@@ -47,56 +47,92 @@
       <section class="doc"><div class="prose">
 <p>Read Aloud is the other half of the app. Highlight text anywhere in macOS, press your<br>
 Read Aloud key, and Zerm speaks it. Press again to stop.</p>
-<p><img src="img/read-aloud.png" alt="Read Aloud settings" style="max-width: 100%;"></p>
+<p>It lives under <strong>Read Aloud</strong> in the sidebar: <strong>Speak</strong> for the settings, <strong>History</strong> for<br>
+what you have listened to, and <strong>Models &amp; Voices</strong> for the downloads.</p>
 <h2>The trigger</h2>
-<p>Read Aloud gets its own hotkey, configured the same way as the dictation one: a modifier<br>
-key on its own, or a custom combination you record. It is unset until you choose one.</p>
+<p>Read Aloud gets its own <strong>Trigger key</strong>, configured the same way as the dictation one: a<br>
+modifier key on its own, or a custom combination you record. It is unset until you<br>
+choose one, and <strong>Enable Read Aloud</strong> switches the whole feature off without losing the<br>
+setting.</p>
 <p>Reading whatever is selected needs Accessibility permission — the same permission<br>
 dictation uses to paste. See <a href="permissions.html">permissions</a>.</p>
-<h2>Smart Reading</h2>
+<h2>Smart text cleanup</h2>
 <p>Raw text is usually not speakable text. Documentation is full of markup, code spans,<br>
 URLs, and symbols that a voice will happily read out character by character.</p>
-<p>Smart Reading is on by default and cleans the text before it reaches the voice, offline<br>
-and instantly:</p>
+<p><strong>Smart text cleanup</strong> is on by default and cleans the text before it reaches the voice,<br>
+offline and instantly:</p>
 <ul>
 <li>Acronyms and units are expanded the way a person would say them.</li>
-<li>URLs, code blocks, and tables are summarised rather than spelled out.</li>
+<li>URLs, file paths, code blocks, and tables are read the way a person would say them<br>
+rather than spelled out.</li>
 <li>Markdown syntax and emoji are dropped.</li>
 <li>Section markers, symbols, and status codes are turned into words.</li>
 </ul>
 <p>So <code class="notranslate">See §4.2 — the POST /v1/ingest endpoint returns 202 ✅</code> is read as "See section four<br>
 point two — the ingest endpoint returns a two oh two accepted."</p>
-<h2>Natural Reading</h2>
-<p>A second, optional pass that sends the cleaned text through the on-device language model<br>
-to rewrite it into something that sounds like prose rather than a document being read<br>
-out. It is off by default because it needs the local model downloaded, and it adds a<br>
-moment before playback starts.</p>
-<p>Worth turning on for reference material and specifications. Unnecessary for anything<br>
-already written to be read.</p>
-<h2>Voices</h2>
-<p><strong>Kokoro</strong> is the bundled local voice, running on <code class="notranslate">sherpa-onnx</code>. It downloads once and<br>
-then works offline, and it is good enough to listen to a long document without fatigue.<br>
-Nine voices are available. Kokoro is English-only; Hebrew text needs an installed<br>
-Apple System Voice (or a cloud voice that supports Hebrew).</p>
-<p><strong>Apple System Voices</strong> use the voices already on the Mac, including Hebrew ones if<br>
-you have installed them.</p>
-<p><strong>Cloud voices</strong> — Deepgram, ElevenLabs, OpenAI, Gemini, Inworld, and Cartesia — are<br>
-available if you add a key. They send the text you are reading to that provider. Kokoro<br>
-sends nothing anywhere.</p>
+<p>Turn it off if you want the text read literally.</p>
+<h2>Reading mode</h2>
+<p><strong>Reading mode</strong> decides whether the on-device language model rewrites the selection<br>
+before it is spoken:</p>
+<table role="table">
+<thead>
+<tr>
+<th>Mode</th>
+<th>What you hear</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read exactly</td>
+<td>The selection, with no AI rewriting. The default.</td>
+</tr>
+<tr>
+<td>Retell</td>
+<td>The selection retold naturally, without losing its meaning.</td>
+</tr>
+<tr>
+<td>Summarize</td>
+<td>A shorter version with the important points.</td>
+</tr>
+<tr>
+<td>Explain</td>
+<td>The selection explained, with enough context to understand it.</td>
+</tr>
+<tr>
+<td>Simplify</td>
+<td>Difficult language rewritten in simpler terms.</td>
+</tr>
+</tbody>
+</table>
+<p>The AI modes run entirely on your Mac and need an on-device model downloaded. They add a<br>
+moment before playback starts. If the model cannot produce a result, Zerm reads the<br>
+exact text instead and tells you.</p>
 <p>Retell keeps the source writing system. A Hebrew selection stays Hebrew. A mixed<br>
 Hebrew/English selection is not rewritten as all-Hebrew.</p>
+<h2>Voices</h2>
+<p><strong>Kokoro</strong> is the local voice, running on <code class="notranslate">sherpa-onnx</code>. It downloads once and then<br>
+works offline, and it is good enough to listen to a long document without fatigue.</p>
+<p><strong>Apple System</strong> uses the voices already on the Mac, including Hebrew ones if you have<br>
+installed them.</p>
+<p><strong>Cloud voices</strong> — Deepgram, Inworld, ElevenLabs, Gemini, OpenAI, and Cartesia — are<br>
+available if you add a key. They send the text you are reading to that provider. Kokoro<br>
+and Apple System send nothing anywhere.</p>
 <p>Each provider keeps its own voice selection, so switching provider and switching back<br>
-does not lose your choice.</p>
+does not lose your choice. <strong>Preview voice</strong> plays a sample before you rely on it.</p>
+<h3>Other languages</h3>
+<p>Kokoro and Deepgram speak English only. When the selection is in another language, Zerm<br>
+reads it with the best installed Apple voice for that language and says so. If no<br>
+matching Apple voice is installed, Zerm asks you to install one in System Settings.</p>
 <h2>Playback</h2>
 <p><strong>Speed</strong> runs from 0.5× to 2×, defaulting to 1×. It applies to every provider.</p>
 <p>Reading is interruptible: pressing the key again stops playback immediately. Starting a<br>
 dictation while Zerm is speaking is blocked rather than overlapped — one voice at a<br>
 time.</p>
-<p><strong>Restore clipboard</strong> puts back whatever was on your clipboard when Read Aloud is done<br>
-capturing the selection.</p>
-<h2>Statistics</h2>
-<p>Words read and sessions completed are counted for the dashboard. They are counters only<br>
-— no text is retained. See <a href="privacy-retention.html">privacy and retention</a>.</p>
+<h2>History and statistics</h2>
+<p>Read Aloud History keeps your most recent 500 sessions on your Mac: the selected text,<br>
+what was spoken, and the voice used. Delete entries one at a time or clear the list.</p>
+<p>Words read and sessions completed are also counted for the dashboard. Those are counters<br>
+only, with no text in them. See <a href="privacy-retention.html">privacy and retention</a>.</p>
         </div>
         <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
       </section>

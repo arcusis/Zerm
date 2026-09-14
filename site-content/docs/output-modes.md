@@ -6,9 +6,10 @@ summary: Instant, Instant + Refine, and Enhanced — what each one does to the t
 
 When a recording finishes, Zerm has to decide between two things you cannot have at
 once: text in front of you immediately, or text that the AI has already improved. The
-output mode is where you make that trade explicitly.
+**Output** setting, at the top of Enhancement, is where you make that trade explicitly.
 
-![The output mode picker](img/output-modes.png)
+It is also the only switch for AI enhancement. Instant means no AI; the other two use
+it. There is no separate on/off toggle.
 
 ## Instant
 
@@ -20,7 +21,10 @@ This is the fastest path in the app. Filler-word removal, your
 run locally and cost nothing.
 
 Choose Instant if you dictate short messages, if you are offline, or if you would rather
-fix the occasional word yourself than wait. Instant + Refine is the shipped default.
+fix the occasional word yourself than wait.
+
+A fresh install starts on Instant, because the on-device enhancement model is not
+downloaded yet. Once you set up a provider, Instant + Refine is the everyday choice.
 
 ## Instant + Refine
 
@@ -28,9 +32,9 @@ The transcript is pasted immediately — byte-for-byte the same path as Instant,
 same latency. The enhancement then runs in the background and, when it comes back,
 quietly replaces what was already typed.
 
-The paste never waits for the model. If the enhancement fails, times out, or you have
-already moved on, what you have is the raw transcript, which is exactly what Instant
-would have given you.
+The paste never waits for the model. Refine has a short budget of its own, about eight
+seconds. If the enhancement fails, times out, or you have already moved on, what you
+have is the raw transcript, which is exactly what Instant would have given you.
 
 ### Where in-place replacement works, and where it does not
 
@@ -73,17 +77,25 @@ It is the slowest of the three by exactly the round-trip time of your provider, 
 is the right choice when you want the pasted text to be final the moment it appears —
 into a document, or into an app where Refine could only offer rather than replace.
 
+Enhanced is also the only mode that can include what is on your screen as context. See
+[contextual awareness](contextual-awareness.html).
+
 The wait is bounded by the enhancement timeout, which defaults to 15 seconds. If it
-expires, Zerm falls back to the raw transcript rather than losing what you said. See
-[AI enhancement](enhancement.html) for the timeout and retry settings.
+expires, Zerm pastes the raw transcript rather than losing what you said, and tells you
+it timed out. See [AI enhancement](enhancement.html) for the timeout and retry settings.
 
 ## Choosing
 
 | | Text appears | AI improves it | Good for |
 | --- | --- | --- | --- |
 | **Instant** | immediately | never | speed, offline, short messages |
-| **Instant + Refine** | immediately | afterwards, in native apps | everyday dictation (the default) |
+| **Instant + Refine** | immediately | afterwards, in native apps | everyday dictation |
 | **Enhanced** | after the model | before you see it | when the first paste must already be final |
 
-The mode is a global setting, but a [Power Mode](power-mode.html) can turn enhancement
-on or off per app and per website, which in practice is the finer control.
+The mode is a global setting. A [Power Mode](power-mode.html) can choose a different
+output for one app or website, and ⌘E in the recorder switches between Instant and your
+AI mode for a single recording — see
+[enhancement shortcuts](enhancement-shortcuts.html).
+
+A Power Mode with **Auto Send** uses Enhanced instead of Instant + Refine, because the
+message is sent before a refinement could replace it.
