@@ -40,16 +40,67 @@
 
     <main id="main" class="page">
       <section class="page-hero">
-        <p class="eyebrow">33 releases</p>
+        <p class="eyebrow">34 releases</p>
         <h1>Changelog</h1>
         <p class="lede">Every published release, in full. Newest first.</p>
       </section>
       <section class="rel-list">
+        <article class="rel" id="v2.8.6">
+          <div class="rel-meta">
+            <a class="rel-tag" href="#v2.8.6">v2.8.6</a>
+            <time>14 September 2026</time>
+            <span class="rel-badge now">Latest</span>
+            <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.8.6/Zerm_2.8.6_aarch64.dmg">Download .dmg <span>32.7 MB</span></a>
+          </div>
+          <div class="rel-body">
+            <h2>2.8.6</h2>
+            <div class="prose">
+<p dir="auto">The biggest Zerm update yet: dictation always uses the model you chose, AI enhancement is rebuilt, Meetings is replaced by file transcription with speaker identification, and the model catalog and the whole app are refreshed, in English and Hebrew.</p>
+<h2 dir="auto">Fixed</h2>
+<ul dir="auto">
+<li><strong>The right model, every time.</strong> Power Modes no longer lock in the dictation model, language and prompt that happened to be selected when they were created, so dictation stops switching models depending on which app is in front. Every Power Mode setting now shows "Use global setting" unless you choose otherwise, and a Power Mode never changes your global settings.</li>
+<li><strong>Parakeet keeps your last words.</strong> Stopping right after you finish speaking no longer cuts the end off. Switching between Whisper models loads the new one once instead of on every dictation.</li>
+<li><strong>AI enhancement, rebuilt.</strong> One Output setting decides what happens: Instant, Instant + Refine, or Enhanced. Each dictation is enhanced with exactly the prompt, provider and model it started with, the timeout setting works, and when enhancement is skipped or fails Zerm tells you why instead of silently pasting the raw text. Prompts can now use their own provider and model.</li>
+<li><strong>Dashboard</strong> time saved and totals follow the range you select.</li>
+<li><strong>Escape</strong> double-press to cancel is reliable again.</li>
+</ul>
+<h2 dir="auto">New</h2>
+<ul dir="auto">
+<li><strong>Transcribe File.</strong> Drop in audio or video files and get a full transcript with speaker identification, timestamps and renameable speakers. Export to TXT, Markdown, SRT, WebVTT or JSON, open any audio file with Zerm from Finder, and reopen transcripts from History.</li>
+<li><strong>A wider, current model catalog.</strong>
+<ul dir="auto">
+<li>New on-device models: Parakeet Unified (English), Parakeet 110M for 8 GB Macs, and ivrit.ai Whisper models tuned for Hebrew.</li>
+<li>Recommended picks the best English, multilingual and Hebrew models for your Mac. Local models can be filtered by English only, Multilingual and Great in Hebrew.</li>
+</ul>
+</li>
+<li><strong>Cloud models are up to date and filterable by provider.</strong>
+<ul dir="auto">
+<li>Current models: OpenAI gpt-transcribe, Gemini 3.5 Transcribe, AssemblyAI Universal-3.5 Pro and Mistral Voxtral, plus the new Gladia provider.</li>
+<li>Model settings such as Output Format and Dictionary terms are sent the way each provider supports them.</li>
+<li>Custom OpenAI-compatible endpoints are verified when you save them.</li>
+</ul>
+</li>
+<li><strong>History</strong> has a copy button on every row.</li>
+<li><strong>Hebrew throughout the app.</strong></li>
+</ul>
+<h2 dir="auto">Removed</h2>
+<ul dir="auto">
+<li><strong>Meetings.</strong> Replaced by Transcribe File. <strong>Meeting recordings saved by earlier versions are permanently deleted when 2.8.6 first launches.</strong> Dictation recordings and History are not affected.</li>
+<li><strong>Outdated models.</strong> Whisper tiny, base and small and Parakeet V2 are retired. If you used one, Zerm moves you to its replacement automatically.</li>
+</ul>
+<h2 dir="auto">Compatibility</h2>
+<ul dir="auto">
+<li>macOS 14.4 or later</li>
+<li>Apple silicon (arm64)</li>
+</ul>
+<p dir="auto">Zerm remains local-first. Audio leaves the Mac only when you choose a cloud provider.</p>
+            </div>
+          </div>
+        </article>
         <article class="rel" id="v2.8.5">
           <div class="rel-meta">
             <a class="rel-tag" href="#v2.8.5">v2.8.5</a>
             <time>23 August 2026</time>
-            <span class="rel-badge now">Latest</span>
             <a class="rel-dl" href="https://github.com/arcusis/Zerm/releases/download/v2.8.5/Zerm_2.8.5_aarch64.dmg">Download .dmg <span>24.2 MB</span></a>
           </div>
           <div class="rel-body">
