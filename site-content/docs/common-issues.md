@@ -66,13 +66,6 @@ one to its replacement — Parakeet Unified or Large v3 Turbo (Quantized) — in
 Power Modes. Download the replacement, or pick another model under **Recommended**. See
 [models](models.html).
 
-## Meetings is gone
-
-Meetings was removed in Zerm 2.8.6 and replaced by
-[Transcribe File](transcribe-file.html), which transcribes recordings with each speaker
-identified. Meeting recordings from earlier versions were permanently deleted when 2.8.6
-first opened and cannot be recovered.
-
 ## Enhancement is not running
 
 Zerm shows a notification when it skips or fails an enhancement, with the reason. If you

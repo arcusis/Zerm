@@ -8,10 +8,6 @@ Transcribe File turns an existing recording into text: an interview, a lecture, 
 memo, a video call you recorded elsewhere. It uses the same models as dictation and,
 when you want it, works out who said what.
 
-It replaces Meetings, which was removed in Zerm 2.8.6. Meeting recordings saved by
-earlier versions are permanently deleted the first time 2.8.6 opens. Dictation
-recordings and History are not affected.
-
 ## Adding files
 
 Open **Transcribe File** in the sidebar, then either:

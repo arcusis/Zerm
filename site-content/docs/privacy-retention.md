@@ -113,12 +113,6 @@ Nothing here replaces doing it by hand. From History you can delete individual
 transcripts or clear the lot, and each deletion takes its audio file with it. Read Aloud
 keeps its own history of what you listened to, which you can clear from its page.
 
-## Meeting recordings
-
-Meetings was removed in Zerm 2.8.6. The first time 2.8.6 opens, it permanently deletes
-the meeting recordings, transcripts, and settings that earlier versions saved. Dictation
-recordings and History are not affected.
-
 ## What leaves your Mac
 
 Only what you configure:
