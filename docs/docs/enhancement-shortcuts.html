@@ -46,36 +46,42 @@
       </section>
       <section class="doc"><div class="prose">
 <p>Enhancement settings are useful to change at exactly the moment you are dictating —<br>
-which is the worst moment to open a settings window. These two shortcuts let you change<br>
+which is the worst moment to open a settings window. These shortcuts let you change<br>
 them from the recorder instead.</p>
-<p>Both only work <strong>while the recorder is visible</strong>. That is deliberate: they use keys that<br>
+<p>They only work <strong>while the recorder is visible</strong>. That is deliberate: they use keys that<br>
 would otherwise collide with the app you are typing into, so they are live only during<br>
 the few seconds the recorder is on screen.</p>
-<p><img src="img/enhancement-shortcuts.png" alt="The recorder with prompts showing" style="max-width: 100%;"></p>
-<h2>Toggle enhancement — ⌘E</h2>
-<p>Turns <a href="enhancement.html">AI enhancement</a> on or off for the recording in progress. The<br>
+<p>Whatever you change applies to the recording in progress only. Your global settings and<br>
+your <a href="power-mode.html">Power Modes</a> are left exactly as they were.</p>
+<h2>Toggle AI Enhancement — ⌘E</h2>
+<p>Switches <a href="enhancement.html">AI enhancement</a> on or off for the recording in progress. The<br>
 recorder shows the current state, so you can see what you changed.</p>
+<ul>
+<li>If this recording would use AI, ⌘E switches it to <strong>Instant</strong>.</li>
+<li>If it would not, ⌘E switches it to the AI output you used last — Instant + Refine<br>
+unless you have used Enhanced.</li>
+</ul>
 <p>Use it when your default is right most of the time but wrong for this particular<br>
 sentence — a name you want left exactly as you said it, or a quick note that does not<br>
 need cleaning up.</p>
 <p>The binding is ⌘E by default and can be changed.</p>
-<h2>Switch prompt — ⌘1 to ⌘0</h2>
+<p>Screen context is only captured when a recording starts in Enhanced, so switching to<br>
+Enhanced with ⌘E mid-recording enhances without it. See<br>
+<a href="contextual-awareness.html">contextual awareness</a>.</p>
+<h2>Switch Enhancement Prompt — ⌘1 to ⌘0</h2>
 <p>Selects one of your first ten enhancement prompts, in the order they are saved. ⌘1 is<br>
 the first, ⌘0 the tenth.</p>
 <p>To change which prompt sits on which key, reorder your prompts. There is no separate<br>
 binding per prompt.</p>
-<p>Selecting a prompt this way also turns enhancement on, since choosing a prompt with<br>
-enhancement off would do nothing.</p>
-<h2>Which ⌘1–⌘0 does what</h2>
-<p>The number keys drive whatever the recorder is currently showing. When it is showing<br>
-enhancement prompts, they select prompts. When it is showing<br>
-<a href="power-mode.html">Power Modes</a>, they select modes.</p>
+<p>Selecting a prompt this way also turns enhancement on for a recording that was on<br>
+Instant, since choosing a prompt with enhancement off would do nothing.</p>
+<h2>Power Modes — ⌥1 to ⌥0</h2>
+<p>The Option number keys select one of your first ten enabled<br>
+<a href="power-mode.html">Power Modes</a> for the recording in progress. Command selects prompts;<br>
+Option selects modes.</p>
 <h2>Other ways to change the same things</h2>
-<p><strong>Trigger words.</strong> Start a transcript with a prompt's trigger word and Zerm switches to<br>
-that prompt automatically, strips the trigger, and restores your previous setting<br>
-afterwards. No keys at all.</p>
-<p><strong>Power Mode.</strong> Pin a prompt to an app or website and it switches itself whenever you go<br>
-there. Better than a shortcut for anything you do repeatedly.</p>
+<p><strong>Power Mode.</strong> Set the output or pin a prompt for an app or website and it applies<br>
+whenever you go there. Better than a shortcut for anything you do repeatedly.</p>
 <p><strong>Output mode.</strong> If you find yourself switching enhancement off constantly, the setting<br>
 you want is probably <a href="output-modes.html">Instant</a> rather than a faster way to turn it<br>
 off.</p>

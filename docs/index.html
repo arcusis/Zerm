@@ -6,7 +6,7 @@
     <title>Zerm — on-device voice for macOS (dictation + read aloud)</title>
     <meta
       name="description"
-      content="Zerm dictates clean text at your cursor and reads any selection back aloud. Three on-device models — Whisper, Kokoro, Gemma — so it is fast, private, and works offline. GPLv3, based on VoiceInk."
+      content="Zerm dictates clean text at your cursor, transcribes audio and video files with each speaker identified, and reads any selection back aloud. On-device models — Parakeet and Whisper, Kokoro, Gemma — so it is fast, private, and works offline. GPLv3, based on VoiceInk."
     />
     <meta name="theme-color" content="#0b0b0c" />
     <meta property="og:title" content="Zerm — on-device voice for macOS" />
@@ -60,9 +60,9 @@
           <h1>Dictate anywhere.<br />Read anything aloud.</h1>
           <p class="lede">
             Press a shortcut and Zerm drops clean text at your cursor. Select any
-            text and it reads back in a natural voice. Whisper, Kokoro, and Gemma
-            run locally — fast, private, offline. Cloud providers stay optional,
-            and off by default.
+            text and it reads back in a natural voice. Parakeet, Whisper, Kokoro,
+            and Gemma run locally — fast, private, offline. Cloud providers stay
+            optional, and off by default.
           </p>
 
           <div class="hero-actions">
@@ -117,7 +117,7 @@
               </div>
 
               <div class="window-foot">
-                <span><b>whisper</b> large-v3-turbo</span>
+                <span><b>parakeet</b> unified</span>
                 <span class="sep"></span>
                 <span>on-device</span>
                 <span class="sep"></span>
@@ -153,14 +153,14 @@
         <div class="model-grid">
           <article class="card model-card reveal">
             <span class="card-idx">01</span>
-            <h3>Whisper</h3>
+            <h3>Parakeet &amp; Whisper</h3>
             <p class="card-role">Speech&nbsp;→&nbsp;Text</p>
             <p>
-              Dictation and audio-file transcription. Runs on
-              <code>whisper.cpp</code> with Metal acceleration, so a paragraph
-              lands in about a second.
+              Dictation and file transcription. Parakeet runs on FluidAudio and
+              Whisper on <code>whisper.cpp</code>, including ivrit.ai models tuned
+              for Hebrew. Zerm recommends the best fit for your Mac.
             </p>
-            <span class="tag">whisper.cpp</span>
+            <span class="tag">FluidAudio · whisper.cpp</span>
           </article>
 
           <article class="card model-card reveal">
@@ -204,7 +204,7 @@
             </li>
             <li>
               <b>Speak normally</b>
-              <span>Whisper transcribes locally while you are still talking.</span>
+              <span>Zerm transcribes locally while you are still talking.</span>
             </li>
             <li>
               <b>Release</b>
@@ -287,8 +287,9 @@
           <div class="card reveal">
             <h3>Power Mode</h3>
             <p>
-              Detects the active app and browser URL, then swaps the prompt to
-              match where you are writing.
+              Detects the active app and browser URL, then applies that app's
+              model, language, output, or prompt — without touching your global
+              settings.
             </p>
           </div>
           <div class="card reveal">
@@ -299,24 +300,26 @@
             </p>
           </div>
           <div class="card reveal">
-            <h3>History</h3>
+            <h3>History &amp; Dashboard</h3>
             <p>
-              Every transcript kept locally, searchable, and deletable — including
-              the audio, if you keep it.
+              Every transcript kept locally, searchable, copyable, and deletable.
+              The Dashboard shows words and time saved for the range you pick.
             </p>
           </div>
           <div class="card reveal">
-            <h3>Audio files</h3>
+            <h3>Transcribe File</h3>
             <p>
-              Drop in a recording or a voice memo and get a transcript with the
-              same local pipeline.
+              Drop in audio or video and get a transcript with each speaker
+              identified. Rename speakers, then export TXT, Markdown, SRT, WebVTT,
+              or JSON.
             </p>
           </div>
           <div class="card reveal">
             <h3>Local or cloud</h3>
             <p>
-              Whisper, FluidAudio, or Apple for speech; Gemma or Ollama for the
-              LLM; plus any cloud provider you configure yourself.
+              Parakeet, Whisper, or Apple for speech; Gemma or Ollama for the
+              LLM; plus eleven cloud speech providers and any AI provider you
+              configure yourself.
             </p>
           </div>
           <div class="card reveal">

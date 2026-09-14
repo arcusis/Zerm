@@ -46,11 +46,11 @@ the app has been moved or replaced by an update.
 
 ## Screen Recording
 
-**Optional.** Only needed if you want the enhancement to see what is on your screen. See
-[contextual awareness](contextual-awareness.html).
+**Optional.** Only needed if you want enhancement in Enhanced output to see what is on
+your screen. See [contextual awareness](contextual-awareness.html).
 
-Everything works without it. Dictation, Read Aloud, and enhancement using the transcript
-alone are all unaffected.
+Everything works without it. Dictation, Transcribe File, Read Aloud, and enhancement
+using the transcript alone are all unaffected.
 
 Screen Recording has the same launch-time binding problem as Accessibility, and Zerm
 detects it: if the permission looks granted but the process cannot use it yet, the card
@@ -70,5 +70,8 @@ are unaffected.
 ## What Zerm does not ask for
 
 No Full Disk Access, no Contacts, no Calendar, no Input Monitoring beyond the modifier
-keys used as hotkeys, and no account of any kind. All of it is in the source, under
-GPLv3.
+keys used as hotkeys, and no account of any kind.
+
+Zerm does not capture system audio, so there is no System Audio Recording permission.
+[Transcribe File](transcribe-file.html) works on files you choose and needs no
+permission at all. All of it is in the source, under GPLv3.

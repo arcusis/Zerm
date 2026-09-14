@@ -323,7 +323,7 @@ const DOC_GROUPS = [
   },
   {
     title: "Models and speech",
-    slugs: ["models", "custom-local-whisper-models", "read-aloud"],
+    slugs: ["models", "custom-local-whisper-models", "transcribe-file", "read-aloud"],
   },
   {
     title: "Privacy",
@@ -400,7 +400,7 @@ ${cards}
   const index = shell({
     title: "Documentation — Zerm",
     description:
-      "How Zerm dictates, enhances, and reads text aloud on your Mac — every setting explained, including the ones the interface does not spell out.",
+      "How Zerm dictates, enhances, transcribes files, and reads text aloud on your Mac — every setting explained, including the ones the interface does not spell out.",
     current: "Docs",
     base: "../",
     hero: pageHero({

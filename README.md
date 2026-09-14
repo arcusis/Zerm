@@ -5,7 +5,7 @@
 <h1 align="center">Zerm</h1>
 
 <p align="center">
-  Native macOS voice dictation, transcription, context-aware prompting, and auto-paste.
+  Native macOS voice dictation, file transcription with speaker identification, read aloud, and auto-paste.
 </p>
 
 <p align="center">
@@ -16,9 +16,11 @@
 </p>
 
 Zerm is a native macOS application for turning speech into clean text quickly.
-It records from your microphone, transcribes with local and cloud-capable
-engines, applies optional enhancement prompts, understands the active app or
-website through Power Mode, and can paste the result directly at your cursor.
+It records from your microphone, transcribes with local and cloud engines,
+applies optional enhancement prompts, adapts to the active app or website
+through Power Mode, and pastes the result directly at your cursor. It also
+transcribes audio and video files with each speaker identified, and reads
+selected text aloud.
 
 ## Attribution
 
@@ -53,18 +55,22 @@ Zerm is built around **three on-device AI models** the app downloads and manages
 
 | Model | Job | Engine |
 | --- | --- | --- |
-| 🎙️ Whisper | Speech-to-Text (dictation) | `whisper.cpp` |
+| 🎙️ Parakeet / Whisper | Speech-to-Text (dictation, file transcription) | FluidAudio / `whisper.cpp` |
 | 🔊 Kokoro | Text-to-Speech (Read Aloud) | `sherpa-onnx` |
 | 🧠 Gemma | Agentic layer (smart reading + enhancement) | `llama.cpp` |
 
 - **Fast dictation workflow** — global shortcut, push-to-talk recording, auto-stop, and auto-paste at the cursor.
 - **Read Aloud** — select text anywhere, press a shortcut, and Zerm reads it in a natural voice (local Kokoro or cloud).
 - **Smart Reading** — text is cleaned (acronyms, URLs, code, emoji, tables) and optionally rewritten by the on-device LLM so it sounds human, not robotic.
-- **On-device AI enhancement** — clean up and reformat dictated text with the local Gemma model (no API key) or a cloud provider.
-- **Power Mode** — adapt prompts based on the active app, website, or workflow.
-- **Local + cloud everywhere** — Whisper/FluidAudio/Apple for STT; Kokoro for TTS; Gemma/Ollama for the LLM — plus cloud providers you explicitly configure.
-- **Personal dictionary**, **history**, and **audio-file transcription**.
+- **AI enhancement** — one Output setting (Instant, Instant + Refine, or Enhanced) decides whether text is cleaned up by the local model (no API key) or a cloud provider; skipped or failed enhancements are reported, never silent.
+- **Transcribe File** — drop in audio or video for a full transcript with speaker identification, renameable speakers, and TXT, Markdown, SRT, WebVTT, or JSON export.
+- **Power Mode** — per-app and per-website model, language, output, prompt, and text settings that inherit your global settings unless you override them.
+- **Local + cloud everywhere** — Parakeet, Whisper (including ivrit.ai Hebrew models), and Apple Speech locally, with hardware-based recommendations; eleven cloud speech providers; Kokoro for TTS; Gemma/Ollama for the LLM — plus cloud providers you explicitly configure.
+- **Personal dictionary**, **history**, and a **dashboard** that follows the range you pick.
+- **English and Hebrew** throughout the interface.
 - **Explicit macOS permissions flow** for microphone, Accessibility, and screen context.
+
+User documentation lives on the [website](https://arcusis.github.io/Zerm/docs/).
 
 See the [project wiki](https://github.com/arcusis/Zerm/wiki) for architecture and subsystem docs.
 
@@ -125,7 +131,8 @@ For detailed local build notes, see [BUILDING.md](./BUILDING.md).
 | `Zerm/Views/` | SwiftUI application interface |
 | `Zerm/Services/` | App services, settings, dictionaries, model management, and integrations |
 | `Makefile` | Local build + ad-hoc install helpers |
-| `docs/` | GitHub Pages website |
+| `docs/` | GitHub Pages website (generated docs pages included) |
+| `site-content/docs/` | Markdown sources for the website documentation (`make site` regenerates) |
 | `NOTICE` | Upstream attribution and derivative-work notes |
 | `LICENSE` | GPLv3 license text |
 

@@ -4,14 +4,16 @@ eyebrow: Reference
 summary: Every shortcut Zerm offers — global triggers, recorder controls, and the ones that are unset until you choose them.
 ---
 
-Zerm is driven from the keyboard. Nothing here is fixed: every shortcut on this page can
-be rebound, and most start unset so they cannot collide with what you already use.
+Zerm is driven from the keyboard. Nothing here is fixed: almost every shortcut on this
+page can be rebound, and most start unset so they cannot collide with what you already
+use.
 
 ![Shortcut settings](img/shortcuts.png)
 
 ## Dictation
 
-You can configure two independent dictation shortcuts, each with its own trigger style.
+You can configure two independent dictation shortcuts, **Shortcut 1** and
+**Shortcut 2**, each with its own trigger style. Shortcut 1 starts as Right Command.
 
 A shortcut can be a **bare modifier key** — Right Option, Left Option, Right Command,
 Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason
@@ -31,8 +33,8 @@ Each shortcut has a mode:
 brightness, volume — cancels the recording trigger, so binding Zerm to Fn does not break
 your function row.
 
-**Middle click** can also start and stop recording, with a configurable hold delay. Off
-by default.
+**Middle-Click Recording** starts and stops recording with the middle mouse button, with
+a configurable activation delay. Off by default.
 
 ## Read Aloud
 
@@ -46,12 +48,14 @@ you are typing into.
 
 | Shortcut | Action |
 | --- | --- |
-| `Esc` | Cancel. Nothing is transcribed, written, or saved. |
-| `⌘E` | Toggle AI enhancement for this recording. |
+| `Esc` `Esc` | Cancel. Press twice within a second and a half. Nothing is transcribed, written, or saved. |
+| `⌘E` | Switch AI enhancement on or off for this recording. |
 | `⌘1` – `⌘0` | Select one of the first ten enhancement prompts. |
-| `⌘1` – `⌘0` | Select one of the first ten Power Modes, when the recorder is showing them. |
+| `⌥1` – `⌥0` | Select one of the first ten enabled Power Modes. |
 
-A second, custom cancel shortcut can be assigned if Escape is taken.
+The first Escape press shows a reminder to press again. If Escape is taken, assign a
+**Custom Cancel Shortcut**: it cancels with a single press, and replaces Escape while it
+is set.
 
 See [enhancement shortcuts](enhancement-shortcuts.html) for what the enhancement keys
 do in detail.
@@ -62,15 +66,14 @@ All unset by default. Assign the ones you want.
 
 | Action | What it does |
 | --- | --- |
-| Paste last transcription | Re-pastes the most recent transcript at your cursor. |
-| Paste last enhancement | Re-pastes the enhanced version instead of the raw one. |
-| Retry last transcription | Runs the last recording through the pipeline again. |
-| Open history | Opens the history window from anywhere. |
-| Quick add to dictionary | Adds a word to your [dictionary](dictionary.html) without opening the app. |
+| Paste Last Transcription (Original) | Re-pastes the raw transcript of your most recent dictation. |
+| Paste Last Transcription (Enhanced) | Re-pastes the enhanced version instead. Nothing is sent to the provider again. |
+| Retry Last Transcription | Runs the last recording through transcription again, with the model and language selected now. |
+| Open History Window | Opens the history window from anywhere. |
+| Quick Add to Dictionary | Adds a word or replacement to your [dictionary](dictionary.html) without opening the app. |
 
 *Retry* is the one to know about: it re-runs the audio you already captured, so
-switching model or prompt after a disappointing result does not mean saying it all
-again.
+switching model after a disappointing result does not mean saying it all again.
 
 ## Power Mode shortcuts
 

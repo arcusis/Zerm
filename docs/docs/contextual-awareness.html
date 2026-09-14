@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Contextual awareness — Zerm</title>
-    <meta name="description" content="The three optional context sources — selected text, clipboard, and screen — and exactly what each one sends." />
+    <meta name="description" content="The two optional context sources — clipboard and screen — and exactly what each one sends." />
     <meta name="theme-color" content="#0b0b0c" />
     <meta property="og:title" content="Contextual awareness — Zerm" />
-    <meta property="og:description" content="The three optional context sources — selected text, clipboard, and screen — and exactly what each one sends." />
+    <meta property="og:description" content="The two optional context sources — clipboard and screen — and exactly what each one sends." />
     <meta property="og:image" content="../icon.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/png" href="../icon.png" />
@@ -42,51 +42,47 @@
       <section class="page-hero">
         <p class="eyebrow">Privacy</p>
         <h1>Contextual awareness</h1>
-        <p class="lede">The three optional context sources — selected text, clipboard, and screen — and exactly what each one sends.</p>
+        <p class="lede">The two optional context sources — clipboard and screen — and exactly what each one sends.</p>
       </section>
       <section class="doc"><div class="prose">
 <p>An <a href="enhancement.html">enhancement</a> prompt does better work when it knows what you are<br>
-writing about. Zerm can supply three kinds of context, each optional and each off unless<br>
-you switch it on.</p>
-<p>None of them apply when your <a href="output-modes.html">output mode</a> is Instant, because no<br>
-model runs at all in that mode. Instant + Refine also skips a live selected-text or<br>
-screen read: those would copy or OCR after the raw transcript is already in the<br>
-field. Clipboard context is still taken at the start of the recording if you have<br>
-it on. Enhanced mode is the one that can include all three.</p>
+writing about. Zerm can supply two kinds of context, each optional and each off unless<br>
+you switch it on in Enhancement settings.</p>
+<p>Neither applies when your <a href="output-modes.html">output mode</a> is Instant, because no model<br>
+runs at all in that mode. Clipboard context is used by Instant + Refine and Enhanced.<br>
+Screen context is used only by Enhanced: Instant + Refine has already pasted by the time<br>
+the screen could be read.</p>
 <p><img src="img/contextual-awareness.png" alt="Context settings" style="max-width: 100%;"></p>
-<h2>Selected text</h2>
-<p>Whatever is highlighted in the frontmost application is passed to the model alongside<br>
-your transcript.</p>
-<p>This is what makes instructions work. Select a paragraph, dictate "make this shorter and<br>
-drop the second sentence", and the model has the paragraph to act on.</p>
-<p>Requires Accessibility permission. Without it, nothing is read and the transcript goes<br>
-to the model alone.</p>
-<p>Selected text is only read in <strong>Enhanced</strong> mode. Instant + Refine never posts a<br>
-synthetic copy into the app you just dictated into.</p>
 <h2>Clipboard context</h2>
 <p>The current contents of your clipboard are passed to the model.</p>
 <p>Useful when you have just copied the thing you are replying to. Off by default.</p>
-<p>The clipboard is read at the moment the recording starts, and the captured value is<br>
-cleared once the enhancement finishes.</p>
+<p>The clipboard is read at the moment the recording starts, and only when that dictation<br>
+can use AI. The captured value is cleared once the enhancement finishes.</p>
 <h2>Screen context</h2>
 <p>Text visible on your screen is captured and passed to the model.</p>
-<p>This is the broadest of the three, and the one to think about before enabling. It reads<br>
-what is on screen rather than what you selected, which means it may include whatever<br>
-else happens to be visible.</p>
-<p><strong>How it works:</strong> Zerm captures the screen, extracts text from the image, and includes<br>
-that text in the prompt. What is sent to the model is text, not the image.</p>
+<p>This is the broader of the two, and the one to think about before enabling. It reads<br>
+what is on screen rather than what you chose to share, which means it may include<br>
+whatever else happens to be visible.</p>
+<p><strong>How it works:</strong> when a recording starts in Enhanced, Zerm captures the screen, extracts<br>
+text from the image, and includes that text in the prompt. What is sent to the model is<br>
+text, not the image. Zerm waits at most a second for it, so a slow capture never holds<br>
+up your text.</p>
 <p><strong>What is kept:</strong> nothing. The extracted text is held only for the duration of the<br>
 enhancement and then cleared. It is not written to disk and not saved to history.</p>
 <p><strong>Permission:</strong> requires Screen Recording. macOS often needs Zerm fully quit and<br>
 reopened before a fresh grant takes effect — see <a href="permissions.html">permissions</a>.</p>
-<p>Screen context is also per-<a href="power-mode.html">Power Mode</a>, so you can enable it only for<br>
-the apps where it earns its keep and leave it off everywhere else.</p>
+<p>A recording switched to Enhanced mid-way with ⌘E does not get screen context, because<br>
+the screen is only read at the start.</p>
+<h2>Per Power Mode</h2>
+<p>A <a href="power-mode.html">Power Mode</a> can turn screen context — <strong>Context Awareness</strong> in the<br>
+mode editor — on or off for its apps and websites, or leave it on your global setting.<br>
+Enable it only where it earns its keep.</p>
 <h2>Where the context goes</h2>
 <p>Context is added to the system message sent to your enhancement provider, in labelled<br>
 sections alongside the transcript. That means:</p>
 <ul>
-<li>With the <strong>on-device</strong> provider, context never leaves your Mac.</li>
-<li>With <strong>Ollama</strong> or a <strong>local CLI</strong>, it goes to whatever you are running locally.</li>
+<li>With the <strong>On-Device</strong> provider, context never leaves your Mac.</li>
+<li>With <strong>Ollama</strong> or a <strong>Local CLI</strong>, it goes to whatever you are running locally.</li>
 <li>With a <strong>cloud provider</strong>, it goes to that provider along with the transcript.</li>
 </ul>
 <p>If you enable screen context, know which provider you are pointing it at.</p>

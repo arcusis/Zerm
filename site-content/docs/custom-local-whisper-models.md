@@ -8,8 +8,6 @@ If you have a Whisper model that fits your work better than the standard ones �
 fine-tune on your domain's vocabulary, your accent, or a language the general models
 handle poorly — you can import it and Zerm will treat it as a first-class local model.
 
-![Importing a local model](img/custom-local-whisper-models.png)
-
 ## What Zerm accepts
 
 A **`.bin` file in `ggml` format**, the format `whisper.cpp` uses. That is the same
@@ -24,33 +22,38 @@ small accuracy cost.
 
 ## Importing
 
-1. Open **AI Models** and choose the **Local** filter.
+1. Open **Models**, under Dictation in the sidebar, and choose the **Local** filter.
 2. Scroll to the end of the list and select **Import Local Model…**
 3. Choose your `.bin` file.
 
-The model is copied into Zerm's model directory and appears in the list next to the
-bundled ones. Select it like any other model, set it as default, or pin it to a
-[Power Mode](power-mode.html).
+The model is copied into Zerm's model directory and appears at the end of the Local list,
+marked "Imported local model". Select it like any other model, set it as default, use it
+in [Transcribe File](transcribe-file.html), or pin it to a [Power Mode](power-mode.html).
 
-Delete it from the same list. That removes Zerm's copy; your original file is untouched.
+If a model with the same file name is already imported, nothing is copied; rename the
+file first.
+
+Delete it from the card's menu with **Delete Model**. That removes Zerm's copy; your
+original file is untouched.
 
 ## What to expect
 
-**It runs locally.** Same as any bundled model — no key, no network, Metal acceleration
-on Apple Silicon.
+**It runs locally.** Same as any bundled Whisper model — no key, no network, Metal
+acceleration on Apple Silicon.
 
 **Everything downstream is identical.** Filler-word removal,
-[dictionary](dictionary.html) replacements, formatting, and
-[enhancement](enhancement.html) all behave the same. The only thing that changes is
+[dictionary](dictionary.html) replacements and vocabulary, formatting, Output Format,
+and [enhancement](enhancement.html) all behave the same. The only thing that changes is
 what produces the first draft.
 
 **Language support comes from the model.** Zerm cannot know what your fine-tune covers,
-so it does not restrict the language picker. Choose a language the model actually
-handles, or leave it automatic.
+so it offers the full Whisper language list and files the model under Multilingual.
+Choose a language the model actually handles, or leave it on Auto-detect.
 
-**Size and memory are on you.** The warnings Zerm shows for bundled models are based on
-published sizes it knows in advance. An imported model of the same footprint has the
-same requirements; a very large one will be slow or will not load.
+**Size and memory are on you.** The memory warnings and Recommended picks Zerm shows for
+catalog models are based on sizes it knows in advance, so an imported model gets
+neither. One of the same footprint has the same requirements; a very large one will be
+slow or will not load.
 
 ## If it does not work
 
@@ -63,5 +66,5 @@ same requirements; a very large one will be slow or will not load.
 ## Custom cloud models are separate
 
 This page is about local files. To point Zerm at a hosted transcription API, use the
-**Custom** filter in AI Models instead — that path accepts any OpenAI-compatible
-transcription endpoint. See [models](models.html).
+**Custom** filter on the Models screen and **Add Model** instead — that path accepts any
+OpenAI-compatible transcription endpoint. See [models](models.html).

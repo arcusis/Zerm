@@ -47,7 +47,8 @@
       <section class="doc"><div class="prose">
 <p>Every speech model mishears the same category of word: proper nouns, product names,<br>
 internal jargon, and anything spelled unusually. The dictionary is where you fix that<br>
-once instead of every time.</p>
+once instead of every time. It lives under <strong>Vocabulary</strong> in the sidebar, in the<br>
+Dictation group.</p>
 <p>It has two halves that work in completely different ways, and picking the right one<br>
 matters.</p>
 <p><img src="img/dictionary.png" alt="The dictionary" style="max-width: 100%;"></p>
@@ -58,13 +59,18 @@ them exactly this way.</p>
 <p>Use it for names and terms whose <em>spelling</em> is the problem — colleagues' names, product<br>
 names, libraries, medical or legal terms.</p>
 <p>Vocabulary is guidance, not a rule. It shifts the odds; it does not guarantee. It is<br>
-also only consulted where the pipeline can use it, which means it helps most when<br>
-<a href="enhancement.html">enhancement</a> is running.</p>
+used in two places:</p>
+<ul>
+<li><strong>By the speech model</strong>, when the model supports it. Those models carry a<br>
+<strong>Uses Dictionary</strong> badge — see <a href="models.html">models</a>. Nothing needs switching on.</li>
+<li><strong>By <a href="enhancement.html">enhancement</a></strong>, as spelling guidance, whenever it runs.</li>
+</ul>
 <p>Add several at once by separating them with commas. Duplicates are rejected rather than<br>
 silently added twice.</p>
 <h2>Word replacement — an exact rule</h2>
 <p>A replacement is a find-and-replace applied to the finished transcript, locally, before<br>
-the text reaches your cursor. It always fires, on every recording, in every output mode.</p>
+the text reaches your cursor. It always fires, on every recording, in every output mode,<br>
+and in <a href="transcribe-file.html">Transcribe File</a>.</p>
 <p>Use it when you know exactly what comes out and exactly what you want instead:</p>
 <table role="table">
 <thead>
@@ -122,9 +128,9 @@ one name.</li>
 <td>always applies</td>
 </tr>
 <tr>
-<td>Needs enhancement</td>
-<td>mostly</td>
-<td>no</td>
+<td>Where it works</td>
+<td>models marked Uses Dictionary, and enhancement</td>
+<td>everywhere</td>
 </tr>
 <tr>
 <td>Good for</td>
@@ -141,7 +147,8 @@ heard the word, use vocabulary.</p>
 the moment you notice a mistake, rather than the moment you remember to fix it. See<br>
 <a href="shortcuts.html">shortcuts</a>.</p>
 <h2>Import and export</h2>
-<p>The dictionary can be exported and imported, so it moves with you between Macs.</p>
+<p><strong>Export Settings</strong> and <strong>Import Settings</strong>, in Settings, include the dictionary along<br>
+with your prompts, Power Modes, and custom models, so it moves with you between Macs.</p>
         </div>
         <p class="doc-more"><a class="text-link" href="./">All documentation</a></p>
       </section>

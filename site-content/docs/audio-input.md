@@ -45,8 +45,9 @@ recording, not the current one.
 
 ## Echo cancellation and gain control
 
-An experimental setting routes capture through VoiceProcessingIO, which adds acoustic
-echo cancellation and automatic gain control.
+**Echo Cancel / AGC**, an experimental setting, routes capture through macOS voice
+processing, which adds acoustic echo cancellation and automatic gain control. Off by
+default.
 
 Worth enabling in a noisy room, or when you dictate with speakers on and the microphone
 is picking them up. It changes the character of the audio, so if transcription accuracy
@@ -58,4 +59,5 @@ setting.
 Auto-stop decides you have finished speaking by watching the input level against a
 threshold. A microphone with very low gain can therefore trip auto-stop early. If
 recordings are cutting off while you are still talking, raise your input level in
-System Settings, or increase the silence duration. See [dictation](dictation.html).
+System Settings, or use push to talk, where releasing the key is the only stop. See
+[dictation](dictation.html).
