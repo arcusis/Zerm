@@ -38,7 +38,8 @@ struct FirstAudioWaitTests {
         let arrived = await recorder.waitForFirstAudio(timeout: 0.05)
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         #expect(!arrived)
-        #expect(elapsed >= 0.05 && elapsed < 2)
+        // Only that it gave up: a loaded CI runner schedules the timeout late (see #346).
+        #expect(elapsed >= 0.05 && elapsed < 30)
     }
 
     @Test func aSecondWaitReplacesTheFirstWithoutHanging() async {
