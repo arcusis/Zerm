@@ -13,32 +13,9 @@ enum SpeechLocaleResolver {
         let supported = Array(Set(supportedIdentifiers)).sorted()
         guard !supported.isEmpty else { return "en-US" }
 
-        if requestedCode != LanguagePreference.autoCode, !requestedCode.isEmpty {
-            if let exact = exactLocaleCode(requestedCode: requestedCode, supportedIdentifiers: supported) {
-                return exact
-            }
-            let requestedLanguage = Locale(identifier: requestedCode).language.languageCode?.identifier
-            let candidates = supported.filter {
-                Locale(identifier: $0).language.languageCode?.identifier == requestedLanguage
-            }
-            if !candidates.isEmpty {
-                let currentIdentifier = locale.identifier(.bcp47)
-                if let current = candidates.first(where: {
-                    $0.caseInsensitiveCompare(currentIdentifier) == .orderedSame
-                }) {
-                    return current
-                }
-                let conventional: [String: String] = [
-                    "ar": "ar-SA", "de": "de-DE", "en": "en-US", "es": "es-ES",
-                    "fr": "fr-FR", "it": "it-IT", "ja": "ja-JP", "ko": "ko-KR",
-                    "pt": "pt-BR", "yue": "yue-CN", "zh": "zh-CN",
-                ]
-                if let preferred = requestedLanguage.flatMap({ conventional[$0] }),
-                   candidates.contains(preferred) {
-                    return preferred
-                }
-                return candidates[0]
-            }
+        if requestedCode != LanguagePreference.autoCode, !requestedCode.isEmpty,
+           let sameLanguage = sameLanguageLocaleCode(requestedCode: requestedCode, supportedIdentifiers: supported, locale: locale) {
+            return sameLanguage
         }
 
         let currentIdentifier = locale.identifier(.bcp47)
@@ -52,6 +29,38 @@ enum SpeechLocaleResolver {
             return sameLanguage
         }
         return supported.contains("en-US") ? "en-US" : supported[0]
+    }
+
+    /// A supported locale of `requestedCode`'s language: an exact match, else the current locale
+    /// when it is that language, else the conventional one, else the first. Nil when Apple Speech
+    /// does not support the language at all; never a locale of another language.
+    static func sameLanguageLocaleCode(
+        requestedCode: String,
+        supportedIdentifiers: [String],
+        locale: Locale = .current
+    ) -> String? {
+        let supported = Array(Set(supportedIdentifiers)).sorted()
+        if let exact = exactLocaleCode(requestedCode: requestedCode, supportedIdentifiers: supported) {
+            return exact
+        }
+        let requestedLanguage = Locale(identifier: requestedCode).language.languageCode?.identifier
+        let candidates = supported.filter {
+            Locale(identifier: $0).language.languageCode?.identifier == requestedLanguage
+        }
+        guard !candidates.isEmpty else { return nil }
+        let currentIdentifier = locale.identifier(.bcp47)
+        if let current = candidates.first(where: { $0.caseInsensitiveCompare(currentIdentifier) == .orderedSame }) {
+            return current
+        }
+        let conventional: [String: String] = [
+            "ar": "ar-SA", "de": "de-DE", "en": "en-US", "es": "es-ES",
+            "fr": "fr-FR", "he": "he-IL", "it": "it-IT", "ja": "ja-JP", "ko": "ko-KR",
+            "pt": "pt-BR", "ru": "ru-RU", "yue": "yue-CN", "zh": "zh-CN",
+        ]
+        if let preferred = requestedLanguage.flatMap({ conventional[$0] }), candidates.contains(preferred) {
+            return preferred
+        }
+        return candidates[0]
     }
 
     /// The supported identifier matching `requestedCode` exactly (case-insensitively), or nil.

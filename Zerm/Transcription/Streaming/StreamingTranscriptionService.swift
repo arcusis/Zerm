@@ -86,8 +86,9 @@ class StreamingTranscriptionService {
 
         self.provider = provider
 
-        // Normalize "auto" → nil so providers don't pass a literal "auto" language hint.
-        let selectedLanguage = LanguagePreference.apiLanguage()
+        // Normalize "auto" → nil so providers don't pass a literal "auto" language hint, and never
+        // ask a model for a language it does not list (#370).
+        let selectedLanguage = model.requestLanguage(for: LanguagePreference.apiLanguage())
 
         try await provider.connect(model: model, language: selectedLanguage)
 

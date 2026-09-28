@@ -594,6 +594,10 @@ class ZermEngine: NSObject, ObservableObject {
             screenContext: screenContext
         )
         dictationSession.setConfiguration(session, for: generation)
+        DebugLogger.shared.log(
+            "ZermEngine",
+            "dictation language=\(session.languageCode) (\(powerMode?.selectedLanguage != nil ? "Power Mode \(powerMode?.name ?? "")" : "Settings")) model=\(session.transcriptionModel.name)"
+        )
 
         // Both AI modes need the on-device model resident by the time transcription ends; a cold
         // load can exhaust a refine's whole budget. Cloud users never load it.

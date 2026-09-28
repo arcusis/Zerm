@@ -172,6 +172,7 @@ enum AppDefaults {
         // Must run before PowerModeManager first loads its configurations, and before the
         // enhancement toggle below is folded away: it reads that toggle.
         PowerModeMigration.run(defaults: defaults)
+        PowerModeMigration.clearStoredAutoLanguage(defaults: defaults)
 
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 7 {
             DictationOutputMode.migrateLegacyEnhancementToggle(

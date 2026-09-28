@@ -86,15 +86,22 @@ enum WhisperLanguageCandidateSelector {
             return false
         }
 
+        let trimmed = primaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Arabic on a Hebrew keyboard is Whisper confusing the two Semitic languages, not a
+        // decision to trust: it is how Hebrew dictation came out as Arabic (#370).
+        if looksLikeArabicMisdetection(detectedLanguage: detectedLanguage, text: trimmed) {
+            return true
+        }
+
         // A confident non-English, non-Hebrew detection is already a language decision.
-        // Running forced-`he` on Russian (or Arabic, French, …) is how Hebrew leaked into
+        // Running forced-`he` on Russian (or French, …) is how Hebrew leaked into
         // speech that never contained it.
         if isIdentifiedNonEnglishLanguage(detectedLanguage),
            primaryProbability >= 0.70 {
             return false
         }
 
-        let trimmed = primaryText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return true }
 
         // Confident multi-word English is not a Hebrew-transliteration miss.
@@ -120,6 +127,12 @@ enum WhisperLanguageCandidateSelector {
             return primary
         }
 
+        // Only reached on a Hebrew keyboard: Hebrew wins over an Arabic guess unless it is clearly
+        // less likely.
+        if looksLikeArabicMisdetection(detectedLanguage: primary.languageCode, text: primaryText) {
+            return hebrew.averageTokenProbability + 0.05 >= primary.averageTokenProbability ? hebrew : primary
+        }
+
         if isIdentifiedNonEnglishLanguage(primary.languageCode),
            primary.averageTokenProbability >= 0.70 {
             return primary
@@ -143,6 +156,14 @@ enum WhisperLanguageCandidateSelector {
             return primary
         }
         return hebrew
+    }
+
+    private static func looksLikeArabicMisdetection(detectedLanguage: String?, text: String) -> Bool {
+        detectedLanguage == "ar" || arabicLetterRatio(in: text) >= 0.5
+    }
+
+    private static func arabicLetterRatio(in text: String) -> Double {
+        letterRatio(in: text, matching: { (0x0600...0x06FF).contains($0.value) || (0x0750...0x077F).contains($0.value) })
     }
 
     private static func isIdentifiedNonEnglishLanguage(_ code: String?) -> Bool {

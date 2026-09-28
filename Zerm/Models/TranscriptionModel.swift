@@ -82,6 +82,19 @@ extension TranscriptionModel {
         hasher.combine(id)
     }
 
+    /// Whether the selected language is one this model lists. Auto is always acceptable.
+    func supportsLanguage(_ code: String) -> Bool {
+        code == LanguagePreference.autoCode || supportedLanguages[code] != nil
+    }
+
+    /// The language to ask this model for: the selection when the model lists it, otherwise nil,
+    /// so the model detects the language itself. Asking for a language a model does not know is
+    /// how Hebrew came back as Arabic from models that list Arabic but not Hebrew (#370).
+    func requestLanguage(for code: String?) -> String? {
+        guard let code, code != LanguagePreference.autoCode, supportedLanguages[code] != nil else { return nil }
+        return code
+    }
+
     var language: String {
         isMultilingualModel ? String(localized: "Multilingual") : String(localized: "English-only")
     }

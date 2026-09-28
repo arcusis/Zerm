@@ -176,3 +176,78 @@ struct LanguagePreferenceTests {
         #expect(WhisperLanguageCandidateSelector.choose(primary: primary, hebrew: hebrew) == primary)
     }
 }
+
+/// Hebrew and Russian dictation came out as Arabic; the language the user chose must win (#370).
+struct LanguageSelectionFixTests {
+
+    @Test func arabicOnAHebrewKeyboardGetsAHebrewPass() {
+        #expect(WhisperLanguageCandidateSelector.shouldEvaluateFallback(
+            selectedLanguage: "auto",
+            shouldConsiderHebrew: true,
+            detectedLanguage: "ar",
+            durationSeconds: 3,
+            primaryText: "شكرا جزيلا",
+            primaryProbability: 0.9
+        ))
+    }
+
+    @Test func hebrewBeatsAnArabicGuessUnlessClearlyLessLikely() {
+        let arabic = WhisperLanguageCandidateSelector.Candidate(text: "شكرا جزيلا", languageCode: "ar", averageTokenProbability: 0.85)
+        let closeHebrew = WhisperLanguageCandidateSelector.Candidate(text: "תודה רבה", languageCode: "he", averageTokenProbability: 0.82)
+        let weakHebrew = WhisperLanguageCandidateSelector.Candidate(text: "תודה רבה", languageCode: "he", averageTokenProbability: 0.6)
+        #expect(WhisperLanguageCandidateSelector.choose(primary: arabic, hebrew: closeHebrew) == closeHebrew)
+        #expect(WhisperLanguageCandidateSelector.choose(primary: arabic, hebrew: weakHebrew) == arabic)
+    }
+
+    @Test func confidentRussianIsStillLeftAlone() {
+        #expect(!WhisperLanguageCandidateSelector.shouldEvaluateFallback(
+            selectedLanguage: "auto",
+            shouldConsiderHebrew: true,
+            detectedLanguage: "ru",
+            durationSeconds: 3,
+            primaryText: "Большое спасибо",
+            primaryProbability: 0.9
+        ))
+    }
+
+    @Test func modelsAreOnlyAskedForLanguagesTheyList() throws {
+        let voxtral = try #require(TranscriptionModelRegistry.models.first { $0.name == "voxtral-mini-2602" })
+        let gpt = try #require(TranscriptionModelRegistry.models.first { $0.name == "gpt-transcribe" })
+        #expect(voxtral.requestLanguage(for: "he") == nil)
+        #expect(!voxtral.supportsLanguage("he"))
+        #expect(voxtral.requestLanguage(for: "ru") == "ru")
+        #expect(gpt.requestLanguage(for: "he") == "he")
+        #expect(gpt.requestLanguage(for: "auto") == nil)
+        #expect(gpt.supportsLanguage("auto"))
+    }
+
+    @Test func storedAutoLanguageIsClearedFromPowerModesOnce() throws {
+        let suite = "zerm.tests.auto-language.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let configs: [[String: Any]] = [
+            ["id": UUID().uuidString, "name": "General", "selectedLanguage": "auto"],
+            ["id": UUID().uuidString, "name": "Hebrew mail", "selectedLanguage": "he"],
+            ["id": UUID().uuidString, "name": "Code"]
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: configs), forKey: PowerModeManager.configKey)
+
+        PowerModeMigration.clearStoredAutoLanguage(defaults: defaults)
+
+        let data = try #require(defaults.data(forKey: PowerModeManager.configKey))
+        let migrated = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        #expect(migrated[0]["selectedLanguage"] is NSNull)
+        #expect(migrated[1]["selectedLanguage"] as? String == "he")
+        #expect(migrated[2]["selectedLanguage"] == nil)
+        #expect(defaults.integer(forKey: PowerModeMigration.autoLanguageCompletionKey) == 1)
+
+        // A later explicit Auto choice survives: the migration runs once.
+        var again = migrated
+        again[0]["selectedLanguage"] = "auto"
+        defaults.set(try JSONSerialization.data(withJSONObject: again), forKey: PowerModeManager.configKey)
+        PowerModeMigration.clearStoredAutoLanguage(defaults: defaults)
+        let keptData = try #require(defaults.data(forKey: PowerModeManager.configKey))
+        let kept = try #require(try JSONSerialization.jsonObject(with: keptData) as? [[String: Any]])
+        #expect(kept[0]["selectedLanguage"] as? String == "auto")
+    }
+}

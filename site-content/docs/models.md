@@ -136,9 +136,12 @@ Your [dictionary](dictionary.html) terms are sent automatically to every model m
 this Mac** when it would use a large share of your memory, and **Unavailable** when it
 would not fit.
 
-**Language.** Set the language on the models screen. Parakeet V3 and Gemini detect it
-themselves, and English-only models are always English. A
-[Power Mode](power-mode.html) can use a different model and language for one app.
+**Language.** Set the language on the models screen. Parakeet and Gemini detect it
+themselves, and English-only models are always English. When the model you pick does not
+support your language (Parakeet, Voxtral and Grok have no Hebrew, for example), the
+language settings say so, and Zerm lets the model detect the language instead of asking it
+for one it does not know. A [Power Mode](power-mode.html) can use a different model and
+language for one app.
 
 **Intel Macs.** Local models do not run reliably on Intel hardware and Zerm says so.
 Recommended picks only Whisper models there; a cloud model is usually the better choice.
