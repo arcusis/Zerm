@@ -1,8 +1,70 @@
 import Foundation
+import Metal
 
 /// Rates this Mac's ability to run local models and judges whether a given model
 /// is a good fit, a stretch, or too heavy to install at all.
 enum HardwareCapability {
+
+    static var supportsApple10GPU: Bool {
+        guard #available(macOS 26.0, *) else { return false }
+        return MTLCreateSystemDefaultDevice()?.supportsFamily(.apple10) == true
+    }
+
+    struct MetalTensorDecision: Equatable {
+        let enabled: Bool
+        let reason: String
+    }
+
+    static func metalTensorDecision(
+        supportsApple10: Bool,
+        isAvailable: Bool,
+        explicitlyDisabled: Bool
+    ) -> MetalTensorDecision {
+        if explicitlyDisabled {
+            return MetalTensorDecision(enabled: false, reason: "explicitly disabled")
+        }
+        guard isAvailable else {
+            return MetalTensorDecision(enabled: false, reason: "requires macOS 26")
+        }
+        guard supportsApple10 else {
+            return MetalTensorDecision(enabled: false, reason: "GPU does not support Apple10")
+        }
+        return MetalTensorDecision(enabled: true, reason: "Apple10 GPU")
+    }
+
+    /// Set ggml's opt-in before any whisper or llama backend/context is created.
+    @discardableResult
+    static func configureMetalTensorPath() -> MetalTensorDecision {
+        let isAvailable: Bool
+        let supportsApple10: Bool
+        if #available(macOS 26.0, *) {
+            isAvailable = true
+            supportsApple10 = supportsApple10GPU
+        } else {
+            isAvailable = false
+            supportsApple10 = false
+        }
+
+        let decision = metalTensorDecision(
+            supportsApple10: supportsApple10,
+            isAvailable: isAvailable,
+            explicitlyDisabled: getenv("GGML_METAL_TENSOR_DISABLE") != nil
+        )
+        var actualDecision = decision
+        if decision.enabled {
+            if setenv("GGML_METAL_TENSOR_ENABLE", "1", 1) != 0 {
+                actualDecision = MetalTensorDecision(enabled: false, reason: "failed to set enable switch")
+                unsetenv("GGML_METAL_TENSOR_ENABLE")
+            }
+        } else {
+            unsetenv("GGML_METAL_TENSOR_ENABLE")
+        }
+        DebugLogger.shared.log(
+            "HardwareCapability",
+            "Metal tensor path: \(actualDecision.enabled ? "enabled" : "disabled") (\(actualDecision.reason))"
+        )
+        return actualDecision
+    }
 
     enum Tier {
         /// Intel Macs and Apple Silicon with 8 GB RAM.

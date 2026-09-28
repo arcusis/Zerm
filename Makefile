@@ -2,9 +2,9 @@
 DEPS_DIR := $(HOME)/Zerm-Dependencies
 # Pinned upstream revisions of the native parsers compiled into the shipped binary.
 # Bump these deliberately (and re-verify) rather than tracking a moving branch head.
-WHISPER_COMMIT := fc674574ca27cac59a15e5b22a09b9d9ad62aafe
+WHISPER_COMMIT := 927cfce34f31707e17f2bff35c349632fb9e2c3a
 SHERPA_COMMIT := 6faa8142d49d4d47d2a6c1e06350a976661fe046
-LLAMA_COMMIT := dd69db292465ef698def69499ccb920a67bd613e
+LLAMA_COMMIT := d5d993a0938ddc0d2a4328632b8dcfbfa64b63e6
 WHISPER_CPP_DIR := $(DEPS_DIR)/whisper.cpp
 FRAMEWORK_PATH := $(WHISPER_CPP_DIR)/build-apple/whisper.xcframework
 SHERPA_DIR := $(DEPS_DIR)/sherpa-onnx
@@ -13,6 +13,9 @@ SHERPA_XCFRAMEWORK := $(SHERPA_BUILD)/sherpa-onnx.xcframework
 ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
 LLAMA_DIR := $(DEPS_DIR)/llama
 LLAMA_XCFRAMEWORK := $(LLAMA_DIR)/build-apple/llama.xcframework
+# Each built framework records the upstream commit it came from, so bumping a pin rebuilds
+# it instead of silently linking a stale copy left in DEPS_DIR.
+PIN_STAMP := .zerm-pinned-commit
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 # Development builds use their own bundle identifier, so their UserDefaults, Application
 # Support data, TCC grants and updater never touch an installed Zerm. See AppStoragePaths.
@@ -38,24 +41,26 @@ check:
 
 healthcheck: check
 
-# whisper.cpp and llama.cpp package seven Apple platform slices; Zerm links only macOS.
-# Build just that slice from the upstream recipe (see scripts/macos-only-xcframework.py).
-MACOS_ONLY_XCFRAMEWORK = python3 $(CURDIR)/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh && bash build-xcframework-macos.sh
+# whisper.cpp packages seven Apple platform slices; Zerm links only macOS. Keep its
+# transformed recipe checked by scripts/macos-only-xcframework.py.
+WHISPER_MACOS_XCFRAMEWORK = python3 $(CURDIR)/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh && bash build-xcframework-macos.sh
 
 # Build process
 whisper:
 	@mkdir -p $(DEPS_DIR)
-	@if [ ! -d "$(FRAMEWORK_PATH)" ]; then \
-		echo "Building whisper.xcframework in $(DEPS_DIR)..."; \
+	@if [ "$$(cat "$(FRAMEWORK_PATH)/$(PIN_STAMP)" 2>/dev/null)" != "$(WHISPER_COMMIT)" ]; then \
+		echo "Building whisper.xcframework $(WHISPER_COMMIT) in $(DEPS_DIR)..."; \
+		rm -rf "$(FRAMEWORK_PATH)"; \
 		if [ ! -d "$(WHISPER_CPP_DIR)" ]; then \
 			git clone https://github.com/ggerganov/whisper.cpp.git $(WHISPER_CPP_DIR); \
 		else \
 			(cd $(WHISPER_CPP_DIR) && git fetch origin); \
 		fi; \
 		(cd $(WHISPER_CPP_DIR) && git checkout --quiet $(WHISPER_COMMIT)); \
-		cd $(WHISPER_CPP_DIR) && $(MACOS_ONLY_XCFRAMEWORK); \
+		(cd $(WHISPER_CPP_DIR) && $(WHISPER_MACOS_XCFRAMEWORK)) && \
+		echo "$(WHISPER_COMMIT)" > "$(FRAMEWORK_PATH)/$(PIN_STAMP)"; \
 	else \
-		echo "whisper.xcframework already built in $(DEPS_DIR), skipping build"; \
+		echo "whisper.xcframework $(WHISPER_COMMIT) already built in $(DEPS_DIR), skipping build"; \
 	fi
 
 # Build sherpa-onnx + onnxruntime xcframeworks for on-device Kokoro TTS (Read Aloud feature)
@@ -67,7 +72,11 @@ sherpa:
 			git clone https://github.com/k2-fsa/sherpa-onnx.git $(SHERPA_DIR); \
 		fi; \
 		(cd $(SHERPA_DIR) && git fetch origin && git checkout --quiet $(SHERPA_COMMIT)); \
-		cd $(SHERPA_DIR) && ./build-swift-macos.sh; \
+		cd $(SHERPA_DIR) && \
+			CC="$$(xcrun --find clang)" \
+			CXX="$$(xcrun --find clang++)" \
+			SDKROOT="$$(xcrun --sdk macosx --show-sdk-path)" \
+			./build-swift-macos.sh; \
 	else \
 		echo "sherpa-onnx.xcframework already built, skipping"; \
 	fi
@@ -78,21 +87,23 @@ sherpa:
 		echo "onnxruntime.xcframework already built, skipping"; \
 	fi
 
-# Build llama.cpp at the exact revision used by Zerm's Objective-C++ bridge. The upstream
-# packaging script produces the dynamic, module-mapped XCFramework expected by the project.
+# Build llama.cpp at the exact revision used by Zerm's Objective-C++ bridge. Its current
+# upstream script accepts a macOS slice selector and no longer matches the legacy transformer.
 llama:
 	@mkdir -p $(DEPS_DIR)
-	@if [ ! -d "$(LLAMA_XCFRAMEWORK)" ]; then \
-		echo "Building llama.xcframework in $(DEPS_DIR)..."; \
+	@if [ "$$(cat "$(LLAMA_XCFRAMEWORK)/$(PIN_STAMP)" 2>/dev/null)" != "$(LLAMA_COMMIT)" ]; then \
+		echo "Building llama.xcframework $(LLAMA_COMMIT) in $(DEPS_DIR)..."; \
+		rm -rf "$(LLAMA_XCFRAMEWORK)"; \
 		if [ ! -d "$(LLAMA_DIR)" ]; then \
 			git clone https://github.com/ggerganov/llama.cpp.git $(LLAMA_DIR); \
 		else \
 			(cd $(LLAMA_DIR) && git fetch origin); \
 		fi; \
 		(cd $(LLAMA_DIR) && git checkout --quiet $(LLAMA_COMMIT)); \
-		cd $(LLAMA_DIR) && $(MACOS_ONLY_XCFRAMEWORK); \
+		(cd $(LLAMA_DIR) && bash build-xcframework.sh macos) && \
+		echo "$(LLAMA_COMMIT)" > "$(LLAMA_XCFRAMEWORK)/$(PIN_STAMP)"; \
 	else \
-		echo "llama.xcframework already built, skipping"; \
+		echo "llama.xcframework $(LLAMA_COMMIT) already built, skipping"; \
 	fi
 
 setup: whisper sherpa llama
@@ -102,7 +113,7 @@ setup: whisper sherpa llama
 	@echo "Please ensure your Xcode project references the frameworks from these locations."
 
 build: setup
-	xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug CODE_SIGN_IDENTITY="" build
+	xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug ZERM_DEPS_DIR="$(DEPS_DIR)" CODE_SIGN_IDENTITY="" build
 
 # Build for local use without Apple Developer certificate
 local: check setup
@@ -111,6 +122,7 @@ local: check setup
 	xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug \
 		-derivedDataPath "$(LOCAL_DERIVED_DATA)" \
 		-xcconfig LocalBuild.xcconfig \
+		ZERM_DEPS_DIR="$(DEPS_DIR)" \
 		CODE_SIGN_IDENTITY="-" \
 		CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGNING_ALLOWED=YES \
@@ -204,6 +216,7 @@ test: setup
 		-destination 'platform=macOS' \
 		-derivedDataPath "$(DEV_DERIVED_DATA)" \
 		-only-testing:ZermTests \
+		ZERM_DEPS_DIR="$(DEPS_DIR)" \
 		ZERM_BUNDLE_ID_SUFFIX=$(DEV_BUNDLE_SUFFIX) \
 		CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
@@ -213,6 +226,7 @@ test: setup
 dev-app: check setup
 	xcodebuild -project Zerm.xcodeproj -scheme Zerm -configuration Debug \
 		-derivedDataPath "$(DEV_DERIVED_DATA)" \
+		ZERM_DEPS_DIR="$(DEPS_DIR)" \
 		-xcconfig LocalBuild.xcconfig \
 		ZERM_BUNDLE_ID_SUFFIX=$(DEV_BUNDLE_SUFFIX) \
 		CODE_SIGN_IDENTITY="-" \

@@ -1,7 +1,44 @@
+import Foundation
 import Testing
 @testable import Zerm
 
 struct HardwareCapabilityTests {
+
+    @Test func metalTensorPathRequiresApple10AndAvailableOS() {
+        #expect(HardwareCapability.metalTensorDecision(
+            supportsApple10: true,
+            isAvailable: true,
+            explicitlyDisabled: false
+        ) == HardwareCapability.MetalTensorDecision(enabled: true, reason: "Apple10 GPU"))
+        #expect(HardwareCapability.metalTensorDecision(
+            supportsApple10: false,
+            isAvailable: true,
+            explicitlyDisabled: false
+        ) == HardwareCapability.MetalTensorDecision(enabled: false, reason: "GPU does not support Apple10"))
+        #expect(HardwareCapability.metalTensorDecision(
+            supportsApple10: true,
+            isAvailable: false,
+            explicitlyDisabled: false
+        ) == HardwareCapability.MetalTensorDecision(enabled: false, reason: "requires macOS 26"))
+    }
+
+    @Test func metalTensorPathRespectsExplicitDisable() {
+        #expect(HardwareCapability.metalTensorDecision(
+            supportsApple10: true,
+            isAvailable: true,
+            explicitlyDisabled: true
+        ) == HardwareCapability.MetalTensorDecision(enabled: false, reason: "explicitly disabled"))
+    }
+
+    @Test func nonApple10GPUClearsInheritedTensorOverride() {
+        guard !HardwareCapability.supportsApple10GPU else { return }
+        setenv("GGML_METAL_TENSOR_ENABLE", "1", 1)
+
+        let decision = HardwareCapability.configureMetalTensorPath()
+
+        #expect(!decision.enabled)
+        #expect(getenv("GGML_METAL_TENSOR_ENABLE") == nil)
+    }
 
     @Test func smallModelFitsOn8GB() {
         let fit = HardwareCapability.fit(forEstimatedRAMGB: 1.5, physicalMemoryGB: 8)

@@ -108,7 +108,7 @@ const std::string kReasoningPrefill = "<think>\n\n</think>\n\n";
     llama_sampler_chain_add(_sampler, llama_sampler_init_temp(0.3f));
     // Penalize loops/stutter so long rewrites don't repeat a phrase forever.
     llama_sampler_chain_add(_sampler, llama_sampler_init_penalties(
-        /*last_n*/ 64, /*repeat*/ 1.15f, /*freq*/ 0.0f, /*present*/ 0.0f));
+        llama_vocab_n_tokens(_vocab), /*last_n*/ 64, /*repeat*/ 1.15f, /*freq*/ 0.0f, /*present*/ 0.0f));
     llama_sampler_chain_add(_sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     return YES;
 }
