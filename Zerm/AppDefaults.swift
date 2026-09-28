@@ -17,6 +17,7 @@ enum AppDefaults {
             // Audio & Media
             "isSystemMuteEnabled": true,
             "SkipMuteWithHeadphones": true,
+            "PreserveBluetoothMediaQuality": true,
             "audioResumptionDelay": 0.0,
             "isPauseMediaEnabled": false,
             "isSoundFeedbackEnabled": true,

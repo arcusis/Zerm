@@ -25,6 +25,23 @@ Prioritised is the mode for anyone who moves between setups: put your headset fi
 your desk microphone second, and the built-in mic last. Plug the headset in and it wins;
 unplug it and Zerm falls back without you touching anything.
 
+## Bluetooth playback quality
+
+Bluetooth headphones use separate profiles for high-quality media playback and
+two-way voice calls. Activating the headset microphone forces macOS into the call
+profile, which makes music and video sound compressed or muted.
+
+**Preserve Bluetooth Media Quality** is on by default. When the selected microphone is
+Bluetooth, Zerm records from the Mac's built-in microphone, or another connected
+non-Bluetooth microphone, without changing the system input or headphone output. Turn
+it off only when you specifically want to use the headset microphone. If no
+non-Bluetooth microphone is available, Zerm uses the headset microphone so recording
+still works, and macOS will use call-quality playback during that recording.
+
+With the lid closed (clamshell mode), macOS disconnects the built-in microphone, so Zerm
+skips it. Connect a USB microphone, webcam microphone, or iPhone microphone to keep
+full playback quality while dictating with the lid closed.
+
 ## Testing
 
 The microphone test shows a live level meter, so you can confirm the right device is

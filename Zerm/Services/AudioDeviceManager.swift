@@ -1,6 +1,7 @@
 import Foundation
 import CoreAudio
 import AVFoundation
+import IOKit
 import os
 
 struct PrioritizedDevice: Codable, Identifiable {
@@ -24,6 +25,10 @@ class AudioDeviceManager: ObservableObject {
     @Published var selectedDeviceID: AudioDeviceID?
     @Published var inputMode: AudioInputMode = .custom
     @Published var prioritizedDevices: [PrioritizedDevice] = []
+
+    /// Transport type per input device, read once per device-list load so resolving the
+    /// recording device on the hotkey path makes no per-device CoreAudio queries.
+    private var transportTypes: [AudioDeviceID: UInt32] = [:]
 
     var isRecordingActive: Bool = false
 
@@ -177,9 +182,13 @@ class AudioDeviceManager: ObservableObject {
             }
             return (id: deviceID, uid: uid, name: name)
         }
+        let transportTypes = Dictionary(uniqueKeysWithValues: devices.compactMap { device in
+            transportType(for: device.id).map { (device.id, $0) }
+        })
         
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            self.transportTypes = transportTypes
             self.availableDevices = devices.map { ($0.id, $0.uid, $0.name) }
             if let currentID = self.selectedDeviceID, !devices.contains(where: { $0.id == currentID }) {
                 self.logger.warning("🎙️ Currently selected device is no longer available")
@@ -300,23 +309,56 @@ class AudioDeviceManager: ObservableObject {
     }
     
     func getCurrentDevice() -> AudioDeviceID {
+        let preferredDeviceID: AudioDeviceID
         switch inputMode {
         case .systemDefault:
-            return getSystemDefaultDevice() ?? findBestAvailableDevice() ?? 0
+            preferredDeviceID = getSystemDefaultDevice() ?? findBestAvailableDevice() ?? 0
         case .custom:
-            if let id = selectedDeviceID, isDeviceAvailable(id) {
-                return id
+            if let id = self.selectedDeviceID, isDeviceAvailable(id) {
+                preferredDeviceID = id
+            } else {
+                preferredDeviceID = findBestAvailableDevice() ?? 0
             }
-            return findBestAvailableDevice() ?? 0
         case .prioritized:
             let sortedDevices = prioritizedDevices.sorted { $0.priority < $1.priority }
-            for device in sortedDevices {
-                if let available = availableDevices.first(where: { $0.uid == device.id }) {
-                    return available.id
-                }
-            }
-            return findBestAvailableDevice() ?? 0
+            preferredDeviceID = sortedDevices.compactMap { device in
+                availableDevices.first(where: { $0.uid == device.id })?.id
+            }.first ?? findBestAvailableDevice() ?? 0
         }
+
+        return resolveRecordingDevice(preferredDeviceID)
+    }
+
+    /// Redirects a Bluetooth input to a non-Bluetooth microphone when media quality
+    /// protection is on, so the headset stays in its high-quality playback profile.
+    private func resolveRecordingDevice(_ preferredDeviceID: AudioDeviceID) -> AudioDeviceID {
+        AudioInputDeviceResolver.resolve(
+            selectedDeviceID: preferredDeviceID,
+            availableDevices: availableDevices.map {
+                AudioInputDeviceResolver.Device(
+                    id: $0.id,
+                    transportType: transportTypes[$0.id]
+                )
+            },
+            preserveBluetoothMediaQuality: UserDefaults.standard.bool(
+                forKey: "PreserveBluetoothMediaQuality"
+            ),
+            isBuiltInMicrophoneUsable: !isLidClosed()
+        )
+    }
+
+    /// macOS disconnects the built-in microphone in clamshell mode but keeps it listed.
+    private func isLidClosed() -> Bool {
+        let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard rootDomain != 0 else { return false }
+        defer { IOObjectRelease(rootDomain) }
+        let state = IORegistryEntryCreateCFProperty(
+            rootDomain,
+            "AppleClamshellState" as CFString,
+            kCFAllocatorDefault,
+            0
+        )?.takeRetainedValue()
+        return state as? Bool ?? false
     }
     
     private func loadPrioritizedDevices() {
@@ -448,11 +490,12 @@ class AudioDeviceManager: ObservableObject {
 
                     if let deviceID = newDeviceID {
                         self.selectedDeviceID = deviceID
-                        DebugLogger.shared.log("AudioDeviceManager", "requesting switch to replacement device \(deviceID)")
+                        let recordingDeviceID = self.resolveRecordingDevice(deviceID)
+                        DebugLogger.shared.log("AudioDeviceManager", "requesting switch to replacement device \(recordingDeviceID)")
                         NotificationCenter.default.post(
                             name: .audioDeviceSwitchRequired,
                             object: nil,
-                            userInfo: ["newDeviceID": deviceID]
+                            userInfo: ["newDeviceID": recordingDeviceID]
                         )
                     } else {
                         self.logger.error("No audio input devices available!")
@@ -516,6 +559,13 @@ class AudioDeviceManager: ObservableObject {
             return nil
         }
         return value
+    }
+
+    private func transportType(for deviceID: AudioDeviceID) -> UInt32? {
+        AudioObjectProperty.uint32(
+            deviceID,
+            selector: kAudioDevicePropertyTransportType
+        )
     }
     
     private func notifyDeviceChange() {
