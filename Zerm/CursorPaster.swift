@@ -28,6 +28,32 @@ class CursorPaster {
     private static let unicodeEventUTF16Limit = 20
     private static let minimumClipboardRestoreDelay: TimeInterval = 0.25
 
+    /// Publishes a stored history item and sends the same paste command as dictation.
+    @MainActor
+    static func pasteClipboardHistoryItem(_ representations: [ClipboardRepresentation]) async throws {
+        let pasteboard = NSPasteboard.general
+        let shouldRestoreClipboard = UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste")
+        let savedContents = shouldRestoreClipboard ? snapshotClipboard(from: pasteboard) : []
+        let grouped = Dictionary(grouping: representations, by: \.itemIndex)
+        let items = grouped.keys.sorted().map { index -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for representation in grouped[index] ?? [] {
+                item.setData(representation.data, forType: NSPasteboard.PasteboardType(representation.type))
+            }
+            item.setData(Data(), forType: ClipboardManager.historyIgnoreType)
+            return item
+        }
+        guard !items.isEmpty else { throw ClipboardHistoryError.missingPayload }
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects(items) else { throw ClipboardHistoryError.missingPayload }
+        ClipboardMonitor.noteZermWrite(changeCount: pasteboard.changeCount)
+        await waitUntilModifiersReleased()
+        _ = await postPasteCommand()
+        if shouldRestoreClipboard {
+            scheduleHistoryClipboardRestore(savedContents, expectedChangeCount: pasteboard.changeCount, on: pasteboard)
+        }
+    }
+
     /// Orca intentionally turns clipboard pastes into `[Pasted text #…]` attachments. Its
     /// editor is also opaque to macOS Accessibility, so AX selected-text insertion is not an
     /// option. Delivering normal Unicode keyboard events matches actual typing and leaves the
@@ -199,6 +225,27 @@ class CursorPaster {
             if !savedContents.isEmpty {
                 pasteboard.writeObjects(pasteboardItems(from: savedContents))
             }
+            ClipboardMonitor.noteZermWrite(changeCount: pasteboard.changeCount)
+        }
+    }
+
+    private static func scheduleHistoryClipboardRestore(
+        _ savedContents: ClipboardSnapshot,
+        expectedChangeCount: Int,
+        on pasteboard: NSPasteboard
+    ) {
+        let delay = max(
+            UserDefaults.standard.double(forKey: "clipboardRestoreDelay"),
+            minimumClipboardRestoreDelay
+        )
+        Task { @MainActor in
+            await wait(delay)
+            guard pasteboard.changeCount == expectedChangeCount else { return }
+            pasteboard.clearContents()
+            if !savedContents.isEmpty {
+                pasteboard.writeObjects(pasteboardItems(from: savedContents))
+            }
+            ClipboardMonitor.noteZermWrite(changeCount: pasteboard.changeCount)
         }
     }
 
