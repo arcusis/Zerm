@@ -23,6 +23,13 @@ hotkey → `.recording` = **79–86 ms**
 1. **`MenuBarView` had `@State var launchAtLoginEnabled = LaunchAtLogin.isEnabled`** — `SMAppService.status`, a synchronous XPC round-trip (~300 ms), re-run on *every* App-body re-evaluation because `MenuBarExtra` sits in `ZermApp.body`. A `sample` caught 279/681 main-thread samples in it. Fixed via `LaunchAtLoginStore` (async cache). This alone was worth ~300 ms at record start **and ~400 ms after stop** — the post-stop gap went 270–449 ms → 20–42 ms.
 2. **Whisper 120 s idle unload** — any dictation more than 2 min after the last paid a ~800 ms model reload. Now resident, released on `DispatchSource` memory pressure instead. Also removed `whisperModelManager.unloadModel()` from the main window's `onDisappear`: for a menu-bar app, "window closed" is the steady state.
 
+## Measured 2026-09-28 (#354)
+
+- **Recorder panel** show + layout + first draw: **4–10 ms** (Debug, 8 runs). Rebuilding it per dictation is not a latency cost worth trading its stale-window protection for.
+- **Usable-model listing** did one Keychain query per cloud provider in release builds: 2.4 ms warm / 8.6 ms cold for 20 providers, twice per start. Now cached in `APIKeyManager`.
+- **Pre-paste wait** was a flat 100 ms; now it ends when no modifier is held (20 ms floor, 100 ms cap).
+- Every dictation writes `trigger→recording` and `stop→paste` to the debug log (`DictationLatency`), and the same intervals show in Instruments' Points of Interest. Use those numbers before any further start-path work.
+
 ## Verification lesson
 
 `pgrep` returning nothing does **not** mean a clean exit — a crashed process is also gone. Compare the newest file in `~/Library/Logs/DiagnosticReports/` before and after. Three crashes this session were initially reported as passing because of weak checks.
