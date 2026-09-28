@@ -59,12 +59,57 @@ private class TaskDelegate: NSObject, URLSessionTaskDelegate {
 
 // MARK: - WhisperModelManager
 
+/// The URLSession task and progress observation behind one download, so cancelling the Swift task
+/// cancels the transfer and every exit releases the observation.
+private final class DownloadRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionDownloadTask?
+    private var observation: NSKeyValueObservation?
+    private var isCancelled = false
+
+    /// False when the request was cancelled before the task could be installed.
+    func install(task: URLSessionDownloadTask, observation: NSKeyValueObservation) -> Bool {
+        lock.withLock {
+            guard !isCancelled else { return false }
+            self.task = task
+            self.observation = observation
+            return true
+        }
+    }
+
+    func finish() {
+        let observation = lock.withLock { () -> NSKeyValueObservation? in
+            defer {
+                self.observation = nil
+                task = nil
+            }
+            return self.observation
+        }
+        observation?.invalidate()
+    }
+
+    func cancel() {
+        let (task, observation) = lock.withLock { () -> (URLSessionDownloadTask?, NSKeyValueObservation?) in
+            isCancelled = true
+            defer {
+                self.task = nil
+                self.observation = nil
+            }
+            return (self.task, self.observation)
+        }
+        observation?.invalidate()
+        task?.cancel()
+    }
+}
+
 @MainActor
 class WhisperModelManager: ObservableObject {
     @Published var availableModels: [WhisperModelFile] = []
     @Published var downloadProgress: [String: Double] = [:]
     /// Last download failure per model name, shown on the model card with a retry.
     @Published var downloadErrors: [String: String] = [:]
+    /// In-flight downloads by model name, cancellable from the model card.
+    @Published private var downloadTasks: [String: Task<Void, Never>] = [:]
     @Published var whisperContext: WhisperContext?
     @Published var isModelLoaded = false
     @Published var loadedWhisperModel: WhisperModelFile?
@@ -201,72 +246,89 @@ class WhisperModelManager: ObservableObject {
 
     private func downloadFileWithProgress(from url: URL, progressKey: String) async throws -> Data {
         let destinationURL = modelsDirectory.appendingPathComponent(UUID().uuidString)
+        let request = DownloadRequest()
 
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            let finished = ManagedAtomic(false)
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                let finished = ManagedAtomic(false)
 
-            func finishOnce(_ result: Result<Data, Error>) {
-                if finished.exchange(true, ordering: .acquiring) == false {
-                    continuation.resume(with: result)
-                }
-            }
-
-            let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
-                if let error = error {
-                    finishOnce(.failure(error))
-                    return
-                }
-
-                guard let httpResponse = response as? HTTPURLResponse,
-                      (200...299).contains(httpResponse.statusCode),
-                      let tempURL = tempURL else {
-                    finishOnce(.failure(URLError(.badServerResponse)))
-                    return
-                }
-
-                do {
-                    try FileManager.default.moveItem(at: tempURL, to: destinationURL)
-                    let data = try Data(contentsOf: destinationURL, options: .mappedIfSafe)
-                    finishOnce(.success(data))
-                    try? FileManager.default.removeItem(at: destinationURL)
-                } catch {
-                    finishOnce(.failure(error))
-                }
-            }
-
-            task.resume()
-
-            var lastUpdateTime = Date()
-            var lastProgressValue: Double = 0
-
-            let observation = task.progress.observe(\.fractionCompleted) { progress, _ in
-                let currentTime = Date()
-                let timeSinceLastUpdate = currentTime.timeIntervalSince(lastUpdateTime)
-                let currentProgress = round(progress.fractionCompleted * 100) / 100
-
-                if timeSinceLastUpdate >= 0.5 && abs(currentProgress - lastProgressValue) >= 0.01 {
-                    lastUpdateTime = currentTime
-                    lastProgressValue = currentProgress
-
-                    DispatchQueue.main.async {
-                        self.downloadProgress[progressKey] = currentProgress
-                    }
-                }
-            }
-
-            Task {
-                await withTaskCancellationHandler {
-                    // Parks until this task is cancelled; the download completes through
-                    // the observation above, not through this continuation.
-                    await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
-                } onCancel: {
-                    observation.invalidate()
+                func finishOnce(_ result: Result<Data, Error>) {
+                    request.finish()
                     if finished.exchange(true, ordering: .acquiring) == false {
-                        continuation.resume(throwing: CancellationError())
+                        continuation.resume(with: result)
                     }
                 }
+
+                let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
+                    if let error = error {
+                        finishOnce(.failure(error))
+                        return
+                    }
+
+                    guard let httpResponse = response as? HTTPURLResponse,
+                          (200...299).contains(httpResponse.statusCode),
+                          let tempURL = tempURL else {
+                        finishOnce(.failure(URLError(.badServerResponse)))
+                        return
+                    }
+
+                    do {
+                        try FileManager.default.moveItem(at: tempURL, to: destinationURL)
+                        let data = try Data(contentsOf: destinationURL, options: .mappedIfSafe)
+                        finishOnce(.success(data))
+                        try? FileManager.default.removeItem(at: destinationURL)
+                    } catch {
+                        finishOnce(.failure(error))
+                    }
+                }
+
+                var lastUpdateTime = Date()
+                var lastProgressValue: Double = 0
+
+                let observation = task.progress.observe(\.fractionCompleted) { progress, _ in
+                    let currentTime = Date()
+                    let timeSinceLastUpdate = currentTime.timeIntervalSince(lastUpdateTime)
+                    let currentProgress = round(progress.fractionCompleted * 100) / 100
+
+                    if timeSinceLastUpdate >= 0.5 && abs(currentProgress - lastProgressValue) >= 0.01 {
+                        lastUpdateTime = currentTime
+                        lastProgressValue = currentProgress
+
+                        DispatchQueue.main.async {
+                            self.downloadProgress[progressKey] = currentProgress
+                        }
+                    }
+                }
+
+                // Cancelled before the task was installed: never start it.
+                guard request.install(task: task, observation: observation) else {
+                    observation.invalidate()
+                    finishOnce(.failure(CancellationError()))
+                    return
+                }
+                task.resume()
             }
+        } onCancel: {
+            request.cancel()
         }
+    }
+
+    /// Starts a download the user can cancel from the model card.
+    func startDownload(_ model: WhisperModel) {
+        guard downloadTasks[model.name] == nil else { return }
+        downloadTasks[model.name] = Task { [weak self] in
+            await self?.downloadModel(model)
+            self?.downloadTasks[model.name] = nil
+        }
+    }
+
+    func cancelDownload(_ model: WhisperModel) {
+        downloadTasks.removeValue(forKey: model.name)?.cancel()
+    }
+
+    func isDownloading(_ model: WhisperModel) -> Bool {
+        downloadTasks[model.name] != nil
     }
 
     func downloadModel(_ model: WhisperModel) async {
@@ -311,7 +373,7 @@ class WhisperModelManager: ObservableObject {
         let data = try await downloadFileWithProgress(from: url, progressKey: progressKeyMain)
 
         let destinationURL = modelsDirectory.appendingPathComponent(model.filename)
-        try data.write(to: destinationURL)
+        try data.write(to: destinationURL, options: .atomic)
 
         // Reject a tampered/corrupt download before whisper.cpp ever parses it.
         if !ModelIntegrity.verify(fileURL: destinationURL, expectedSHA256: ModelIntegrity.whisperSHA256[model.name]) {
@@ -328,7 +390,7 @@ class WhisperModelManager: ObservableObject {
         let coreMLData = try await downloadFileWithProgress(from: url, progressKey: progressKeyCoreML)
 
         let coreMLZipPath = modelsDirectory.appendingPathComponent("\(model.name)-encoder.mlmodelc.zip")
-        try coreMLData.write(to: coreMLZipPath)
+        try coreMLData.write(to: coreMLZipPath, options: .atomic)
 
         return try await unzipAndSetupCoreMLModel(for: model, zipPath: coreMLZipPath, progressKey: progressKeyCoreML)
     }
@@ -416,6 +478,14 @@ class WhisperModelManager: ObservableObject {
     private func handleModelDownloadError(_ model: WhisperModel, _ error: Error) {
         self.downloadProgress.removeValue(forKey: model.name + "_main")
         self.downloadProgress.removeValue(forKey: model.name + "_coreml")
+        if error is CancellationError || (error as? URLError)?.code == .cancelled {
+            // A cancel can land between the main model and its Core ML encoder; drop both so a
+            // half-installed model is not picked up on the next launch.
+            try? FileManager.default.removeItem(at: modelsDirectory.appendingPathComponent(model.filename))
+            try? FileManager.default.removeItem(at: modelsDirectory.appendingPathComponent("\(model.name)-encoder.mlmodelc.zip"))
+            logger.notice("Download cancelled for \(model.name, privacy: .public)")
+            return
+        }
         downloadErrors[model.name] = error.localizedDescription
         logError("Download failed for \(model.name)", error)
     }

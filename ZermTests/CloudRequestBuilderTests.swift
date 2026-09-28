@@ -79,6 +79,7 @@ struct CloudRequestBuilderTests {
         #expect(items.first { $0.name == "model" }?.value == "nova-3")
         #expect(items.first { $0.name == "language" }?.value == "multi")
         #expect(items.filter { $0.name == "keyterm" }.map(\.value) == ["Zerm", "Arcusis"])
+        #expect(items.first { $0.name == "mip_opt_out" }?.value == "true")
         #expect(!items.contains { $0.name == "prompt" })
         #expect(urlRequest.value(forHTTPHeaderField: "Authorization") == "Token test-key")
         #expect(urlRequest.httpBody == Data("RIFFfake".utf8))

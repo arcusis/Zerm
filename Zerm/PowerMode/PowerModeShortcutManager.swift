@@ -70,6 +70,7 @@ class PowerModeShortcutManager {
     }
 
     private func canProcessHotkeyAction(engine: ZermEngine) -> Bool {
+        UserSessionInputPolicy.allowsShortcutHandling &&
         engine.recordingState != .transcribing &&
         engine.recordingState != .enhancing &&
         engine.recordingState != .busy
