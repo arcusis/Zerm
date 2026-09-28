@@ -38,6 +38,10 @@ check:
 
 healthcheck: check
 
+# whisper.cpp and llama.cpp package seven Apple platform slices; Zerm links only macOS.
+# Build just that slice from the upstream recipe (see scripts/macos-only-xcframework.py).
+MACOS_ONLY_XCFRAMEWORK = python3 $(CURDIR)/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh && bash build-xcframework-macos.sh
+
 # Build process
 whisper:
 	@mkdir -p $(DEPS_DIR)
@@ -49,7 +53,7 @@ whisper:
 			(cd $(WHISPER_CPP_DIR) && git fetch origin); \
 		fi; \
 		(cd $(WHISPER_CPP_DIR) && git checkout --quiet $(WHISPER_COMMIT)); \
-		cd $(WHISPER_CPP_DIR) && ./build-xcframework.sh; \
+		cd $(WHISPER_CPP_DIR) && $(MACOS_ONLY_XCFRAMEWORK); \
 	else \
 		echo "whisper.xcframework already built in $(DEPS_DIR), skipping build"; \
 	fi
@@ -86,7 +90,7 @@ llama:
 			(cd $(LLAMA_DIR) && git fetch origin); \
 		fi; \
 		(cd $(LLAMA_DIR) && git checkout --quiet $(LLAMA_COMMIT)); \
-		cd $(LLAMA_DIR) && ./build-xcframework.sh; \
+		cd $(LLAMA_DIR) && $(MACOS_ONLY_XCFRAMEWORK); \
 	else \
 		echo "llama.xcframework already built, skipping"; \
 	fi

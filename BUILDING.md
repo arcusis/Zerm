@@ -182,9 +182,12 @@ If you prefer to build manually or need more control over the build process, fol
 ```bash
 git clone https://github.com/ggerganov/whisper.cpp.git
 cd whisper.cpp
-./build-xcframework.sh
+python3 /path/to/Zerm/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh
+bash build-xcframework-macos.sh
 ```
-This will create the XCFramework at `build-apple/whisper.xcframework`.
+This will create the XCFramework at `build-apple/whisper.xcframework`. The transform builds only
+the macOS slice Zerm links; upstream's `./build-xcframework.sh` also works but builds six extra
+iOS, visionOS and tvOS slices. `make whisper` and `make llama` do this for you.
 
 ### Building Zerm
 
