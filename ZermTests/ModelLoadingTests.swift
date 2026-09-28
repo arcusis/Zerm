@@ -154,6 +154,16 @@ struct ModelLoadingTests {
 
 struct ParakeetLanguageTests {
 
+    /// Parakeet Ultra is a v3 derivative: same languages and live text, its own model files (#353).
+    @Test func parakeetUltraLoadsAsItsOwnVersionWithV3Capabilities() throws {
+        #expect(String(describing: FluidAudioModelManager.asrVersion(for: "parakeet-tdt-0.6b-ultra")) == "ultra")
+        let ultra = try #require(TranscriptionModelRegistry.models.first { $0.name == "parakeet-tdt-0.6b-ultra" })
+        let v3 = try #require(TranscriptionModelRegistry.models.first { $0.name == "parakeet-tdt-0.6b-v3" })
+        #expect(ultra.supportsStreaming)
+        #expect(ultra.isMultilingualModel)
+        #expect(ultra.supportedLanguages == v3.supportedLanguages)
+    }
+
     @Test func parakeetV3IsMultilingualWithItsEuropeanLanguages() {
         let languages = LanguageDictionary.forProvider(isMultilingual: true, provider: .fluidAudio)
         #expect(languages.count == 26)

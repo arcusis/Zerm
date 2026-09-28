@@ -38,6 +38,7 @@ class FluidAudioModelManager: ObservableObject {
     nonisolated static let modelVersionMap: [String: AsrModelVersion] = [
         "parakeet-tdt-ctc-110m": .tdtCtc110m,
         "parakeet-tdt-0.6b-v3": .v3,
+        "parakeet-tdt-0.6b-ultra": .ultra,
     ]
 
     /// Parakeet Unified is an RNNT model with its own manager, not a TDT version.

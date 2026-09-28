@@ -35,6 +35,7 @@ network — dictation keeps working on a plane.
 | --- | --- | --- | --- |
 | Parakeet Unified | 614 MB | English only | The best English model for most Apple Silicon Macs. |
 | Parakeet 110M | 228 MB | English only | Small and very fast. Leaves memory free on 8 GB Macs. |
+| Parakeet Ultra | 595 MB | English + 25 European languages | A post-trained Parakeet V3: same languages and speed, fewer errors, most of all outside English. Supports real-time streaming. No Hebrew. |
 | Parakeet V3 | 494 MB | English + 25 European languages | Detects the language itself. Supports real-time streaming. No Hebrew. |
 | Large v3 Turbo | 1.5 GB | Multilingual | Whisper. The most accurate general multilingual model. |
 | Large v3 Turbo (Quantized) | 547 MB | Multilingual | Nearly the same accuracy for a third of the disk. |
@@ -66,8 +67,9 @@ required, with a button to start it.
 
 With streaming, text appears in the recorder while you are still talking.
 
-- **Parakeet V3** is the local model that streams. Its card has a **Real-time** switch,
-  on by default once the model is downloaded.
+- **Parakeet Ultra** and **Parakeet V3** are the local models that stream. Their cards have
+  a **Real-time** switch, on by default once the model is downloaded. With voice activity
+  detection on, the live preview skips its passes while you pause.
 - **Cloud models** marked **Streaming** get the same **Real-time** switch once their key
   is configured.
 - **Show Live Text Preview**, in Model Settings, decides whether the recorder shows that
