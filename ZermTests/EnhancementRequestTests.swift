@@ -383,3 +383,19 @@ private extension EnhancementOutcome {
         return nil
     }
 }
+
+/// The Email template formats; it must neither translate nor be rejected for its greeting (#370).
+struct EmailTemplateLanguageTests {
+    @Test func emailTemplateKeepsTheScriptGuard() throws {
+        let email = try #require(PromptTemplates.all.first { $0.title == "Email" })
+        #expect(!email.allowsLanguageChange)
+    }
+
+    @Test func aTypicalEmailRewriteIsAcceptedAndAnArabicOneIsNot() {
+        let dictated = "תגיד לדנה שהפגישה עברה ליום חמישי בשלוש"
+        let email = "היי דנה,\n\nרציתי לעדכן שהפגישה עברה ליום חמישי בשעה 15:00.\n\nתודה"
+        #expect(EnhancementLanguageGuard.rejection(original: dictated, enhanced: email, policy: .preserveScript) == nil)
+        let arabic = "مرحبا دانا، تم نقل الاجتماع إلى يوم الخميس الساعة الثالثة. شكرا"
+        #expect(EnhancementLanguageGuard.rejection(original: dictated, enhanced: arabic, policy: .preserveScript) == .languageChanged)
+    }
+}
