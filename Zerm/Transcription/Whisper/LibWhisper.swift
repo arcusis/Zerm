@@ -163,6 +163,7 @@ actor WhisperContext {
     }
 
     static func createContext(path: String) async throws -> WhisperContext {
+        HardwareCapability.configureMetalTensorPath()
         // whisper_init_from_file_with_params is a heavy C call (can take 5–30s for large
         // models). Running it on the main actor freezes the entire UI. Load the raw C
         // context on a background thread, then hand it back to the actor.

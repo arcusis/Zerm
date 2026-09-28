@@ -64,10 +64,10 @@
 		E11473C32CBE0F0B00318EE4 /* ZermTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZermTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E11473CD2CBE0F0B00318EE4 /* ZermUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZermUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E161D4A02F41ECB90086F83D /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
-		E1A0BD052EB1E7B800266859 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "$(HOME)/Zerm-Dependencies/whisper.cpp/build-apple/whisper.xcframework"; sourceTree = "<group>"; };
-		D7A1C0DE0000000000000002 /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "$(HOME)/Zerm-Dependencies/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"; sourceTree = "<group>"; };
-		D7A1C0DE0000000000000004 /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "onnxruntime.xcframework"; path = "$(HOME)/Zerm-Dependencies/sherpa-onnx/build-swift-macos/onnxruntime.xcframework"; sourceTree = "<group>"; };
-		D7A1C0DE0000000000000007 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = "$(HOME)/Zerm-Dependencies/llama/build-apple/llama.xcframework"; sourceTree = "<group>"; };
+		E1A0BD052EB1E7B800266859 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "$(ZERM_DEPS_DIR)/whisper.cpp/build-apple/whisper.xcframework"; sourceTree = "<group>"; };
+		D7A1C0DE0000000000000002 /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "$(ZERM_DEPS_DIR)/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"; sourceTree = "<group>"; };
+		D7A1C0DE0000000000000004 /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "onnxruntime.xcframework"; path = "$(ZERM_DEPS_DIR)/sherpa-onnx/build-swift-macos/onnxruntime.xcframework"; sourceTree = "<group>"; };
+		D7A1C0DE0000000000000007 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = "$(ZERM_DEPS_DIR)/llama/build-apple/llama.xcframework"; sourceTree = "<group>"; };
 		D7A1C0DE0000000000000012 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		E1B2DCAA2E3DE70A008DFD68 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "../whisper.cpp/build-apple/whisper.xcframework"; sourceTree = "<group>"; };
 		E1CE28772E4336150082B758 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = whisper.xcframework; path = "../build-apple/whisper.xcframework"; sourceTree = "<group>"; };
@@ -379,6 +379,7 @@
 		E11473D52CBE0F0B00318EE4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ZERM_DEPS_DIR = "$(HOME)/Zerm-Dependencies";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -442,6 +443,7 @@
 		E11473D62CBE0F0B00318EE4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ZERM_DEPS_DIR = "$(HOME)/Zerm-Dependencies";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;

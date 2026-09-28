@@ -31,6 +31,7 @@ actor LlamaEngine {
 
     /// Loads the model without generating, so the first real request is fast.
     func warmUp() throws {
+        HardwareCapability.configureMetalTensorPath()
         guard bridge.load() else { throw LlamaError.loadFailed }
     }
 
