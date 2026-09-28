@@ -31,6 +31,9 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     // One failed preview pass is not a failed stream: the next pass covers the same audio, and the
     // committed text comes from its own pass. Only repeated failures end the live preview.
     private var consecutivePassFailures = 0
+    /// Skips preview passes over pauses. Owned here rather than shared with the batch service,
+    /// whose lazily created manager is not safe to reach from this loop.
+    private var vadManager: VadManager?
     private let maxConsecutivePassFailures = 3
 
     private func withBufferLock<T>(_ body: () throws -> T) rethrows -> T {
@@ -72,6 +75,9 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         agreementEngine.reset()
         withBufferLock { audioBuffer = [] }
         lastTranscribedSampleCount = 0
+        if UserDefaults.standard.bool(forKey: "IsVADEnabled") {
+            vadManager = try? await VadManager(config: VadConfig(defaultThreshold: 0.7))
+        }
 
         startTranscriptionLoop()
 
@@ -113,6 +119,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
 
         await asrManager?.cleanup()
         asrManager = nil
+        vadManager = nil
         decoderLayerCount = 0
 
         withBufferLock { audioBuffer = [] }
@@ -152,6 +159,16 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
 
         isTranscribing = true
         defer { isTranscribing = false }
+
+        // Nothing said since the last pass cannot change the preview; skip the model run. A missed
+        // word onset is covered by the next pass, which starts from the unconfirmed words.
+        if let vadManager {
+            let newAudio = withBufferLock { Array(audioBuffer[lastTranscribedSampleCount..<sampleCount]) }
+            if let segments = try? await vadManager.segmentSpeechAudio(newAudio), segments.isEmpty {
+                lastTranscribedSampleCount = sampleCount
+                return
+            }
+        }
 
         // Seek to the start of the first unconfirmed word so it isn't clipped.
         let seekTime = agreementEngine.hypothesisStartTime > 0

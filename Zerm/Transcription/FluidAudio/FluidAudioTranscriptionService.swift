@@ -102,22 +102,14 @@ class FluidAudioTranscriptionService: TranscriptionService {
             throw ASRError.notInitialized
         }
 
-        let durationSeconds = Double(audioSamples.count) / 16000.0
         let isVADEnabled = UserDefaults.standard.bool(forKey: "IsVADEnabled")
 
+        // Silence is cut at every length: on a fixed corpus of short clips, pauses and pure
+        // silence this changed no word and ran faster (#353). When VAD finds no speech the full
+        // audio is still transcribed, so a missed quiet phrase is never dropped.
         var speechAudio = audioSamples
-        if durationSeconds >= 20.0, isVADEnabled {
-            let vadConfig = VadConfig(defaultThreshold: 0.7)
-            if vadManager == nil {
-                do {
-                    vadManager = try await VadManager(config: vadConfig)
-                } catch {
-                    logger.notice("VAD init failed; falling back to full audio: \(error.localizedDescription, privacy: .public)")
-                    vadManager = nil
-                }
-            }
-
-            if let vadManager {
+        if isVADEnabled {
+            if let vadManager = await loadedVADManager() {
                 do {
                     let segments = try await vadManager.segmentSpeechAudio(audioSamples)
                     speechAudio = segments.isEmpty ? audioSamples : segments.flatMap { $0 }
@@ -151,6 +143,16 @@ class FluidAudioTranscriptionService: TranscriptionService {
             let result = try await reloadedManager.transcribe(speechAudio, decoderState: &retryDecoderState)
             return result.text
         }
+    }
+
+    private func loadedVADManager() async -> VadManager? {
+        if let vadManager { return vadManager }
+        do {
+            vadManager = try await VadManager(config: VadConfig(defaultThreshold: 0.7))
+        } catch {
+            logger.notice("VAD init failed; falling back to full audio: \(error.localizedDescription, privacy: .public)")
+        }
+        return vadManager
     }
 
     /// Forces a fresh model reload from disk, discarding cached (possibly stale) CoreML handles. (VoiceInk #614)

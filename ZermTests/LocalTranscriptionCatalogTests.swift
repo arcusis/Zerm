@@ -21,6 +21,7 @@ struct LocalTranscriptionCatalogTests {
             "apple-speech",
             "parakeet-unified-en-0.6b",
             "parakeet-tdt-ctc-110m",
+            "parakeet-tdt-0.6b-ultra",
             "parakeet-tdt-0.6b-v3",
             "ggml-large-v3-turbo",
             "ggml-large-v3-turbo-q5_0",
@@ -243,9 +244,10 @@ struct LocalTranscriptionCatalogTests {
 
     @Test func appleSilicon8GBStaysLight() {
         let result = picks(Profile(isAppleSilicon: true, physicalMemoryGB: 8, hasAppleSpeech: false))
+        // Parakeet Ultra: V3's memory and languages, fewer errors.
         #expect(result == [
             .english: "parakeet-tdt-ctc-110m",
-            .multilingual: "parakeet-tdt-0.6b-v3",
+            .multilingual: "parakeet-tdt-0.6b-ultra",
             .hebrew: "ivrit-large-v3-turbo"
         ])
     }
