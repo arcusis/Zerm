@@ -1,27 +1,17 @@
----
-title: Clipboard history
-eyebrow: Privacy
-summary: How Zerm captures, stores, and exports clipboard copies on this Mac.
----
+# Clipboard History
 
-Zerm keeps clipboard history on this Mac. Capture starts enabled; saving dictated text is
-optional and off by default. History can be paused, and password-manager apps are excluded
-by default. Confidential and transient pasteboard markers have separate controls.
+Clipboard History keeps copied items in an encrypted local store. It supports text, rich text, images, files, links, and other pasteboard content. Image text and QR or barcode values are indexed for search and shown in item details.
 
-History index and payloads are encrypted at rest with AES-GCM. The key stays in this Zerm
-installation's Keychain. Pinned items bypass age and count retention. Clearing history can
-keep pinned items, favourites, and tagged items. Optional clear-on-quit and clear-on-restart
-settings remove stored entries; restart detection compares the system boot time saved at the
-previous launch.
+## Open and search
 
-Export creates a ZIP archive with a versioned JSON index and one JSON representation blob per
-item. It preserves item metadata, titles, pins, favourites, collection membership, and favourite
-order. Import merges entries by content hash. An optional password encrypts the ZIP payload with
-PBKDF2-HMAC-SHA256 and AES-GCM; without a password, the ZIP is unencrypted and should be stored
-accordingly.
+Open the floating panel with **Shift-Command-V** or choose **Open Clipboard History** from the menu bar. The shortcut can be changed in Settings. Search matches item text, titles, source apps, tags, OCR text, and QR or barcode values. Add `kind:`, `app:`, or `tag:` tokens to filter results.
 
-Retention choices can be set per content kind and are stored in settings. Per-kind enforcement
-will connect when the history engine work lands; the current engine enforces the overall age and
-count limits. The history panel is being built separately. Its open shortcut and menu entry call
-a connection stub until that panel is merged. The Paste Next shortcuts likewise forward through
-a marked runtime hook for the history engine integration.
+Select one or more items to paste, copy, merge, or delete them. The command palette opens with **Command-K**. It includes text transforms, editing, splitting text into lines, tag actions, pinning, favourite ordering, paste-sequence controls, and history clearing. Transforms save their result as a new item.
+
+Panel settings control its position, paste-on-click and double-click behavior, quick-paste badges, favourite ordering, and confirmation before clearing. The Details pane shows source app, dates, size, tags, and recognized image text.
+
+## Settings and privacy
+
+Clipboard History can be paused from Settings or the menu bar. Settings control which apps and confidential or transient content are ignored, whether dictated text is saved, and retention by item kind. Pinned, favourited, and tagged items can be protected from cleanup or clearing.
+
+Export writes a ZIP archive. An optional password encrypts the archive; without one, the archive is unencrypted. Import merges archive entries into the current history.

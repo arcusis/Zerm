@@ -8,10 +8,11 @@ final class ClipboardHistoryRuntime {
 
     let store: ClipboardHistoryStore?
     private let monitor: ClipboardMonitor?
-    private var cleanupTimer: Timer?
+    private(set) var cleanupTimer: Timer?
     private var didInstallHandlers = false
     private var didInstallLifecycleHooks = false
     private static let bootTimeKey = "clipboardHistorySystemBootTime"
+    static let openShortcutNames: [KeyboardShortcuts.Name] = [.openClipboardHistory]
 
     nonisolated static func didSystemRestart(previousBootTime: TimeInterval?, currentBootTime: TimeInterval) -> Bool {
         guard let previousBootTime else { return false }
@@ -32,15 +33,24 @@ final class ClipboardHistoryRuntime {
         }
     }
 
+    init(store: ClipboardHistoryStore?, monitor: ClipboardMonitor?) {
+        self.store = store
+        self.monitor = monitor
+    }
+
     func start() {
         monitor?.start()
         detectRestartAndStoreBootTime()
         installLifecycleHooks()
         installShortcutHandlers()
-        cleanupTimer?.invalidate()
+        startCleanupTimer()
+    }
+
+    func startCleanupTimer() {
+        guard cleanupTimer == nil, store != nil else { return }
         cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
             guard let store = self?.store else { return }
-            Task { try? await store.cleanupRetention() }
+            Task { try? await store.cleanupExpired() }
         }
     }
 
@@ -89,9 +99,16 @@ final class ClipboardHistoryRuntime {
         Task { try? await store.recordDictation(text) }
     }
 
-    /// Forwarding point for task C's paste-stack API.
-    func pasteNextClipboardItem(formatted: Bool) async {
-        // Reviewer: forward this call to task C's store paste-next API when it lands.
+    /// Pastes the next item of the paste sequence; formatted keeps the original representations.
+    func pasteNextClipboardItem(
+        formatted: Bool,
+        operation: ClipboardHistoryPasteOperation? = nil
+    ) async -> ClipboardItem? {
+        guard let store else { return nil }
+        if formatted {
+            return try? await store.pasteNextFormatted(operation: operation)
+        }
+        return try? await store.pasteNext(asPlainText: true, operation: operation)
     }
 
     private func detectRestartAndStoreBootTime() {
@@ -130,8 +147,10 @@ final class ClipboardHistoryRuntime {
     private func installShortcutHandlers() {
         guard !didInstallHandlers else { return }
         didInstallHandlers = true
-        KeyboardShortcuts.onKeyUp(for: .openClipboardHistory) {
-            ClipboardHistoryPanelEntry.show()
+        for name in Self.openShortcutNames {
+            KeyboardShortcuts.onKeyUp(for: name) {
+                Task { @MainActor in ClipboardHistoryPanelEntry.show() }
+            }
         }
         KeyboardShortcuts.onKeyUp(for: .pauseClipboardHistory) { [weak self] in
             self?.togglePause()
