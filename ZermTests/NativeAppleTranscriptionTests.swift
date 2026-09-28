@@ -105,3 +105,23 @@ private actor CancellationProbe {
     private(set) var value = false
     func markCancelled() { value = true }
 }
+
+/// Dictation passes base language codes, which must reach Apple Speech as a locale of that
+/// language, and never as another language (#370).
+struct NativeAppleOverrideLanguageTests {
+    @Test func aBaseLanguageOverrideGetsALocaleOfThatLanguage() throws {
+        #expect(try NativeAppleTranscriptionService.overrideLocale("he", supportedIdentifiers: ["ar-SA", "en-US", "he-IL"]) == "he-IL")
+        #expect(try NativeAppleTranscriptionService.overrideLocale("ru", supportedIdentifiers: ["en-US", "ru-RU"]) == "ru-RU")
+    }
+
+    @Test func anUnsupportedLanguageIsRefusedNotReplaced() {
+        #expect(throws: NativeAppleTranscriptionService.ServiceError.self) {
+            try NativeAppleTranscriptionService.overrideLocale("he", supportedIdentifiers: ["ar-SA", "en-US"])
+        }
+    }
+
+    @Test func autoOverrideResolvesInsteadOfFailing() throws {
+        let resolved = try NativeAppleTranscriptionService.overrideLocale(LanguagePreference.autoCode, supportedIdentifiers: ["en-US"])
+        #expect(resolved == "en-US")
+    }
+}

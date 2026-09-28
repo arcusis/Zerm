@@ -107,9 +107,12 @@ Each of these can stay on **Use global setting** or be set for the mode.
 **Model.** A mode used for quick replies can run a small local model while a mode used
 for long-form dictation runs a large one. See [models](models.html).
 
-**Language.** Pin the language you will actually speak in that app. Auto is for modes
-where you switch. Pinning Hebrew and then speaking English produces broken Hebrew — that
-is the speech model doing what it was told.
+**Language.** **Use global setting** follows the language on the models screen. Pin a
+language you will actually speak in that app. **Auto-detect (overrides Settings)** makes
+the model guess in that mode's apps even when Settings names one language; on short
+phrases it can guess a neighbouring language, such as Arabic for Hebrew. Pinning Hebrew
+and then speaking English produces broken Hebrew — that is the speech model doing what it
+was told.
 
 ### Text
 

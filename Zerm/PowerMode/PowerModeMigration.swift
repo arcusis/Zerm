@@ -43,6 +43,33 @@ enum PowerModeMigration {
         defaults.set(1, forKey: completionKey)
     }
 
+    // MARK: - Stored Auto-detect language
+
+    static let autoLanguageCompletionKey = "ZermPowerModeAutoLanguageMigrationVersion"
+
+    /// Clears a stored "auto" language from every Power Mode, once (#370).
+    ///
+    /// 2.8.5 froze the global language into each config, often "auto", and the 2.8.6 migration kept
+    /// any frozen value that differed from the global language at that moment. Such a config,
+    /// usually the default mode that applies everywhere, then overrode a language fixed later in
+    /// Settings: a user who set Hebrew still got auto-detect, which Whisper can resolve to Arabic.
+    /// Clearing it makes the mode follow Settings again. A fixed language in a mode is kept.
+    static func clearStoredAutoLanguage(defaults: UserDefaults = .standard) {
+        guard defaults.integer(forKey: autoLanguageCompletionKey) < 1 else { return }
+        defer { defaults.set(1, forKey: autoLanguageCompletionKey) }
+        guard let data = defaults.data(forKey: PowerModeManager.configKey),
+              var configs = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return }
+
+        var cleared = 0
+        for index in configs.indices where configs[index]["selectedLanguage"] as? String == LanguagePreference.autoCode {
+            configs[index]["selectedLanguage"] = NSNull()
+            cleared += 1
+        }
+        guard cleared > 0, let newData = try? JSONSerialization.data(withJSONObject: configs) else { return }
+        defaults.set(newData, forKey: PowerModeManager.configKey)
+        logger.notice("Cleared a stored Auto-detect language from \(cleared, privacy: .public) Power Mode configurations")
+    }
+
     // MARK: - Abandoned session
 
     /// Writes an interrupted session's snapshot back to the global keys it came from.

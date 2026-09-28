@@ -109,7 +109,11 @@ class CloudTranscriptionService: TranscriptionService {
         defaults: UserDefaults = .standard
     ) -> CloudTranscriptionRequest {
         let capabilities = model.capabilities
-        let language = LanguagePreference.apiLanguage(defaults: defaults)
+        let selected = LanguagePreference.apiLanguage(defaults: defaults)
+        let language = model.requestLanguage(for: selected)
+        if let selected, language == nil {
+            DebugLogger.shared.log("Transcription", "\(model.displayName) does not support \(selected); letting it detect the language")
+        }
         return CloudTranscriptionRequest(
             audioData: audioData,
             fileName: fileName,

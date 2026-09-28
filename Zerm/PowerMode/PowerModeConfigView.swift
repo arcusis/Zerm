@@ -343,7 +343,13 @@ struct ConfigurationView: View {
                                 if $1.key == "auto" { return false }
                                 return $0.value < $1.value
                             }), id: \.key) { key, value in
-                                Text(verbatim: FileTranscriptionOptionsView.languageName(key, for: modelInfo)).tag(key as String?)
+                                // Auto-detect here replaces a language fixed in Settings for this
+                                // mode's apps; say so, it read like "use the global setting" (#370).
+                                if key == LanguagePreference.autoCode {
+                                    Text("Auto-detect (overrides Settings)").tag(key as String?)
+                                } else {
+                                    Text(verbatim: FileTranscriptionOptionsView.languageName(key, for: modelInfo)).tag(key as String?)
+                                }
                             }
                         } label: {
                             HStack(spacing: 4) {

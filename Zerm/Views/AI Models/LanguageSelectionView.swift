@@ -50,6 +50,21 @@ struct LanguageSelectionView: View {
         return currentModel.supportedLanguages
     }
 
+    /// Shown when the language chosen for dictation is not one this model lists: the model is then
+    /// left to detect the language, and one that lists Arabic but not Hebrew wrote Hebrew as Arabic.
+    @ViewBuilder
+    private func unsupportedLanguageWarning(for model: any TranscriptionModel) -> some View {
+        if !model.supportsLanguage(selectedLanguage) {
+            Label(
+                String(localized: "\(model.displayName) does not support \(LanguageDictionary.displayName(for: selectedLanguage)), so it detects the language itself. Choose a model that supports it."),
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // Get the display name of the current language
     private func currentLanguageDisplayName() -> String {
         guard getCurrentModelLanguages()[selectedLanguage] != nil else { return String(localized: "Unknown") }
@@ -96,8 +111,9 @@ struct LanguageSelectionView: View {
                         Text("The transcription language is automatically detected by the model.")
                             .font(.caption)
                             .foregroundColor(.secondary)
+
+                        unsupportedLanguageWarning(for: currentModel)
                     }
-                    .disabled(true)
                 } else if isMultilingualModel() {
                     VStack(alignment: .leading, spacing: 8) {
                         Picker(selection: $selectedLanguage) {
@@ -129,6 +145,8 @@ struct LanguageSelectionView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
+                        unsupportedLanguageWarning(for: currentModel)
+
                         if currentModel.isHebrewOptimized {
                             Text("Tuned for Hebrew: Auto-detect transcribes Hebrew and keeps English words. Choose English only for English-only dictation.")
                                 .font(.caption)
@@ -158,10 +176,8 @@ struct LanguageSelectionView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     }
-                    .onAppear {
-                        // Ensure English is set when viewing English-only model
-                        updateLanguage("en")
-                    }
+                    // Viewing an English-only model must not overwrite the language: switching back
+                    // to a multilingual model then forced Hebrew or Russian speech to English (#370).
                 }
             } else {
                 Text("No model selected")
@@ -223,10 +239,6 @@ struct LanguageSelectionView: View {
                         .foregroundColor(.secondary)
                 }
                 .disabled(true)
-                .onAppear {
-                    // Ensure English is set for English-only models
-                    updateLanguage("en")
-                }
             }
         }
     }

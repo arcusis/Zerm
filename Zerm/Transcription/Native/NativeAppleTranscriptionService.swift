@@ -43,19 +43,22 @@ class NativeAppleTranscriptionService: TranscriptionService {
             ?? localeIdentifier
     }
 
-    /// A per-operation language override must already be a concrete supported locale; it is
-    /// never reinterpreted against the current machine locale.
+    /// A per-operation language override is honored as given: a full locale must be supported
+    /// exactly, a base language ("he", as every dictation passes it) gets a supported locale of that
+    /// language, and Auto resolves as usual. It is never replaced by another language (#370).
     static func overrideLocale(
         _ localeIdentifier: String,
         supportedIdentifiers: [String]
     ) throws -> String {
-        guard let exact = SpeechLocaleResolver.exactLocaleCode(
-            requestedCode: localeIdentifier,
-            supportedIdentifiers: supportedIdentifiers
-        ) else {
-            throw ServiceError.localeNotSupported
+        if localeIdentifier == LanguagePreference.autoCode {
+            return SpeechLocaleResolver.localeCode(requestedCode: localeIdentifier, supportedIdentifiers: supportedIdentifiers)
         }
-        return exact
+        let isFullLocale = localeIdentifier.contains("-") || localeIdentifier.contains("_")
+        let resolved = isFullLocale
+            ? SpeechLocaleResolver.exactLocaleCode(requestedCode: localeIdentifier, supportedIdentifiers: supportedIdentifiers)
+            : SpeechLocaleResolver.sameLanguageLocaleCode(requestedCode: localeIdentifier, supportedIdentifiers: supportedIdentifiers)
+        guard let resolved else { throw ServiceError.localeNotSupported }
+        return resolved
     }
 
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
