@@ -31,17 +31,25 @@ Cards carry badges for what matters when choosing: **Streaming**, **Speaker labe
 Local models download once and then run entirely on your Mac. No key, no account, no
 network — dictation keeps working on a plane.
 
-| Model | Size | Languages | Notes |
+| Model family | Size | Languages | Notes |
 | --- | --- | --- | --- |
-| Parakeet Unified | 614 MB | English only | The best English model for most Apple Silicon Macs. |
-| Parakeet 110M | 228 MB | English only | Small and very fast. Leaves memory free on 8 GB Macs. |
-| Parakeet Ultra | 595 MB | English + 25 European languages | A post-trained Parakeet V3: same languages and speed, fewer errors, most of all outside English. Supports real-time streaming. No Hebrew. |
-| Parakeet V3 | 494 MB | English + 25 European languages | Detects the language itself. Supports real-time streaming. No Hebrew. |
-| Large v3 Turbo | 1.5 GB | Multilingual | Whisper. The most accurate general multilingual model. |
-| Large v3 Turbo (Quantized) | 547 MB | Multilingual | Nearly the same accuracy for a third of the disk. |
-| ivrit.ai Large v3 Turbo | 1.6 GB | Hebrew and English | Whisper tuned for Hebrew by ivrit.ai. |
-| ivrit.ai Large v3 | 3.1 GB | Hebrew and English | Slower and more accurate. Needs a Mac with 24 GB of memory or more. |
+| Sherpa-ONNX Moonshine Tiny EN | 103 MB | English only | Useful Sensors model converted to ONNX. |
+| Sherpa-ONNX Moonshine Base EN | 239 MB | English only | Useful Sensors model converted to ONNX. |
+| Sherpa-ONNX Zipformer Russian | 58 MB | Russian | Vosk model converted to Zipformer ONNX. |
+| Parakeet Unified | 614 MB | English only | Best English model for most Apple Silicon Macs. |
+| Parakeet 110M | 228 MB | English only | Small and fast. |
+| Parakeet TDT v2 | 1.2 GB | English only | NVIDIA model through FluidAudio. |
+| Parakeet Ultra / V3 | 595 / 494 MB | English + 25 European languages | Support real-time streaming. No Hebrew. |
+| Parakeet Redux | 220 MB | English + 25 European languages | Compact streaming model. **Requires macOS 15 or later.** No Hebrew. |
+| Whisper Tiny, Base, Small, Medium, Large v2/v3, and Large v3 Turbo | 75 MB–3.1 GB | Multilingual | Official ggml-org conversions of OpenAI Whisper. English-only variants available for Tiny, Base, Small, and Medium. |
+| Whisper quantized variants | 44 MB–1.7 GB | Matches base model | ggml-org Q5_0 and Q8_0 files where published. Smaller files use less storage and may trade some accuracy. |
+| Distil-Whisper Large v3 | 1.5 GB | English only | Official ggml release for whisper.cpp. |
+| ivrit.ai Large v3 Turbo / Large v3 | 1.6 / 3.1 GB | Hebrew and English | Whisper tuned for Hebrew by ivrit.ai. Large v3 needs a Mac with 24 GB of memory or more. |
 | Apple Speech | — | Multilingual | Built into macOS. Nothing to download. **Requires macOS 26.** |
+
+Earlier versions retired Whisper Tiny, Base, and Small variants and Parakeet TDT v2. Those
+models are offered again; the retired-model cleanup migration is disabled and preserves
+existing selections and files.
 
 **Parakeet** runs through FluidAudio and needs Apple Silicon. **Whisper** models run on
 `whisper.cpp`, and you can import your own fine-tuned one — see
@@ -52,22 +60,23 @@ Choose English only when you will dictate nothing but English.
 
 **Apple Speech** offers Hebrew only if your copy of macOS reports that it supports it.
 
-### Retired models
+### Sources and licenses
 
-Whisper Tiny, Base, and Small (including the English variants) and Parakeet V2 are no
-longer offered. If you were using one, Zerm moves you — and any
-[Power Mode](power-mode.html) that pinned it — to its replacement: Parakeet Unified for
-the English models on Apple Silicon, Large v3 Turbo (Quantized) otherwise. The old files
-are deleted.
+Each downloadable local model card includes its creator, official model card and download
+source, license, required credit, and conversion or quantization credit. Whisper downloads
+are pinned to official ggml-org or ivrit.ai files and verified against SHA-256. Parakeet
+models use FluidAudio's official Core ML model packages. Sherpa-ONNX model cards link to the
+upstream model page and list sherpa-onnx as the ONNX converter.
 
-The replacement is not downloaded for you. The Default Model card says a download is
-required, with a button to start it.
+Before the first download, Zerm shows a third-party model notice with creator, source, license,
+and attribution. Downloads show progress and support pause, resume, cancel, and delete. Choose
+**Model credits** to review attribution and open source and license links for installed models.
 
 ## Streaming and live preview
 
 With streaming, text appears in the recorder while you are still talking.
 
-- **Parakeet Ultra** and **Parakeet V3** are the local models that stream. Their cards have
+- **Parakeet Ultra**, **Parakeet Redux** (macOS 15+), and **Parakeet V3** are the local models that stream. Their cards have
   a **Real-time** switch, on by default once the model is downloaded. With voice activity
   detection on, the live preview skips its passes while you pause.
 - **Cloud models** marked **Streaming** get the same **Real-time** switch once their key

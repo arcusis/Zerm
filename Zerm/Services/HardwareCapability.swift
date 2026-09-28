@@ -190,6 +190,10 @@ enum HardwareCapability {
     }
 
     static func canRun(_ model: any LocalTranscriptionModel, on profile: Profile) -> Bool {
+        if let fluidAudioModel = model as? FluidAudioModel,
+           !FluidAudioModelManager.isModelAvailable(fluidAudioModel.name) {
+            return false
+        }
         switch model.runtime {
         case .whisperCpp: return true
         case .fluidAudio: return profile.isAppleSilicon

@@ -63,6 +63,9 @@ Hebrew/English selection is not rewritten as all-Hebrew.
 
 **Kokoro** is the local voice, running on `sherpa-onnx`. It downloads once and then
 works offline, and it is good enough to listen to a long document without fatigue.
+Before its first download, review the source and license notice. Kokoro downloads can be
+paused, resumed, or cancelled; paused transfer data remains available after quitting and
+reopening Zerm.
 
 **Apple System** uses the voices already on the Mac, including Hebrew ones if you have
 installed them.

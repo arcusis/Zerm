@@ -7,6 +7,7 @@ struct FluidAudioModelCardView: View {
     @ObservedObject var fluidAudioModelManager: FluidAudioModelManager
     @ObservedObject var transcriptionModelManager: TranscriptionModelManager
     @State private var streamingEnabled: Bool
+    @State private var isShowingDownloadNotice = false
 
     init(model: FluidAudioModel, fluidAudioModelManager: FluidAudioModelManager, transcriptionModelManager: TranscriptionModelManager) {
         self.model = model
@@ -18,6 +19,12 @@ struct FluidAudioModelCardView: View {
 
     private var streamingDefaultsKey: String {
         "streaming-enabled-\(model.name)"
+    }
+
+    private var downloadButtonTitle: LocalizedStringKey {
+        if isDownloading { return "Downloading..." }
+        if fluidAudioModelManager.downloadErrors[model.name] != nil { return "Retry Download" }
+        return "Download"
     }
 
     var isCurrent: Bool {
@@ -38,6 +45,14 @@ struct FluidAudioModelCardView: View {
                 headerSection
                 metadataSection
                 descriptionSection
+                if model.minimumMacOSMajorVersion != nil {
+                    Label("Requires macOS 15+", systemImage: "info.circle")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Color(.secondaryLabelColor))
+                }
+                if let provenance = model.provenance {
+                    ModelProvenanceDisclosure(provenance: provenance)
+                }
                 if !isDownloaded {
                     HardwareFitNotice(fit: model.hardwareFit)
                 }
@@ -52,6 +67,13 @@ struct FluidAudioModelCardView: View {
         }
         .padding(16)
         .background(CardBackground(isSelected: isCurrent, useAccentGradientWhenSelected: isCurrent))
+        .sheet(isPresented: $isShowingDownloadNotice) {
+            if let provenance = model.provenance {
+                ModelDownloadNoticeView(assetID: model.name, modelName: model.displayName, provenance: provenance) {
+                    startDownload()
+                }
+            }
+        }
     }
 
     private var headerSection: some View {
@@ -112,19 +134,33 @@ struct FluidAudioModelCardView: View {
 
     private var progressSection: some View {
         Group {
-            if isDownloading {
-                let progress = fluidAudioModelManager.downloadProgress[model.name] ?? 0.0
-                ProgressView(value: progress)
-                    .progressViewStyle(LinearProgressViewStyle())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
+            if isDownloading || fluidAudioModelManager.isPaused(model) {
+                let progress = fluidAudioModelManager.downloadProgress[model.name] ?? fluidAudioModelManager.downloadStates[model.name]?.fractionCompleted ?? 0.0
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(LinearProgressViewStyle())
+                    HStack {
+                        Text(fluidAudioModelManager.downloadStates[model.name]?.phase == .resuming ? "Resuming…" : "Downloading…")
+                        Spacer()
+                        Text(verbatim: "\(Int(progress * 100))%")
+                        Text("Byte count unavailable")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
             }
         }
     }
 
     private var actionSection: some View {
         HStack(spacing: 8) {
-            if isCurrent {
+            if !FluidAudioModelManager.isModelAvailable(model.name) {
+                Text("Requires macOS 15 or later")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color(.secondaryLabelColor))
+            } else if isCurrent {
                 Text("Default Model")
                     .font(.system(size: 12))
                     .foregroundColor(Color(.secondaryLabelColor))
@@ -147,14 +183,23 @@ struct FluidAudioModelCardView: View {
                     .padding(.vertical, 6)
                     .background(Capsule().fill(Color(.quaternaryLabelColor).opacity(0.3)))
                     .help("This model needs more memory than this Mac has available")
+            } else if fluidAudioModelManager.isPaused(model) {
+                HStack(spacing: 6) {
+                    Text("Paused").font(.caption).foregroundStyle(.secondary)
+                    Button("Resume") { fluidAudioModelManager.resumeDownload(model) }.controlSize(.small)
+                    Text("FluidAudio resumes saved partial files when retried.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Button("Cancel") { fluidAudioModelManager.cancelDownload(model) }.controlSize(.small)
+                }
+            } else if isDownloading {
+                HStack(spacing: 6) {
+                    Button("Pause") { fluidAudioModelManager.pauseDownload(model) }.controlSize(.small)
+                    Button("Cancel") { fluidAudioModelManager.cancelDownload(model) }.controlSize(.small)
+                }
             } else {
-                Button(action: {
-                    Task {
-                        await fluidAudioModelManager.downloadFluidAudioModel(model)
-                    }
-                }) {
+                Button(action: requestDownload) {
                     HStack(spacing: 4) {
-                        Text(isDownloading ? "Downloading..." : (fluidAudioModelManager.downloadErrors[model.name] == nil ? "Download" : "Retry Download"))
+                        Text(downloadButtonTitle)
                         Image(systemName: "arrow.down.circle")
                     }
                     .font(.system(size: 12, weight: .medium))
@@ -190,5 +235,18 @@ struct FluidAudioModelCardView: View {
                 .frame(width: 20, height: 20)
             }
         }
+    }
+
+    private func requestDownload() {
+        guard let provenance = model.provenance else { return }
+        if ModelDownloadNoticePolicy.requiresNotice(assetID: model.name, provenance: provenance) {
+            isShowingDownloadNotice = true
+        } else {
+            startDownload()
+        }
+    }
+
+    private func startDownload() {
+        fluidAudioModelManager.startDownload(model)
     }
 }

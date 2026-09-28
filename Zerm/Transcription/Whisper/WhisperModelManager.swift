@@ -25,7 +25,10 @@ struct WhisperModelFile: Identifiable {
     /// Only non-quantized whisper.cpp releases ship a Core ML encoder; fine-tunes from other
     /// repositories (ivrit.ai) run on Metal alone.
     static func hasCoreMLEncoder(modelName: String) -> Bool {
-        modelName.hasPrefix("ggml-") && !modelName.contains("q5") && !modelName.contains("q8")
+        modelName.hasPrefix("ggml-")
+            && !modelName.hasPrefix("ggml-distil-")
+            && !modelName.contains("q5")
+            && !modelName.contains("q8")
     }
 
     // Core ML related properties
@@ -40,67 +43,7 @@ struct WhisperModelFile: Identifiable {
     }
 }
 
-// MARK: - Private download task delegate
-
-private class TaskDelegate: NSObject, URLSessionTaskDelegate {
-    private let continuation: CheckedContinuation<Void, Never>
-    private let finished = ManagedAtomic(false)
-
-    init(_ continuation: CheckedContinuation<Void, Never>) {
-        self.continuation = continuation
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if finished.exchange(true, ordering: .acquiring) == false {
-            continuation.resume()
-        }
-    }
-}
-
 // MARK: - WhisperModelManager
-
-/// The URLSession task and progress observation behind one download, so cancelling the Swift task
-/// cancels the transfer and every exit releases the observation.
-private final class DownloadRequest: @unchecked Sendable {
-    private let lock = NSLock()
-    private var task: URLSessionDownloadTask?
-    private var observation: NSKeyValueObservation?
-    private var isCancelled = false
-
-    /// False when the request was cancelled before the task could be installed.
-    func install(task: URLSessionDownloadTask, observation: NSKeyValueObservation) -> Bool {
-        lock.withLock {
-            guard !isCancelled else { return false }
-            self.task = task
-            self.observation = observation
-            return true
-        }
-    }
-
-    func finish() {
-        let observation = lock.withLock { () -> NSKeyValueObservation? in
-            defer {
-                self.observation = nil
-                task = nil
-            }
-            return self.observation
-        }
-        observation?.invalidate()
-    }
-
-    func cancel() {
-        let (task, observation) = lock.withLock { () -> (URLSessionDownloadTask?, NSKeyValueObservation?) in
-            isCancelled = true
-            defer {
-                self.task = nil
-                self.observation = nil
-            }
-            return (self.task, self.observation)
-        }
-        observation?.invalidate()
-        task?.cancel()
-    }
-}
 
 @MainActor
 class WhisperModelManager: ObservableObject {
@@ -108,8 +51,13 @@ class WhisperModelManager: ObservableObject {
     @Published var downloadProgress: [String: Double] = [:]
     /// Last download failure per model name, shown on the model card with a retry.
     @Published var downloadErrors: [String: String] = [:]
+    @Published private(set) var downloadStates: [String: ModelDownloadState] = [:]
     /// In-flight downloads by model name, cancellable from the model card.
     @Published private var downloadTasks: [String: Task<Void, Never>] = [:]
+    private var downloadRequests: [String: ModelDownloadRequest] = [:]
+    private var pausedDownloads: Set<String> = []
+    private let resumeDataStore = ModelDownloadResumeDataStore()
+    private let downloadStateStore = ModelDownloadStateStore()
     @Published var whisperContext: WhisperContext?
     @Published var isModelLoaded = false
     @Published var loadedWhisperModel: WhisperModelFile?
@@ -138,6 +86,9 @@ class WhisperModelManager: ObservableObject {
     ) {
         self.modelsDirectory = modelsDirectory
         self.contextLoader = contextLoader
+        for model in TranscriptionModelRegistry.models where model.provider == .whisper {
+            if let state = downloadStateStore.load(for: model.name) { downloadStates[model.name] = state }
+        }
     }
 
     // MARK: - Model Directory Management
@@ -251,21 +202,23 @@ class WhisperModelManager: ObservableObject {
 
     private func downloadFileWithProgress(from url: URL, progressKey: String) async throws -> Data {
         let destinationURL = modelsDirectory.appendingPathComponent(UUID().uuidString)
-        let request = DownloadRequest()
+        let request = ModelDownloadRequest()
+        let resumeStore = resumeDataStore
 
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 let finished = ManagedAtomic(false)
 
-                func finishOnce(_ result: Result<Data, Error>) {
+                @Sendable func finishOnce(_ result: Result<Data, Error>) {
                     request.finish()
+                    Task { @MainActor in self.downloadRequests[progressKey] = nil }
                     if finished.exchange(true, ordering: .acquiring) == false {
                         continuation.resume(with: result)
                     }
                 }
 
-                let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
+                let completion: @Sendable (URL?, URLResponse?, Error?) -> Void = { tempURL, response, error in
                     if let error = error {
                         finishOnce(.failure(error))
                         return
@@ -281,12 +234,16 @@ class WhisperModelManager: ObservableObject {
                     do {
                         try FileManager.default.moveItem(at: tempURL, to: destinationURL)
                         let data = try Data(contentsOf: destinationURL, options: .mappedIfSafe)
+                        resumeStore.remove(for: progressKey)
                         finishOnce(.success(data))
                         try? FileManager.default.removeItem(at: destinationURL)
                     } catch {
                         finishOnce(.failure(error))
                     }
                 }
+                let resumeData = resumeStore.load(for: progressKey)
+                let task = resumeData.map { URLSession.shared.downloadTask(withResumeData: $0, completionHandler: completion) }
+                    ?? URLSession.shared.downloadTask(with: url, completionHandler: completion)
 
                 var lastUpdateTime = Date()
                 var lastProgressValue: Double = 0
@@ -302,6 +259,16 @@ class WhisperModelManager: ObservableObject {
 
                         DispatchQueue.main.async {
                             self.downloadProgress[progressKey] = currentProgress
+                            let modelName = progressKey.replacingOccurrences(of: "_main", with: "").replacingOccurrences(of: "_coreml", with: "")
+                            var state = self.downloadStates[modelName] ?? ModelDownloadState(phase: .downloading)
+                            let hasCoreML = WhisperModelFile.hasCoreMLEncoder(modelName: modelName)
+                            state.fractionCompleted = hasCoreML
+                                ? (progressKey.hasSuffix("_coreml") ? 0.5 + progress.fractionCompleted * 0.5 : progress.fractionCompleted * 0.5)
+                                : progress.fractionCompleted
+                            state.bytesDownloaded = progress.completedUnitCount
+                            state.totalBytes = progress.totalUnitCount > 0 ? progress.totalUnitCount : nil
+                            self.downloadStates[modelName] = state
+                            try? self.downloadStateStore.save(state, for: modelName)
                         }
                     }
                 }
@@ -312,6 +279,7 @@ class WhisperModelManager: ObservableObject {
                     finishOnce(.failure(CancellationError()))
                     return
                 }
+                Task { @MainActor in self.downloadRequests[progressKey] = request }
                 task.resume()
             }
         } onCancel: {
@@ -322,6 +290,12 @@ class WhisperModelManager: ObservableObject {
     /// Starts a download the user can cancel from the model card.
     func startDownload(_ model: WhisperModel) {
         guard downloadTasks[model.name] == nil else { return }
+        let resuming = downloadStateStore.load(for: model.name)?.phase == .paused
+            || resumeDataStore.load(for: model.name + "_main") != nil
+            || resumeDataStore.load(for: model.name + "_coreml") != nil
+        downloadStates[model.name] = ModelDownloadState(phase: resuming ? .resuming : .downloading)
+        try? downloadStateStore.save(downloadStates[model.name]!, for: model.name)
+        pausedDownloads.remove(model.name)
         downloadTasks[model.name] = Task { [weak self] in
             await self?.downloadModel(model)
             self?.downloadTasks[model.name] = nil
@@ -329,7 +303,30 @@ class WhisperModelManager: ObservableObject {
     }
 
     func cancelDownload(_ model: WhisperModel) {
-        downloadTasks.removeValue(forKey: model.name)?.cancel()
+        pausedDownloads.remove(model.name)
+        downloadTasks[model.name]?.cancel()
+        resumeDataStore.remove(for: model.name + "_main")
+        resumeDataStore.remove(for: model.name + "_coreml")
+        downloadStates[model.name] = ModelDownloadState(phase: .queued)
+        try? downloadStateStore.save(downloadStates[model.name]!, for: model.name)
+    }
+
+    func pauseDownload(_ model: WhisperModel) {
+        let keys = [model.name + "_main", model.name + "_coreml"]
+        guard keys.contains(where: { downloadRequests[$0] != nil }) else { return }
+        pausedDownloads.insert(model.name)
+        for key in keys { downloadRequests[key]?.pause(resumeDataStore: resumeDataStore, assetID: key) }
+    }
+
+    func isPaused(_ model: WhisperModel) -> Bool { downloadStates[model.name]?.phase == .paused }
+
+    func resumeDownload(_ model: WhisperModel) {
+        guard isPaused(model) else { return }
+        downloadStates[model.name]?.phase = .resuming
+        Task { @MainActor in
+            while downloadTasks[model.name] != nil { try? await Task.sleep(for: .milliseconds(20)) }
+            startDownload(model)
+        }
     }
 
     func isDownloading(_ model: WhisperModel) -> Bool {
@@ -361,6 +358,8 @@ class WhisperModelManager: ObservableObject {
             }
 
             availableModels.append(whisperModel)
+            downloadStates[model.name] = ModelDownloadState(phase: .completed, fractionCompleted: 1)
+            try? downloadStateStore.save(downloadStates[model.name]!, for: model.name)
             self.downloadProgress.removeValue(forKey: model.name + "_main")
 
             onModelsChanged?()
@@ -370,6 +369,18 @@ class WhisperModelManager: ObservableObject {
             }
         } catch {
             handleModelDownloadError(model, error)
+            if pausedDownloads.contains(model.name) {
+                var state = downloadStates[model.name] ?? ModelDownloadState(phase: .paused)
+                state.phase = .paused
+                state.message = nil
+                downloadStates[model.name] = state
+            } else if !(error is CancellationError) && (error as? URLError)?.code != .cancelled {
+                var state = downloadStates[model.name] ?? ModelDownloadState(phase: .failed)
+                state.phase = .failed
+                state.message = error.localizedDescription
+                downloadStates[model.name] = state
+            }
+            if let state = downloadStates[model.name] { try? downloadStateStore.save(state, for: model.name) }
         }
     }
 
@@ -486,7 +497,9 @@ class WhisperModelManager: ObservableObject {
         if error is CancellationError || (error as? URLError)?.code == .cancelled {
             // A cancel can land between the main model and its Core ML encoder; drop both so a
             // half-installed model is not picked up on the next launch.
-            try? FileManager.default.removeItem(at: modelsDirectory.appendingPathComponent(model.filename))
+            if !pausedDownloads.contains(model.name) {
+                try? FileManager.default.removeItem(at: modelsDirectory.appendingPathComponent(model.filename))
+            }
             try? FileManager.default.removeItem(at: modelsDirectory.appendingPathComponent("\(model.name)-encoder.mlmodelc.zip"))
             logger.notice("Download cancelled for \(model.name, privacy: .public)")
             return
@@ -605,11 +618,12 @@ extension WhisperModelManager: WhisperModelProvider {}
 struct DownloadProgressView: View {
     let modelName: String
     let downloadProgress: [String: Double]
+    let downloadState: ModelDownloadState?
 
     @Environment(\.colorScheme) private var colorScheme
 
     private var mainProgress: Double {
-        downloadProgress[modelName + "_main"] ?? 0
+        downloadProgress[modelName + "_main"] ?? (downloadState?.fractionCompleted ?? 0)
     }
 
     private var coreMLProgress: Double {
@@ -621,7 +635,10 @@ struct DownloadProgressView: View {
     }
 
     private var totalProgress: Double {
-        supportsCoreML ? (mainProgress * 0.5) + (coreMLProgress * 0.5) : mainProgress
+        if downloadProgress[modelName + "_main"] == nil && downloadProgress[modelName + "_coreml"] == nil {
+            return downloadState?.fractionCompleted ?? 0
+        }
+        return supportsCoreML ? (mainProgress * 0.5) + (coreMLProgress * 0.5) : mainProgress
     }
 
     private var downloadPhase: String {
@@ -633,7 +650,7 @@ struct DownloadProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: downloadPhase)
+            Text(verbatim: downloadState?.phase == .resuming ? String(localized: "Resuming…") : downloadPhase)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Color(.secondaryLabelColor))
 
@@ -651,6 +668,11 @@ struct DownloadProgressView: View {
             .frame(height: 6)
 
             HStack {
+                if let downloaded = downloadState?.bytesDownloaded {
+                    Text(byteProgress(downloaded, total: downloadState?.totalBytes))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(.secondaryLabelColor))
+                }
                 Spacer()
                 Text(verbatim: "\(Int(totalProgress * 100))%")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -659,5 +681,13 @@ struct DownloadProgressView: View {
         }
         .padding(.vertical, 4)
         .animation(.smooth, value: totalProgress)
+    }
+
+    private func byteProgress(_ downloaded: Int64, total: Int64?) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        let downloadedText = formatter.string(fromByteCount: downloaded)
+        guard let total else { return String.localizedStringWithFormat(String(localized: "%@ downloaded"), downloadedText) }
+        return String.localizedStringWithFormat(String(localized: "%@ of %@"), downloadedText, formatter.string(fromByteCount: total))
     }
 }

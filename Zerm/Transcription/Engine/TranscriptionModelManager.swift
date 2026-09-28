@@ -9,7 +9,7 @@ class TranscriptionModelManager: ObservableObject {
 
     private weak var whisperModelManager: WhisperModelManager?
     private weak var fluidAudioModelManager: FluidAudioModelManager?
-    private let sherpaOnnxModelManager: SherpaOnnxModelManager
+    let sherpaOnnxModelManager: SherpaOnnxModelManager
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionModelManager")
 
@@ -23,6 +23,9 @@ class TranscriptionModelManager: ObservableObject {
             self?.handleModelDeleted(modelName)
         }
         fluidAudioModelManager.onModelDeleted = { [weak self] modelName in
+            self?.handleModelDeleted(modelName)
+        }
+        self.sherpaOnnxModelManager.onModelDeleted = { [weak self] modelName in
             self?.handleModelDeleted(modelName)
         }
 

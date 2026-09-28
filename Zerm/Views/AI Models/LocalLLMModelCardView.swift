@@ -47,6 +47,7 @@ struct LocalLLMModelCardView: View {
     let package: LocalLLMPackage
     var role: LocalLLMRole = .reading
     @ObservedObject private var manager = LocalLLMModelManager.shared
+    @State private var isShowingDownloadNotice = false
 
     private var isCurrent: Bool {
         switch role {
@@ -56,6 +57,7 @@ struct LocalLLMModelCardView: View {
     }
     private var isDownloaded: Bool { manager.isDownloaded(package) }
     private var progress: Double? { manager.downloadProgress[package.fileName] }
+    private var downloadPhase: ModelDownloadPhase? { manager.downloadStates[package.fileName]?.phase }
     private var isRecommended: Bool {
         switch role {
         case .reading:
@@ -105,15 +107,35 @@ struct LocalLLMModelCardView: View {
                     }
                     .controlSize(.small)
                 }
+            } else if downloadPhase == .paused {
+                HStack {
+                    Text("Paused").font(.caption).foregroundStyle(.secondary)
+                    Text(verbatim: "\(Int((manager.downloadStates[package.fileName]?.fractionCompleted ?? 0) * 100))%")
+                        .font(.caption.monospacedDigit())
+                    if let state = manager.downloadStates[package.fileName], let bytes = state.bytesDownloaded {
+                        let formatter = ByteCountFormatter()
+                        Text(state.totalBytes.map { "\(formatter.string(fromByteCount: bytes)) / \(formatter.string(fromByteCount: $0))" } ?? formatter.string(fromByteCount: bytes))
+                            .font(.caption.monospacedDigit())
+                    }
+                    Spacer()
+                    Button("Resume") { manager.resumeDownload(package) }.controlSize(.small)
+                    Button("Cancel") { manager.cancelDownload(package) }.controlSize(.small)
+                }
             } else if progress != nil {
                 VStack(alignment: .leading, spacing: 6) {
                     ProgressView(value: progress ?? 0)
                     HStack {
-                        Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+                        Text(downloadPhase == .resuming ? "Resuming…" : "Downloading…").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         if let p = progress {
                             Text(verbatim: "\(Int(p * 100))%").font(.caption.monospacedDigit())
                         }
+                        if let state = manager.downloadStates[package.fileName], let bytes = state.bytesDownloaded {
+                            let formatter = ByteCountFormatter()
+                            Text(state.totalBytes.map { "\(formatter.string(fromByteCount: bytes)) / \(formatter.string(fromByteCount: $0))" } ?? formatter.string(fromByteCount: bytes))
+                                .font(.caption.monospacedDigit())
+                        }
+                        Button("Pause") { manager.pauseDownload(package) }.controlSize(.small)
                         Button("Cancel") { manager.cancelDownload(package) }.controlSize(.small)
                     }
                 }
@@ -126,11 +148,8 @@ struct LocalLLMModelCardView: View {
                         Text("Download once. No API key.")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button {
-                            manager.select(package, role: role)
-                            Task { await manager.download(package) }
-                        } label: {
-                            Label("Download", systemImage: "arrow.down.circle")
+                        Button(action: requestDownload) {
+                            Label(manager.statusText == nil ? "Download" : "Retry Download", systemImage: "arrow.down.circle")
                         }
                         .controlSize(.small)
                     }
@@ -146,5 +165,19 @@ struct LocalLLMModelCardView: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(isCurrent ? Color.accentColor.opacity(0.5) : .clear, lineWidth: 1)
         )
+        .sheet(isPresented: $isShowingDownloadNotice) {
+            ModelDownloadNoticeView(assetID: package.fileName, modelName: package.displayName, provenance: package.provenance) {
+                Task { await manager.download(package) }
+            }
+        }
+    }
+
+    private func requestDownload() {
+        manager.select(package, role: role)
+        if ModelDownloadNoticePolicy.requiresNotice(assetID: package.fileName, provenance: package.provenance) {
+            isShowingDownloadNotice = true
+        } else {
+            Task { await manager.download(package) }
+        }
     }
 }

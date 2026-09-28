@@ -13,6 +13,7 @@ struct TextToSpeechSettingsView: View {
     @State private var apiKey: String = ""
     @State private var verifyState: VerifyState = .idle
     @State private var isPreviewing = false
+    @State private var isShowingKokoroNotice = false
 
     /// The app-level controller (wired to the recorder widget), so Preview shows the same
     /// "Speaking" widget a real trigger does — a reliable way to see Read Aloud working.
@@ -85,6 +86,12 @@ struct TextToSpeechSettingsView: View {
             }
             .padding(24)
             .frame(maxWidth: 720, alignment: .leading)
+        }
+        .sheet(isPresented: $isShowingKokoroNotice) {
+            let package = KokoroModelManager.package
+            ModelDownloadNoticeView(assetID: package.name, modelName: package.displayName, provenance: package.provenance) {
+                Task { await kokoro.download() }
+            }
         }
         .onAppear(perform: reloadForProvider)
         .onChange(of: providerRaw) { _, _ in reloadForProvider() }
@@ -344,6 +351,21 @@ struct TextToSpeechSettingsView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
+                } else if kokoro.isPaused {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: kokoro.downloadState?.fractionCompleted ?? 0)
+                        HStack {
+                            Text("Paused").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if let bytes = kokoro.downloadedBytes {
+                                let formatter = ByteCountFormatter()
+                                Text(kokoro.totalDownloadBytes.map { "\(formatter.string(fromByteCount: bytes)) / \(formatter.string(fromByteCount: $0))" } ?? formatter.string(fromByteCount: bytes))
+                                    .font(.caption.monospacedDigit())
+                            }
+                            Button("Resume") { kokoro.resumeDownload() }
+                            Button("Cancel") { kokoro.cancelDownload() }
+                        }
+                    }
                 } else if kokoro.isDownloading {
                     VStack(alignment: .leading, spacing: 6) {
                         ProgressView(value: kokoro.downloadProgress ?? 0)
@@ -355,6 +377,12 @@ struct TextToSpeechSettingsView: View {
                                 Text(p, format: .percent.precision(.fractionLength(0)))
                                     .font(.caption.monospacedDigit())
                             }
+                            if let bytes = kokoro.downloadedBytes {
+                                let formatter = ByteCountFormatter()
+                                Text(kokoro.totalDownloadBytes.map { "\(formatter.string(fromByteCount: bytes)) / \(formatter.string(fromByteCount: $0))" } ?? formatter.string(fromByteCount: bytes))
+                                    .font(.caption.monospacedDigit())
+                            }
+                            Button("Pause") { kokoro.pauseDownload() }
                             Button("Cancel") { kokoro.cancelDownload() }
                         }
                     }
@@ -363,8 +391,8 @@ struct TextToSpeechSettingsView: View {
                         Text("Download once to use Kokoro offline. No API key needed.")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button { Task { await kokoro.download() } } label: {
-                            Label("Download model", systemImage: "arrow.down.circle")
+                        Button(action: requestKokoroDownload) {
+                            Label(kokoro.statusText == nil ? "Download model" : "Retry Download", systemImage: "arrow.down.circle")
                         }
                     }
                     if let status = kokoro.statusText {
@@ -373,6 +401,15 @@ struct TextToSpeechSettingsView: View {
                 }
             }
             .padding(8)
+        }
+    }
+
+    private func requestKokoroDownload() {
+        let package = KokoroModelManager.package
+        if ModelDownloadNoticePolicy.requiresNotice(assetID: package.name, provenance: package.provenance) {
+            isShowingKokoroNotice = true
+        } else {
+            Task { await kokoro.download() }
         }
     }
 

@@ -23,6 +23,24 @@ struct LocalLLMPackage: Identifiable, Hashable, Sendable {
     /// prefilling one would push tokens its template never expects.
     var disablesThinking: Bool = false
 
+    var provenance: ModelProvenance {
+        let license = fileName.hasPrefix("gemma-3-") ? "Gemma Community License" : "Apache-2.0"
+        let licenseURL = fileName.hasPrefix("gemma-3-") ? "https://ai.google.dev/gemma/terms" : "https://www.apache.org/licenses/LICENSE-2.0"
+        let creator = fileName.hasPrefix("Qwen") ? "Qwen" : "Google DeepMind"
+        let quantizer = downloadURL.host == "huggingface.co" && downloadURL.path.contains("/unsloth/") ? "Unsloth" : nil
+        return ModelProvenance(
+            creator: creator,
+            sourceURL: downloadURL,
+            downloadHost: downloadURL.host ?? "huggingface.co",
+            licenseName: license,
+            licenseSPDX: license == "Apache-2.0" ? "Apache-2.0" : nil,
+            licenseURL: URL(string: licenseURL)!,
+            attribution: quantizer.map { "\(creator) model; GGUF quantization by \($0)." } ?? "\(creator) model distributed in GGUF format.",
+            conversionCredit: quantizer,
+            checksumSHA256: sha256
+        )
+    }
+
     /// `fileName` is the stable identity/key (also the on-disk name).
     var id: String { fileName }
 }
@@ -235,6 +253,7 @@ final class LocalLLMModelManager: ObservableObject {
     @Published private(set) var installedFiles: Set<String> = []
     /// Per-model download progress (0.0–1.0), keyed by fileName; absent when not downloading.
     @Published private(set) var downloadProgress: [String: Double] = [:]
+    @Published private(set) var downloadStates: [String: ModelDownloadState] = [:]
     /// Mirrors the persisted current-model selection so SwiftUI updates on change.
     @Published private(set) var currentFileName: String = LocalLLMModelManager.current.fileName
     @Published private(set) var enhancementFileName: String = LocalLLMModelManager.package(for: .enhancement).fileName
@@ -248,12 +267,18 @@ final class LocalLLMModelManager: ObservableObject {
     private static let idleUnloadDelayNanoseconds: UInt64 = 120_000_000_000
     private var downloadTasks: [String: URLSessionDownloadTask] = [:]
     private var progressObservations: [String: NSKeyValueObservation] = [:]
+    private let resumeDataStore = ModelDownloadResumeDataStore()
+    private let downloadStateStore = ModelDownloadStateStore()
+    private var pausedDownloads: Set<String> = []
 
     private init() {
         let appSupport = AppStoragePaths.root
         modelsDirectory = appSupport.appendingPathComponent("LLMModels")
         try? FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         refreshInstalled()
+        for package in Self.packages {
+            downloadStates[package.fileName] = downloadStateStore.load(for: package.fileName)
+        }
     }
 
     // MARK: - Paths & state
@@ -316,6 +341,9 @@ final class LocalLLMModelManager: ObservableObject {
         }
         guard downloadProgress[package.fileName] == nil else { return }
         downloadProgress[package.fileName] = 0
+        let resuming = resumeDataStore.load(for: package.fileName) != nil
+        downloadStates[package.fileName] = ModelDownloadState(phase: resuming ? .resuming : .downloading)
+        try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
         statusText = nil
         defer { downloadProgress[package.fileName] = nil }
 
@@ -332,11 +360,33 @@ final class LocalLLMModelManager: ObservableObject {
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.moveItem(at: file, to: dest)
             refreshInstalled()
+            resumeDataStore.remove(for: package.fileName)
+            downloadStates[package.fileName] = ModelDownloadState(phase: .completed, fractionCompleted: 1)
+            try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
         } catch is CancellationError {
-            statusText = String(localized: "Download cancelled")
+            if pausedDownloads.contains(package.fileName) {
+                pausedDownloads.remove(package.fileName)
+                downloadStates[package.fileName]?.phase = .paused
+                try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
+            } else {
+                statusText = String(localized: "Download cancelled")
+            }
         } catch {
+            if pausedDownloads.contains(package.fileName) {
+                pausedDownloads.remove(package.fileName)
+                downloadStates[package.fileName]?.phase = .paused
+                try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
+                return
+            }
+            if (error as? URLError)?.code == .cancelled {
+                downloadStates[package.fileName] = ModelDownloadState(phase: .queued)
+                try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
+                return
+            }
             logger.error("LLM download failed: \(error.localizedDescription, privacy: .public)")
             statusText = String(localized: "Download failed: \(error.localizedDescription)")
+            downloadStates[package.fileName] = ModelDownloadState(phase: .failed, message: error.localizedDescription)
+            try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
         }
     }
 
@@ -344,8 +394,28 @@ final class LocalLLMModelManager: ObservableObject {
     func download() async { await download(currentPackage) }
 
     func cancelDownload(_ package: LocalLLMPackage) {
+        pausedDownloads.remove(package.fileName)
         downloadTasks[package.fileName]?.cancel()
-        downloadTasks[package.fileName] = nil
+        resumeDataStore.remove(for: package.fileName)
+        downloadStates[package.fileName] = ModelDownloadState(phase: .queued)
+        try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
+    }
+
+    func pauseDownload(_ package: LocalLLMPackage) {
+        guard let task = downloadTasks[package.fileName] else { return }
+        pausedDownloads.insert(package.fileName)
+        downloadStates[package.fileName]?.phase = .paused
+        task.cancel(byProducingResumeData: { [resumeDataStore] data in
+            if let data { try? resumeDataStore.save(data, for: package.fileName) }
+        })
+        try? downloadStateStore.save(downloadStates[package.fileName]!, for: package.fileName)
+    }
+
+    func resumeDownload(_ package: LocalLLMPackage) {
+        Task { @MainActor in
+            while downloadTasks[package.fileName] != nil { try? await Task.sleep(for: .milliseconds(20)) }
+            await download(package)
+        }
     }
 
     func delete(_ package: LocalLLMPackage) {
@@ -372,8 +442,11 @@ final class LocalLLMModelManager: ObservableObject {
 
     /// Downloads to a temp file, reporting fractional progress via KVO (mirrors KokoroModelManager).
     private func downloadFile(for package: LocalLLMPackage) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let task = URLSession.shared.downloadTask(with: package.downloadURL) { [weak self] tempURL, response, error in
+        let resumeStore = resumeDataStore
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+            let resumeData = resumeStore.load(for: package.fileName)
+            let task: URLSessionDownloadTask
+            let completion: @Sendable (URL?, URLResponse?, Error?) -> Void = { [weak self] tempURL, response, error in
                 Task { @MainActor [weak self] in
                     self?.progressObservations[package.fileName]?.invalidate()
                     self?.progressObservations[package.fileName] = nil
@@ -390,14 +463,27 @@ final class LocalLLMModelManager: ObservableObject {
                         .appendingPathComponent("llm-download-\(package.fileName)")
                     try? FileManager.default.removeItem(at: dest)
                     try FileManager.default.moveItem(at: tempURL, to: dest)
+                    resumeStore.remove(for: package.fileName)
                     continuation.resume(returning: dest)
                 } catch {
                     continuation.resume(throwing: error)
                 }
             }
+            task = resumeData.map { URLSession.shared.downloadTask(withResumeData: $0, completionHandler: completion) }
+                ?? URLSession.shared.downloadTask(with: package.downloadURL, completionHandler: completion)
             self.downloadTasks[package.fileName] = task
             self.progressObservations[package.fileName] = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-                Task { @MainActor in self?.downloadProgress[package.fileName] = progress.fractionCompleted }
+                Task { @MainActor in
+                    self?.downloadProgress[package.fileName] = progress.fractionCompleted
+                    guard let self else { return }
+                    var state = self.downloadStates[package.fileName] ?? ModelDownloadState(phase: .downloading)
+                    state.phase = .downloading
+                    state.fractionCompleted = progress.fractionCompleted
+                    state.bytesDownloaded = task.countOfBytesReceived
+                    state.totalBytes = task.countOfBytesExpectedToReceive > 0 ? task.countOfBytesExpectedToReceive : nil
+                    self.downloadStates[package.fileName] = state
+                    try? self.downloadStateStore.save(state, for: package.fileName)
+                }
             }
             task.resume()
         }
