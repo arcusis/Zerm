@@ -4,6 +4,7 @@ import Foundation
 enum ModelProvider: String, Codable, Hashable, CaseIterable {
     case whisper = "Whisper"
     case fluidAudio = "Parakeet"
+    case sherpaOnnx = "sherpa-onnx"
     case groq = "Groq"
     case elevenLabs = "ElevenLabs"
     case deepgram = "Deepgram"
@@ -70,14 +71,27 @@ protocol TranscriptionModel: Identifiable, Hashable {
     var isHebrewOptimized: Bool { get }
     /// Cloud models only; local recommendations are derived from this Mac's hardware.
     var isRecommended: Bool { get }
+    var provenance: ModelProvenance? { get }
+}
+
+struct ModelProvenance: Equatable {
+    let creator: String
+    let sourceURL: URL
+    let licenseSPDX: String
+    let licenseURL: URL
+    let attribution: String
+    let converterCredit: String
 }
 
 enum ModelLanguageGroup {
     case englishOnly
     case multilingual
+    case singleLanguage
 }
 
 extension TranscriptionModel {
+    var provenance: ModelProvenance? { nil }
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -96,13 +110,22 @@ extension TranscriptionModel {
     }
 
     var language: String {
-        isMultilingualModel ? String(localized: "Multilingual") : String(localized: "English-only")
+        switch languageGroup {
+        case .englishOnly:
+            String(localized: "English-only")
+        case .multilingual:
+            String(localized: "Multilingual")
+        case .singleLanguage:
+            supportedLanguages.first(where: { $0.key != LanguagePreference.autoCode })?.value
+                ?? String(localized: "Single language")
+        }
     }
 
     var supportsStreaming: Bool { false }
 
     var languageGroup: ModelLanguageGroup {
-        isMultilingualModel ? .multilingual : .englishOnly
+        if isMultilingualModel { return .multilingual }
+        return supportedLanguages["en"] == nil ? .singleLanguage : .englishOnly
     }
 
     var capabilities: TranscriptionCapabilities {

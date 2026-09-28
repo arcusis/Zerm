@@ -20,6 +20,7 @@ struct ZermApp: App {
     private let engine: ZermEngine
     private let whisperModelManager: WhisperModelManager
     private let fluidAudioModelManager: FluidAudioModelManager
+    private let sherpaOnnxModelManager: SherpaOnnxModelManager
     private let transcriptionModelManager: TranscriptionModelManager
     private let fileTranscriptionQueue: FileTranscriptionQueue
     private let recorderUIManager: RecorderUIManager
@@ -130,9 +131,11 @@ struct ZermApp: App {
         // 2. Create model managers
         let whisperModelManager = WhisperModelManager(modelsDirectory: modelsDirectory)
         let fluidAudioModelManager = FluidAudioModelManager()
+        let sherpaOnnxModelManager = SherpaOnnxModelManager(storageRoot: appSupportDirectory)
         let transcriptionModelManager = TranscriptionModelManager(
             whisperModelManager: whisperModelManager,
-            fluidAudioModelManager: fluidAudioModelManager
+            fluidAudioModelManager: fluidAudioModelManager,
+            sherpaOnnxModelManager: sherpaOnnxModelManager
         )
 
         // 3. Create UI manager
@@ -174,6 +177,7 @@ struct ZermApp: App {
 
         self.whisperModelManager = whisperModelManager
         self.fluidAudioModelManager = fluidAudioModelManager
+        self.sherpaOnnxModelManager = sherpaOnnxModelManager
         self.transcriptionModelManager = transcriptionModelManager
         self.recorderUIManager = recorderUIManager
         self.engine = engine

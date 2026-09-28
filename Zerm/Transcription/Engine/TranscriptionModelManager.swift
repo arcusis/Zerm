@@ -9,12 +9,14 @@ class TranscriptionModelManager: ObservableObject {
 
     private weak var whisperModelManager: WhisperModelManager?
     private weak var fluidAudioModelManager: FluidAudioModelManager?
+    private let sherpaOnnxModelManager: SherpaOnnxModelManager
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "TranscriptionModelManager")
 
-    init(whisperModelManager: WhisperModelManager, fluidAudioModelManager: FluidAudioModelManager) {
+    init(whisperModelManager: WhisperModelManager, fluidAudioModelManager: FluidAudioModelManager, sherpaOnnxModelManager: SherpaOnnxModelManager? = nil) {
         self.whisperModelManager = whisperModelManager
         self.fluidAudioModelManager = fluidAudioModelManager
+        self.sherpaOnnxModelManager = sherpaOnnxModelManager ?? SherpaOnnxModelManager()
 
         // Wire up deletion callbacks so each manager notifies this manager.
         whisperModelManager.onModelDeleted = { [weak self] modelName in
@@ -42,6 +44,9 @@ class TranscriptionModelManager: ObservableObject {
                 return whisperModelManager?.availableModels.contains { $0.name == model.name } ?? false
             case .fluidAudio:
                 return fluidAudioModelManager?.isFluidAudioModelDownloaded(named: model.name) ?? false
+            case .sherpaOnnx:
+                guard let sherpaModel = model as? SherpaOnnxModel else { return false }
+                return sherpaOnnxModelManager.isDownloaded(sherpaModel)
             case .nativeApple:
                 if #available(macOS 26, *) { return true } else { return false }
             case .custom:

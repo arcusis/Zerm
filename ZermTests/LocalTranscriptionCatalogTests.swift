@@ -23,6 +23,9 @@ struct LocalTranscriptionCatalogTests {
             "parakeet-tdt-ctc-110m",
             "parakeet-tdt-0.6b-ultra",
             "parakeet-tdt-0.6b-v3",
+            "sherpa-moonshine-tiny-en",
+            "sherpa-moonshine-base-en",
+            "sherpa-zipformer-ru-vosk-int8",
             "ggml-large-v3-turbo",
             "ggml-large-v3-turbo-q5_0",
             "ivrit-large-v3-turbo",
@@ -43,7 +46,15 @@ struct LocalTranscriptionCatalogTests {
                 #expect(!model.isHebrewOptimized, "\(model.name)")
             case .multilingual:
                 #expect(model.isMultilingualModel, "\(model.name)")
+            case .singleLanguage:
+                #expect(!model.isMultilingualModel, "\(model.name)")
+                #expect(!model.supportedLanguages.isEmpty, "\(model.name)")
             }
+        }
+
+        for model in localModels.compactMap({ $0 as? SherpaOnnxModel }) {
+            #expect(model.sha256.count == 64, "\(model.name)")
+            #expect(model.provenance != nil, "\(model.name)")
         }
 
         for model in localModels {

@@ -6,6 +6,8 @@ enum LocalModelRuntime {
     case whisperCpp
     /// FluidAudio Core ML models: Apple Silicon only.
     case fluidAudio
+    /// sherpa-onnx C API with CPU execution provider.
+    case sherpaOnnx
     /// SpeechAnalyzer: Apple Silicon on macOS 26 or later.
     case appleSpeech
 }
@@ -26,6 +28,7 @@ extension WhisperModel: LocalTranscriptionModel {
 extension FluidAudioModel: LocalTranscriptionModel {
     var runtime: LocalModelRuntime { .fluidAudio }
 }
+
 
 extension NativeAppleModel: LocalTranscriptionModel {
     var runtime: LocalModelRuntime { .appleSpeech }
