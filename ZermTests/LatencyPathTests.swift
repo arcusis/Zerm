@@ -28,3 +28,25 @@ struct LatencyPathTests {
         #expect(!manager.hasAPIKey(forProvider: provider))
     }
 }
+
+/// The start cue waits for real audio, but never longer than its timeout (first-audio gating).
+@MainActor
+struct FirstAudioWaitTests {
+    @Test func waitingWithoutAudioEndsAtTheTimeout() async {
+        let recorder = Recorder()
+        let start = ProcessInfo.processInfo.systemUptime
+        let arrived = await recorder.waitForFirstAudio(timeout: 0.05)
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        #expect(!arrived)
+        #expect(elapsed >= 0.05 && elapsed < 2)
+    }
+
+    @Test func aSecondWaitReplacesTheFirstWithoutHanging() async {
+        let recorder = Recorder()
+        async let first = recorder.waitForFirstAudio(timeout: 5)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let second = await recorder.waitForFirstAudio(timeout: 0.05)
+        #expect(await first == false)
+        #expect(!second)
+    }
+}

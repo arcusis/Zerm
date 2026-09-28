@@ -194,7 +194,8 @@ class RecorderUIManager: ObservableObject {
             // finalizes and keeps the WAV instead of walking away from an open file.
             engine.shouldCancelRecording = true
             var waited = 0
-            while engine.recordingState == .starting, waited < 50 {
+            // Starting can take up to ~1.6 s: it waits for a Bluetooth microphone's first audio.
+            while engine.recordingState == .starting, waited < 100 {
                 try? await Task.sleep(nanoseconds: 20_000_000)
                 waited += 1
             }

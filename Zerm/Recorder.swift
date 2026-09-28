@@ -19,6 +19,9 @@ class Recorder: NSObject, ObservableObject {
     private let audioSetupQueue = DispatchQueue(label: "com.arcusis.zerm.audioSetup", qos: .userInitiated)
     private var audioRestorationTask: Task<Void, Never>?
     private let meterSmoother = AudioMeterSmoother()
+    /// Whether this recording has delivered non-silent audio yet, and who is waiting for it.
+    private var hasFirstAudio = false
+    private var firstAudioWaiter: (id: UUID, continuation: CheckedContinuation<Bool, Never>)?
 
     /// Audio chunk callback for streaming. Can be updated while recording;
     /// changes are forwarded to the live CoreAudioRecorder.
@@ -125,6 +128,13 @@ class Recorder: NSObject, ObservableObject {
 
         let coreAudioRecorder = CoreAudioRecorder()
         coreAudioRecorder.onAudioChunk = onAudioChunk
+        hasFirstAudio = false
+        coreAudioRecorder.onFirstAudio = { [weak self, weak coreAudioRecorder] in
+            Task { @MainActor [weak self] in
+                guard let self, let coreAudioRecorder, self.recorder === coreAudioRecorder else { return }
+                self.resolveFirstAudio(true)
+            }
+        }
         recorder = coreAudioRecorder
 
         audioRestorationTask?.cancel()
@@ -175,6 +185,7 @@ class Recorder: NSObject, ObservableObject {
         let currentRecorder = self.recorder
         recorder = nil
         onAudioChunk = nil
+        resolveFirstAudio(false, waiterOnly: true)
 
         meterSmoother.reset()
 
@@ -192,6 +203,29 @@ class Recorder: NSObject, ObservableObject {
             await playbackController.resumeMedia()
         }
         deviceManager.isRecordingActive = false
+    }
+
+    /// Returns true once the recording delivers non-silent audio, false after `timeout` without
+    /// any. The audio unit runs within ~80 ms, but a Bluetooth headset's microphone sends digital
+    /// silence for 0.6–0.9 s while its call link comes up; words spoken then are lost.
+    func waitForFirstAudio(timeout: TimeInterval) async -> Bool {
+        if hasFirstAudio { return true }
+        firstAudioWaiter?.continuation.resume(returning: false)
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            firstAudioWaiter = (id, continuation)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard let self, self.firstAudioWaiter?.id == id else { return }
+                self.resolveFirstAudio(false, waiterOnly: true)
+            }
+        }
+    }
+
+    private func resolveFirstAudio(_ arrived: Bool, waiterOnly: Bool = false) {
+        if !waiterOnly { hasFirstAudio = true }
+        firstAudioWaiter?.continuation.resume(returning: arrived)
+        firstAudioWaiter = nil
     }
 
     private func handleRecordingError(_ error: Error) async {

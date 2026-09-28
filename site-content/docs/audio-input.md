@@ -38,6 +38,11 @@ it off only when you specifically want to use the headset microphone. If no
 non-Bluetooth microphone is available, Zerm uses the headset microphone so recording
 still works, and macOS will use call-quality playback during that recording.
 
+A Bluetooth headset's microphone also needs time to start: it sends silence for most of a
+second while its call link comes up. Zerm waits for its first real audio before it plays
+the start sound, so everything you say after the sound is recorded. With the Mac's own
+microphone or a wired one, the sound comes almost immediately.
+
 With the lid closed (clamshell mode), macOS disconnects the built-in microphone, so Zerm
 skips it. Connect a USB microphone, webcam microphone, or iPhone microphone to keep
 full playback quality while dictating with the lid closed.
