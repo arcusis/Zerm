@@ -193,6 +193,7 @@ enum HardwareCapability {
         switch model.runtime {
         case .whisperCpp: return true
         case .fluidAudio: return profile.isAppleSilicon
+        case .sherpaOnnx: return profile.isAppleSilicon
         case .appleSpeech: return profile.isAppleSilicon && profile.hasAppleSpeech
         }
     }

@@ -13,6 +13,19 @@ enum AppDefaults {
             "restoreClipboardAfterPaste": false,
             "clipboardRestoreDelay": 2.0,
             "useAppleScriptPaste": false,
+            "clipboardHistoryEnabled": true,
+            "clipboardHistoryRetentionCount": 500,
+            "clipboardHistoryRetentionDays": 90,
+            "clipboardHistoryExcludedApps": [
+                "com.agilebits.onepassword7",
+                "com.1password.1password",
+                "com.bitwarden.desktop",
+                "com.apple.keychainaccess",
+                "com.apple.Passwords"
+            ],
+            "clipboardHistorySaveDictations": false,
+            "clipboardHistorySounds": false,
+            "clipboardHistoryPaused": false,
 
             // Audio & Media
             "isSystemMuteEnabled": true,

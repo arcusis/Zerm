@@ -88,7 +88,7 @@ extension FileTranscriptionQueue {
     /// Whether a provider runs on this Mac rather than a cloud service.
     static func isOnDevice(_ provider: ModelProvider) -> Bool {
         switch provider {
-        case .whisper, .fluidAudio, .nativeApple: true
+        case .whisper, .fluidAudio, .sherpaOnnx, .nativeApple: true
         default: false
         }
     }

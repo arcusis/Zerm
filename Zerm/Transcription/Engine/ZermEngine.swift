@@ -535,7 +535,7 @@ class ZermEngine: NSObject, ObservableObject {
         let message: String
         if let model {
             switch model.provider {
-            case .whisper, .fluidAudio:
+            case .whisper, .fluidAudio, .sherpaOnnx:
                 message = String(localized: "Model not downloaded — download \(model.displayName) first")
             case .nativeApple:
                 message = String(localized: "Apple Speech is not available on this system")
