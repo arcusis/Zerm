@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import AVFoundation
 import SwiftUI
 
@@ -128,6 +129,17 @@ class SoundManager: ObservableObject {
         guard isSoundFeedbackEnabled else { return }
         escSound?.volume = 0.3
         escSound?.play()
+    }
+
+    func playClipboardCopySound() { playClipboardSound(key: ClipboardHistorySettings.Keys.copySound, name: "Pop") }
+    func playClipboardPasteSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.pasteSound, name: "Purr") }
+    func playClipboardDeleteSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.deleteSound, name: "Basso") }
+    func playClipboardSelectionSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.selectionSound, name: "Tink") }
+
+    private func playClipboardSound(key: String, name: String) {
+        guard ClipboardHistorySettings.soundEnabled(for: key), let sound = NSSound(named: NSSound.Name(name)) else { return }
+        sound.volume = 0.22
+        sound.play()
     }
     
     var isEnabled: Bool {

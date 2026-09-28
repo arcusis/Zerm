@@ -1,24 +1,27 @@
 ---
 title: Clipboard history
 eyebrow: Privacy
-summary: How Zerm captures and protects clipboard copies on this Mac.
+summary: How Zerm captures, stores, and exports clipboard copies on this Mac.
 ---
 
-Zerm's clipboard history stores copies locally so they can be searched and pasted again.
-Nothing is sent off this Mac. History capture is enabled by default; dictation capture is
-off by default.
+Zerm keeps clipboard history on this Mac. Capture starts enabled; saving dictated text is
+optional and off by default. History can be paused, and password-manager apps are excluded
+by default. Confidential and transient pasteboard markers have separate controls.
 
-Zerm skips copies marked transient, concealed, or automatically generated. It also skips
-copies from 1Password, Bitwarden, Keychain Access, and Apple Passwords by default. The
-history can be paused globally, for a set time, or for the next copy. Excluded apps and
-retention limits are configurable through the Clipboard History settings API.
+History index and payloads are encrypted at rest with AES-GCM. The key stays in this Zerm
+installation's Keychain. Pinned items bypass age and count retention. Clearing history can
+keep pinned items, favourites, and tagged items. Optional clear-on-quit and clear-on-restart
+settings remove stored entries; restart detection compares the system boot time saved at the
+previous launch.
 
-History metadata and each clipboard payload are encrypted with AES-GCM. The encryption
-key is held in this Zerm installation's Keychain, and encrypted files live under Zerm's
-Application Support folder. Pinned items do not expire or count toward the item limit.
-Clearing history keeps pinned items unless they are explicitly included.
+Export creates a ZIP archive with a versioned JSON index and one JSON representation blob per
+item. It preserves item metadata, titles, pins, favourites, collection membership, and favourite
+order. Import merges entries by content hash. An optional password encrypts the ZIP payload with
+PBKDF2-HMAC-SHA256 and AES-GCM; without a password, the ZIP is unencrypted and should be stored
+accordingly.
 
-Zerm's transient dictation paste and clipboard restoration are marked and skipped by
-history capture. Saving dictated text to history is optional and starts turned off.
-
-The history panel and settings controls are not part of this release yet.
+Retention choices can be set per content kind and are stored in settings. Per-kind enforcement
+will connect when the history engine work lands; the current engine enforces the overall age and
+count limits. The history panel is being built separately. Its open shortcut and menu entry call
+a connection stub until that panel is merged. The Paste Next shortcuts likewise forward through
+a marked runtime hook for the history engine integration.

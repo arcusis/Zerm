@@ -7,6 +7,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case shortcutsAutomation
     case audio
+    case clipboardHistory
     case modelsProviders
     case permissionsPrivacy
     case storageBackup

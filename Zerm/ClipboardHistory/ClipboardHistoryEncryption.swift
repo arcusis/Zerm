@@ -27,4 +27,8 @@ enum ClipboardHistoryError: Error {
     case keychainUnavailable
     case corruptStore
     case missingPayload
+    case archiveOperationFailed
+    case invalidArchivePassword
+    case unsupportedArchiveVersion
+    case corruptArchive
 }

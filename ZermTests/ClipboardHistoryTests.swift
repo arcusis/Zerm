@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Testing
+import KeyboardShortcuts
 @testable import Zerm
 
 @Suite(.serialized)
@@ -132,6 +133,99 @@ struct ClipboardHistoryTests {
         #expect(ClipboardItem.detectKind(in: [.init(type: "public.file-url", data: Data())]) == .fileURLs)
         #expect(ClipboardItem.detectKind(in: [.init(type: "public.url", data: Data())]) == .url)
         #expect(ClipboardItem.detectKind(in: [.init(type: "public.color", data: Data())]) == .color)
+    }
+
+    @Test func clipboardHistorySettingsDefaultsAreRegistered() {
+        let defaults = UserDefaults.standard
+        let keys = [
+            ClipboardHistorySettings.Keys.enabled, ClipboardHistorySettings.Keys.windowPosition,
+            ClipboardHistorySettings.Keys.pasteOnClick, ClipboardHistorySettings.Keys.doubleClickPaste,
+            ClipboardHistorySettings.Keys.showBadges, ClipboardHistorySettings.Keys.updateAfterPaste,
+            ClipboardHistorySettings.Keys.favoritesOnTop, ClipboardHistorySettings.Keys.warnBeforeClear,
+            ClipboardHistorySettings.Keys.clearOnQuit, ClipboardHistorySettings.Keys.clearOnRestart,
+            ClipboardHistorySettings.Keys.keepFavoritesOnClear, ClipboardHistorySettings.Keys.keepTaggedOnClear,
+            ClipboardHistorySettings.Keys.ignoreConfidential, ClipboardHistorySettings.Keys.ignoreTransient,
+            ClipboardHistorySettings.Keys.retentionCount, ClipboardHistorySettings.Keys.retentionDays,
+            ClipboardHistorySettings.Keys.saveDictations, ClipboardHistorySettings.Keys.paused,
+            ClipboardHistorySettings.Keys.copySound, ClipboardHistorySettings.Keys.pasteSound,
+            ClipboardHistorySettings.Keys.deleteSound, ClipboardHistorySettings.Keys.selectionSound
+        ]
+        let saved = Dictionary(uniqueKeysWithValues: keys.map { ($0, defaults.object(forKey: $0)) })
+        defer { for key in keys { if let value = saved[key] { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) } } }
+        for key in keys { defaults.removeObject(forKey: key) }
+        AppDefaults.registerDefaults()
+        #expect(ClipboardHistorySettings.isEnabled)
+        #expect(ClipboardHistorySettings.windowPosition == "lastLocation")
+        #expect(ClipboardHistorySettings.retentionCount == 500)
+        #expect(ClipboardHistorySettings.retentionDays == 90)
+        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreConfidential))
+        #expect(!ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnQuit))
+        #expect(!ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.copySound))
+    }
+
+    @Test func archiveRoundTripPreservesItemAndFavoriteOrder() throws {
+        let item = try #require(ClipboardItem.capture(
+            representations: [Self.text("archive payload")], sourceApp: Self.source
+        ))
+        let entry = ClipboardHistoryArchive.Entry(item: ClipboardItem(
+            id: item.id, contentHash: item.contentHash, kind: item.kind,
+            representations: item.representations, preview: item.preview,
+            createdAt: item.createdAt, lastUsedAt: item.lastUsedAt, useCount: 4,
+            isPinned: true, isFavorite: true, collectionID: nil, title: "Saved title", sourceApp: item.sourceApp
+        ), favoriteOrder: 2)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).zermclip")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let passphrase = UUID().uuidString
+        try ClipboardHistoryArchive.write([entry], to: url, password: passphrase)
+        let imported = try ClipboardHistoryArchive.read(from: url, password: passphrase)
+        #expect(imported.count == 1)
+        #expect(imported[0].item.representations == item.representations)
+        #expect(imported[0].item.title == "Saved title")
+        #expect(imported[0].item.isFavorite && imported[0].item.isPinned)
+        #expect(imported[0].favoriteOrder == 2)
+    }
+
+    @Test func archiveMergeDeduplicatesByContentHashAndCombinesOrganization() async throws {
+        try await Self.withStore { store, _ in
+            let original = try #require(ClipboardItem.capture(
+                representations: [Self.text("same bytes")], sourceApp: Self.source
+            ))
+            let existing = try await store.capture(original)
+            let archived = ClipboardItem(
+                id: UUID(), contentHash: original.contentHash, kind: original.kind,
+                representations: original.representations, preview: original.preview,
+                createdAt: original.createdAt, lastUsedAt: original.lastUsedAt,
+                useCount: 3, isPinned: true, isFavorite: true, collectionID: UUID(),
+                title: "Imported title", sourceApp: original.sourceApp
+            )
+            try await store.mergeArchiveEntries([.init(item: archived, favoriteOrder: 0)])
+            let items = try await store.recent()
+            #expect(items.count == 1)
+            #expect(items[0].id == existing.id)
+            #expect(items[0].isPinned && items[0].isFavorite)
+            #expect(items[0].title == "Imported title")
+        }
+    }
+
+    @Test func restartDetectionAndMenuRecentItemsAreBounded() throws {
+        #expect(!ClipboardHistoryRuntime.didSystemRestart(previousBootTime: nil, currentBootTime: 100))
+        #expect(!ClipboardHistoryRuntime.didSystemRestart(previousBootTime: 100, currentBootTime: 101))
+        #expect(ClipboardHistoryRuntime.didSystemRestart(previousBootTime: 100, currentBootTime: 110))
+        let items = try (0..<7).map { index in
+            try #require(ClipboardItem.capture(
+                representations: [Self.text("item \(index)")], sourceApp: Self.source,
+                createdAt: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+        #expect(ClipboardHistoryRuntime.menuRecentItems(from: items).count == 5)
+        #expect(ClipboardHistoryRuntime.menuRecentItems(from: items).map(\.preview) == items.prefix(5).map(\.preview))
+    }
+
+    @Test func clipboardShortcutNamesAreDeclaredWithExpectedStorageNames() {
+        #expect(KeyboardShortcuts.Name.openClipboardHistory == KeyboardShortcuts.Name("openClipboardHistory"))
+        #expect(KeyboardShortcuts.Name.pauseClipboardHistory == KeyboardShortcuts.Name("pauseClipboardHistory"))
+        #expect(KeyboardShortcuts.Name.pasteNextClipboardItem == KeyboardShortcuts.Name("pasteNextClipboardItem"))
+        #expect(KeyboardShortcuts.Name.pasteNextClipboardItemFormatted == KeyboardShortcuts.Name("pasteNextClipboardItemFormatted"))
     }
 
     private static let source = ClipboardSourceApp(bundleIdentifier: "com.apple.TextEdit", name: "TextEdit")
