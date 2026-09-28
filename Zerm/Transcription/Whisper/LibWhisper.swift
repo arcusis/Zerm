@@ -10,9 +10,7 @@ import os
 // Meet Whisper C++ constraint: Don't access from more than one thread at a time.
 actor WhisperContext {
     private var context: OpaquePointer?
-    private var languageCString: [CChar]?
     private var prompt: String?
-    private var promptCString: [CChar]?
     private var vadModelPath: String?
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperContext")
 
@@ -42,26 +40,6 @@ actor WhisperContext {
         let maxThreads = HardwareCapability.inferenceThreadCount
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         
-        if languageCode != LanguagePreference.autoCode {
-            languageCString = Array(languageCode.utf8CString)
-            params.language = languageCString?.withUnsafeBufferPointer { ptr in
-                ptr.baseAddress
-            }
-        } else {
-            languageCString = nil
-            params.language = nil
-        }
-        
-        if prompt != nil {
-            promptCString = Array(prompt!.utf8CString)
-            params.initial_prompt = promptCString?.withUnsafeBufferPointer { ptr in
-                ptr.baseAddress
-            }
-        } else {
-            promptCString = nil
-            params.initial_prompt = nil
-        }
-        
         params.print_realtime = true
         params.print_progress = false
         params.print_timestamps = true
@@ -80,10 +58,8 @@ actor WhisperContext {
         
         // Configure VAD if enabled by user and model is available
         let isVADEnabled = !forceDisableVAD && UserDefaults.standard.bool(forKey: "IsVADEnabled")
-        if isVADEnabled, let vadModelPath = self.vadModelPath {
-            params.vad = true
-            params.vad_model_path = (vadModelPath as NSString).utf8String
-            
+        let vadModelPath = isVADEnabled ? self.vadModelPath : nil
+        if vadModelPath != nil {
             var vadParams = whisper_vad_default_params()
             vadParams.threshold = 0.50
             vadParams.min_speech_duration_ms = 250
@@ -92,22 +68,36 @@ actor WhisperContext {
             vadParams.speech_pad_ms = 30
             vadParams.samples_overlap = 0.1
             params.vad_params = vadParams
-        } else {
-            params.vad = false
         }
-        
-        var success = true
-        samples.withUnsafeBufferPointer { samplesBuffer in
-            if whisper_full(context, params, samplesBuffer.baseAddress, Int32(samplesBuffer.count)) != 0 {
-                logger.error("❌ Failed to run whisper_full. VAD enabled: \(params.vad, privacy: .public)")
-                success = false
+        params.vad = vadModelPath != nil
+
+        // whisper_full reads the language, prompt and VAD model path through these pointers, so
+        // they must stay valid for the whole call: each one is only valid inside its closure.
+        let language = languageCode != LanguagePreference.autoCode ? languageCode : nil
+        let success = Self.withOptionalCString(language) { languagePointer in
+            Self.withOptionalCString(prompt) { promptPointer in
+                Self.withOptionalCString(vadModelPath) { vadModelPointer in
+                    params.language = languagePointer
+                    params.initial_prompt = promptPointer
+                    params.vad_model_path = vadModelPointer
+                    return samples.withUnsafeBufferPointer { samplesBuffer in
+                        whisper_full(context, params, samplesBuffer.baseAddress, Int32(samplesBuffer.count)) == 0
+                    }
+                }
             }
         }
-        
-        languageCString = nil
-        promptCString = nil
-        
+        if !success {
+            logger.error("❌ Failed to run whisper_full. VAD enabled: \(params.vad, privacy: .public)")
+        }
         return success
+    }
+
+    private static func withOptionalCString<Result>(
+        _ string: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let string else { return body(nil) }
+        return string.withCString(body)
     }
 
     func transcriptionCandidate() -> WhisperLanguageCandidateSelector.Candidate {
@@ -216,7 +206,6 @@ actor WhisperContext {
             whisper_free(context)
             self.context = nil
         }
-        languageCString = nil
     }
 
     func setPrompt(_ prompt: String?) {
