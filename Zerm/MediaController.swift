@@ -13,6 +13,9 @@ final class MediaController: ObservableObject, @unchecked Sendable {
     /// it belonged to is still the current one before touching system volume.
     private struct MuteState {
         var didMuteAudio = false
+        /// The output Zerm muted. Unmuting targets it, not whatever the default output is by then,
+        /// so switching outputs mid-recording cannot leave the old one muted.
+        var mutedDeviceID: AudioDeviceID?
         var wasAudioMutedBeforeRecording = false
         var unmuteTask: Task<Void, Never>?
         var muteTask: Task<Void, Never>?
@@ -106,7 +109,9 @@ final class MediaController: ObservableObject, @unchecked Sendable {
             return false
         }
 
-        if isSystemAudioMuted() {
+        guard let deviceID = getDefaultOutputDevice() else { return false }
+
+        if isSystemAudioMuted(deviceID) {
             // Already muted before we got here — remember that, so the unmute path
             // does not un-mute something the user muted themselves.
             state.withLock { state in
@@ -120,16 +125,17 @@ final class MediaController: ObservableObject, @unchecked Sendable {
 
         state.withLock { $0.wasAudioMutedBeforeRecording = false }
 
-        let success = setSystemMuted(true)
+        let success = setSystemMuted(true, on: deviceID)
         let raced = state.withLock { state -> Bool in
             // Only claim mute ownership while this generation is still current.
             guard state.generation == generation else { return success }
             state.didMuteAudio = success
+            state.mutedDeviceID = success ? deviceID : nil
             return false
         }
         if raced {
             // Muted after a cancel landed — undo it rather than stranding the output.
-            _ = setSystemMuted(false)
+            _ = setSystemMuted(false, on: deviceID)
         }
         return success
     }
@@ -138,11 +144,11 @@ final class MediaController: ObservableObject, @unchecked Sendable {
         guard isSystemMuteEnabled else { return }
 
         let delay = audioResumptionDelay
-        let (shouldUnmute, myGeneration) = state.withLock { state -> (Bool, Int) in
+        let (mutedDeviceID, myGeneration) = state.withLock { state -> (AudioDeviceID?, Int) in
             state.muteTask?.cancel()
             state.muteTask = nil
             let shouldUnmute = state.didMuteAudio && !state.wasAudioMutedBeforeRecording
-            return (shouldUnmute, state.nextGeneration())
+            return (shouldUnmute ? state.mutedDeviceID : nil, state.nextGeneration())
         }
 
         let task = Task { [weak self] in
@@ -153,10 +159,13 @@ final class MediaController: ObservableObject, @unchecked Sendable {
             guard let self, !Task.isCancelled else { return }
             guard self.state.withLock({ $0.generation == myGeneration }) else { return }
 
-            if shouldUnmute {
-                _ = self.setSystemMuted(false)
+            if let mutedDeviceID {
+                _ = self.setSystemMuted(false, on: mutedDeviceID)
             }
-            self.state.withLock { $0.didMuteAudio = false }
+            self.state.withLock { state in
+                state.didMuteAudio = false
+                state.mutedDeviceID = nil
+            }
         }
 
         state.withLock { $0.unmuteTask = task }
@@ -196,9 +205,7 @@ final class MediaController: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func isSystemAudioMuted() -> Bool {
-        guard let deviceID = getDefaultOutputDevice() else { return false }
-
+    private func isSystemAudioMuted(_ deviceID: AudioDeviceID) -> Bool {
         // Check any mutable element — if the master element is muted, or every
         // channel is muted, consider the device muted.
         return muteableElements(for: deviceID).contains { element in
@@ -211,9 +218,7 @@ final class MediaController: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func setSystemMuted(_ muted: Bool) -> Bool {
-        guard let deviceID = getDefaultOutputDevice() else { return false }
-
+    private func setSystemMuted(_ muted: Bool, on deviceID: AudioDeviceID) -> Bool {
         let elements = muteableElements(for: deviceID)
         guard !elements.isEmpty else { return false }
 

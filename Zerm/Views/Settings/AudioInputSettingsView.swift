@@ -3,6 +3,7 @@ import SwiftUI
 struct AudioInputSettingsView: View {
     @ObservedObject var audioDeviceManager = AudioDeviceManager.shared
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("PreserveBluetoothMediaQuality") private var preserveBluetoothMediaQuality = true
     
     var body: some View {
         ScrollView {
@@ -17,6 +18,7 @@ struct AudioInputSettingsView: View {
     private var mainContent: some View {
         VStack(spacing: 40) {
             inputModeSection
+            bluetoothMediaQualitySection
 
             switch audioDeviceManager.inputMode {
             case .systemDefault:
@@ -37,6 +39,24 @@ struct AudioInputSettingsView: View {
             title: String(localized: "Audio Input"),
             description: String(localized: "Configure your microphone preferences")
         )
+    }
+
+    private var bluetoothMediaQualitySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $preserveBluetoothMediaQuality) {
+                HStack(spacing: 4) {
+                    Text("Preserve Bluetooth Media Quality")
+                    InfoTip(
+                        String(localized: "Keeps music and video at full headphone quality while dictating. If the chosen microphone is Bluetooth, Zerm records from the Mac's built-in microphone, or another connected non-Bluetooth microphone, without changing your system audio devices. With the lid closed the built-in microphone is off, so another microphone is needed.")
+                    )
+                }
+            }
+
+            Text("Bluetooth cannot provide high-quality playback while its microphone is active. Turn this off only when you specifically want to record through the headset microphone.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
     
     private var inputModeSection: some View {
@@ -67,12 +87,12 @@ struct AudioInputSettingsView: View {
     private var systemDefaultSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 4) {
-                Text("Current Device")
+                Text("Recording Device")
                     .font(.title2)
                     .fontWeight(.semibold)
 
                 InfoTip(
-                    String(localized: "The microphone macOS is currently set to use. Zerm follows it, so changing the input in System Settings or plugging in a headset changes what Zerm records from. Switch to Custom Device if you want it pinned instead."),
+                    String(localized: "The microphone Zerm will record from. Zerm follows the macOS default unless Bluetooth media protection redirects a Bluetooth headset to a non-Bluetooth microphone. Switch to Custom Device if you want the preference pinned instead."),
                     doc: .audioInput
                 )
             }
@@ -81,7 +101,11 @@ struct AudioInputSettingsView: View {
                 Image(systemName: "display")
                     .foregroundStyle(.secondary)
 
-                Text(audioDeviceManager.getSystemDefaultDeviceName() ?? String(localized: "No device available"))
+                Text(
+                    audioDeviceManager.availableDevices.first(where: {
+                        $0.id == audioDeviceManager.getCurrentDevice()
+                    })?.name ?? String(localized: "No device available")
+                )
                     .foregroundStyle(.primary)
 
                 Spacer()

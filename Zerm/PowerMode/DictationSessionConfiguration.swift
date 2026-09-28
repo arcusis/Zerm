@@ -121,6 +121,21 @@ struct DictationSessionConfiguration {
         powerMode?.contextAwareness ?? global
     }
 
+    /// The model a dictation under this Power Mode records with: the Power Mode's model when it is
+    /// usable, otherwise the global model when it is usable. Nil when neither can transcribe.
+    static func sessionModel(
+        powerMode: PowerModeConfig?,
+        globalModel: (any TranscriptionModel)?,
+        usableModels: [any TranscriptionModel]
+    ) -> (any TranscriptionModel)? {
+        if let name = powerMode?.selectedTranscriptionModelName,
+           let override = usableModels.first(where: { $0.name == name }) {
+            return override
+        }
+        guard let globalModel else { return nil }
+        return usableModels.first { $0.name == globalModel.name }
+    }
+
     /// Resolves a Power Mode against the global settings. An overridden transcription model that is
     /// no longer usable (deleted, key removed) falls back to the global model rather than failing
     /// the recording.

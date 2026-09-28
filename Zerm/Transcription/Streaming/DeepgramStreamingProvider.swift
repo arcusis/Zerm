@@ -11,6 +11,8 @@ final class DeepgramStreamingProvider: StreamingTranscriptionProvider {
     private let modelContext: ModelContext
 
     private(set) var transcriptionEvents: AsyncStream<StreamingTranscriptionEvent>
+    /// Deepgram sends `Metadata` only after `CloseStream`, once every final segment is out.
+    var finalizationEvents: AsyncStream<String>? { client.finalizationEvents }
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext

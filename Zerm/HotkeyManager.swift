@@ -78,7 +78,8 @@ class HotkeyManager: ObservableObject {
 
     // MARK: - Helper Properties
     private var canProcessHotkeyAction: Bool {
-        engine.recordingState != .transcribing && engine.recordingState != .enhancing && engine.recordingState != .busy && engine.recordingState != .speaking && engine.recordingState != .preparingSpeech && engine.recordingState != .generatingSpeech
+        UserSessionInputPolicy.allowsShortcutHandling
+            && engine.recordingState != .transcribing && engine.recordingState != .enhancing && engine.recordingState != .busy && engine.recordingState != .speaking && engine.recordingState != .preparingSpeech && engine.recordingState != .generatingSpeech
     }
     
     // NSEvent monitoring for modifier keys
@@ -104,6 +105,13 @@ class HotkeyManager: ObservableObject {
     // (VoiceInk #720)
     private var fnKeyDownMonitor: Any?
     private var fnCompanionKeyPressed = false
+
+    // A modifier-only shortcut in toggle mode fires when the modifier is released, and only if
+    // no other key was used while it was held, so Option+letter and similar combinations keep
+    // working. Push-to-talk and hybrid need the key-down and still get it.
+    private var standaloneModifier: (keyCode: UInt16, pressedAt: TimeInterval)?
+    private var standaloneCompanionMonitor: Any?
+    private var standaloneCompanionKeyPressed = false
 
     // Keyboard shortcut state tracking
     private var shortcutKeyPressEventTime: TimeInterval?
@@ -370,7 +378,7 @@ class HotkeyManager: ObservableObject {
         if readAloudHotkey == .custom {
             KeyboardShortcuts.onKeyDown(for: .readSelectedTextAloud) { [weak self] in
                 Task { @MainActor in
-                    guard let self, !self.isRecordingShortcut else { return }
+                    guard let self, !self.isRecordingShortcut, UserSessionInputPolicy.allowsShortcutHandling else { return }
                     self.onReadAloudTriggered?()
                 }
             }
@@ -401,6 +409,7 @@ class HotkeyManager: ObservableObject {
             fnKeyDownMonitor = nil
         }
         fnCompanionKeyPressed = false
+        clearStandaloneModifier()
 
         resetKeyStates()
     }
@@ -477,12 +486,17 @@ class HotkeyManager: ObservableObject {
         let flags = event.modifierFlags
         let eventTime = event.timestamp
 
+        // Another modifier changing while a standalone candidate is held makes it a combination.
+        if let candidate = standaloneModifier, candidate.keyCode != keycode {
+            standaloneCompanionKeyPressed = true
+        }
+
         // Read Aloud trigger — independent of dictation. Simple tap-to-toggle on key down.
         if readAloudHotkey.isModifierKey, readAloudHotkey != .none, readAloudHotkey.keyCode == keycode {
             let pressed = Self.isModifierPressed(readAloudHotkey, flags: flags)
             if pressed != readAloudKeyState {
                 readAloudKeyState = pressed
-                if pressed { onReadAloudTriggered?() }
+                if pressed, UserSessionInputPolicy.allowsShortcutHandling { onReadAloudTriggered?() }
             }
             return
         }
@@ -541,10 +555,41 @@ class HotkeyManager: ObservableObject {
             }
             return
         case .rightOption, .leftOption, .leftControl, .rightControl, .rightCommand, .rightShift:
-            break
+            if activeMode == .toggle {
+                await handleStandaloneModifier(keyCode: keycode, isKeyPressed: isKeyPressed, eventTime: eventTime)
+                return
+            }
         }
 
         await processKeyPress(isKeyPressed: isKeyPressed, eventTime: eventTime, mode: activeMode)
+    }
+
+    private func handleStandaloneModifier(keyCode: UInt16, isKeyPressed: Bool, eventTime: TimeInterval) async {
+        if isKeyPressed {
+            guard standaloneModifier == nil else { return }
+            standaloneModifier = (keyCode, eventTime)
+            standaloneCompanionKeyPressed = false
+            standaloneCompanionMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+                self?.standaloneCompanionKeyPressed = true
+            }
+            return
+        }
+
+        guard let candidate = standaloneModifier, candidate.keyCode == keyCode else { return }
+        let wasCombination = standaloneCompanionKeyPressed
+        clearStandaloneModifier()
+        guard !wasCombination else { return }
+        await processKeyPress(isKeyPressed: true, eventTime: candidate.pressedAt, mode: .toggle)
+        await processKeyPress(isKeyPressed: false, eventTime: eventTime, mode: .toggle)
+    }
+
+    private func clearStandaloneModifier() {
+        if let monitor = standaloneCompanionMonitor {
+            NSEvent.removeMonitor(monitor)
+            standaloneCompanionMonitor = nil
+        }
+        standaloneModifier = nil
+        standaloneCompanionKeyPressed = false
     }
 
     private func processKeyPress(isKeyPressed: Bool, eventTime: TimeInterval, mode: HotkeyMode) async {
@@ -694,7 +739,7 @@ class HotkeyManager: ObservableObject {
         // Hand the monitors over by value. Calling removeAllMonitoring() from a Task
         // spawned in deinit would capture `self` and resurrect an object that is
         // already being deallocated (a hard error under the Swift 6 language mode).
-        let monitors = ([globalEventMonitor, localEventMonitor, fnKeyDownMonitor] + middleClickMonitors)
+        let monitors = ([globalEventMonitor, localEventMonitor, fnKeyDownMonitor, standaloneCompanionMonitor] + middleClickMonitors)
             .compactMap { $0 }
         Task { @MainActor in
             monitors.forEach(NSEvent.removeMonitor)

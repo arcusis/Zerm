@@ -96,6 +96,7 @@ final class StreamingTranscriptionSession: TranscriptionSession {
                 let desc = error.localizedDescription
                 await MainActor.run {
                     self.logger.error("❌ Failed to start streaming, will fall back to batch: \(desc, privacy: .public)")
+                    DebugLogger.shared.log("TranscriptionSession", "streaming did not connect for \(model.displayName); no live text, batch transcription at stop: \(desc)")
                     self.streamingFailed = true
                 }
             }
@@ -116,6 +117,7 @@ final class StreamingTranscriptionSession: TranscriptionSession {
                 return text
             } catch {
                 logger.error("❌ Streaming failed, falling back to batch: \(error.localizedDescription, privacy: .public)")
+                DebugLogger.shared.log("TranscriptionSession", "streaming stop failed for \(model.displayName); using batch transcription: \(error.localizedDescription)")
                 streamingService.cancel()
             }
         } else {
