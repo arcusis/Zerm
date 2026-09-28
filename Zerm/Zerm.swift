@@ -14,19 +14,21 @@ struct ZermApp: App {
     let containerInitializationFailed: Bool
     private let uiTestConfiguration: UITestLaunchConfiguration
 
-    @StateObject private var engine: ZermEngine
-    @StateObject private var whisperModelManager: WhisperModelManager
-    @StateObject private var fluidAudioModelManager: FluidAudioModelManager
-    @StateObject private var transcriptionModelManager: TranscriptionModelManager
-    @StateObject private var fileTranscriptionQueue: FileTranscriptionQueue
-    @StateObject private var recorderUIManager: RecorderUIManager
-    @StateObject private var hotkeyManager: HotkeyManager
-    @StateObject private var updaterViewModel: UpdaterViewModel
-    @StateObject private var menuBarManager: MenuBarManager
-    @StateObject private var ttsController: TTSController
-    @StateObject private var aiService = AIService()
-    @StateObject private var enhancementService: AIEnhancementService
-    @StateObject private var activeWindowService = ActiveWindowService.shared
+    // Plain references, not @StateObject: the App body reads none of their properties, it only
+    // hands them to the scenes, which observe them themselves. As @StateObject every published
+    // change of any of them re-evaluated every scene, about six times per dictation (#354).
+    private let engine: ZermEngine
+    private let whisperModelManager: WhisperModelManager
+    private let fluidAudioModelManager: FluidAudioModelManager
+    private let transcriptionModelManager: TranscriptionModelManager
+    private let fileTranscriptionQueue: FileTranscriptionQueue
+    private let recorderUIManager: RecorderUIManager
+    private let hotkeyManager: HotkeyManager
+    private let updaterViewModel: UpdaterViewModel
+    private let menuBarManager: MenuBarManager
+    private let ttsController: TTSController
+    private let aiService: AIService
+    private let enhancementService: AIEnhancementService
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("enableAnnouncements") private var enableAnnouncements = true
     @State private var showMenuBarIcon = true
@@ -109,16 +111,16 @@ struct ZermApp: App {
 
         // Initialize services with proper sharing of instances
         let aiService = AIService()
-        _aiService = StateObject(wrappedValue: aiService)
+        self.aiService = aiService
 
         // A development bundle must never update itself into the released app.
         let updaterViewModel = UpdaterViewModel(
             startsUpdater: !uiTestConfiguration.isEnabled && AppStoragePaths.isProductionBundle
         )
-        _updaterViewModel = StateObject(wrappedValue: updaterViewModel)
+        self.updaterViewModel = updaterViewModel
 
         let enhancementService = AIEnhancementService(aiService: aiService, modelContext: container.mainContext)
-        _enhancementService = StateObject(wrappedValue: enhancementService)
+        self.enhancementService = enhancementService
 
         // 1. Create modelsDirectory URL
         let appSupportDirectory = uiTestConfiguration.storageRoot
@@ -170,27 +172,27 @@ struct ZermApp: App {
             transcriptionModelManager.loadCurrentTranscriptionModel()
         }
 
-        _whisperModelManager = StateObject(wrappedValue: whisperModelManager)
-        _fluidAudioModelManager = StateObject(wrappedValue: fluidAudioModelManager)
-        _transcriptionModelManager = StateObject(wrappedValue: transcriptionModelManager)
-        _recorderUIManager = StateObject(wrappedValue: recorderUIManager)
-        _engine = StateObject(wrappedValue: engine)
+        self.whisperModelManager = whisperModelManager
+        self.fluidAudioModelManager = fluidAudioModelManager
+        self.transcriptionModelManager = transcriptionModelManager
+        self.recorderUIManager = recorderUIManager
+        self.engine = engine
 
         let fileTranscriptionQueue = FileTranscriptionQueue.live(
             engine: engine,
             modelManager: transcriptionModelManager,
             modelContext: container.mainContext
         )
-        _fileTranscriptionQueue = StateObject(wrappedValue: fileTranscriptionQueue)
+        self.fileTranscriptionQueue = fileTranscriptionQueue
 
         // 7. Create other services that depend on engine
         let hotkeyManager = HotkeyManager(engine: engine, recorderUIManager: recorderUIManager)
-        _hotkeyManager = StateObject(wrappedValue: hotkeyManager)
+        self.hotkeyManager = hotkeyManager
 
         let menuBarManager = MenuBarManager(
             initialMenuBarOnly: uiTestConfiguration.isEnabled ? false : nil
         )
-        _menuBarManager = StateObject(wrappedValue: menuBarManager)
+        self.menuBarManager = menuBarManager
         menuBarManager.configure(modelContainer: container, engine: engine)
 
         // Read Aloud (text-to-speech) — mirror of the dictation flow.
@@ -199,9 +201,8 @@ struct ZermApp: App {
         let ttsController = TTSController(engine: engine, recorderUIManager: recorderUIManager)
         hotkeyManager.onReadAloudTriggered = { [weak ttsController] in ttsController?.toggle() }
         recorderUIManager.onCancelSpeaking = { [weak ttsController] in ttsController?.stop() }
-        _ttsController = StateObject(wrappedValue: ttsController)
+        self.ttsController = ttsController
 
-        _activeWindowService = StateObject(wrappedValue: ActiveWindowService.shared)
 
         prewarmService = uiTestConfiguration.isEnabled
             ? nil
