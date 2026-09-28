@@ -8,6 +8,11 @@ final class APIKeyManager {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "APIKeyManager")
     private let keychain = KeychainService.shared
 
+    /// Whether each provider has a key, so listing usable models, which runs on every recording
+    /// start, does not query the Keychain once per cloud provider. Every write goes through this
+    /// type and updates the cache.
+    private let presence = OSAllocatedUnfairLock(initialState: [String: Bool]())
+
     /// Provider to Keychain identifier mapping (iOS compatible for iCloud sync).
     private static let providerToKeychainKey: [String: String] = [
         "groq": "groqAPIKey",
@@ -37,6 +42,7 @@ final class APIKeyManager {
     func saveAPIKey(_ key: String, forProvider provider: String) -> Bool {
         let keyIdentifier = keychainIdentifier(forProvider: provider)
         let success = keychain.save(key, forKey: keyIdentifier)
+        presence.withLock { $0[keyIdentifier] = nil }
         if success {
             logger.info("Saved API key for provider: \(provider, privacy: .public) with key: \(keyIdentifier, privacy: .public)")
         }
@@ -54,6 +60,7 @@ final class APIKeyManager {
     func deleteAPIKey(forProvider provider: String) -> Bool {
         let keyIdentifier = keychainIdentifier(forProvider: provider)
         let success = keychain.delete(forKey: keyIdentifier)
+        presence.withLock { $0[keyIdentifier] = nil }
         if success {
             logger.info("Deleted API key for provider: \(provider, privacy: .public)")
         }
@@ -62,7 +69,11 @@ final class APIKeyManager {
 
     /// Checks if an API key exists for a provider.
     func hasAPIKey(forProvider provider: String) -> Bool {
-        return getAPIKey(forProvider: provider) != nil
+        let keyIdentifier = keychainIdentifier(forProvider: provider)
+        if let cached = presence.withLock({ $0[keyIdentifier] }) { return cached }
+        let hasKey = getAPIKey(forProvider: provider) != nil
+        presence.withLock { $0[keyIdentifier] = hasKey }
+        return hasKey
     }
 
     // MARK: - Custom Model API Keys

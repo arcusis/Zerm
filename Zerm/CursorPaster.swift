@@ -18,7 +18,11 @@ class CursorPaster {
         }
     }
 
+    /// Upper bound on the wait before Cmd+V: a shortcut the user is still releasing would turn
+    /// it into a different key combination in the target app.
     private static let prePasteDelay: TimeInterval = 0.10
+    /// Lower bound, so the pasteboard write has settled even when no modifier is held.
+    private static let minimumPrePasteDelay: TimeInterval = 0.02
     private static let pasteShortcutEventDelay: TimeInterval = 0.01
     private static let unicodeEventDelay: TimeInterval = 0.003
     private static let unicodeEventUTF16Limit = 20
@@ -117,7 +121,7 @@ class CursorPaster {
 
         let targetBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         if prefersClipboardFreeInsertion(bundleIdentifier: targetBundleIdentifier) {
-            await wait(prePasteDelay)
+            await waitUntilModifiersReleased()
             let snapshot = await anchorTask?.value
             let result = await typeTextWithoutClipboard(text)
             if result == .commandPosted {
@@ -138,7 +142,7 @@ class CursorPaster {
             return (.commandNotPosted, nil)
         }
 
-        await wait(prePasteDelay)
+        await waitUntilModifiersReleased()
 
         let snapshot = await anchorTask?.value
 
@@ -374,6 +378,21 @@ class CursorPaster {
         guard seconds > 0 else { return }
         let nanoseconds = UInt64(seconds * 1_000_000_000)
         try? await Task.sleep(nanoseconds: nanoseconds)
+    }
+
+    /// Waits until no modifier key is held, between `minimumPrePasteDelay` and `prePasteDelay`.
+    /// Most dictations end with every key already up, so the paste goes out after the minimum.
+    private static func waitUntilModifiersReleased() async {
+        await wait(minimumPrePasteDelay)
+        let deadline = ProcessInfo.processInfo.systemUptime + prePasteDelay - minimumPrePasteDelay
+        while hasModifierHeld(CGEventSource.flagsState(.combinedSessionState)),
+              ProcessInfo.processInfo.systemUptime < deadline {
+            await wait(0.005)
+        }
+    }
+
+    static func hasModifierHeld(_ flags: CGEventFlags) -> Bool {
+        !flags.intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift, .maskSecondaryFn]).isEmpty
     }
 
     // MARK: - Auto Send Keys
