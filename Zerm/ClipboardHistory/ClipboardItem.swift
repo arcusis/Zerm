@@ -20,6 +20,7 @@ enum ClipboardItemKind: String, Codable, CaseIterable, Sendable {
     case image
     case fileURLs
     case url
+    case email
     case color
     case other
 }
@@ -37,12 +38,16 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
     let representations: [ClipboardRepresentation]
     let preview: String
     let createdAt: Date
+    var lastCopiedAt: Date
     var lastUsedAt: Date
     var useCount: Int
     var isPinned: Bool
     var isFavorite: Bool
     var collectionID: UUID?
     var title: String?
+    var tagIDs: [UUID]
+    var recognizedText: String
+    var barcodePayloads: [String]
     let sourceApp: ClipboardSourceApp
 
     var thumbnail: NSImage? {
@@ -62,12 +67,16 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         representations: [ClipboardRepresentation],
         preview: String,
         createdAt: Date = Date(),
+        lastCopiedAt: Date? = nil,
         lastUsedAt: Date = Date(),
         useCount: Int = 1,
         isPinned: Bool = false,
         isFavorite: Bool = false,
         collectionID: UUID? = nil,
         title: String? = nil,
+        tagIDs: [UUID] = [],
+        recognizedText: String = "",
+        barcodePayloads: [String] = [],
         sourceApp: ClipboardSourceApp
     ) {
         self.id = id
@@ -76,12 +85,16 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         self.representations = representations
         self.preview = preview
         self.createdAt = createdAt
+        self.lastCopiedAt = lastCopiedAt ?? createdAt
         self.lastUsedAt = lastUsedAt
         self.useCount = useCount
         self.isPinned = isPinned
         self.isFavorite = isFavorite
         self.collectionID = collectionID
         self.title = title
+        self.tagIDs = tagIDs
+        self.recognizedText = recognizedText
+        self.barcodePayloads = barcodePayloads
         self.sourceApp = sourceApp
     }
 
@@ -104,11 +117,16 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         }
         let hash = SHA256.hash(data: hashInput).map { String(format: "%02x", $0) }.joined()
         let kind = Self.detectKind(in: sorted)
+        let preview = Self.makePreview(from: pasteableRepresentations, kind: kind)
+        if [.plainText, .richText, .url, .email, .color].contains(kind),
+           preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return nil
+        }
         return ClipboardItem(
             contentHash: hash,
             kind: kind,
             representations: pasteableRepresentations,
-            preview: Self.makePreview(from: pasteableRepresentations, kind: kind),
+            preview: preview,
             createdAt: createdAt,
             lastUsedAt: createdAt,
             sourceApp: sourceApp
@@ -122,12 +140,28 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         if types.contains("public.color") || types.contains(where: { $0.localizedCaseInsensitiveContains("color") }) { return .color }
         if types.contains("public.rtf") || types.contains("public.html") || types.contains("com.apple.rtfd") { return .richText }
         if types.contains("public.url") { return .url }
+        if let text = representations.first(where: { $0.type == NSPasteboard.PasteboardType.string.rawValue })
+            .flatMap({ String(data: $0.data, encoding: .utf8) }) {
+            if ClipboardDetection.isEmail(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return .email }
+            if ClipboardDetection.isURL(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return .url }
+            if ClipboardDetection.colorToken(in: text) != nil { return .color }
+        }
         if types.contains("public.utf8-plain-text") || types.contains("NSStringPboardType") { return .plainText }
         return .other
     }
 
     private static func makePreview(from representations: [ClipboardRepresentation], kind: ClipboardItemKind) -> String {
         let byType = Dictionary(representations.map { ($0.type, $0.data) }, uniquingKeysWith: { first, _ in first })
+        if kind == .richText,
+           let rtf = byType["public.rtf"],
+           let attributed = try? NSAttributedString(data: rtf, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+            return String(attributed.string.prefix(500))
+        }
+        if kind == .richText,
+           let html = byType["public.html"],
+           let attributed = try? NSAttributedString(data: html, options: [.documentType: NSAttributedString.DocumentType.html], documentAttributes: nil) {
+            return String(attributed.string.prefix(500))
+        }
         if let text = byType[NSPasteboard.PasteboardType.string.rawValue].flatMap({ String(data: $0, encoding: .utf8) }) {
             return String(text.prefix(500))
         }
@@ -151,6 +185,7 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         case .color: return String(localized: "Color")
         case .richText: return String(localized: "Rich text")
         case .url: return String(localized: "Link")
+        case .email: return String(localized: "Email")
         case .plainText, .other: return ""
         }
     }
