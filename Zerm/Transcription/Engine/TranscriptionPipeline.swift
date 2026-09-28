@@ -286,6 +286,11 @@ class TranscriptionPipeline {
         if let textToPaste = finalPastedText,
            transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue,
            isRunStillValid() {
+            await MainActor.run {
+                if ClipboardHistorySettings.saveDictations {
+                    ClipboardHistoryRuntime.shared.recordDictation(textToPaste)
+                }
+            }
             let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
             let pastedText = textToPaste + (appendSpace ? " " : "")
 
