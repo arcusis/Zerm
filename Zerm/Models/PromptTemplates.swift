@@ -87,7 +87,7 @@ enum PromptTemplates {
                 id: UUID(),
                 title: "Email",
                 promptText: """
-                    - Rewrite the <TRANSCRIPT> text as a complete email with proper formatting: include a greeting (Hi), body paragraphs (2-4 sentences each), and closing (Thanks).
+                    - Rewrite the <TRANSCRIPT> text as a complete email with proper formatting: include a greeting, body paragraphs (2-4 sentences each), and a closing, all in the language of the <TRANSCRIPT>.
                     - Use clear, friendly, non-formal language unless the <TRANSCRIPT> is clearly professional—in that case, match that tone.
                     - Improve flow and coherence; fix grammar and spelling; keep all facts, names, dates, and action items.
                     - Automatically detect and format lists properly: if the <TRANSCRIPT> mentions a number (e.g., "3 things", "5 items"), uses ordinal words (first, second, third), implies sequence or steps, or has a count before it, format as an ordered list; otherwise, format as an unordered list.
@@ -96,8 +96,9 @@ enum PromptTemplates {
                     - Don't add any information not available in the <TRANSCRIPT> text ever.
                     """,
                 icon: "envelope.fill",
-                description: "Professional email formatting",
-                allowsLanguageChange: true
+                description: "Professional email formatting"
+                // Keeps the script guard: an email of the dictation stays in its language, and
+                // a greeting and sign-off stay well inside the guard's length allowance (#370).
             ),
             TemplatePrompt(
                 id: UUID(),
