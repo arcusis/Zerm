@@ -24,7 +24,10 @@ struct ClipboardHistorySettingsView: View {
     @AppStorage(ClipboardHistorySettings.Keys.deleteSound) private var deleteSound = false
     @AppStorage(ClipboardHistorySettings.Keys.selectionSound) private var selectionSound = false
     @AppStorage(ClipboardHistorySettings.Keys.retentionCount) private var retentionCount = 500
-    @State private var retentionByKind = ClipboardHistorySettings.retentionByKind
+    @AppStorage(ClipboardHistorySettings.Keys.sort) private var sort = ClipboardHistorySort.lastCopy.rawValue
+    @AppStorage(ClipboardHistorySettings.Keys.copyMergeEnabled) private var copyMergeEnabled = false
+    @AppStorage(ClipboardHistorySettings.Keys.copyMergeSeparator) private var copyMergeSeparator = "\n"
+    @AppStorage(ClipboardHistorySettings.Keys.copyMergeUpdatesClipboard) private var copyMergeUpdatesClipboard = false
     @State private var installedApps: [(url: URL, name: String, bundleId: String, icon: NSImage)] = []
     @State private var selectedApps: [AppConfig] = []
     @State private var appSearch = ""
@@ -40,7 +43,9 @@ struct ClipboardHistorySettingsView: View {
     @State private var archiveError = ""
 
     private enum ArchiveAction { case export, `import` }
-    private let retentionChoices = ["1 day", "3 days", "7 days", "14 days", "30 days", "90 days", "6 months", "1 year", "Unlimited", "Never"]
+    private let retentionChoices: [ClipboardRetentionPeriod] = [
+        .days(1), .days(3), .days(7), .days(14), .days(30), .days(90), .days(180), .days(365), .unlimited, .never
+    ]
 
     var body: some View {
         Form {
@@ -65,6 +70,19 @@ struct ClipboardHistorySettingsView: View {
                 Toggle("Clear history on restart", isOn: $clearOnRestart)
                 Toggle("Keep favourites when clearing", isOn: $keepFavorites)
                 Toggle("Keep tagged items when clearing", isOn: $keepTagged)
+                Picker("Sort order", selection: $sort) {
+                    Text("Most recently copied").tag(ClipboardHistorySort.lastCopy.rawValue)
+                    Text("First copied").tag(ClipboardHistorySort.firstCopy.rawValue)
+                    Text("Copy count").tag(ClipboardHistorySort.copyCount.rawValue)
+                    Text("Size").tag(ClipboardHistorySort.size.rawValue)
+                    Text("Copy sequence").tag(ClipboardHistorySort.copySequence.rawValue)
+                }
+                Toggle("Copy & Merge on double ⌘C", isOn: $copyMergeEnabled)
+                Picker("Copy & Merge separator", selection: $copyMergeSeparator) {
+                    Text("New line").tag("\n")
+                    Text("Space").tag(" ")
+                }
+                Toggle("Update clipboard after Copy & Merge", isOn: $copyMergeUpdatesClipboard)
             }
 
             Section("Shortcuts") {
@@ -110,7 +128,9 @@ struct ClipboardHistorySettingsView: View {
             Section("Storage") {
                 ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
                     Picker(LocalizedStringKey(kindTitle(kind)), selection: retentionBinding(for: kind)) {
-                        ForEach(retentionChoices, id: \.self) { Text(LocalizedStringKey($0)).tag($0) }
+                        ForEach(retentionChoicesIncludingCurrent(for: kind), id: \.storageValue) { period in
+                            retentionTitle(for: period).tag(period.storageValue)
+                        }
                     }
                 }
                 Stepper(value: $retentionCount, in: 1...10_000, step: 100) {
@@ -204,8 +224,11 @@ struct ClipboardHistorySettingsView: View {
 
     private func retentionBinding(for kind: ClipboardItemKind) -> Binding<String> {
         Binding(
-            get: { retentionByKind[kind.rawValue] ?? "90 days" },
-            set: { retentionByKind[kind.rawValue] = $0; ClipboardHistorySettings.retentionByKind = retentionByKind }
+            get: { ClipboardHistoryEngineSettings.retentionPeriod(for: kind).storageValue },
+            set: { value in
+                guard let period = ClipboardRetentionPeriod(storageValue: value) else { return }
+                ClipboardHistoryEngineSettings.setRetentionPeriod(period, for: kind)
+            }
         )
     }
 
@@ -217,7 +240,30 @@ struct ClipboardHistorySettingsView: View {
         case .fileURLs: "Files and folders"
         case .url: "Links"
         case .color: "Colours"
+        case .email: "Email"
         case .other: "Other"
+        }
+    }
+
+    private func retentionChoicesIncludingCurrent(for kind: ClipboardItemKind) -> [ClipboardRetentionPeriod] {
+        let current = ClipboardHistoryEngineSettings.retentionPeriod(for: kind)
+        guard case .days = current, !retentionChoices.contains(current) else { return retentionChoices }
+        return [current] + retentionChoices
+    }
+
+    private func retentionTitle(for period: ClipboardRetentionPeriod) -> Text {
+        switch period {
+        case .days(1): Text("1 day")
+        case .days(3): Text("3 days")
+        case .days(7): Text("7 days")
+        case .days(14): Text("14 days")
+        case .days(30): Text("30 days")
+        case .days(90): Text("90 days")
+        case .days(180): Text("6 months")
+        case .days(365): Text("1 year")
+        case .days(let days): Text("\(days) days")
+        case .unlimited: Text("Unlimited")
+        case .never: Text("Never")
         }
     }
 

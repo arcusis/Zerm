@@ -1,27 +1,22 @@
 ---
 title: Clipboard history
 eyebrow: Privacy
-summary: How Zerm captures, stores, and exports clipboard copies on this Mac.
+summary: How Zerm captures, protects, and retains clipboard copies on this Mac.
 ---
 
-Zerm keeps clipboard history on this Mac. Capture starts enabled; saving dictated text is
-optional and off by default. History can be paused, and password-manager apps are excluded
-by default. Confidential and transient pasteboard markers have separate controls.
+Zerm stores clipboard history locally. Capture starts enabled; saving dictated text is optional
+and off by default. History can be paused, and password-manager apps are excluded by default.
+Confidential and transient pasteboard markers have separate controls.
 
 History index and payloads are encrypted at rest with AES-GCM. The key stays in this Zerm
-installation's Keychain. Pinned items bypass age and count retention. Clearing history can
-keep pinned items, favourites, and tagged items. Optional clear-on-quit and clear-on-restart
-settings remove stored entries; restart detection compares the system boot time saved at the
-previous launch.
+installation's Keychain. Retention can be set by content kind, from one to 365 days, unlimited,
+or never. Never prevents capture. Expired entries are cleaned hourly. Pinned entries bypass
+age and item-count limits. Favorites and tagged entries follow their keep settings when history
+is cleared or retention runs.
 
-Export creates a ZIP archive with a versioned JSON index and one JSON representation blob per
-item. It preserves item metadata, titles, pins, favourites, collection membership, and favourite
-order. Import merges entries by content hash. An optional password encrypts the ZIP payload with
-PBKDF2-HMAC-SHA256 and AES-GCM; without a password, the ZIP is unencrypted and should be stored
-accordingly.
+Clipboard History settings include per-kind retention, sort order, Copy & Merge on double ⌘C,
+and its separator and clipboard-update options. Export creates a ZIP archive. An optional
+password encrypts the archive; without one, the archive is unencrypted.
 
-Retention choices can be set per content kind and are stored in settings. Per-kind enforcement
-will connect when the history engine work lands; the current engine enforces the overall age and
-count limits. The history panel is being built separately. Its open shortcut and menu entry call
-a connection stub until that panel is merged. The Paste Next shortcuts likewise forward through
-a marked runtime hook for the history engine integration.
+The history panel is still being built. Its open shortcut and menu entry remain connection stubs.
+The Paste Next shortcuts select and paste successive non-favorite items in copy order.

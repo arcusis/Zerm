@@ -93,19 +93,20 @@ struct ClipboardHistoryTests {
     @Test func encryptedIndexAndPayloadReloadWithoutPlaintextOnDisk() async throws {
         try await Self.withStore { store, context in
             let (_, directory, key) = context
+            let payload = UUID().uuidString
             let item = try #require(ClipboardItem.capture(
-                representations: [Self.text("secret clipboard payload")], sourceApp: Self.source
+                representations: [Self.text(payload)], sourceApp: Self.source
             ))
             _ = try await store.capture(item)
             let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             for file in files where file.pathExtension == "enc" {
                 let diskData = try Data(contentsOf: file)
-                #expect(String(data: diskData, encoding: .utf8)?.contains("secret clipboard payload") != true)
+                #expect(String(data: diskData, encoding: .utf8)?.contains(payload) != true)
             }
             let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key)
             let reloadedItems = try await reloaded.recent()
             let found = reloadedItems.first
-            #expect(found?.representations.first?.data == Data("secret clipboard payload".utf8))
+            #expect(found?.representations.first?.data == Data(payload.utf8))
         }
     }
 
@@ -145,7 +146,9 @@ struct ClipboardHistoryTests {
             ClipboardHistorySettings.Keys.clearOnQuit, ClipboardHistorySettings.Keys.clearOnRestart,
             ClipboardHistorySettings.Keys.keepFavoritesOnClear, ClipboardHistorySettings.Keys.keepTaggedOnClear,
             ClipboardHistorySettings.Keys.ignoreConfidential, ClipboardHistorySettings.Keys.ignoreTransient,
-            ClipboardHistorySettings.Keys.retentionCount, ClipboardHistorySettings.Keys.retentionDays,
+            ClipboardHistorySettings.Keys.retentionCount, ClipboardHistorySettings.Keys.retentionByKind,
+            ClipboardHistorySettings.Keys.sort, ClipboardHistorySettings.Keys.copyMergeEnabled,
+            ClipboardHistorySettings.Keys.copyMergeSeparator, ClipboardHistorySettings.Keys.copyMergeUpdatesClipboard,
             ClipboardHistorySettings.Keys.saveDictations, ClipboardHistorySettings.Keys.paused,
             ClipboardHistorySettings.Keys.copySound, ClipboardHistorySettings.Keys.pasteSound,
             ClipboardHistorySettings.Keys.deleteSound, ClipboardHistorySettings.Keys.selectionSound
@@ -157,7 +160,9 @@ struct ClipboardHistoryTests {
         #expect(ClipboardHistorySettings.isEnabled)
         #expect(ClipboardHistorySettings.windowPosition == "lastLocation")
         #expect(ClipboardHistorySettings.retentionCount == 500)
-        #expect(ClipboardHistorySettings.retentionDays == 90)
+        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear))
+        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear))
+        #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText) == .days(90))
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreConfidential))
         #expect(!ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnQuit))
         #expect(!ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.copySound))
@@ -221,6 +226,44 @@ struct ClipboardHistoryTests {
         #expect(ClipboardHistoryRuntime.menuRecentItems(from: items).map(\.preview) == items.prefix(5).map(\.preview))
     }
 
+    @Test @MainActor func pasteNextForwardingSelectsEngineCandidateWithoutKeystrokes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey())
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = try #require(ClipboardItem.capture(representations: [Self.text("first")], sourceApp: Self.source, createdAt: Date(timeIntervalSince1970: 1)))
+        let second = try #require(ClipboardItem.capture(representations: [Self.text("second")], sourceApp: Self.source, createdAt: Date(timeIntervalSince1970: 2)))
+        let savedFirst = try await store.capture(first, now: first.createdAt)
+        _ = try await store.capture(second, now: second.createdAt)
+        let runtime = ClipboardHistoryRuntime(store: store, monitor: nil)
+        let recorder = PasteRecorder()
+
+        let selected = await runtime.pasteNextClipboardItem(formatted: false) { item, plainText in
+            await recorder.record(item.id, plainText: plainText)
+        }
+
+        #expect(selected?.id == savedFirst.id)
+        #expect(await recorder.selection?.0 == savedFirst.id)
+        #expect(await recorder.selection?.1 == true)
+    }
+
+    @Test @MainActor func runtimeInstallsOnlyOneCleanupTimer() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey())
+        let runtime = ClipboardHistoryRuntime(store: store, monitor: nil)
+        defer {
+            runtime.cleanupTimer?.invalidate()
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        runtime.startCleanupTimer()
+        let firstTimer = runtime.cleanupTimer
+        runtime.startCleanupTimer()
+
+        #expect(firstTimer != nil)
+        #expect(firstTimer?.isValid == true)
+        #expect(runtime.cleanupTimer === firstTimer)
+    }
+
     @Test func clipboardShortcutNamesAreDeclaredWithExpectedStorageNames() {
         #expect(KeyboardShortcuts.Name.openClipboardHistory == KeyboardShortcuts.Name("openClipboardHistory"))
         #expect(KeyboardShortcuts.Name.pauseClipboardHistory == KeyboardShortcuts.Name("pauseClipboardHistory"))
@@ -232,6 +275,18 @@ struct ClipboardHistoryTests {
 
     private static func text(_ text: String) -> ClipboardRepresentation {
         ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))
+    }
+
+    private static func randomKey() -> Data {
+        Data((0..<32).map { _ in UInt8.random(in: 0...255) })
+    }
+
+    private actor PasteRecorder {
+        private(set) var selection: (UUID, Bool)?
+
+        func record(_ id: UUID, plainText: Bool) {
+            selection = (id, plainText)
+        }
     }
 
     private static func withStore(_ body: (ClipboardHistoryStore, (UserDefaults, URL, Data)) async throws -> Void) async throws {

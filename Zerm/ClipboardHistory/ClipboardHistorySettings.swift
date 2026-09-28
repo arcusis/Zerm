@@ -17,8 +17,11 @@ enum ClipboardHistorySettings {
         static let ignoreConfidential = "clipboardHistoryIgnoreConfidential"
         static let ignoreTransient = "clipboardHistoryIgnoreTransient"
         static let retentionCount = "clipboardHistoryRetentionCount"
-        static let retentionDays = "clipboardHistoryRetentionDays"
         static let retentionByKind = "clipboardHistoryRetentionByKind"
+        static let sort = "clipboardHistorySort"
+        static let copyMergeEnabled = "clipboardHistoryCopyMergeEnabled"
+        static let copyMergeSeparator = "clipboardHistoryCopyMergeSeparator"
+        static let copyMergeUpdatesClipboard = "clipboardHistoryCopyMergeUpdatesClipboard"
         static let excludedApps = "clipboardHistoryExcludedApps"
         static let saveDictations = "clipboardHistorySaveDictations"
         static let sounds = "clipboardHistorySounds"
@@ -37,20 +40,14 @@ enum ClipboardHistorySettings {
         get { max(1, UserDefaults.standard.object(forKey: Keys.retentionCount) as? Int ?? 500) }
         set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.retentionCount) }
     }
-    static var retentionDays: Int {
-        get { max(1, UserDefaults.standard.object(forKey: Keys.retentionDays) as? Int ?? 90) }
-        set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.retentionDays) }
-    }
     static var windowPosition: String {
         get { UserDefaults.standard.string(forKey: Keys.windowPosition) ?? "lastLocation" }
         set { UserDefaults.standard.set(newValue, forKey: Keys.windowPosition) }
     }
-    static func bool(_ key: String) -> Bool { UserDefaults.standard.bool(forKey: key) }
-    static func set(_ value: Bool, for key: String) { UserDefaults.standard.set(value, forKey: key) }
-    static var retentionByKind: [String: String] {
-        get { UserDefaults.standard.dictionary(forKey: Keys.retentionByKind) as? [String: String] ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: Keys.retentionByKind) }
+    static func bool(_ key: String, defaultValue: Bool = false) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? defaultValue
     }
+    static func set(_ value: Bool, for key: String) { UserDefaults.standard.set(value, forKey: key) }
     static var excludedApps: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: Keys.excludedApps) ?? Self.defaultExcludedApps) }
         set { UserDefaults.standard.set(newValue.sorted(), forKey: Keys.excludedApps) }

@@ -28,8 +28,11 @@ enum AppDefaults {
             "clipboardHistoryIgnoreConfidential": true,
             "clipboardHistoryIgnoreTransient": true,
             "clipboardHistoryRetentionCount": 500,
-            "clipboardHistoryRetentionDays": 90,
             "clipboardHistoryRetentionByKind": [:],
+            "clipboardHistorySort": "lastCopy",
+            "clipboardHistoryCopyMergeEnabled": false,
+            "clipboardHistoryCopyMergeSeparator": "\n",
+            "clipboardHistoryCopyMergeUpdatesClipboard": false,
             "clipboardHistoryExcludedApps": [
                 "com.agilebits.onepassword7",
                 "com.1password.1password",

@@ -14,6 +14,10 @@ final class ClipboardMonitor {
     private var lastChangeCount: Int
     private var pauseUntil: Date?
     private var pauseNextCopy = false
+    private var copyMergeEventMonitor: Any?
+    private var copyMergeWasEnabled = false
+    private var lastCommandCopyAt: Date?
+    private var copyMergeAwaitingClipboard = false
 
     init(store: ClipboardHistoryStore, pasteboard: NSPasteboard = .general) {
         self.store = store
@@ -23,6 +27,7 @@ final class ClipboardMonitor {
 
     func start() {
         guard timer == nil else { return }
+        refreshCopyMergeMonitor()
         lastChangeCount = pasteboard.changeCount
         let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
@@ -35,6 +40,11 @@ final class ClipboardMonitor {
     func stop() {
         timer?.invalidate()
         timer = nil
+        if let copyMergeEventMonitor { NSEvent.removeMonitor(copyMergeEventMonitor) }
+        copyMergeEventMonitor = nil
+        copyMergeWasEnabled = false
+        lastCommandCopyAt = nil
+        copyMergeAwaitingClipboard = false
     }
 
     func pause() {
@@ -72,10 +82,13 @@ final class ClipboardMonitor {
     }
 
     func poll() {
+        refreshCopyMergeMonitor()
         guard ClipboardHistorySettings.isEnabled else { return }
         let currentCount = pasteboard.changeCount
         guard currentCount != lastChangeCount else { return }
         lastChangeCount = currentCount
+        let shouldMergeCopy = copyMergeAwaitingClipboard
+        copyMergeAwaitingClipboard = false
         if Self.ignoresNextChange {
             Self.ignoresNextChange = false
             return
@@ -110,10 +123,52 @@ final class ClipboardMonitor {
             ignoreConfidential: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreConfidential),
             ignoreTransient: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreTransient)
         ), let captured = ClipboardItem.capture(representations: representations, sourceApp: appInfo) else { return }
+        let text = captured.kind == .plainText ? captured.preview : nil
+        let now = Date()
+        let shouldMerge = text != nil && shouldMergeCopy
         Task {
-            if (try? await store.capture(captured)) != nil {
+            do {
+                if shouldMerge, let text {
+                    guard await store.shouldCapture(captured.kind) else { return }
+                    if let merged = try await store.appendCopyToPreviousText(text, separator: ClipboardHistoryEngineSettings.copyMergeSeparator) {
+                        if ClipboardHistoryEngineSettings.copyMergeUpdatesClipboard {
+                            await MainActor.run {
+                                guard pasteboard.changeCount == currentCount else { return }
+                                if ClipboardManager.setClipboard(merged.preview, on: pasteboard) {
+                                    Self.noteZermWrite(changeCount: pasteboard.changeCount)
+                                }
+                            }
+                        }
+                        return
+                    }
+                }
+                _ = try await store.capture(captured, now: now)
                 await MainActor.run { SoundManager.shared.playClipboardCopySound() }
+            } catch { }
+        }
+    }
+
+    private func refreshCopyMergeMonitor() {
+        let enabled = ClipboardHistoryEngineSettings.copyMergeEnabled
+        guard enabled != copyMergeWasEnabled else { return }
+        copyMergeWasEnabled = enabled
+        if enabled {
+            copyMergeEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "c" else { return }
+                Task { @MainActor in
+                    guard let self else { return }
+                    let now = Date()
+                    if let prior = self.lastCommandCopyAt, now.timeIntervalSince(prior) <= 0.8 {
+                        self.copyMergeAwaitingClipboard = true
+                    }
+                    self.lastCommandCopyAt = now
+                }
             }
+        } else {
+            if let copyMergeEventMonitor { NSEvent.removeMonitor(copyMergeEventMonitor) }
+            copyMergeEventMonitor = nil
+            lastCommandCopyAt = nil
+            copyMergeAwaitingClipboard = false
         }
     }
 }
