@@ -79,15 +79,24 @@ Supported browsers: Safari, Chrome, Edge, Brave, Arc, Opera, Vivaldi, Orion, and
 ## The default mode
 
 One mode can be marked as the default. It is what applies everywhere you have not
-configured something more specific. Zerm creates three modes when you have none:
+configured something more specific. When you have no modes, Zerm creates **General**: the
+default, with no triggers, using your global settings.
 
-- **General** — the default. No triggers.
-- **Code** — Cursor, Visual Studio Code, Xcode, Terminal, iTerm, Warp, plus the website
-  trigger `github.com`.
-- **Writing** — Mail, Notes, Chrome, Safari.
+## Templates
 
-All three use your global settings until you change them. Rename them, retrigger them,
-or delete them.
+Setup offers three templates, and **From Template** on the Power Modes page adds them
+later. Each template is bound only to the matching apps installed on your Mac, and leaves
+out apps another mode already uses.
+
+- **Code**: Xcode, Visual Studio Code, Cursor, Zed, Terminal, iTerm, Ghostty, Warp. No
+  paragraph formatting and no trailing period. With enhancement on, the Coding prompt.
+- **Messages**: Messages, Slack, WhatsApp, Telegram, Discord, Microsoft Teams, Signal. No
+  paragraph formatting and no trailing period. With enhancement on, the Chat prompt.
+- **Writing**: Mail, Microsoft Outlook, Notes, Pages, Microsoft Word, Notion, Obsidian.
+  Paragraph formatting and punctuation kept. With enhancement on, the Default prompt.
+
+Everything else in a template, including the model, language, and output mode, follows
+your global settings. Rename, retrigger, or delete template modes like any other.
 
 ## What a mode can change
 
