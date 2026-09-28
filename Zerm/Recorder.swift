@@ -18,11 +18,7 @@ class Recorder: NSObject, ObservableObject {
     /// Dedicated serial queue for hardware setup.
     private let audioSetupQueue = DispatchQueue(label: "com.arcusis.zerm.audioSetup", qos: .userInitiated)
     private var audioRestorationTask: Task<Void, Never>?
-    private let smoothedValuesLock = NSLock()
-    private var smoothedAverage: Float = 0
-    private var smoothedPeak: Float = 0
-    // Only touched on audioMeterQueue (serial)
-    private var meterTickCount = 0
+    private let meterSmoother = AudioMeterSmoother()
 
     /// Audio chunk callback for streaming. Can be updated while recording;
     /// changes are forwarded to the live CoreAudioRecorder.
@@ -180,10 +176,7 @@ class Recorder: NSObject, ObservableObject {
         recorder = nil
         onAudioChunk = nil
 
-        smoothedValuesLock.withLock {
-            smoothedAverage = 0
-            smoothedPeak = 0
-        }
+        meterSmoother.reset()
 
         audioMeter = AudioMeter(averagePower: 0, peakPower: 0)
 
@@ -215,67 +208,34 @@ class Recorder: NSObject, ObservableObject {
         }
     }
 
+    /// Samples the live recorder on `audioMeterQueue`. The handler is handed the recorder it
+    /// samples, so it never reads this main-actor object's state from that queue: stopping a
+    /// recording clears `recorder` on the main actor while the timer may still be firing.
     private func startAudioMeterTimer() {
+        guard let recorder else { return }
+        let smoother = meterSmoother
         let timer = DispatchSource.makeTimerSource(queue: audioMeterQueue)
         // 30 Hz is smooth for the visualizer at roughly half the wakeup cost of the
         // previous 17 ms cadence — this runs for the whole recording.
         timer.schedule(deadline: .now(), repeating: .milliseconds(33))
-        timer.setEventHandler { [weak self] in
-            self?.updateAudioMeter()
+        var tickCount = 0 // only touched on audioMeterQueue (serial)
+        timer.setEventHandler { [weak self, weak recorder] in
+            guard let recorder else { return }
+            // ~1 Hz capture-health heartbeat while debug logging is on (33 ms ticks)
+            tickCount += 1
+            if tickCount % 30 == 0 {
+                DebugLogger.shared.log("Recorder", "heartbeat: \(recorder.debugSessionStats())")
+            }
+            let meter = smoother.update(averagePower: recorder.averagePower, peakPower: recorder.peakPower)
+            // Dispatch to main queue for UI updates (more efficient than Task)
+            DispatchQueue.main.async { [weak self] in
+                self?.audioMeter = meter
+            }
         }
         timer.resume()
         audioMeterUpdateTimer = timer
     }
 
-    private func updateAudioMeter() {
-        guard let recorder = recorder else { return }
-
-        // ~1 Hz capture-health heartbeat while debug logging is on (33 ms ticks)
-        meterTickCount += 1
-        if meterTickCount % 30 == 0 {
-            DebugLogger.shared.log("Recorder", "heartbeat: \(recorder.debugSessionStats())")
-        }
-
-        // Sample audio levels (thread-safe read)
-        let averagePower = recorder.averagePower
-        let peakPower = recorder.peakPower
-
-        // Normalize values
-        let minVisibleDb: Float = -60.0
-        let maxVisibleDb: Float = 0.0
-
-        let normalizedAverage: Float
-        if averagePower < minVisibleDb {
-            normalizedAverage = 0.0
-        } else if averagePower >= maxVisibleDb {
-            normalizedAverage = 1.0
-        } else {
-            normalizedAverage = (averagePower - minVisibleDb) / (maxVisibleDb - minVisibleDb)
-        }
-
-        let normalizedPeak: Float
-        if peakPower < minVisibleDb {
-            normalizedPeak = 0.0
-        } else if peakPower >= maxVisibleDb {
-            normalizedPeak = 1.0
-        } else {
-            normalizedPeak = (peakPower - minVisibleDb) / (maxVisibleDb - minVisibleDb)
-        }
-
-        // Apply EMA smoothing with thread-safe access
-        smoothedValuesLock.lock()
-        smoothedAverage = smoothedAverage * 0.6 + normalizedAverage * 0.4
-        smoothedPeak = smoothedPeak * 0.6 + normalizedPeak * 0.4
-        let newAudioMeter = AudioMeter(averagePower: Double(smoothedAverage), peakPower: Double(smoothedPeak))
-        smoothedValuesLock.unlock()
-
-        // Dispatch to main queue for UI updates (more efficient than Task)
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.audioMeter = newAudioMeter
-        }
-    }
-    
     // MARK: - Cleanup
 
     deinit {
@@ -290,4 +250,34 @@ class Recorder: NSObject, ObservableObject {
 struct AudioMeter: Equatable {
     let averagePower: Double
     let peakPower: Double
+}
+/// Normalizes and smooths recorder levels for the visualizer. Written from the meter queue and
+/// reset from the main actor, so every access holds the lock.
+private final class AudioMeterSmoother: @unchecked Sendable {
+    private let lock = NSLock()
+    private var average: Float = 0
+    private var peak: Float = 0
+
+    func reset() {
+        lock.withLock {
+            average = 0
+            peak = 0
+        }
+    }
+
+    /// Maps -60…0 dB to 0…1 and applies an exponential moving average.
+    func update(averagePower: Float, peakPower: Float) -> AudioMeter {
+        func normalized(_ db: Float) -> Float {
+            let minVisibleDb: Float = -60.0
+            let maxVisibleDb: Float = 0.0
+            if db < minVisibleDb { return 0 }
+            if db >= maxVisibleDb { return 1 }
+            return (db - minVisibleDb) / (maxVisibleDb - minVisibleDb)
+        }
+        return lock.withLock {
+            average = average * 0.6 + normalized(averagePower) * 0.4
+            peak = peak * 0.6 + normalized(peakPower) * 0.4
+            return AudioMeter(averagePower: Double(average), peakPower: Double(peak))
+        }
+    }
 }

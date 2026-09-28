@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 import AVFoundation
 import SwiftData
 import os
@@ -8,12 +9,14 @@ class WhisperTranscriptionService: TranscriptionService {
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "WhisperTranscriptionService")
     private let modelsDirectory: URL
     private weak var modelProvider: (any WhisperModelProvider)?
-    private let modelContext: ModelContext?
+    /// Transcription runs off the main actor, where the app's shared context must not be used; the
+    /// container is thread-safe and gives each read a context of its own.
+    private let modelContainer: ModelContainer?
 
     init(modelsDirectory: URL, modelProvider: (any WhisperModelProvider)? = nil, modelContext: ModelContext? = nil) {
         self.modelsDirectory = modelsDirectory
         self.modelProvider = modelProvider
-        self.modelContext = modelContext
+        self.modelContainer = modelContext?.container
     }
 
     func transcribe(audioURL: URL, model: any TranscriptionModel) async throws -> String {
@@ -52,7 +55,8 @@ class WhisperTranscriptionService: TranscriptionService {
         // correctly rather than always skipping 44 bytes (VoiceInk #393).
         let data = try await AudioProcessor().processAudioToSamples(audioURL)
         let durationSeconds = Double(data.count) / 16_000.0
-        let peak = data.map { abs($0) }.max() ?? 0
+        var peak: Float = 0
+        vDSP_maxmgv(data, 1, &peak, vDSP_Length(data.count))
         let selectedLanguage = LanguagePreference.selectedCode()
         let shouldConsiderHebrew = selectedLanguage == LanguagePreference.autoCode
             ? await MainActor.run { LanguagePreference.prefersHebrewForAutomaticDetection() }
@@ -71,8 +75,8 @@ class WhisperTranscriptionService: TranscriptionService {
         // Merge style prompt with custom dictionary so Whisper biases toward user terms.
         let basePrompt = WhisperPrompt.resolvedPrompt(for: selectedLanguage)
         let dictionarySuffix: String
-        if let modelContext {
-            dictionarySuffix = VocabularyTerms.whisperPromptSuffix(from: modelContext)
+        if let modelContainer {
+            dictionarySuffix = VocabularyTerms.whisperPromptSuffix(from: ModelContext(modelContainer))
         } else {
             dictionarySuffix = ""
         }
