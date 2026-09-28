@@ -251,3 +251,30 @@ struct LanguageSelectionFixTests {
         #expect(kept[0]["selectedLanguage"] as? String == "auto")
     }
 }
+
+/// "My languages" limits Auto-detect to the user's languages (#371).
+struct DictationLanguagesTests {
+    private let probabilities: [String: Float] = ["ar": 0.46, "he": 0.30, "en": 0.12, "ru": 0.08]
+
+    @Test func aLanguageOutsideTheSetNeverWins() {
+        #expect(DictationLanguages.choose(probabilities: probabilities, allowed: ["he", "en", "ru"], keyboardLanguage: nil) == "he")
+    }
+
+    @Test func theKeyboardLanguageWinsANearTieWithinTheSet() {
+        let close: [String: Float] = ["en": 0.40, "he": 0.34]
+        #expect(DictationLanguages.choose(probabilities: close, allowed: ["he", "en"], keyboardLanguage: "he") == "he")
+        #expect(DictationLanguages.choose(probabilities: close, allowed: ["he", "en"], keyboardLanguage: "en") == "en")
+        let clear: [String: Float] = ["en": 0.80, "he": 0.10]
+        #expect(DictationLanguages.choose(probabilities: clear, allowed: ["he", "en"], keyboardLanguage: "he") == "en")
+    }
+
+    @Test func noAllowedProbabilityMeansNoChoice() {
+        #expect(DictationLanguages.choose(probabilities: probabilities, allowed: ["fr"], keyboardLanguage: nil) == nil)
+        #expect(DictationLanguages.choose(probabilities: probabilities, allowed: [], keyboardLanguage: "he") == nil)
+    }
+
+    @Test func storageDropsAutoAndDuplicates() {
+        #expect(DictationLanguages.encode(["he", "auto", "en", "he"]) == "he,en")
+        #expect(DictationLanguages.parse(" he, ,en,auto") == ["he", "en"])
+    }
+}

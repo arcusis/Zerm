@@ -100,6 +100,25 @@ actor WhisperContext {
         return string.withCString(body)
     }
 
+    /// whisper.cpp's probability for every language it knows, from the first 30 s of `samples`.
+    func languageProbabilities(samples: [Float]) -> [String: Float]? {
+        guard let context, !samples.isEmpty else { return nil }
+        let threads = Int32(HardwareCapability.inferenceThreadCount)
+        let melStatus = samples.withUnsafeBufferPointer { buffer in
+            whisper_pcm_to_mel(context, buffer.baseAddress, Int32(buffer.count), threads)
+        }
+        guard melStatus == 0 else { return nil }
+        var probabilities = [Float](repeating: 0, count: Int(whisper_lang_max_id()) + 1)
+        guard whisper_lang_auto_detect(context, 0, threads, &probabilities) >= 0 else { return nil }
+        var byCode: [String: Float] = [:]
+        for (id, probability) in probabilities.enumerated() {
+            if let code = whisper_lang_str(Int32(id)) {
+                byCode[String(cString: code)] = probability
+            }
+        }
+        return byCode
+    }
+
     func transcriptionCandidate() -> WhisperLanguageCandidateSelector.Candidate {
         guard let context else {
             return .init(text: "", languageCode: nil, averageTokenProbability: 0)

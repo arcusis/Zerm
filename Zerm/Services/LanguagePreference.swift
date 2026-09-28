@@ -223,3 +223,48 @@ enum WhisperLanguageCandidateSelector {
 enum ProcessLifecycle {
     nonisolated(unsafe) static var isTerminating = false
 }
+
+/// The languages a user dictates in ("My languages"). With Auto selected, Whisper's language
+/// detection only chooses among these, so a neighbouring language the user never speaks, such
+/// as Arabic for short Hebrew or Russian, cannot win (#371). Empty means any language.
+enum DictationLanguages {
+    static let defaultsKey = "DictationLanguages"
+
+    static func codes(defaults: UserDefaults = .standard) -> [String] {
+        parse(defaults.string(forKey: defaultsKey) ?? "")
+    }
+
+    static func setCodes(_ codes: [String], defaults: UserDefaults = .standard) {
+        defaults.set(encode(codes), forKey: defaultsKey)
+    }
+
+    /// Stored as one comma-separated string so settings can bind it with @AppStorage.
+    static func parse(_ raw: String) -> [String] {
+        raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0 != LanguagePreference.autoCode }
+    }
+
+    static func encode(_ codes: [String]) -> String {
+        var seen = Set<String>()
+        return codes.filter { $0 != LanguagePreference.autoCode && seen.insert($0).inserted }.joined(separator: ",")
+    }
+
+    /// The most likely allowed language. When the keyboard's language is allowed and within
+    /// `keyboardMargin` of the best, it wins the near-tie, as short phrases are often ambiguous.
+    static func choose(
+        probabilities: [String: Float],
+        allowed: [String],
+        keyboardLanguage: String?,
+        keyboardMargin: Float = 0.10
+    ) -> String? {
+        let candidates = allowed.compactMap { code in probabilities[code].map { (code, $0) } }
+        guard let best = candidates.max(by: { $0.1 < $1.1 }) else { return nil }
+        if let keyboardLanguage,
+           let keyboard = candidates.first(where: { $0.0 == keyboardLanguage }),
+           keyboard.1 + keyboardMargin >= best.1 {
+            return keyboard.0
+        }
+        return best.0
+    }
+}

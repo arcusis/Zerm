@@ -158,6 +158,11 @@ struct LanguageSelectionView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         }
+
+                        if selectedLanguage == LanguagePreference.autoCode,
+                           currentModel.provider == .whisper, !currentModel.isHebrewOptimized {
+                            MyLanguagesPicker(model: currentModel)
+                        }
                     }
                 } else {
                     // For English-only models, force set language to English
@@ -241,5 +246,69 @@ struct LanguageSelectionView: View {
                 .disabled(true)
             }
         }
+    }
+}
+
+/// "My languages": the languages Auto-detect may choose among with a Whisper model (#371).
+private struct MyLanguagesPicker: View {
+    let model: any TranscriptionModel
+    @AppStorage(DictationLanguages.defaultsKey) private var storedCodes = ""
+
+    private var codes: [String] { DictationLanguages.parse(storedCodes) }
+
+    private var addable: [String] {
+        model.supportedLanguages.keys
+            .filter { $0 != LanguagePreference.autoCode && !codes.contains($0) }
+            .sorted { LanguageDictionary.displayName(for: $0).localizedStandardCompare(LanguageDictionary.displayName(for: $1)) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("My languages")
+                    .font(.subheadline)
+                InfoTip(String(localized: "Auto-detect chooses only among these languages, so it cannot guess one you never speak, such as Arabic for a short Hebrew phrase. Leave empty to allow every language."))
+            }
+
+            HStack(spacing: 6) {
+                ForEach(codes, id: \.self) { code in
+                    Button {
+                        storedCodes = DictationLanguages.encode(codes.filter { $0 != code })
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(verbatim: LanguageDictionary.displayName(for: code))
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "Remove"))
+                }
+
+                Menu {
+                    ForEach(addable, id: \.self) { code in
+                        Button(LanguageDictionary.displayName(for: code)) {
+                            storedCodes = DictationLanguages.encode(codes + [code])
+                        }
+                    }
+                } label: {
+                    Label("Add language", systemImage: "plus")
+                        .font(.caption)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+
+            if codes.isEmpty {
+                Text("Any language can be detected.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.top, 4)
     }
 }

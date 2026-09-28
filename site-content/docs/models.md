@@ -143,6 +143,12 @@ language settings say so, and Zerm lets the model detect the language instead of
 for one it does not know. A [Power Mode](power-mode.html) can use a different model and
 language for one app.
 
+**My languages.** With a Whisper model and Auto-detect, add the languages you actually
+speak under **My languages**. Detection then chooses only among them, so a short Hebrew
+or Russian phrase cannot come out as a neighbouring language such as Arabic. When two of
+your languages are about equally likely, the one of your current keyboard wins. Leave it
+empty to allow every language.
+
 **Intel Macs.** Local models do not run reliably on Intel hardware and Zerm says so.
 Recommended picks only Whisper models there; a cloud model is usually the better choice.
 
