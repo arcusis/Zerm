@@ -62,8 +62,13 @@ protocol StreamingTranscriptionProvider: AnyObject {
 
     /// Stream of transcription events from the provider
     var transcriptionEvents: AsyncStream<StreamingTranscriptionEvent> { get }
+
+    /// The provider's full transcript, emitted once it has acknowledged the end of the stream after
+    /// `commit()`. Providers without such an acknowledgement return nil and finish on `.committed`.
+    var finalizationEvents: AsyncStream<String>? { get }
 }
 
 extension StreamingTranscriptionProvider {
     var finishesEventsOnCommit: Bool { false }
+    var finalizationEvents: AsyncStream<String>? { nil }
 }

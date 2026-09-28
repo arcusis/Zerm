@@ -121,6 +121,10 @@ class StreamingTranscriptionService {
         // Finish the chunk source so the send loop drains remaining chunks and exits naturally.
         await drainRemainingChunks()
 
+        // A provider that acknowledges the end of the stream hands over its full transcript;
+        // the first commit may arrive while later segments are still in flight.
+        let finalizationEvents = provider.finalizationEvents
+
         // Set up the commit signal BEFORE sending commit to avoid a race with the response.
         let (signalStream, signalContinuation) = AsyncStream.makeStream(of: Void.self)
         self.commitSignal = signalContinuation
@@ -138,7 +142,14 @@ class StreamingTranscriptionService {
         }
 
         // Wait for the server to acknowledge our commit (or timeout)
-        let finalText = try await waitForFinalCommit(signalStream: signalStream)
+        let finalText: String
+        if let finalizationEvents {
+            commitSignal?.finish()
+            commitSignal = nil
+            finalText = try await waitForFinalization(events: finalizationEvents)
+        } else {
+            finalText = try await waitForFinalCommit(signalStream: signalStream)
+        }
 
         state = .done
         await cleanupStreaming()
@@ -280,6 +291,41 @@ class StreamingTranscriptionService {
     ///
     /// Throws on timeout-with-partial / stream error so `StreamingTranscriptionSession`
     /// can re-run the recorded file through batch instead of accepting truncated text.
+    /// Waits for the provider's end-of-stream acknowledgement and its full transcript. Anything
+    /// short of that falls back to batch, which transcribes the whole recording.
+    private func waitForFinalization(events: AsyncStream<String>) async throws -> String {
+        let text = await withTaskGroup(of: String?.self) { group in
+            group.addTask {
+                for await text in events {
+                    return text
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+
+        if sawStreamingError {
+            logger.warning("Streaming error observed — forcing batch fallback")
+            throw StreamingTranscriptionError.providerError(String(localized: "Streaming provider reported an error"))
+        }
+        guard let text else {
+            logger.warning("Provider did not confirm the end of the stream — forcing batch fallback")
+            throw StreamingTranscriptionError.timeout
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            logger.warning("No transcript received from streaming")
+            throw StreamingTranscriptionError.noResult
+        }
+        return trimmed
+    }
+
     private func waitForFinalCommit(signalStream: AsyncStream<Void>) async throws -> String {
         // Race: wait for commit acknowledgment vs timeout
         let receivedInTime = await withTaskGroup(of: Bool.self) { group in

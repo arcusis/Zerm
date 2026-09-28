@@ -23,6 +23,31 @@ private final class ScriptedStreamingProvider: StreamingTranscriptionProvider {
     func disconnect() async { continuation.finish() }
 }
 
+/// Provider that acknowledges the end of the stream with its full transcript, like Deepgram's
+/// `Metadata` after `CloseStream`.
+private final class FinalizingStreamingProvider: StreamingTranscriptionProvider {
+    let transcriptionEvents: AsyncStream<StreamingTranscriptionEvent>
+    let continuation: AsyncStream<StreamingTranscriptionEvent>.Continuation
+    let finalization: AsyncStream<String>
+    let finalizationContinuation: AsyncStream<String>.Continuation
+    var finalizationEvents: AsyncStream<String>? { finalization }
+    private let onCommit: (FinalizingStreamingProvider) async -> Void
+
+    init(onCommit: @escaping (FinalizingStreamingProvider) async -> Void) {
+        (transcriptionEvents, continuation) = AsyncStream.makeStream(of: StreamingTranscriptionEvent.self)
+        (finalization, finalizationContinuation) = AsyncStream.makeStream(of: String.self)
+        self.onCommit = onCommit
+    }
+
+    func connect(model: any TranscriptionModel, language: String?) async throws {}
+    func sendAudioChunk(_ data: Data) async throws {}
+    func commit() async throws { await onCommit(self) }
+    func disconnect() async {
+        continuation.finish()
+        finalizationContinuation.finish()
+    }
+}
+
 @MainActor
 struct StreamingTranscriptionTests {
 
@@ -112,6 +137,39 @@ struct StreamingTranscriptionTests {
             try await service.stopAndGetFinalText()
         }
         #expect(Date().timeIntervalSince(start) < 10)
+    }
+
+    /// A provider with an end-of-stream acknowledgement is not done at its first commit: the
+    /// trailing words arrive later, with the full transcript (#352).
+    @Test func finalizingProvidersWaitForTheEndOfStreamTranscript() async throws {
+        let provider = FinalizingStreamingProvider { provider in
+            provider.continuation.yield(.committed(text: "hello there"))
+            let finalization = provider.finalizationContinuation
+            Task.detached {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                finalization.yield("hello there general Kenobi")
+            }
+        }
+        let service = try makeService()
+        try await service.startStreaming(with: provider, model: model)
+
+        let text = try await service.stopAndGetFinalText()
+
+        #expect(text == "hello there general Kenobi")
+    }
+
+    /// Without the acknowledgement the streamed text may be missing its end, so batch takes over.
+    @Test func aMissingEndOfStreamAcknowledgementFallsBackToBatch() async throws {
+        let provider = FinalizingStreamingProvider { provider in
+            provider.continuation.yield(.committed(text: "hello there"))
+            provider.finalizationContinuation.finish()
+        }
+        let service = try makeService()
+        try await service.startStreaming(with: provider, model: model)
+
+        await #expect(throws: StreamingTranscriptionError.self) {
+            try await service.stopAndGetFinalText()
+        }
     }
 }
 

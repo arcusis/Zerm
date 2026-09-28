@@ -80,7 +80,9 @@ struct DeepgramProvider: CloudProvider {
         var queryItems = [
             URLQueryItem(name: "model", value: request.model),
             URLQueryItem(name: "smart_format", value: "true"),
-            URLQueryItem(name: "punctuate", value: "true")
+            URLQueryItem(name: "punctuate", value: "true"),
+            // Opt this audio out of Deepgram's Model Improvement Program.
+            URLQueryItem(name: "mip_opt_out", value: "true")
         ]
         if let language = resolvedLanguage(request.language, model: request.model) {
             queryItems.append(URLQueryItem(name: "language", value: language))
