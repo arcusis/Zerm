@@ -6,18 +6,29 @@ struct WhisperModelCardView: View {
     let isDownloaded: Bool
     let isCurrent: Bool
     let downloadProgress: [String: Double]
+    let downloadState: ModelDownloadState?
     let modelURL: URL?
     let isWarming: Bool
     let downloadError: String?
+    let isPaused: Bool
     
     // Actions
     var deleteAction: () -> Void
     var setDefaultAction: () -> Void
     var downloadAction: () -> Void
     var cancelDownloadAction: (() -> Void)?
+    var pauseDownloadAction: (() -> Void)?
+    var resumeDownloadAction: (() -> Void)?
+    @State private var isShowingDownloadNotice = false
     private var isDownloading: Bool {
         downloadProgress.keys.contains(model.name + "_main") || 
         downloadProgress.keys.contains(model.name + "_coreml")
+    }
+
+    private var downloadButtonTitle: LocalizedStringKey {
+        if isDownloading { return "Downloading..." }
+        if downloadError != nil { return "Retry Download" }
+        return "Download"
     }
     
     var body: some View {
@@ -28,6 +39,9 @@ struct WhisperModelCardView: View {
                 metadataSection
                 ModelBadgesRow(model: model)
                 descriptionSection
+                if let provenance = model.provenance {
+                    ModelProvenanceDisclosure(provenance: provenance)
+                }
                 if !isDownloaded {
                     HardwareFitNotice(fit: model.hardwareFit)
                 }
@@ -43,6 +57,13 @@ struct WhisperModelCardView: View {
         }
         .padding(16)
         .background(CardBackground(isSelected: isCurrent, useAccentGradientWhenSelected: isCurrent))
+        .sheet(isPresented: $isShowingDownloadNotice) {
+            if let provenance = model.provenance {
+                ModelDownloadNoticeView(assetID: model.name, modelName: model.displayName, provenance: provenance) {
+                    downloadAction()
+                }
+            }
+        }
     }
     
     private var headerSection: some View {
@@ -103,10 +124,11 @@ struct WhisperModelCardView: View {
     
     private var progressSection: some View {
         Group {
-            if isDownloading {
+            if isDownloading || isPaused {
                 DownloadProgressView(
                     modelName: model.name,
-                    downloadProgress: downloadProgress
+                    downloadProgress: downloadProgress,
+                    downloadState: downloadState
                 )
                 .padding(.top, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -145,14 +167,23 @@ struct WhisperModelCardView: View {
                     .padding(.vertical, 6)
                     .background(Capsule().fill(Color(.quaternaryLabelColor).opacity(0.3)))
                     .help("This model needs more memory than this Mac has available")
+            } else if isPaused {
+                HStack(spacing: 6) {
+                    Text("Paused").font(.caption).foregroundStyle(.secondary)
+                    if let resumeDownloadAction { Button("Resume", action: resumeDownloadAction).controlSize(.small) }
+                    if let cancelDownloadAction { Button("Cancel", action: cancelDownloadAction).controlSize(.small) }
+                }
             } else if isDownloading, let cancelDownloadAction {
+                Button("Pause", action: pauseDownloadAction ?? cancelDownloadAction)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 Button("Cancel", action: cancelDownloadAction)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             } else {
-                Button(action: downloadAction) {
+                Button(action: requestDownload) {
                     HStack(spacing: 4) {
-                        Text(isDownloading ? "Downloading..." : (downloadError == nil ? "Download" : "Retry Download"))
+                        Text(downloadButtonTitle)
                             .font(.system(size: 12, weight: .medium))
                         Image(systemName: "arrow.down.circle")
                             .font(.system(size: 12, weight: .medium))
@@ -192,6 +223,53 @@ struct WhisperModelCardView: View {
                 .frame(width: 20, height: 20)
             }
         }
+    }
+
+    private func requestDownload() {
+        guard let provenance = model.provenance else { return }
+        if ModelDownloadNoticePolicy.requiresNotice(assetID: model.name, provenance: provenance) {
+            isShowingDownloadNotice = true
+        } else {
+            downloadAction()
+        }
+    }
+}
+
+struct ModelProvenanceDisclosure: View {
+    let provenance: ModelProvenance
+
+    var body: some View {
+        DisclosureGroup("Source and license") {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    Text("Creator")
+                    Text(verbatim: provenance.creator)
+                }
+                HStack(spacing: 4) {
+                    Link("Model card", destination: provenance.sourceURL)
+                    Text(verbatim: provenance.downloadHost)
+                }
+                HStack(spacing: 4) {
+                    Text("License")
+                    Text(verbatim: provenance.licenseName)
+                    Link("License details", destination: provenance.licenseURL)
+                }
+                HStack(alignment: .top, spacing: 4) {
+                    Text("Required credit")
+                    Text(verbatim: provenance.attribution)
+                }
+                HStack(alignment: .top, spacing: 4) {
+                    Text("Conversion")
+                    Text(verbatim: provenance.conversionCredit ?? "")
+                }
+            }
+            .font(.system(size: 10))
+            .foregroundColor(Color(.secondaryLabelColor))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundColor(Color(.secondaryLabelColor))
     }
 }
 

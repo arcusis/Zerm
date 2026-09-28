@@ -21,13 +21,26 @@ struct LocalTranscriptionCatalogTests {
             "apple-speech",
             "parakeet-unified-en-0.6b",
             "parakeet-tdt-ctc-110m",
+            "parakeet-tdt-0.6b-v2",
             "parakeet-tdt-0.6b-ultra",
+            "parakeet-tdt-0.6b-redux",
             "parakeet-tdt-0.6b-v3",
             "sherpa-moonshine-tiny-en",
             "sherpa-moonshine-base-en",
             "sherpa-zipformer-ru-vosk-int8",
+            "ggml-tiny", "ggml-tiny.en", "ggml-base", "ggml-base.en",
+            "ggml-small", "ggml-small.en", "ggml-medium", "ggml-medium.en",
+            "ggml-large-v2", "ggml-large-v2-q5_0", "ggml-large-v2-q8_0",
+            "ggml-large-v3", "ggml-large-v3-q5_0",
             "ggml-large-v3-turbo",
             "ggml-large-v3-turbo-q5_0",
+            "ggml-large-v3-turbo-q8_0",
+            "ggml-medium-q5_0", "ggml-medium-q8_0",
+            "ggml-medium.en-q5_0", "ggml-medium.en-q8_0",
+            "ggml-tiny-q8_0", "ggml-tiny.en-q8_0",
+            "ggml-base-q8_0", "ggml-base.en-q8_0",
+            "ggml-small-q8_0", "ggml-small.en-q8_0",
+            "ggml-distil-large-v3",
             "ivrit-large-v3-turbo",
             "ivrit-large-v3"
         ])
@@ -40,6 +53,12 @@ struct LocalTranscriptionCatalogTests {
             #expect((0...1).contains(model.speed) && model.speed > 0, "\(model.name)")
             #expect(!model.supportedLanguages.isEmpty, "\(model.name)")
             #expect(!model.displayName.isEmpty && !model.description.isEmpty, "\(model.name)")
+            let provenance = model.provenance
+            #expect(provenance != nil, "\(model.name) has no provenance")
+            #expect(!(provenance?.creator.isEmpty ?? true), "\(model.name)")
+            #expect(!(provenance?.licenseName.isEmpty ?? true), "\(model.name)")
+            #expect(!(provenance?.attribution.isEmpty ?? true), "\(model.name)")
+            #expect(!(provenance?.conversionCredit?.isEmpty ?? true), "\(model.name)")
             switch model.languageGroup {
             case .englishOnly:
                 #expect(model.supportedLanguages == ["en": "English"], "\(model.name)")
@@ -47,14 +66,9 @@ struct LocalTranscriptionCatalogTests {
             case .multilingual:
                 #expect(model.isMultilingualModel, "\(model.name)")
             case .singleLanguage:
-                #expect(!model.isMultilingualModel, "\(model.name)")
-                #expect(!model.supportedLanguages.isEmpty, "\(model.name)")
+                #expect(model.name == "sherpa-zipformer-ru-vosk-int8")
+                #expect(model.supportedLanguages["ru"] == "Russian")
             }
-        }
-
-        for model in localModels.compactMap({ $0 as? SherpaOnnxModel }) {
-            #expect(model.sha256.count == 64, "\(model.name)")
-            #expect(model.provenance != nil, "\(model.name)")
         }
 
         for model in localModels {
@@ -62,6 +76,8 @@ struct LocalTranscriptionCatalogTests {
                 #expect(!whisper.size.isEmpty, "\(model.name)")
             } else if let fluidAudio = model as? FluidAudioModel {
                 #expect(!fluidAudio.size.isEmpty, "\(model.name)")
+            } else if let sherpa = model as? SherpaOnnxModel {
+                #expect(!sherpa.size.isEmpty, "\(model.name)")
             }
         }
     }
@@ -88,15 +104,55 @@ struct LocalTranscriptionCatalogTests {
             #expect(sha?.count == 64, "\(model.name) has no SHA-256 pin")
             #expect(model.source.commit.count == 40, "\(model.name)")
             #expect(model.downloadURL == "https://huggingface.co/\(model.source.repository)/resolve/\(model.source.commit)/\(model.source.fileName)")
+            #expect(model.provenance?.checksumSHA256 == sha, "\(model.name) provenance checksum")
         }
         #expect(ModelIntegrity.ivritLargeV3Turbo.repository == "ivrit-ai/whisper-large-v3-turbo-ggml")
         #expect(ModelIntegrity.ivritLargeV3.repository == "ivrit-ai/whisper-large-v3-ggml")
+    }
+
+    @Test func localProvenanceLinksUseOfficialHostsAndNewModelsHaveChecksums() throws {
+        let allowedHosts: Set<String> = ["huggingface.co", "github.com", "developer.apple.com", "opensource.org", "www.apache.org", "creativecommons.org", "www.apple.com"]
+        for model in localModels {
+            let provenance = try #require(model.provenance, "\(model.name)")
+            #expect(allowedHosts.contains(provenance.sourceURL.host ?? ""), "\(model.name) source host")
+            #expect(allowedHosts.contains(provenance.downloadHost), "\(model.name) download host")
+            #expect(allowedHosts.contains(provenance.licenseURL.host ?? ""), "\(model.name) license host")
+        }
+        #expect(try model(named: "parakeet-tdt-ctc-110m").provenance?.licenseSPDX == "CC-BY-4.0")
+        #expect(try model(named: "parakeet-tdt-0.6b-ultra").provenance?.creator == "Moondream")
+        #expect(try model(named: "parakeet-tdt-0.6b-ultra").provenance?.licenseSPDX == "CC-BY-4.0")
+        for name in ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-redux"] {
+            #expect(ModelIntegrity.fluidAudioSHA256[name]?.count == 64, "\(name) HF SHA-256")
+            #expect(try model(named: name).provenance?.checksumSHA256?.count == 64, "\(name) provenance SHA-256")
+            let fileHashes = try #require(ModelIntegrity.fluidAudioLFSFileSHA256[name], "\(name) component hashes")
+            #expect(fileHashes.count == (name.hasSuffix("-v2") ? 10 : 12), "\(name) LFS file count")
+            #expect(fileHashes.values.allSatisfy { $0.count == 64 }, "\(name) component SHA-256")
+            #expect(fileHashes["Encoder.mlmodelc/weights/weight.bin"] == ModelIntegrity.fluidAudioSHA256[name], "\(name) primary encoder pin")
+        }
+        #expect(try model(named: "ggml-distil-large-v3").provenance?.checksumSHA256?.count == 64)
+    }
+
+    @Test func englishOnlyWhisperModelsListOnlyEnglish() {
+        let englishOnly = localModels.compactMap { $0 as? WhisperModel }.filter { $0.languageGroup == .englishOnly }
+        #expect(!englishOnly.isEmpty)
+        for model in englishOnly {
+            #expect(model.supportedLanguages == ["en": "English"], "\(model.name)")
+        }
+    }
+
+    @Test func reduxRequiresMacOS15() throws {
+        #expect(FluidAudioModelManager.modelVersionMap[FluidAudioModelManager.reduxModelName] == .redux)
+        #expect(!FluidAudioModelManager.supportsModel(FluidAudioModelManager.reduxModelName, macOSMajorVersion: 14))
+        #expect(FluidAudioModelManager.supportsModel(FluidAudioModelManager.reduxModelName, macOSMajorVersion: 15))
+        #expect(FluidAudioModelManager.supportsModel("parakeet-tdt-0.6b-v3", macOSMajorVersion: 14))
+        #expect(try model(named: FluidAudioModelManager.reduxModelName).description.contains("macOS 15"))
     }
 
     /// A fine-tune must never pick up the stock whisper.cpp Core ML encoder or download one.
     @Test func onlyStockWhisperModelsUseCoreMLEncoders() {
         #expect(WhisperModelFile.hasCoreMLEncoder(modelName: "ggml-large-v3-turbo"))
         #expect(!WhisperModelFile.hasCoreMLEncoder(modelName: "ggml-large-v3-turbo-q5_0"))
+        #expect(!WhisperModelFile.hasCoreMLEncoder(modelName: "ggml-distil-large-v3"))
         #expect(!WhisperModelFile.hasCoreMLEncoder(modelName: "ivrit-large-v3-turbo"))
         #expect(!WhisperModelFile.hasCoreMLEncoder(modelName: "ivrit-large-v3"))
     }
@@ -107,7 +163,7 @@ struct LocalTranscriptionCatalogTests {
                 || model.name == FluidAudioModelManager.unifiedModelName
             #expect(known, "\(model.name) has no FluidAudio engine")
         }
-        #expect(FluidAudioModelManager.modelVersionMap["parakeet-tdt-0.6b-v2"] == nil)
+        #expect(FluidAudioModelManager.modelVersionMap["parakeet-tdt-0.6b-v2"] == .v2)
     }
 
     // MARK: - FluidAudio cache states
@@ -247,28 +303,27 @@ struct LocalTranscriptionCatalogTests {
     @Test func intel16GBGetsOnlyWhisperCpp() {
         let result = picks(Profile(isAppleSilicon: false, physicalMemoryGB: 16, hasAppleSpeech: true))
         #expect(result == [
-            .english: "ggml-large-v3-turbo-q5_0",
-            .multilingual: "ggml-large-v3-turbo-q5_0",
+            .english: "ggml-base.en",
+            .multilingual: "ggml-base",
             .hebrew: "ivrit-large-v3-turbo"
         ])
     }
 
     @Test func appleSilicon8GBStaysLight() {
         let result = picks(Profile(isAppleSilicon: true, physicalMemoryGB: 8, hasAppleSpeech: false))
-        // Parakeet Ultra: V3's memory and languages, fewer errors.
         #expect(result == [
             .english: "parakeet-tdt-ctc-110m",
-            .multilingual: "parakeet-tdt-0.6b-ultra",
+            .multilingual: "parakeet-tdt-0.6b-redux",
             .hebrew: "ivrit-large-v3-turbo"
         ])
     }
 
-    /// On macOS 26 the system speech model costs Zerm almost no memory, which matters most on 8 GB.
-    @Test func appleSilicon8GBOnMacOS26UsesAppleSpeechForManyLanguages() {
+    /// Redux's smaller memory footprint wins for multilingual use on 8 GB Macs, including macOS 26.
+    @Test func appleSilicon8GBOnMacOS26CanRecommendReduxForManyLanguages() {
         let result = picks(Profile(isAppleSilicon: true, physicalMemoryGB: 8, hasAppleSpeech: true))
         #expect(result == [
             .english: "parakeet-tdt-ctc-110m",
-            .multilingual: "apple-speech",
+            .multilingual: "parakeet-tdt-0.6b-redux",
             .hebrew: "ivrit-large-v3-turbo"
         ])
     }
@@ -315,158 +370,39 @@ struct LocalTranscriptionCatalogTests {
         }
     }
 
-    // MARK: - Retired model migration
+    // MARK: - Restored catalog models
 
-    private func isolatedDefaults(_ name: String = #function) -> UserDefaults {
-        let suite = "com.arcusis.zerm.tests.localcatalog.\(name)"
-        UserDefaults().removePersistentDomain(forName: suite)
-        return UserDefaults(suiteName: suite)!
-    }
+    @Test func restoredCatalogModelsAreNotRetiredOrDeleted() throws {
+        let restored = [
+            "ggml-tiny", "ggml-tiny.en", "ggml-base", "ggml-base.en", "ggml-small", "ggml-small.en",
+            "parakeet-tdt-0.6b-v2"
+        ]
+        #expect(RetiredLocalTranscriptionModelMigration.retiredModelNames.isEmpty)
+        for name in restored {
+            #expect(localModels.contains { $0.name == name }, "\(name) is missing")
+        }
+        #expect(ModelIntegrity.fluidAudioSHA256["parakeet-tdt-0.6b-v2"]?.count == 64)
 
-    private func temporaryDirectory(_ name: String = #function) throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("LocalTranscriptionCatalogTests-\(name)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
+        let suite = "com.arcusis.zerm.tests.localcatalog.\(#function)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set("ggml-tiny", forKey: "CurrentTranscriptionModel")
+        defaults.set(true, forKey: "ParakeetModelDownloaded_parakeet-tdt-0.6b-v2")
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalTranscriptionCatalogTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let tinyFile = directory.appendingPathComponent("ggml-tiny.bin")
+        #expect(FileManager.default.createFile(atPath: tinyFile.path, contents: Data("model".utf8)))
 
-    private func runMigration(_ defaults: UserDefaults, isAppleSilicon: Bool = true, whisper: URL, parakeetV2: URL) {
         RetiredLocalTranscriptionModelMigration.run(
             defaults: defaults,
-            isAppleSilicon: isAppleSilicon,
-            whisperModelsDirectory: whisper,
-            parakeetV2CacheDirectory: parakeetV2
+            whisperModelsDirectory: directory,
+            parakeetV2CacheDirectory: directory.appendingPathComponent("parakeet-v2")
         )
-    }
-
-    @Test(arguments: [
-        ("ggml-tiny.en", true, "parakeet-unified-en-0.6b"),
-        ("ggml-base.en", true, "parakeet-unified-en-0.6b"),
-        ("ggml-small.en", true, "parakeet-unified-en-0.6b"),
-        ("ggml-tiny.en", false, "ggml-large-v3-turbo-q5_0"),
-        ("ggml-small.en", false, "ggml-large-v3-turbo-q5_0"),
-        ("ggml-tiny", true, "ggml-large-v3-turbo-q5_0"),
-        ("ggml-base", false, "ggml-large-v3-turbo-q5_0"),
-        ("ggml-small", true, "ggml-large-v3-turbo-q5_0"),
-        ("parakeet-tdt-0.6b-v2", true, "parakeet-unified-en-0.6b")
-    ])
-    func selectionMovesToTheClosestReplacement(retired: String, isAppleSilicon: Bool, replacement: String) throws {
-        let defaults = isolatedDefaults("selection-\(retired)-\(isAppleSilicon)")
-        let whisper = try temporaryDirectory("selection")
-        defaults.set(retired, forKey: "CurrentTranscriptionModel")
-
-        runMigration(defaults, isAppleSilicon: isAppleSilicon, whisper: whisper, parakeetV2: whisper.appendingPathComponent("v2"))
-
-        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == replacement)
-        let notice = defaults.dictionary(forKey: RetiredLocalTranscriptionModelMigration.replacementNoticeKey) as? [String: String]
-        #expect(notice == ["retired": retired, "replacement": replacement])
-        #expect(defaults.bool(forKey: RetiredLocalTranscriptionModelMigration.completionKey))
-        #expect(TranscriptionModelRegistry.models.contains { $0.name == replacement })
-    }
-
-    @Test func currentModelsAreLeftAloneWithoutANotice() throws {
-        let defaults = isolatedDefaults()
-        defaults.set("parakeet-tdt-0.6b-v3", forKey: "CurrentTranscriptionModel")
-
-        let whisper = try temporaryDirectory()
-        runMigration(defaults, whisper: whisper, parakeetV2: whisper.appendingPathComponent("v2"))
-
-        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "parakeet-tdt-0.6b-v3")
-        #expect(defaults.object(forKey: RetiredLocalTranscriptionModelMigration.replacementNoticeKey) == nil)
-    }
-
-    @Test func powerModeConfigurationsAndSessionAreRewritten() throws {
-        let defaults = isolatedDefaults()
-        let configs: [[String: Any]] = [
-            ["id": "A", "name": "Mail", "selectedTranscriptionModelName": "ggml-base.en", "selectedLanguage": "en"],
-            ["id": "B", "name": "Chat", "selectedTranscriptionModelName": "ggml-small"],
-            ["id": "C", "name": "Code", "selectedTranscriptionModelName": "parakeet-tdt-0.6b-v2"],
-            ["id": "D", "name": "Notes", "selectedTranscriptionModelName": "ivrit-large-v3-turbo"],
-            ["id": "E", "name": "Default"]
-        ]
-        defaults.set(try JSONSerialization.data(withJSONObject: configs),
-                     forKey: RetiredLocalTranscriptionModelMigration.powerModeConfigurationsKey)
-        let session: [String: Any] = [
-            "id": "S",
-            "originalState": ["isEnhancementEnabled": true, "transcriptionModelName": "ggml-tiny"]
-        ]
-        defaults.set(try JSONSerialization.data(withJSONObject: session),
-                     forKey: RetiredLocalTranscriptionModelMigration.powerModeSessionKey)
-
-        let whisper = try temporaryDirectory()
-        runMigration(defaults, whisper: whisper, parakeetV2: whisper.appendingPathComponent("v2"))
-
-        let data = try #require(defaults.data(forKey: RetiredLocalTranscriptionModelMigration.powerModeConfigurationsKey))
-        let migrated = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        #expect(migrated.map { $0["selectedTranscriptionModelName"] as? String } == [
-            "parakeet-unified-en-0.6b",
-            "ggml-large-v3-turbo-q5_0",
-            "parakeet-unified-en-0.6b",
-            "ivrit-large-v3-turbo",
-            nil
-        ])
-        #expect(migrated[0]["name"] as? String == "Mail")
-        #expect(migrated[0]["selectedLanguage"] as? String == "en")
-
-        let sessionData = try #require(defaults.data(forKey: RetiredLocalTranscriptionModelMigration.powerModeSessionKey))
-        let migratedSession = try #require(try JSONSerialization.jsonObject(with: sessionData) as? [String: Any])
-        let state = try #require(migratedSession["originalState"] as? [String: Any])
-        #expect(state["transcriptionModelName"] as? String == "ggml-large-v3-turbo-q5_0")
-        #expect(state["isEnhancementEnabled"] as? Bool == true)
-        // Power Mode replacements alone do not produce the default-model notice.
-        #expect(defaults.object(forKey: RetiredLocalTranscriptionModelMigration.replacementNoticeKey) == nil)
-    }
-
-    @Test func retiredFilesAreDeletedAndCurrentOnesKept() throws {
-        let defaults = isolatedDefaults()
-        defaults.set("ggml-base.en", forKey: "CurrentTranscriptionModel")
-        defaults.set(true, forKey: "ParakeetModelDownloaded_parakeet-tdt-0.6b-v2")
-        let whisper = try temporaryDirectory()
-        let fileManager = FileManager.default
-
-        let retiredFiles = ["ggml-base.en.bin", "ggml-tiny.bin", "ggml-small.en.bin"]
-        let keptFiles = ["ggml-large-v3-turbo.bin", "ivrit-large-v3-turbo.bin", "my-imported-model.bin"]
-        for name in retiredFiles + keptFiles {
-            #expect(fileManager.createFile(atPath: whisper.appendingPathComponent(name).path, contents: Data("x".utf8)))
-        }
-        let retiredEncoder = whisper.appendingPathComponent("ggml-base.en-encoder.mlmodelc", isDirectory: true)
-        let keptEncoder = whisper.appendingPathComponent("ggml-large-v3-turbo-encoder.mlmodelc", isDirectory: true)
-        let parakeetV2 = whisper.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
-        for directory in [retiredEncoder, keptEncoder, parakeetV2] {
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        }
-
-        runMigration(defaults, whisper: whisper, parakeetV2: parakeetV2)
-
-        for name in retiredFiles {
-            #expect(!fileManager.fileExists(atPath: whisper.appendingPathComponent(name).path), "\(name)")
-        }
-        for name in keptFiles {
-            #expect(fileManager.fileExists(atPath: whisper.appendingPathComponent(name).path), "\(name)")
-        }
-        #expect(!fileManager.fileExists(atPath: retiredEncoder.path))
-        #expect(fileManager.fileExists(atPath: keptEncoder.path))
-        #expect(!fileManager.fileExists(atPath: parakeetV2.path))
-        #expect(defaults.object(forKey: "ParakeetModelDownloaded_parakeet-tdt-0.6b-v2") == nil)
-        #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "parakeet-unified-en-0.6b")
-    }
-
-    @Test func migrationRunsOnlyOnce() throws {
-        let defaults = isolatedDefaults()
-        let whisper = try temporaryDirectory()
-        runMigration(defaults, whisper: whisper, parakeetV2: whisper.appendingPathComponent("v2"))
-
-        defaults.set("ggml-tiny", forKey: "CurrentTranscriptionModel")
-        runMigration(defaults, whisper: whisper, parakeetV2: whisper.appendingPathComponent("v2"))
 
         #expect(defaults.string(forKey: "CurrentTranscriptionModel") == "ggml-tiny")
-    }
-
-    @Test func noRetiredModelIsStillInTheCatalog() {
-        for name in RetiredLocalTranscriptionModelMigration.retiredModelNames {
-            #expect(!TranscriptionModelRegistry.models.contains { $0.name == name }, "\(name)")
-            #expect(ModelIntegrity.whisperSHA256[name] == nil, "\(name)")
-            #expect(RetiredLocalTranscriptionModelMigration.retiredDisplayNames[name] != nil, "\(name)")
-        }
+        #expect(defaults.bool(forKey: "ParakeetModelDownloaded_parakeet-tdt-0.6b-v2"))
+        #expect(FileManager.default.fileExists(atPath: tinyFile.path))
+        #expect(defaults.bool(forKey: RetiredLocalTranscriptionModelMigration.completionKey))
     }
 }

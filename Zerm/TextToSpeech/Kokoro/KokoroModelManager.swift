@@ -7,6 +7,19 @@ struct KokoroModelPackage {
     let displayName: String
     let approxSize: String
     let downloadURL: URL
+    var provenance: ModelProvenance {
+        ModelProvenance(
+            creator: "hexgrad / sherpa-onnx",
+            sourceURL: downloadURL,
+            downloadHost: "github.com",
+            licenseName: "Apache-2.0",
+            licenseSPDX: "Apache-2.0",
+            licenseURL: URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!,
+            attribution: "Kokoro model package distributed by sherpa-onnx.",
+            conversionCredit: "sherpa-onnx",
+            checksumSHA256: nil
+        )
+    }
 
     /// Files that must exist after extraction for the package to be considered installed.
     var requiredFiles: [String] { ["model.onnx", "voices.bin", "tokens.txt"] }
@@ -31,8 +44,12 @@ final class KokoroModelManager: ObservableObject {
 
     @Published private(set) var isInstalled = false
     @Published private(set) var isDownloading = false
+    @Published private(set) var isPaused = false
     /// 0.0–1.0 while downloading/extracting; nil when idle.
     @Published private(set) var downloadProgress: Double?
+    @Published private(set) var downloadedBytes: Int64?
+    @Published private(set) var totalDownloadBytes: Int64?
+    @Published private(set) var downloadState: ModelDownloadState?
     @Published private(set) var statusText: String?
 
     let modelsDirectory: URL
@@ -40,12 +57,22 @@ final class KokoroModelManager: ObservableObject {
     private var engine: KokoroEngine?
     private var downloadTask: URLSessionDownloadTask?
     private var progressObservation: NSKeyValueObservation?
+    private let resumeDataStore = ModelDownloadResumeDataStore()
+    private let downloadStateStore = ModelDownloadStateStore()
+    private var pauseRequested = false
 
     private init() {
         let appSupport = AppStoragePaths.root
         modelsDirectory = appSupport.appendingPathComponent("TTSModels")
         try? FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         refreshInstalled()
+        downloadState = downloadStateStore.load(for: Self.package.name)
+        downloadedBytes = downloadState?.bytesDownloaded
+        totalDownloadBytes = downloadState?.totalBytes
+        if resumeDataStore.load(for: Self.package.name) != nil {
+            isPaused = true
+            statusText = String(localized: "Paused")
+        }
     }
 
     // MARK: - Paths
@@ -77,7 +104,11 @@ final class KokoroModelManager: ObservableObject {
 
     func download() async {
         guard !isDownloading else { return }
+        isPaused = false
+        pauseRequested = false
         isDownloading = true
+        downloadState = ModelDownloadState(phase: resumeDataStore.load(for: Self.package.name) == nil ? .downloading : .resuming)
+        try? downloadStateStore.save(downloadState!, for: Self.package.name)
         downloadProgress = 0
         statusText = String(localized: "Downloading Kokoro model…")
         defer { isDownloading = false; downloadProgress = nil }
@@ -91,18 +122,56 @@ final class KokoroModelManager: ObservableObject {
             refreshInstalled()
             statusText = isInstalled ? nil : String(localized: "Extraction incomplete")
             if !isInstalled { logger.error("Kokoro extraction finished but required files are missing") }
+            if isInstalled {
+                downloadState = ModelDownloadState(phase: .completed, fractionCompleted: 1)
+                try? downloadStateStore.save(downloadState!, for: Self.package.name)
+            }
         } catch is CancellationError {
-            statusText = String(localized: "Download cancelled")
+            isPaused = pauseRequested
+            statusText = isPaused ? String(localized: "Paused") : String(localized: "Download cancelled")
+            downloadState = ModelDownloadState(phase: isPaused ? .paused : .queued, fractionCompleted: downloadState?.fractionCompleted, bytesDownloaded: downloadedBytes, totalBytes: totalDownloadBytes)
+            try? downloadStateStore.save(downloadState!, for: Self.package.name)
         } catch {
+            if pauseRequested {
+                isPaused = true
+                statusText = String(localized: "Paused")
+                downloadState = ModelDownloadState(phase: .paused, fractionCompleted: downloadState?.fractionCompleted, bytesDownloaded: downloadedBytes, totalBytes: totalDownloadBytes)
+                try? downloadStateStore.save(downloadState!, for: Self.package.name)
+                return
+            }
             logger.error("Kokoro download failed: \(error.localizedDescription, privacy: .public)")
             let format = String(localized: "Download failed: %@")
             statusText = String.localizedStringWithFormat(format, error.localizedDescription)
+            downloadState = ModelDownloadState(phase: .failed, fractionCompleted: downloadProgress, bytesDownloaded: downloadedBytes, totalBytes: totalDownloadBytes, message: error.localizedDescription)
+            try? downloadStateStore.save(downloadState!, for: Self.package.name)
         }
     }
 
     func cancelDownload() {
+        isPaused = false
+        resumeDataStore.remove(for: Self.package.name)
+        downloadState = ModelDownloadState(phase: .queued)
+        try? downloadStateStore.save(downloadState!, for: Self.package.name)
         downloadTask?.cancel()
         downloadTask = nil
+        statusText = String(localized: "Download cancelled")
+    }
+
+    func pauseDownload() {
+        guard let downloadTask else { return }
+        pauseRequested = true
+        let packageName = Self.package.name
+        downloadTask.cancel(byProducingResumeData: { [resumeDataStore] data in
+            if let data { try? resumeDataStore.save(data, for: packageName) }
+        })
+        statusText = String(localized: "Pausing…")
+    }
+
+    func resumeDownload() {
+        Task { @MainActor in
+            while isDownloading { try? await Task.sleep(for: .milliseconds(20)) }
+            await download()
+        }
     }
 
     func delete() {
@@ -114,13 +183,16 @@ final class KokoroModelManager: ObservableObject {
     /// Downloads to a temp file, reporting fractional progress via KVO (mirrors WhisperModelManager).
     private func downloadArchive(from url: URL) async throws -> URL {
         let archiveDestination = modelsDirectory.appendingPathComponent("kokoro-download.tar.bz2")
+        let resumeStore = resumeDataStore
+        let packageName = Self.package.name
         defer {
             progressObservation?.invalidate()
             progressObservation = nil
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            let task = URLSession.shared.downloadTask(with: url) { tempURL, response, error in
+            let completion: @Sendable (URL?, URLResponse?, Error?) -> Void = { [weak self] tempURL, response, error in
+                Task { @MainActor in self?.downloadTask = nil }
                 if let error { continuation.resume(throwing: error); return }
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     continuation.resume(throwing: TTSError.http((response as? HTTPURLResponse)?.statusCode ?? -1, String(localized: "download failed")))
@@ -130,14 +202,29 @@ final class KokoroModelManager: ObservableObject {
                 do {
                     try? FileManager.default.removeItem(at: archiveDestination)
                     try FileManager.default.moveItem(at: tempURL, to: archiveDestination)
+                    resumeStore.remove(for: packageName)
                     continuation.resume(returning: archiveDestination)
                 } catch {
                     continuation.resume(throwing: error)
                 }
             }
+            let resumeData = resumeStore.load(for: packageName)
+            let task = resumeData.map { URLSession.shared.downloadTask(withResumeData: $0, completionHandler: completion) }
+                ?? URLSession.shared.downloadTask(with: url, completionHandler: completion)
             self.downloadTask = task
             self.progressObservation = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-                Task { @MainActor in self?.downloadProgress = progress.fractionCompleted }
+                Task { @MainActor in
+                    self?.downloadProgress = progress.fractionCompleted
+                    self?.downloadedBytes = progress.completedUnitCount
+                    self?.totalDownloadBytes = progress.totalUnitCount > 0 ? progress.totalUnitCount : nil
+                    guard let self else { return }
+                    var state = self.downloadState ?? ModelDownloadState(phase: .downloading)
+                    state.fractionCompleted = progress.fractionCompleted
+                    state.bytesDownloaded = progress.completedUnitCount
+                    state.totalBytes = progress.totalUnitCount > 0 ? progress.totalUnitCount : nil
+                    self.downloadState = state
+                    try? self.downloadStateStore.save(state, for: Self.package.name)
+                }
             }
             task.resume()
         }

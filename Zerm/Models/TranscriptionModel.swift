@@ -74,15 +74,6 @@ protocol TranscriptionModel: Identifiable, Hashable {
     var provenance: ModelProvenance? { get }
 }
 
-struct ModelProvenance: Equatable {
-    let creator: String
-    let sourceURL: URL
-    let licenseSPDX: String
-    let licenseURL: URL
-    let attribution: String
-    let converterCredit: String
-}
-
 enum ModelLanguageGroup {
     case englishOnly
     case multilingual
@@ -91,7 +82,6 @@ enum ModelLanguageGroup {
 
 extension TranscriptionModel {
     var provenance: ModelProvenance? { nil }
-
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -166,6 +156,7 @@ struct NativeAppleModel: TranscriptionModel {
     let name: String
     let displayName: String
     let description: String
+    let provenance: ModelProvenance?
     let provider: ModelProvider = .nativeApple
     let isMultilingualModel: Bool
     let languageGroup: ModelLanguageGroup = .multilingual
@@ -177,12 +168,13 @@ struct NativeAppleModel: TranscriptionModel {
         return catalogLanguages.merging(["he": "Hebrew"]) { current, _ in current }
     }
 
-    init(name: String, displayName: String, description: String, isMultilingualModel: Bool, supportedLanguages: [String: String]) {
+    init(name: String, displayName: String, description: String, isMultilingualModel: Bool, supportedLanguages: [String: String], provenance: ModelProvenance) {
         self.name = name
         self.displayName = displayName
         self.description = description
         self.isMultilingualModel = isMultilingualModel
         self.catalogLanguages = supportedLanguages
+        self.provenance = provenance
     }
 }
 
@@ -197,13 +189,15 @@ struct FluidAudioModel: TranscriptionModel {
     let speed: Double
     let accuracy: Double
     let ramUsage: Double
+    let provenance: ModelProvenance?
+    let minimumMacOSMajorVersion: Int?
     let supportsStreaming: Bool
     var isMultilingualModel: Bool {
         supportedLanguages.count > 1
     }
     let supportedLanguages: [String: String]
 
-    init(name: String, displayName: String, description: String, size: String, speed: Double, accuracy: Double, ramUsage: Double, supportsStreaming: Bool = false, supportedLanguages: [String: String]) {
+    init(name: String, displayName: String, description: String, size: String, speed: Double, accuracy: Double, ramUsage: Double, supportsStreaming: Bool = false, minimumMacOSMajorVersion: Int? = nil, supportedLanguages: [String: String], provenance: ModelProvenance? = nil) {
         self.name = name
         self.displayName = displayName
         self.description = description
@@ -213,6 +207,8 @@ struct FluidAudioModel: TranscriptionModel {
         self.ramUsage = ramUsage
         self.supportsStreaming = supportsStreaming
         self.supportedLanguages = supportedLanguages
+        self.minimumMacOSMajorVersion = minimumMacOSMajorVersion
+        self.provenance = provenance
     }
 }
 
@@ -357,8 +353,9 @@ struct WhisperModel: TranscriptionModel {
     let isHebrewOptimized: Bool
     /// The pinned Hugging Face file this model is downloaded from.
     let source: ModelIntegrity.PinnedFile
+    let provenance: ModelProvenance?
 
-    init(name: String, displayName: String, size: String, supportedLanguages: [String: String], description: String, speed: Double, accuracy: Double, ramUsage: Double, isHebrewOptimized: Bool = false, source: ModelIntegrity.PinnedFile? = nil) {
+    init(name: String, displayName: String, size: String, supportedLanguages: [String: String], description: String, speed: Double, accuracy: Double, ramUsage: Double, isHebrewOptimized: Bool = false, source: ModelIntegrity.PinnedFile? = nil, provenance: ModelProvenance? = nil) {
         self.name = name
         self.displayName = displayName
         self.size = size
@@ -369,6 +366,7 @@ struct WhisperModel: TranscriptionModel {
         self.ramUsage = ramUsage
         self.isHebrewOptimized = isHebrewOptimized
         self.source = source ?? .whisperCpp(fileName: "\(name).bin")
+        self.provenance = provenance
     }
 
     var downloadURL: String {

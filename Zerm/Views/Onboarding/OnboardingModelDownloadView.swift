@@ -9,6 +9,7 @@ struct OnboardingModelDownloadView: View {
     @State private var isDownloading = false
     @State private var isModelSet = false
     @State private var showNextStep = false
+    @State private var isShowingDownloadNotice = false
     
     private let turboModel = TranscriptionModelRegistry.models.first { $0.name == "ggml-large-v3-turbo-q5_0" } as! WhisperModel
     
@@ -87,10 +88,11 @@ struct OnboardingModelDownloadView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             
                             // Download progress
-                            if isDownloading {
+                            if isDownloading || whisperModelManager.isPaused(turboModel) {
                                 DownloadProgressView(
                                     modelName: turboModel.name,
-                                    downloadProgress: whisperModelManager.downloadProgress
+                                    downloadProgress: whisperModelManager.downloadProgress,
+                                    downloadState: whisperModelManager.downloadStates[turboModel.name]
                                 )
                                 .transition(.opacity)
                             }
@@ -119,6 +121,18 @@ struct OnboardingModelDownloadView: View {
                             .buttonStyle(ScaleButtonStyle())
                             .disabled(isDownloading)
 
+                            if isDownloading {
+                                HStack {
+                                    Button("Pause") { whisperModelManager.pauseDownload(turboModel) }
+                                    Button("Cancel") { whisperModelManager.cancelDownload(turboModel) }
+                                }
+                            } else if whisperModelManager.isPaused(turboModel) {
+                                HStack {
+                                    Button("Resume") { startDownload() }
+                                    Button("Cancel") { whisperModelManager.cancelDownload(turboModel) }
+                                }
+                            }
+
                             // Model download is required before continuing — skipping left
                             // users with no usable STT and silent recording failures.
                             if !isModelSet {
@@ -141,6 +155,13 @@ struct OnboardingModelDownloadView: View {
         .onAppear {
             animateIn()
             checkModelStatus()
+        }
+        .sheet(isPresented: $isShowingDownloadNotice) {
+            if let provenance = turboModel.provenance {
+                ModelDownloadNoticeView(assetID: turboModel.name, modelName: turboModel.displayName, provenance: provenance) {
+                    startDownload()
+                }
+            }
         }
     }
     
@@ -172,19 +193,27 @@ struct OnboardingModelDownloadView: View {
                 }
             }
         } else {
-            withAnimation {
-                isDownloading = true
+            guard let provenance = turboModel.provenance else { return }
+            if ModelDownloadNoticePolicy.requiresNotice(assetID: turboModel.name, provenance: provenance) {
+                isShowingDownloadNotice = true
+            } else {
+                startDownload()
             }
-            Task {
-                await whisperModelManager.downloadModel(turboModel)
-                if let modelToSet = transcriptionModelManager.allAvailableModels.first(where: { $0.name == turboModel.name }) {
-                    transcriptionModelManager.setDefaultTranscriptionModel(modelToSet)
-                    withAnimation {
-                        isModelSet = true
-                        isDownloading = false
-                    }
-                }
+        }
+    }
+
+    private func startDownload() {
+        withAnimation { isDownloading = true }
+        whisperModelManager.startDownload(turboModel)
+        Task {
+            while whisperModelManager.isDownloading(turboModel) {
+                try? await Task.sleep(for: .milliseconds(250))
             }
+            if let modelToSet = transcriptionModelManager.allAvailableModels.first(where: { $0.name == turboModel.name }) {
+                transcriptionModelManager.setDefaultTranscriptionModel(modelToSet)
+                withAnimation { isModelSet = true }
+            }
+            isDownloading = false
         }
     }
 

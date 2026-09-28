@@ -28,18 +28,37 @@ class FluidAudioModelManager: ObservableObject {
     @Published var downloadProgress: [String: Double] = [:]
     /// Last download failure per model name, shown on the model card with a retry.
     @Published var downloadErrors: [String: String] = [:]
+    @Published private(set) var downloadStates: [String: ModelDownloadState] = [:]
 
     var onModelDeleted: ((String) -> Void)?
     var onModelsChanged: (() -> Void)?
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "FluidAudioModelManager")
+    private var downloadTasks: [String: Task<Void, Never>] = [:]
+    private var pausedDownloads: Set<String> = []
+    private var cancelledDownloads: Set<String> = []
+    private let downloadStateStore = ModelDownloadStateStore()
 
     // Add new Fluid Audio TDT models here when support is added.
     nonisolated static let modelVersionMap: [String: AsrModelVersion] = [
         "parakeet-tdt-ctc-110m": .tdtCtc110m,
+        "parakeet-tdt-0.6b-v2": .v2,
         "parakeet-tdt-0.6b-v3": .v3,
+        "parakeet-tdt-0.6b-redux": .redux,
         "parakeet-tdt-0.6b-ultra": .ultra,
     ]
+
+    nonisolated static let reduxModelName = "parakeet-tdt-0.6b-redux"
+
+    nonisolated static func supportsModel(_ modelName: String, macOSMajorVersion: Int) -> Bool {
+        modelName != reduxModelName || macOSMajorVersion >= 15
+    }
+
+    nonisolated static func isModelAvailable(_ modelName: String) -> Bool {
+        guard modelName == reduxModelName else { return true }
+        if #available(macOS 15.0, *) { return true }
+        return false
+    }
 
     /// Parakeet Unified is an RNNT model with its own manager, not a TDT version.
     nonisolated static let unifiedModelName = "parakeet-unified-en-0.6b"
@@ -72,6 +91,7 @@ class FluidAudioModelManager: ObservableObject {
     /// `directory` is the model's own cache folder, named as FluidAudio names it (FluidAudio resolves
     /// the folder by name); injectable for tests.
     nonisolated static func cacheState(forModelNamed modelName: String, in directory: URL? = nil) -> FluidAudioCacheState {
+        guard isModelAvailable(modelName) else { return .missing }
         func allExist(_ files: [String], in folder: URL) -> Bool {
             files.allSatisfy { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
         }
@@ -91,7 +111,11 @@ class FluidAudioModelManager: ObservableObject {
         return .missing
     }
 
-    init() {}
+    init() {
+        for model in TranscriptionModelRegistry.models where model.provider == .fluidAudio {
+            if let state = downloadStateStore.load(for: model.name) { downloadStates[model.name] = state }
+        }
+    }
 
     // MARK: - Query helpers
 
@@ -112,10 +136,47 @@ class FluidAudioModelManager: ObservableObject {
         parakeetDownloadStates[model.name] ?? false
     }
 
+    func isPaused(_ model: FluidAudioModel) -> Bool { downloadStates[model.name]?.phase == .paused }
+
+    func startDownload(_ model: FluidAudioModel) {
+        guard downloadTasks[model.name] == nil else { return }
+        let isResuming = downloadStates[model.name]?.phase == .paused
+        downloadStates[model.name] = ModelDownloadState(phase: isResuming ? .resuming : .queued)
+        try? downloadStateStore.save(downloadStates[model.name]!, for: model.name)
+        pausedDownloads.remove(model.name)
+        cancelledDownloads.remove(model.name)
+        downloadTasks[model.name] = Task { [weak self] in
+            await self?.downloadFluidAudioModel(model)
+            self?.downloadTasks[model.name] = nil
+        }
+    }
+
+    func pauseDownload(_ model: FluidAudioModel) {
+        guard downloadTasks[model.name] != nil else { return }
+        pausedDownloads.insert(model.name)
+        downloadTasks[model.name]?.cancel()
+    }
+
+    func resumeDownload(_ model: FluidAudioModel) {
+        guard isPaused(model) else { return }
+        Task { @MainActor in
+            while downloadTasks[model.name] != nil { try? await Task.sleep(for: .milliseconds(20)) }
+            startDownload(model)
+        }
+    }
+
+    func cancelDownload(_ model: FluidAudioModel) {
+        pausedDownloads.remove(model.name)
+        cancelledDownloads.insert(model.name)
+        downloadTasks[model.name]?.cancel()
+        downloadStates[model.name] = ModelDownloadState(phase: .queued)
+        try? downloadStateStore.save(downloadStates[model.name]!, for: model.name)
+    }
+
     // MARK: - Download
 
     func downloadFluidAudioModel(_ model: FluidAudioModel) async {
-        if isFluidAudioModelDownloaded(model) || model.hardwareFit.blocksInstall || isFluidAudioModelDownloading(model) {
+        if !Self.isModelAvailable(model.name) || isFluidAudioModelDownloaded(model) || model.hardwareFit.blocksInstall || isFluidAudioModelDownloading(model) {
             return
         }
 
@@ -124,35 +185,49 @@ class FluidAudioModelManager: ObservableObject {
         downloadProgress[modelName] = 0.0
         downloadErrors[modelName] = nil
 
-        let timer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { timer in
-            Task { @MainActor in
-                if let currentProgress = self.downloadProgress[modelName], currentProgress < 0.9 {
-                    self.downloadProgress[modelName] = currentProgress + 0.005
-                }
-            }
-        }
+        downloadStates[modelName] = ModelDownloadState(phase: .downloading)
+        try? downloadStateStore.save(downloadStates[modelName]!, for: modelName)
 
         do {
             if modelName == Self.unifiedModelName {
                 let manager = UnifiedAsrManager()
-                try await manager.loadModels()
+                let progressHandler: ProgressHandler = { [weak self] progress in
+                    Task { @MainActor in self?.downloadProgress[modelName] = progress.fractionCompleted }
+                }
+                try await manager.loadModels(progressHandler: progressHandler)
                 await manager.cleanup()
             } else {
-                _ = try await AsrModels.downloadAndLoad(version: Self.asrVersion(for: modelName))
+                let progressHandler: ProgressHandler = { [weak self] progress in
+                    Task { @MainActor in self?.downloadProgress[modelName] = progress.fractionCompleted }
+                }
+                _ = try await AsrModels.downloadAndLoad(version: Self.asrVersion(for: modelName), progressHandler: progressHandler)
             }
             _ = try await VadManager()
 
             UserDefaults.standard.set(true, forKey: parakeetDefaultsKey(for: modelName))
             downloadProgress[modelName] = 1.0
+            downloadStates[modelName] = ModelDownloadState(phase: .completed, fractionCompleted: 1)
         } catch {
-            UserDefaults.standard.set(false, forKey: parakeetDefaultsKey(for: modelName))
-            downloadErrors[modelName] = error.localizedDescription
-            logger.error("❌ FluidAudio download failed for \(modelName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            if pausedDownloads.contains(modelName) {
+                downloadStates[modelName] = ModelDownloadState(phase: .paused, fractionCompleted: downloadProgress[modelName])
+            } else if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                UserDefaults.standard.set(false, forKey: parakeetDefaultsKey(for: modelName))
+                if cancelledDownloads.contains(modelName) {
+                    try? FileManager.default.removeItem(at: cacheDirectory(forModelNamed: modelName))
+                    cancelledDownloads.remove(modelName)
+                }
+                downloadStates[modelName] = ModelDownloadState(phase: .queued)
+            } else {
+                UserDefaults.standard.set(false, forKey: parakeetDefaultsKey(for: modelName))
+                downloadErrors[modelName] = error.localizedDescription
+                downloadStates[modelName] = ModelDownloadState(phase: .failed, message: error.localizedDescription)
+                logger.error("FluidAudio download failed for \(modelName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
 
-        timer.invalidate()
         parakeetDownloadStates[modelName] = false
-        downloadProgress[modelName] = nil
+        if downloadStates[modelName]?.phase != .paused { downloadProgress[modelName] = nil }
+        if let state = downloadStates[modelName] { try? downloadStateStore.save(state, for: modelName) }
 
         onModelsChanged?()
     }

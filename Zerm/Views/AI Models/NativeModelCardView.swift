@@ -14,6 +14,9 @@ struct NativeAppleModelCardView: View {
                 headerSection
                 metadataSection
                 descriptionSection
+                if let provenance = model.provenance {
+                    ModelProvenanceDisclosure(provenance: provenance)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             

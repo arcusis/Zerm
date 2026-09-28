@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SwiftData
 import Testing
 @testable import Zerm
 
@@ -42,6 +43,16 @@ struct SherpaOnnxTranscriptionTests {
         #expect(russian.provenance?.licenseSPDX == "Apache-2.0")
         #expect(russian.supportedLanguages["ru"] == "Russian")
         #expect(russian.languageGroup == .singleLanguage)
+    }
+
+    @Test func selectingSherpaModelRoutesToSherpaService() throws {
+        let container = try ModelContainer(for: Transcription.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let registry = TranscriptionServiceRegistry(
+            modelProvider: WhisperModelManager(modelsDirectory: FileManager.default.temporaryDirectory),
+            modelsDirectory: FileManager.default.temporaryDirectory,
+            modelContext: ModelContext(container)
+        )
+        #expect(registry.service(for: tiny) is SherpaOnnxTranscriptionService)
     }
 
     @Test func archiveExtractionRejectsTraversalAndPlatformPaths() throws {

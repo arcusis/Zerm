@@ -42,6 +42,7 @@ enum LocalModelFilter: CaseIterable, Identifiable {
 struct ModelManagementView: View {
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
     @EnvironmentObject private var fluidAudioModelManager: FluidAudioModelManager
+    @EnvironmentObject private var sherpaOnnxModelManager: SherpaOnnxModelManager
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
     @State private var customModelToEdit: CustomCloudModel?
     @StateObject private var customModelManager = CustomCloudModelManager.shared
@@ -59,6 +60,8 @@ struct ModelManagementView: View {
     @State private var replacementNotice = UserDefaults.standard.dictionary(
         forKey: RetiredLocalTranscriptionModelMigration.replacementNoticeKey
     ) as? [String: String]
+    @State private var isShowingModelCredits = false
+    @State private var noticeRequest: ModelDownloadNoticeRequest?
 
     private let settingsPanelWidth: CGFloat = 400
 
@@ -77,6 +80,10 @@ struct ModelManagementView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                HStack {
+                    Spacer()
+                    Button("Model credits") { isShowingModelCredits = true }
+                }
                 if SystemArchitecture.isIntelMac {
                     intelMacWarningBanner
                 } else if HardwareCapability.tier == .limited {
@@ -105,6 +112,12 @@ struct ModelManagementView: View {
                 primaryButton: .destructive(Text("Delete"), action: deleteActionClosure),
                 secondaryButton: .cancel()
             )
+        }
+        .sheet(isPresented: $isShowingModelCredits) {
+            ModelCreditsView()
+        }
+        .sheet(item: $noticeRequest) { request in
+            ModelDownloadNoticeView(assetID: request.assetID, modelName: request.modelName, provenance: request.provenance, onDownload: request.onDownload)
         }
         .task {
             appleSpeechSupportsHebrew = await AppleSpeechLanguageSupport.refresh()
@@ -185,6 +198,9 @@ struct ModelManagementView: View {
             return !whisperModelManager.availableModels.contains { $0.name == model.name }
         case .fluidAudio:
             return !fluidAudioModelManager.isFluidAudioModelDownloaded(named: model.name)
+        case .sherpaOnnx:
+            guard let sherpa = model as? SherpaOnnxModel else { return false }
+            return !sherpaOnnxModelManager.isDownloaded(sherpa)
         default:
             return false
         }
@@ -194,8 +210,17 @@ struct ModelManagementView: View {
         if let fluidAudioModel = model as? FluidAudioModel {
             return fluidAudioModelManager.isFluidAudioModelDownloading(fluidAudioModel)
         }
-        return whisperModelManager.downloadProgress[model.name + "_main"] != nil
-            || whisperModelManager.downloadProgress[model.name + "_coreml"] != nil
+        if let sherpa = model as? SherpaOnnxModel {
+            return sherpaOnnxModelManager.downloadingModels.contains(sherpa.name)
+        }
+        return (model as? WhisperModel).map { whisperModelManager.isDownloading($0) } ?? false
+    }
+
+    private func isPaused(_ model: any TranscriptionModel) -> Bool {
+        if let whisper = model as? WhisperModel { return whisperModelManager.isPaused(whisper) }
+        if let fluid = model as? FluidAudioModel { return fluidAudioModelManager.isPaused(fluid) }
+        if let sherpa = model as? SherpaOnnxModel { return sherpaOnnxModelManager.isPaused(sherpa) }
+        return false
     }
 
     private func downloadRequiredRow(for model: any TranscriptionModel) -> some View {
@@ -207,13 +232,39 @@ struct ModelManagementView: View {
 
             Spacer()
 
-            Button(action: { download(model) }) {
-                Text(isDownloading(model) ? "Downloading..." : "Download")
-                    .font(.system(size: 12, weight: .medium))
+            if isPaused(model) {
+                Text("Paused").font(.caption).foregroundStyle(.secondary)
+                Button("Resume") {
+                    if let whisper = model as? WhisperModel { whisperModelManager.resumeDownload(whisper) }
+                    if let fluid = model as? FluidAudioModel { fluidAudioModelManager.resumeDownload(fluid) }
+                    if let sherpa = model as? SherpaOnnxModel { sherpaOnnxModelManager.resumeDownload(sherpa) }
+                }
+                .controlSize(.small)
+                Button("Cancel") {
+                    if let whisper = model as? WhisperModel { whisperModelManager.cancelDownload(whisper) }
+                    if let fluid = model as? FluidAudioModel { fluidAudioModelManager.cancelDownload(fluid) }
+                    if let sherpa = model as? SherpaOnnxModel { sherpaOnnxModelManager.cancelDownload(sherpa) }
+                }
+                .controlSize(.small)
+            } else if isDownloading(model) {
+                Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+                if let whisper = model as? WhisperModel {
+                    Button("Pause") { whisperModelManager.pauseDownload(whisper) }.controlSize(.small)
+                    Button("Cancel") { whisperModelManager.cancelDownload(whisper) }.controlSize(.small)
+                } else if let fluid = model as? FluidAudioModel {
+                    Button("Pause") { fluidAudioModelManager.pauseDownload(fluid) }.controlSize(.small)
+                    Button("Cancel") { fluidAudioModelManager.cancelDownload(fluid) }.controlSize(.small)
+                } else if let sherpa = model as? SherpaOnnxModel {
+                    Button("Pause") { sherpaOnnxModelManager.pauseDownload(sherpa) }.controlSize(.small)
+                    Button("Cancel") { sherpaOnnxModelManager.cancelDownload(sherpa) }.controlSize(.small)
+                }
+            } else {
+                Button(action: { requestDownload(model) }) {
+                    Text("Download").font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isDownloading(model))
         }
     }
 
@@ -222,6 +273,18 @@ struct ModelManagementView: View {
             whisperModelManager.startDownload(whisperModel)
         } else if let fluidAudioModel = model as? FluidAudioModel {
             Task { await fluidAudioModelManager.downloadFluidAudioModel(fluidAudioModel) }
+        } else if let sherpa = model as? SherpaOnnxModel {
+            sherpaOnnxModelManager.startDownload(sherpa)
+        }
+    }
+
+    private func requestDownload(_ model: any TranscriptionModel) {
+        guard let provenance = model.provenance else { return }
+        let action = { download(model) }
+        if ModelDownloadNoticePolicy.requiresNotice(assetID: model.name, provenance: provenance) {
+            noticeRequest = ModelDownloadNoticeRequest(assetID: model.name, modelName: model.displayName, provenance: provenance, onDownload: action)
+        } else {
+            action()
         }
     }
 
@@ -332,7 +395,7 @@ struct ModelManagementView: View {
                 recommendedList
             case .local:
                 localFilterChips
-                modelCards(localModels)
+                localModelSections
                 importLocalModelCard
             case .cloud:
                 cloudProviderChips
@@ -361,13 +424,16 @@ struct ModelManagementView: View {
         return ModelCardView(
             model: model,
             fluidAudioModelManager: fluidAudioModelManager,
+            sherpaOnnxModelManager: sherpaOnnxModelManager,
             transcriptionModelManager: transcriptionModelManager,
-            isDownloaded: whisperModelManager.availableModels.contains { $0.name == model.name },
+            isDownloaded: isModelDownloaded(model),
             isCurrent: transcriptionModelManager.currentTranscriptionModel?.name == model.name,
-            downloadProgress: whisperModelManager.downloadProgress,
+            downloadProgress: model.provider == .sherpaOnnx ? sherpaOnnxModelManager.downloadProgress : whisperModelManager.downloadProgress,
+            downloadState: model.provider == .sherpaOnnx ? sherpaOnnxModelManager.downloadStates[model.name] : whisperModelManager.downloadStates[model.name],
             modelURL: whisperModelManager.availableModels.first { $0.name == model.name }?.url,
             isWarming: isWarming,
-            downloadError: whisperModelManager.downloadErrors[model.name],
+            downloadError: model.provider == .sherpaOnnx ? sherpaOnnxModelManager.downloadErrors[model.name] : whisperModelManager.downloadErrors[model.name],
+            isPaused: isPaused(model),
             deleteAction: {
                 if let customModel = model as? CustomCloudModel {
                     alertTitle = "Delete Custom Model"
@@ -386,6 +452,11 @@ struct ModelManagementView: View {
                         }
                     }
                     isShowingDeleteAlert = true
+                } else if let sherpa = model as? SherpaOnnxModel, sherpaOnnxModelManager.isDownloaded(sherpa) {
+                    alertTitle = "Delete Model"
+                    alertMessage = "Are you sure you want to delete the model '\(sherpa.displayName)'?"
+                    deleteActionClosure = { try? sherpaOnnxModelManager.delete(sherpa) }
+                    isShowingDeleteAlert = true
                 }
             },
             setDefaultAction: {
@@ -396,15 +467,39 @@ struct ModelManagementView: View {
             downloadAction: {
                 if let whisperModel = model as? WhisperModel {
                     whisperModelManager.startDownload(whisperModel)
+                } else if let sherpa = model as? SherpaOnnxModel {
+                    sherpaOnnxModelManager.startDownload(sherpa)
                 }
             },
             cancelDownloadAction: (model as? WhisperModel).map { whisperModel in
                 { whisperModelManager.cancelDownload(whisperModel) }
             },
+            pauseDownloadAction: (model as? WhisperModel).map { whisperModel in
+                { whisperModelManager.pauseDownload(whisperModel) }
+            },
+            resumeDownloadAction: (model as? WhisperModel).map { whisperModel in
+                { whisperModelManager.resumeDownload(whisperModel) }
+            },
             editAction: model.provider == .custom ? { customModel in
                 customModelToEdit = customModel
             } : nil
         )
+    }
+
+    private func isModelDownloaded(_ model: any TranscriptionModel) -> Bool {
+        switch model.provider {
+        case .whisper:
+            return whisperModelManager.availableModels.contains { $0.name == model.name }
+        case .fluidAudio:
+            return fluidAudioModelManager.isFluidAudioModelDownloaded(named: model.name)
+        case .sherpaOnnx:
+            guard let sherpa = model as? SherpaOnnxModel else { return false }
+            return sherpaOnnxModelManager.isDownloaded(sherpa)
+        case .nativeApple:
+            return true
+        default:
+            return transcriptionModelManager.usableModels.contains { $0.name == model.name }
+        }
     }
 
     // MARK: Recommended
@@ -457,7 +552,7 @@ struct ModelManagementView: View {
 
     private var localModels: [any TranscriptionModel] {
         transcriptionModelManager.allAvailableModels.filter { model in
-            guard model.provider == .whisper || model.provider == .nativeApple || model.provider == .fluidAudio else {
+            guard model.provider == .whisper || model.provider == .nativeApple || model.provider == .fluidAudio || model.provider == .sherpaOnnx else {
                 return false
             }
             switch selectedLocalFilter {
@@ -465,6 +560,36 @@ struct ModelManagementView: View {
             case .englishOnly: return model.languageGroup == .englishOnly
             case .multilingual: return model.languageGroup == .multilingual
             case .hebrew: return isGreatInHebrew(model)
+            }
+        }
+    }
+
+    private var localModelSections: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            localModelSection("Apple Speech", models: localModels.filter { $0.provider == .nativeApple })
+            localModelSection("Parakeet", models: localModels.filter { $0.provider == .fluidAudio })
+            localModelSection("Sherpa ONNX", models: localModels.filter { $0.provider == .sherpaOnnx })
+            localModelSection("Whisper and ivrit.ai", models: localModels.filter { $0.provider == .whisper })
+        }
+    }
+
+    @ViewBuilder
+    private func localModelSection(_ title: LocalizedStringKey, models: [any TranscriptionModel]) -> some View {
+        if !models.isEmpty {
+            let recommendedNames = Set(HardwareCapability.RecommendationNeed.allCases.compactMap {
+                HardwareCapability.recommendedLocalModel(for: $0, among: models)?.name
+            })
+            let orderedModels = models.sorted { lhs, rhs in
+                let lhsRecommended = recommendedNames.contains(lhs.name)
+                let rhsRecommended = recommendedNames.contains(rhs.name)
+                if lhsRecommended != rhsRecommended { return lhsRecommended }
+                return lhs.name < rhs.name
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                modelCards(orderedModels)
             }
         }
     }
