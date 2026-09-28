@@ -57,7 +57,19 @@ class WhisperTranscriptionService: TranscriptionService {
         let durationSeconds = Double(data.count) / 16_000.0
         var peak: Float = 0
         vDSP_maxmgv(data, 1, &peak, vDSP_Length(data.count))
-        let selectedLanguage = LanguagePreference.selectedCode()
+        var selectedLanguage = LanguagePreference.selectedCode()
+        let myLanguages = DictationLanguages.codes()
+        if selectedLanguage == LanguagePreference.autoCode, !myLanguages.isEmpty, !data.isEmpty,
+           let probabilities = await whisperContext.languageProbabilities(samples: data) {
+            let keyboardLanguage = await MainActor.run { LanguagePreference.currentInputSourceLanguageCode() }
+            if let chosen = DictationLanguages.choose(probabilities: probabilities, allowed: myLanguages, keyboardLanguage: keyboardLanguage) {
+                // Transcribe with the chosen language forced; detection over every language is what
+                // let a neighbouring one, such as Arabic, win on short phrases.
+                let detected = probabilities.max(by: { $0.value < $1.value })?.key ?? "?"
+                DebugLogger.shared.log("Whisper", "auto among \(myLanguages): chose \(chosen), unrestricted pick \(detected)")
+                selectedLanguage = chosen
+            }
+        }
         let shouldConsiderHebrew = selectedLanguage == LanguagePreference.autoCode
             ? await MainActor.run { LanguagePreference.prefersHebrewForAutomaticDetection() }
             : false
