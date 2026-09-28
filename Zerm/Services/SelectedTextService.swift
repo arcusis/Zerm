@@ -83,6 +83,7 @@ class SelectedTextService {
         }
         let initialChangeCount = pasteboard.changeCount
 
+        ClipboardMonitor.ignoreNextClipboardChange()
         postCopyKeystroke()
 
         var copiedText: String?
@@ -98,7 +99,9 @@ class SelectedTextService {
         if pasteboard.changeCount != initialChangeCount {
             pasteboard.clearContents()
             pasteboard.writeObjects(savedItems)
+            ClipboardMonitor.noteZermWrite(changeCount: pasteboard.changeCount)
         }
+        ClipboardMonitor.cancelIgnoringNextClipboardChange()
 
         guard let copiedText, !copiedText.isEmpty else {
             logger.notice("Fallback ⌘C copy produced no text")
