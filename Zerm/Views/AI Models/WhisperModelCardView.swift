@@ -14,6 +14,7 @@ struct WhisperModelCardView: View {
     var deleteAction: () -> Void
     var setDefaultAction: () -> Void
     var downloadAction: () -> Void
+    var cancelDownloadAction: (() -> Void)?
     private var isDownloading: Bool {
         downloadProgress.keys.contains(model.name + "_main") || 
         downloadProgress.keys.contains(model.name + "_coreml")
@@ -144,6 +145,10 @@ struct WhisperModelCardView: View {
                     .padding(.vertical, 6)
                     .background(Capsule().fill(Color(.quaternaryLabelColor).opacity(0.3)))
                     .help("This model needs more memory than this Mac has available")
+            } else if isDownloading, let cancelDownloadAction {
+                Button("Cancel", action: cancelDownloadAction)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             } else {
                 Button(action: downloadAction) {
                     HStack(spacing: 4) {

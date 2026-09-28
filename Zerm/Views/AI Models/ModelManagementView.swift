@@ -219,7 +219,7 @@ struct ModelManagementView: View {
 
     private func download(_ model: any TranscriptionModel) {
         if let whisperModel = model as? WhisperModel {
-            Task { await whisperModelManager.downloadModel(whisperModel) }
+            whisperModelManager.startDownload(whisperModel)
         } else if let fluidAudioModel = model as? FluidAudioModel {
             Task { await fluidAudioModelManager.downloadFluidAudioModel(fluidAudioModel) }
         }
@@ -395,8 +395,11 @@ struct ModelManagementView: View {
             },
             downloadAction: {
                 if let whisperModel = model as? WhisperModel {
-                    Task { await whisperModelManager.downloadModel(whisperModel) }
+                    whisperModelManager.startDownload(whisperModel)
                 }
+            },
+            cancelDownloadAction: (model as? WhisperModel).map { whisperModel in
+                { whisperModelManager.cancelDownload(whisperModel) }
             },
             editAction: model.provider == .custom ? { customModel in
                 customModelToEdit = customModel
