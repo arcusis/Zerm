@@ -228,6 +228,11 @@ class WhisperModelManager: ObservableObject {
         return try await loadModel(model)
     }
 
+    /// Returns once the model load in flight, if any, has finished or failed.
+    func waitForPendingLoad() async {
+        _ = try? await pendingLoad?.task.value
+    }
+
     /// Releases the resident or loading model unless it is the one named `name`.
     func releaseModel(otherThan name: String) {
         guard let current = loadedWhisperModel?.name ?? pendingLoad?.name, current != name else { return }

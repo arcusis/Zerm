@@ -79,17 +79,25 @@ class TranscriptionPipeline {
 
         do {
             let transcriptionStart = Date()
+            let transcribeInterval = DictationLatency.signposter.beginInterval("Transcribe")
             // Hard timeout: if transcription hasn't returned within 120 seconds the
             // model/provider is hung.  Cancel it so the app returns to .idle rather than
             // staying stuck in the "Transcribing…" state indefinitely. (VoiceInk #338)
-            let transcript = try await LanguagePreference.$operationOverrideCode.withValue(dictationSession.languageCode) {
-                try await withTranscriptionTimeout(seconds: 120) { [serviceRegistry = self.serviceRegistry] in
-                    if let transcriptionSession {
-                        return try await transcriptionSession.transcribe(audioURL: audioURL)
-                    } else {
-                        return try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
+            let transcript: String
+            do {
+                transcript = try await LanguagePreference.$operationOverrideCode.withValue(dictationSession.languageCode) {
+                    try await withTranscriptionTimeout(seconds: 120) { [serviceRegistry = self.serviceRegistry] in
+                        if let transcriptionSession {
+                            return try await transcriptionSession.transcribe(audioURL: audioURL)
+                        } else {
+                            return try await serviceRegistry.transcribe(audioURL: audioURL, model: model)
+                        }
                     }
                 }
+                DictationLatency.signposter.endInterval("Transcribe", transcribeInterval)
+            } catch {
+                DictationLatency.signposter.endInterval("Transcribe", transcribeInterval)
+                throw error
             }
             // If this run was superseded while awaiting transcription, drop the result.
             if !isRunStillValid() {
@@ -282,11 +290,14 @@ class TranscriptionPipeline {
             let pastedText = textToPaste + (appendSpace ? " " : "")
 
             var anchorSnapshot: AXTextAnchorCapture.PrePasteSnapshot?
+            let pasteInterval = DictationLatency.signposter.beginInterval("Paste")
             if refineRequest != nil {
                 anchorSnapshot = await CursorPaster.pasteAtCursorCapturingAnchor(pastedText).snapshot
             } else {
                 _ = await CursorPaster.startPasteAtCursor(pastedText).value
             }
+            DictationLatency.signposter.endInterval("Paste", pasteInterval)
+            DictationLatency.shared.recordPaste()
 
             SoundManager.shared.playStopSound()
 

@@ -7,7 +7,11 @@ import os
 
 @MainActor
 class ZermEngine: NSObject, ObservableObject {
-    @Published var recordingState: RecordingState = .idle
+    @Published var recordingState: RecordingState = .idle {
+        didSet {
+            if recordingState != oldValue { DictationLatency.shared.record(recordingState) }
+        }
+    }
     @Published var shouldCancelRecording = false
     var partialTranscript: String = ""
     var currentSession: TranscriptionSession?
@@ -36,8 +40,6 @@ class ZermEngine: NSObject, ObservableObject {
     private(set) var pipelineRunToken = UUID()
     private var pipelineTask: Task<Void, Never>?
     private var busyWatchdogTask: Task<Void, Never>?
-    private var whisperIdleUnloadTask: Task<Void, Never>?
-    private let whisperIdleUnloadSeconds: TimeInterval = 120
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     init(
@@ -162,7 +164,6 @@ class ZermEngine: NSObject, ObservableObject {
             shouldCancelRecording = false
             partialTranscript = ""
             invalidatePipelineRun()
-            cancelWhisperIdleUnload()
             let sessionGeneration = dictationSession.begin(powerModeId: powerModeId)
             setState(.starting)
 
@@ -667,16 +668,11 @@ class ZermEngine: NSObject, ObservableObject {
         // when we reach this point.  Wait for it before running the pipeline so that
         // the first transcription after idle doesn't fail with a nil context.
         // (VoiceInk #614 / Zerm #15)
+        // Awaiting the load itself resumes the moment it finishes; the previous 200 ms poll
+        // could add up to 200 ms to the first dictation after a model load.
         if whisperModelManager.isModelLoading {
             logger.notice("runPipeline: model is loading, waiting…")
-            var waited = 0
-            while whisperModelManager.isModelLoading && waited < 60 {
-                try? await Task.sleep(nanoseconds: 200_000_000) // 200 ms
-                waited += 1
-            }
-            if whisperModelManager.isModelLoading {
-                logger.error("runPipeline: timed out waiting for model to load")
-            }
+            await whisperModelManager.waitForPendingLoad()
         }
 
         let session = currentSession
@@ -717,41 +713,17 @@ class ZermEngine: NSObject, ObservableObject {
         if pipelineRunToken == runToken, recordingState != .idle {
             setState(.idle)
         }
-        scheduleWhisperIdleUnload()
     }
 
     // MARK: - Resource Cleanup
 
     func cleanupResources() async {
         cancelAutoStopMonitor()
-        // Keep Whisper warm across rapid dictations; unload on idle timer instead.
+        // Whisper stays resident and is released only on memory pressure (see below).
         // FluidAudio sessions and streaming state still need release.
         logger.notice("cleanupResources: releasing non-Whisper resources")
         await serviceRegistry.cleanup()
-        scheduleWhisperIdleUnload()
         logger.notice("cleanupResources: completed")
-    }
-
-    private func cancelWhisperIdleUnload() {
-        whisperIdleUnloadTask?.cancel()
-        whisperIdleUnloadTask = nil
-    }
-
-    private func scheduleWhisperIdleUnload() {
-        cancelWhisperIdleUnload()
-        whisperIdleUnloadTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: UInt64(self.whisperIdleUnloadSeconds * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            guard self.recordingState == .idle else { return }
-            // A refine runs after the recorder has gone back to idle, so the state check
-            // above does not cover it.
-            guard !RefineInPlaceCoordinator.shared.isRefining else { return }
-            // Keep Whisper warm for low-latency dictation. The much larger local LLM manages its
-            // own short burst window and unloads independently so it does not reserve unified
-            // memory between enhancement or Read Aloud jobs.
-            self.logger.notice("Idle after \(self.whisperIdleUnloadSeconds, privacy: .public)s — keeping Whisper warm")
-        }
     }
 
     /// Releases the Whisper context only when the system is actually short of memory.
