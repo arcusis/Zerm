@@ -202,29 +202,42 @@ class ZermEngine: NSObject, ObservableObject {
                             try result.get()
                             self.logger.notice("toggleRecord: audio hardware started successfully")
 
-                            // Enter .recording only now that CoreAudio is delivering
-                            // samples — same reasoning as the start sound below.  Setting
-                            // it before hardware init mounted the AudioVisualizer against
-                            // a zeroed meter, so it rendered flat bars indistinguishable
-                            // from StaticVisualizer and then snapped to life ~280 ms later.
-                            self.setState(.recording)
-                            self.logger.notice("toggleRecord: state=recording")
+                            // The start cue is the user's signal to speak, so it waits for the
+                            // first real audio, not only a running audio unit: a Bluetooth
+                            // headset sends digital silence for 0.6–0.9 s while its call link
+                            // comes up, and words spoken into that were lost. Audio is recorded
+                            // throughout; a device that stays silent starts after the timeout.
+                            if !(await self.recorder.waitForFirstAudio(timeout: 1.5)) {
+                                DebugLogger.shared.log("ZermEngine", "no input audio within 1.5 s of starting; signalling start anyway")
+                            }
 
-                            // Play start sound NOW — CoreAudio is running, so this is
-                            // the true "go" cue for the user.  Previously the sound
-                            // played ~1 s before hardware init, losing the first words
-                            // spoken on the cue. (VoiceInk #572)
-                            // Mute only after the cue finishes, and only if still
-                            // recording — prevents cancel-during-sound from leaving
-                            // output stuck muted (generation + state guard).
-                            SoundManager.shared.playStartSound {
-                                Task { @MainActor [weak self] in
-                                    guard let self else { return }
-                                    guard self.recordingState == .recording,
-                                          !self.shouldCancelRecording else {
-                                        return
+                            // Cancelled or closed while waiting: no cue; the guard below
+                            // keeps what was recorded.
+                            if self.recorderUIManager?.isMiniRecorderVisible ?? false, !self.shouldCancelRecording {
+                                // Enter .recording only now that CoreAudio is delivering
+                                // samples — same reasoning as the start sound below.  Setting
+                                // it before hardware init mounted the AudioVisualizer against
+                                // a zeroed meter, so it rendered flat bars indistinguishable
+                                // from StaticVisualizer and then snapped to life ~280 ms later.
+                                self.setState(.recording)
+                                self.logger.notice("toggleRecord: state=recording")
+
+                                // Play start sound NOW — CoreAudio is running, so this is
+                                // the true "go" cue for the user.  Previously the sound
+                                // played ~1 s before hardware init, losing the first words
+                                // spoken on the cue. (VoiceInk #572)
+                                // Mute only after the cue finishes, and only if still
+                                // recording — prevents cancel-during-sound from leaving
+                                // output stuck muted (generation + state guard).
+                                SoundManager.shared.playStartSound {
+                                    Task { @MainActor [weak self] in
+                                        guard let self else { return }
+                                        guard self.recordingState == .recording,
+                                              !self.shouldCancelRecording else {
+                                            return
+                                        }
+                                        _ = await MediaController.shared.muteSystemAudio()
                                     }
-                                    _ = await MediaController.shared.muteSystemAudio()
                                 }
                             }
 

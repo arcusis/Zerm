@@ -133,6 +133,9 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private var _onTimestampedAudioChunk: ((TimestampedAudioChunk) -> Void)?
     private var _onDroppedInputFrames: ((Int64, UInt64?, Double?, Double) -> Void)?
     private var _onWriteError: ((Error) -> Void)?
+    private var _onFirstAudio: (() -> Void)?
+    /// Set when this recording's first non-silent input was reported; handoff worker only.
+    private var didReportFirstAudio = false
     var onAudioChunk: ((_ data: Data) -> Void)? {
         get {
             audioChunkLock.lock()
@@ -142,6 +145,22 @@ final class CoreAudioRecorder: @unchecked Sendable {
         set {
             audioChunkLock.lock()
             _onAudioChunk = newValue
+            audioChunkLock.unlock()
+        }
+    }
+
+    /// Called once per recording, on the handoff worker, when the first non-silent input arrives.
+    /// A Bluetooth headset delivers digital silence for 0.6–0.9 s while its call link comes up,
+    /// so this, not the audio unit starting, is when speech can actually be recorded.
+    var onFirstAudio: (() -> Void)? {
+        get {
+            audioChunkLock.lock()
+            defer { audioChunkLock.unlock() }
+            return _onFirstAudio
+        }
+        set {
+            audioChunkLock.lock()
+            _onFirstAudio = newValue
             audioChunkLock.unlock()
         }
     }
@@ -217,6 +236,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         currentDeviceID = deviceID
         recordingURL = url
+        didReportFirstAudio = false
         resetSessionStats()
 
         logger.notice("🎙️ Starting recording from device \(deviceID, privacy: .public)")
@@ -1111,6 +1131,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
         // channel doesn't dilute speech by −6 dB and trip false auto-stops.
         var mono = [Float32](repeating: 0, count: Int(frameCount))
         AudioSampleConversion.mixToMono(inputSamples: inputSamples, frameCount: Int(frameCount), channels: inputChannels, output: &mono)
+
+        if !didReportFirstAudio, mono.contains(where: { $0 != 0 }) {
+            didReportFirstAudio = true
+            onFirstAudio?()
+        }
 
         let ratio = outputSampleRate / inputSampleRate
         guard ratio > 0, let outputBuffer = conversionBuffer else { return }
