@@ -145,37 +145,18 @@ class ZermEngine: NSObject, ObservableObject {
             }
         } else if recordingState == .idle {
             logger.notice("toggleRecord: entering start-recording branch")
-            guard let selectedModel = transcriptionModelManager.currentTranscriptionModel else {
-                NotificationManager.shared.showNotification(
-                    title: String(localized: "No AI Model Selected"),
-                    type: .error,
-                    duration: 5.0,
-                    actionButton: (label: String(localized: "Open Models"), action: {
-                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
-                    })
-                )
-                return
-            }
-            // Selection alone is not enough — model must be downloaded / API key present.
-            let isUsable = transcriptionModelManager.usableModels.contains { $0.name == selectedModel.name }
-            guard isUsable else {
-                let message: String
-                switch selectedModel.provider {
-                case .whisper, .fluidAudio:
-                    message = String(localized: "Model not downloaded — download \(selectedModel.displayName) first")
-                case .nativeApple:
-                    message = String(localized: "Apple Speech is not available on this system")
-                default:
-                    message = String(localized: "Add an API key for \(selectedModel.displayName) in Settings")
+            // The Power Mode, and with it the model, is only known once the recording has started, so
+            // this only rules out recordings no model could transcribe. A Power Mode's own model can
+            // stand in for a global model that is missing or unusable.
+            let usableModels = transcriptionModelManager.usableModels
+            let globalModel = transcriptionModelManager.currentTranscriptionModel
+            let anyModelCanTranscribe =
+                DictationSessionConfiguration.sessionModel(powerMode: nil, globalModel: globalModel, usableModels: usableModels) != nil
+                || PowerModeManager.shared.configurations.contains {
+                    $0.isEnabled && DictationSessionConfiguration.sessionModel(powerMode: $0, globalModel: nil, usableModels: usableModels) != nil
                 }
-                NotificationManager.shared.showNotification(
-                    title: message,
-                    type: .error,
-                    duration: 5.0,
-                    actionButton: (label: String(localized: "Open Models"), action: {
-                        MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
-                    })
-                )
+            guard anyModelCanTranscribe else {
+                notifyNoUsableModel(globalModel)
                 return
             }
             shouldCancelRecording = false
@@ -260,10 +241,18 @@ class ZermEngine: NSObject, ObservableObject {
                                     return
                                 }
                                 PowerModeManager.shared.setActiveConfiguration(powerMode)
-                                let dictationSession = self.startDictationSession(powerMode: powerMode, generation: sessionGeneration)
+                                guard let dictationSession = self.startDictationSession(powerMode: powerMode, generation: sessionGeneration) else {
+                                    // Neither this Power Mode nor the global settings have a usable
+                                    // model. Keep what was recorded so it can be retried from History.
+                                    DebugLogger.shared.log("ZermEngine", "no usable transcription model for this recording; cancelling")
+                                    self.notifyNoUsableModel(self.transcriptionModelManager.currentTranscriptionModel)
+                                    self.shouldCancelRecording = true
+                                    await self.recorderUIManager?.dismissMiniRecorder()
+                                    return
+                                }
                                 self.startAutoStopMonitor()
 
-                                if self.recordingState == .recording, let dictationSession {
+                                if self.recordingState == .recording {
                                     let model = dictationSession.transcriptionModel
                                     let session = self.serviceRegistry.createSession(
                                         for: model,
@@ -275,7 +264,8 @@ class ZermEngine: NSObject, ObservableObject {
                                                 // whatever session is live now.
                                                 guard let self,
                                                       self.recordingState == .recording,
-                                                      !self.shouldCancelRecording else {
+                                                      !self.shouldCancelRecording,
+                                                      self.dictationSession.generation == sessionGeneration else {
                                                     return
                                                 }
                                                 self.partialTranscript = partial
@@ -301,10 +291,9 @@ class ZermEngine: NSObject, ObservableObject {
                                     }
                                 }
 
-                                if let model = dictationSession?.transcriptionModel {
-                                    Task { [weak self] in
-                                        await self?.loadTranscriptionModelIfNeeded(model)
-                                    }
+                                let model = dictationSession.transcriptionModel
+                                Task { [weak self] in
+                                    await self?.loadTranscriptionModelIfNeeded(model)
                                 }
 
                             } catch {
@@ -514,10 +503,40 @@ class ZermEngine: NSObject, ObservableObject {
 
     // MARK: - Dictation session
 
+    /// Explains why a recording cannot be transcribed and offers the Dictation Models page.
+    private func notifyNoUsableModel(_ model: (any TranscriptionModel)?) {
+        let message: String
+        if let model {
+            switch model.provider {
+            case .whisper, .fluidAudio:
+                message = String(localized: "Model not downloaded — download \(model.displayName) first")
+            case .nativeApple:
+                message = String(localized: "Apple Speech is not available on this system")
+            default:
+                message = String(localized: "Add an API key for \(model.displayName) in Settings")
+            }
+        } else {
+            message = String(localized: "No AI Model Selected")
+        }
+        NotificationManager.shared.showNotification(
+            title: message,
+            type: .error,
+            duration: 5.0,
+            actionButton: (label: String(localized: "Open Models"), action: {
+                MenuBarManager.shared?.openMainWindowAndNavigate(to: "Dictation Models")
+            })
+        )
+    }
+
     /// Resolves the live recording's configuration once, captures the context its enhancement may
     /// use, and warms the on-device model only when this dictation will actually use it.
     private func startDictationSession(powerMode: PowerModeConfig?, generation: Int) -> DictationSessionConfiguration? {
-        guard let globalModel = transcriptionModelManager.currentTranscriptionModel else { return nil }
+        let usableModels = transcriptionModelManager.usableModels
+        guard let model = DictationSessionConfiguration.sessionModel(
+            powerMode: powerMode,
+            globalModel: transcriptionModelManager.currentTranscriptionModel,
+            usableModels: usableModels
+        ) else { return nil }
 
         let outputMode = DictationOutputMode.effective(
             configured: powerMode?.outputMode ?? DictationOutputMode.current,
@@ -540,8 +559,8 @@ class ZermEngine: NSObject, ObservableObject {
 
         let session = DictationSessionConfiguration.resolve(
             powerMode: powerMode,
-            globalModel: globalModel,
-            usableModels: transcriptionModelManager.usableModels,
+            globalModel: model,
+            usableModels: usableModels,
             globalLanguage: LanguagePreference.selectedCode(),
             globalTextCleanup: .global(),
             clipboardContext: clipboardContext,
@@ -561,13 +580,19 @@ class ZermEngine: NSObject, ObservableObject {
     /// For a recording that stopped before its Power Mode resolved: the app's or default Power
     /// Mode, without waiting on a browser, and without context that was never captured.
     private func fallbackDictationSession() -> DictationSessionConfiguration? {
-        guard let globalModel = transcriptionModelManager.currentTranscriptionModel else { return nil }
+        let powerMode = ActiveWindowService.shared.resolveConfigurationWithoutURL(
+            powerModeId: dictationSession.requestedPowerModeId
+        )
+        let usableModels = transcriptionModelManager.usableModels
+        guard let model = DictationSessionConfiguration.sessionModel(
+            powerMode: powerMode,
+            globalModel: transcriptionModelManager.currentTranscriptionModel,
+            usableModels: usableModels
+        ) else { return nil }
         return DictationSessionConfiguration.resolve(
-            powerMode: ActiveWindowService.shared.resolveConfigurationWithoutURL(
-                powerModeId: dictationSession.requestedPowerModeId
-            ),
-            globalModel: globalModel,
-            usableModels: transcriptionModelManager.usableModels,
+            powerMode: powerMode,
+            globalModel: model,
+            usableModels: usableModels,
             globalLanguage: LanguagePreference.selectedCode(),
             globalTextCleanup: .global()
         )

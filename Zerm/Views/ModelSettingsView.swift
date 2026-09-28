@@ -26,6 +26,30 @@ struct ModelSettingsVisibility: Equatable {
         )
     }
 
+    /// Visibility across every model a dictation can use, so a setting stays reachable whenever any
+    /// of them honors it — not only when the global model does.
+    init(models: [any TranscriptionModel], defaults: UserDefaults = .standard) {
+        let each = models.map { ModelSettingsVisibility(model: $0, defaults: defaults) }
+        self.init(
+            outputFormat: each.contains { $0.showsOutputFormat },
+            voiceActivityDetection: each.contains { $0.showsVoiceActivityDetection },
+            prewarm: each.contains { $0.showsPrewarm },
+            liveTextPreview: each.contains { $0.showsLiveTextPreview },
+            cloudTimeout: each.contains { $0.showsCloudTimeout }
+        )
+    }
+
+    /// The global model plus the model of every enabled Power Mode that overrides it.
+    static func modelsInUse(
+        global: (any TranscriptionModel)?,
+        powerModes: [PowerModeConfig],
+        availableModels: [any TranscriptionModel]
+    ) -> [any TranscriptionModel] {
+        let overrideNames = Set(powerModes.filter(\.isEnabled).compactMap(\.selectedTranscriptionModelName))
+        let overrides = availableModels.filter { overrideNames.contains($0.name) && $0.name != global?.name }
+        return (global.map { [$0] } ?? []) + overrides
+    }
+
     private init(outputFormat: Bool, voiceActivityDetection: Bool, prewarm: Bool, liveTextPreview: Bool, cloudTimeout: Bool) {
         showsOutputFormat = outputFormat
         showsVoiceActivityDetection = voiceActivityDetection
@@ -38,6 +62,7 @@ struct ModelSettingsVisibility: Equatable {
 struct ModelSettingsView: View {
     @ObservedObject var whisperPrompt: WhisperPrompt
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
+    @ObservedObject private var powerModeManager = PowerModeManager.shared
     @AppStorage("SelectedLanguage") private var selectedLanguage: String = "auto"
     @AppStorage("IsTextFormattingEnabled") private var isTextFormattingEnabled = true
     @AppStorage("IsVADEnabled") private var isVADEnabled = true
@@ -49,7 +74,11 @@ struct ModelSettingsView: View {
     @State private var isEditing: Bool = false
 
     private var visibility: ModelSettingsVisibility {
-        ModelSettingsVisibility(model: transcriptionModelManager.currentTranscriptionModel)
+        ModelSettingsVisibility(models: ModelSettingsVisibility.modelsInUse(
+            global: transcriptionModelManager.currentTranscriptionModel,
+            powerModes: powerModeManager.configurations,
+            availableModels: transcriptionModelManager.allAvailableModels
+        ))
     }
 
     var body: some View {

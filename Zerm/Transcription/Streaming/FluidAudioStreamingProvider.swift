@@ -28,6 +28,10 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     private var isTranscribing = false
     private var lastTranscribedSampleCount = 0
     private let minNewSamples = 8000 // ~0.5s
+    // One failed preview pass is not a failed stream: the next pass covers the same audio, and the
+    // committed text comes from its own pass. Only repeated failures end the live preview.
+    private var consecutivePassFailures = 0
+    private let maxConsecutivePassFailures = 3
 
     private func withBufferLock<T>(_ body: () throws -> T) rethrows -> T {
         bufferLock.lock()
@@ -175,6 +179,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             // Commit cancelled this pass; its preview is stale and the final pass covers its audio.
             guard !Task.isCancelled else { return }
             lastTranscribedSampleCount = sampleCount
+            consecutivePassFailures = 0
 
             guard let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty else {
                 if !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -195,8 +200,11 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             }
         } catch {
             guard !Task.isCancelled else { return }
-            logger.error("Transcription pass failed: \(error.localizedDescription, privacy: .public)")
-            eventsContinuation?.yield(.error(error))
+            consecutivePassFailures += 1
+            logger.error("Transcription pass failed (\(self.consecutivePassFailures, privacy: .public) in a row): \(error.localizedDescription, privacy: .public)")
+            if consecutivePassFailures >= maxConsecutivePassFailures {
+                eventsContinuation?.yield(.error(error))
+            }
         }
     }
 

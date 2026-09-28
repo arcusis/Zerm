@@ -304,6 +304,18 @@ struct ConfigurationView: View {
                                 InfoTip(String(localized: "The transcription model used while this mode is active. \"Use global setting\" always follows the model selected in Dictation Models."))
                             }
                         }
+
+                        if let effectiveModel {
+                            Group {
+                                if effectiveModel.activeCapabilities().contains(.streaming) {
+                                    Text("Text appears live while you speak.")
+                                } else {
+                                    Text("Text appears when you stop speaking.")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
                     }
 
                     if languageSelectionDisabled() {
