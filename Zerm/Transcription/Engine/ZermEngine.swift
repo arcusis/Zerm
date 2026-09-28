@@ -91,242 +91,255 @@ class ZermEngine: NSObject, ObservableObject {
     func toggleRecord(powerModeId: UUID? = nil) async {
         logger.notice("toggleRecord called – state=\(String(describing: self.recordingState), privacy: .public)")
 
-        if recordingState == .recording {
-            dictationSession.stop()
-            cancelAutoStopMonitor()
-            partialTranscript = ""
-            setState(.transcribing)
-            await recorder.stopRecordingAndWaitUntilFinalized()
+        switch recordingState {
+        case .recording:
+            await stopRecordingAndTranscribe()
+        case .idle:
+            await startRecording(powerModeId: powerModeId)
+        default:
+            logger.notice("toggleRecord ignored while lifecycle is busy (state=\(String(describing: self.recordingState), privacy: .public))")
+        }
+    }
 
-            if let recordedFile {
-                let inspection = RecordingAudioStore.inspect(recordedFile)
-                if shouldCancelRecording {
-                    invalidatePipelineRun()
-                    currentSession?.cancel()
-                    currentSession = nil
-                    if let inspection, inspection.hasAudio {
-                        persistPreservedRecording(
-                            file: recordedFile,
-                            duration: inspection.duration,
-                            message: String(localized: "Recording saved — transcription was cancelled. Retry from History.")
-                        )
-                    }
-                    setState(.idle)
-                    await cleanupResources()
-                } else if let inspection, inspection.hasAudio {
-                    let transcription = Transcription(
-                        text: "",
-                        duration: inspection.duration,
-                        audioFileURL: recordedFile.absoluteString,
-                        transcriptionStatus: .pending
-                    )
-                    modelContext.insert(transcription)
-                    try? modelContext.save()
-                    NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
+    /// Stops capture, then transcribes and pastes, or keeps the audio in History when the
+    /// recording was cancelled or produced nothing.
+    private func stopRecordingAndTranscribe() async {
+        dictationSession.stop()
+        cancelAutoStopMonitor()
+        partialTranscript = ""
+        setState(.transcribing)
+        await recorder.stopRecordingAndWaitUntilFinalized()
 
-                    await runPipeline(on: transcription, audioURL: recordedFile)
-                } else {
-                    let fileBytes = inspection?.byteCount ?? 0
-                    logger.error("Recording finalized with no audio bytes path=\(recordedFile.lastPathComponent, privacy: .public) size=\(fileBytes, privacy: .public)")
-                    NotificationManager.shared.showNotification(
-                        title: String(localized: "Recording produced no audio — the microphone may have dropped. Try again."),
-                        type: .error,
-                        duration: 5.0
-                    )
-                    setState(.idle)
-                    await cleanupResources()
-                }
-            } else {
-                logger.error("❌ No recorded file found after stopping recording")
-                DebugLogger.shared.log("ZermEngine", "no recorded file after stopping recording")
+        if let recordedFile {
+            let inspection = RecordingAudioStore.inspect(recordedFile)
+            if shouldCancelRecording {
                 invalidatePipelineRun()
                 currentSession?.cancel()
                 currentSession = nil
+                if let inspection, inspection.hasAudio {
+                    persistPreservedRecording(
+                        file: recordedFile,
+                        duration: inspection.duration,
+                        message: String(localized: "Recording saved — transcription was cancelled. Retry from History.")
+                    )
+                }
+                setState(.idle)
+                await cleanupResources()
+            } else if let inspection, inspection.hasAudio {
+                let transcription = Transcription(
+                    text: "",
+                    duration: inspection.duration,
+                    audioFileURL: recordedFile.absoluteString,
+                    transcriptionStatus: .pending
+                )
+                modelContext.insert(transcription)
+                try? modelContext.save()
+                NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
+
+                await runPipeline(on: transcription, audioURL: recordedFile)
+            } else {
+                let fileBytes = inspection?.byteCount ?? 0
+                logger.error("Recording finalized with no audio bytes path=\(recordedFile.lastPathComponent, privacy: .public) size=\(fileBytes, privacy: .public)")
+                NotificationManager.shared.showNotification(
+                    title: String(localized: "Recording produced no audio — the microphone may have dropped. Try again."),
+                    type: .error,
+                    duration: 5.0
+                )
                 setState(.idle)
                 await cleanupResources()
             }
-        } else if recordingState == .idle {
-            logger.notice("toggleRecord: entering start-recording branch")
-            // The Power Mode, and with it the model, is only known once the recording has started, so
-            // this only rules out recordings no model could transcribe. A Power Mode's own model can
-            // stand in for a global model that is missing or unusable.
-            let usableModels = transcriptionModelManager.usableModels
-            let globalModel = transcriptionModelManager.currentTranscriptionModel
-            let anyModelCanTranscribe =
-                DictationSessionConfiguration.sessionModel(powerMode: nil, globalModel: globalModel, usableModels: usableModels) != nil
-                || PowerModeManager.shared.configurations.contains {
-                    $0.isEnabled && DictationSessionConfiguration.sessionModel(powerMode: $0, globalModel: nil, usableModels: usableModels) != nil
-                }
-            guard anyModelCanTranscribe else {
-                notifyNoUsableModel(globalModel)
-                return
-            }
-            shouldCancelRecording = false
-            partialTranscript = ""
+        } else {
+            logger.error("❌ No recorded file found after stopping recording")
+            DebugLogger.shared.log("ZermEngine", "no recorded file after stopping recording")
             invalidatePipelineRun()
-            let sessionGeneration = dictationSession.begin(powerModeId: powerModeId)
-            setState(.starting)
+            currentSession?.cancel()
+            currentSession = nil
+            setState(.idle)
+            await cleanupResources()
+        }
+    }
 
-            requestRecordPermission { [self] granted in
-                if granted {
-                    let fileName = "\(UUID().uuidString).wav"
-                    let permanentURL = self.recordingsDirectory.appendingPathComponent(fileName)
-                    self.recordedFile = permanentURL
+    /// Starts capture once a model can transcribe it; the Power Mode and its model resolve
+    /// after the audio hardware is running.
+    private func startRecording(powerModeId: UUID?) async {
+        logger.notice("toggleRecord: entering start-recording branch")
+        // The Power Mode, and with it the model, is only known once the recording has started, so
+        // this only rules out recordings no model could transcribe. A Power Mode's own model can
+        // stand in for a global model that is missing or unusable.
+        let usableModels = transcriptionModelManager.usableModels
+        let globalModel = transcriptionModelManager.currentTranscriptionModel
+        let anyModelCanTranscribe =
+            DictationSessionConfiguration.sessionModel(powerMode: nil, globalModel: globalModel, usableModels: usableModels) != nil
+            || PowerModeManager.shared.configurations.contains {
+                $0.isEnabled && DictationSessionConfiguration.sessionModel(powerMode: $0, globalModel: nil, usableModels: usableModels) != nil
+            }
+        guard anyModelCanTranscribe else {
+            notifyNoUsableModel(globalModel)
+            return
+        }
+        shouldCancelRecording = false
+        partialTranscript = ""
+        invalidatePipelineRun()
+        let sessionGeneration = dictationSession.begin(powerModeId: powerModeId)
+        setState(.starting)
 
-                    let pendingChunks = OSAllocatedUnfairLock(initialState: [Data]())
-                    self.recorder.onAudioChunk = { data in
-                        pendingChunks.withLock { $0.append(data) }
-                    }
+        requestRecordPermission { [self] granted in
+            if granted {
+                let fileName = "\(UUID().uuidString).wav"
+                let permanentURL = self.recordingsDirectory.appendingPathComponent(fileName)
+                self.recordedFile = permanentURL
 
-                    self.logger.notice("toggleRecord: starting audio hardware")
+                let pendingChunks = OSAllocatedUnfairLock(initialState: [Data]())
+                self.recorder.onAudioChunk = { data in
+                    pendingChunks.withLock { $0.append(data) }
+                }
 
-                    self.recorder.startRecording(toOutputFile: permanentURL) { result in
-                        Task { @MainActor [self] in
-                            do {
-                                try result.get()
-                                self.logger.notice("toggleRecord: audio hardware started successfully")
+                self.logger.notice("toggleRecord: starting audio hardware")
 
-                                // Enter .recording only now that CoreAudio is delivering
-                                // samples — same reasoning as the start sound below.  Setting
-                                // it before hardware init mounted the AudioVisualizer against
-                                // a zeroed meter, so it rendered flat bars indistinguishable
-                                // from StaticVisualizer and then snapped to life ~280 ms later.
-                                self.setState(.recording)
-                                self.logger.notice("toggleRecord: state=recording")
+                self.recorder.startRecording(toOutputFile: permanentURL) { result in
+                    Task { @MainActor [self] in
+                        do {
+                            try result.get()
+                            self.logger.notice("toggleRecord: audio hardware started successfully")
 
-                                // Play start sound NOW — CoreAudio is running, so this is
-                                // the true "go" cue for the user.  Previously the sound
-                                // played ~1 s before hardware init, losing the first words
-                                // spoken on the cue. (VoiceInk #572)
-                                // Mute only after the cue finishes, and only if still
-                                // recording — prevents cancel-during-sound from leaving
-                                // output stuck muted (generation + state guard).
-                                SoundManager.shared.playStartSound {
-                                    Task { @MainActor [weak self] in
-                                        guard let self else { return }
-                                        guard self.recordingState == .recording,
-                                              !self.shouldCancelRecording else {
-                                            return
-                                        }
-                                        _ = await MediaController.shared.muteSystemAudio()
+                            // Enter .recording only now that CoreAudio is delivering
+                            // samples — same reasoning as the start sound below.  Setting
+                            // it before hardware init mounted the AudioVisualizer against
+                            // a zeroed meter, so it rendered flat bars indistinguishable
+                            // from StaticVisualizer and then snapped to life ~280 ms later.
+                            self.setState(.recording)
+                            self.logger.notice("toggleRecord: state=recording")
+
+                            // Play start sound NOW — CoreAudio is running, so this is
+                            // the true "go" cue for the user.  Previously the sound
+                            // played ~1 s before hardware init, losing the first words
+                            // spoken on the cue. (VoiceInk #572)
+                            // Mute only after the cue finishes, and only if still
+                            // recording — prevents cancel-during-sound from leaving
+                            // output stuck muted (generation + state guard).
+                            SoundManager.shared.playStartSound {
+                                Task { @MainActor [weak self] in
+                                    guard let self else { return }
+                                    guard self.recordingState == .recording,
+                                          !self.shouldCancelRecording else {
+                                        return
                                     }
+                                    _ = await MediaController.shared.muteSystemAudio()
                                 }
-
-                                guard self.recorderUIManager?.isMiniRecorderVisible ?? false, !self.shouldCancelRecording else {
-                                    self.cancelAutoStopMonitor()
-                                    MediaController.shared.cancelPendingMute()
-                                    await MediaController.shared.unmuteSystemAudio()
-                                    await self.recorder.stopRecordingAndWaitUntilFinalized()
-                                    if let recordedFile = self.recordedFile,
-                                       let inspection = RecordingAudioStore.inspect(recordedFile),
-                                       inspection.hasAudio {
-                                        self.persistPreservedRecording(
-                                            file: recordedFile,
-                                            duration: inspection.duration,
-                                            message: String(localized: "Recording saved — the recorder closed before transcription. Retry from History.")
-                                        )
-                                    }
-                                    self.setState(.idle)
-                                    return
-                                }
-
-                                // Resolving can wait on a browser. A recording that stopped or was
-                                // replaced meanwhile must not be configured, given a streaming
-                                // session, or have context captured for it.
-                                guard case .resolved(let powerMode) = await self.dictationSession.resolvePowerMode(
-                                    for: sessionGeneration,
-                                    isLive: { self.recordingState == .recording && !self.shouldCancelRecording },
-                                    using: { await ActiveWindowService.shared.resolveConfiguration(powerModeId: powerModeId) }
-                                ) else {
-                                    self.logger.notice("toggleRecord: recording ended while its Power Mode resolved")
-                                    return
-                                }
-                                PowerModeManager.shared.setActiveConfiguration(powerMode)
-                                guard let dictationSession = self.startDictationSession(powerMode: powerMode, generation: sessionGeneration) else {
-                                    // Neither this Power Mode nor the global settings have a usable
-                                    // model. Keep what was recorded so it can be retried from History.
-                                    DebugLogger.shared.log("ZermEngine", "no usable transcription model for this recording; cancelling")
-                                    self.notifyNoUsableModel(self.transcriptionModelManager.currentTranscriptionModel)
-                                    self.shouldCancelRecording = true
-                                    await self.recorderUIManager?.dismissMiniRecorder()
-                                    return
-                                }
-                                self.startAutoStopMonitor()
-
-                                if self.recordingState == .recording {
-                                    let model = dictationSession.transcriptionModel
-                                    let session = self.serviceRegistry.createSession(
-                                        for: model,
-                                        onPartialTranscript: { [weak self] partial in
-                                            Task { @MainActor in
-                                                // A provider can deliver a partial after the
-                                                // recording it belongs to has stopped. Without
-                                                // this guard that late text lands in the UI of
-                                                // whatever session is live now.
-                                                guard let self,
-                                                      self.recordingState == .recording,
-                                                      !self.shouldCancelRecording,
-                                                      self.dictationSession.generation == sessionGeneration else {
-                                                    return
-                                                }
-                                                self.partialTranscript = partial
-                                            }
-                                        }
-                                    )
-                                    self.currentSession = session
-                                    let realCallback = try await LanguagePreference.$operationOverrideCode.withValue(dictationSession.languageCode) {
-                                        try await session.prepare(model: model)
-                                    }
-
-                                    if let realCallback {
-                                        self.recorder.onAudioChunk = realCallback
-                                        let buffered = pendingChunks.withLock { chunks -> [Data] in
-                                            let result = chunks
-                                            chunks.removeAll()
-                                            return result
-                                        }
-                                        for chunk in buffered { realCallback(chunk) }
-                                    } else {
-                                        self.recorder.onAudioChunk = nil
-                                        pendingChunks.withLock { $0.removeAll() }
-                                    }
-                                }
-
-                                let model = dictationSession.transcriptionModel
-                                Task { [weak self] in
-                                    await self?.loadTranscriptionModelIfNeeded(model)
-                                }
-
-                            } catch {
-                                self.cancelAutoStopMonitor()
-                                self.logger.error("❌ Failed to start recording: \(error.localizedDescription, privacy: .public)")
-                                self.setState(.idle)
-                                self.recordedFile = nil
-                                NotificationManager.shared.showNotification(title: String(localized: "Recording failed to start"), type: .error)
-                                self.logger.notice("toggleRecord: calling dismissMiniRecorder from error handler")
-                                await self.recorderUIManager?.dismissMiniRecorder()
                             }
+
+                            guard self.recorderUIManager?.isMiniRecorderVisible ?? false, !self.shouldCancelRecording else {
+                                self.cancelAutoStopMonitor()
+                                MediaController.shared.cancelPendingMute()
+                                await MediaController.shared.unmuteSystemAudio()
+                                await self.recorder.stopRecordingAndWaitUntilFinalized()
+                                if let recordedFile = self.recordedFile,
+                                   let inspection = RecordingAudioStore.inspect(recordedFile),
+                                   inspection.hasAudio {
+                                    self.persistPreservedRecording(
+                                        file: recordedFile,
+                                        duration: inspection.duration,
+                                        message: String(localized: "Recording saved — the recorder closed before transcription. Retry from History.")
+                                    )
+                                }
+                                self.setState(.idle)
+                                return
+                            }
+
+                            // Resolving can wait on a browser. A recording that stopped or was
+                            // replaced meanwhile must not be configured, given a streaming
+                            // session, or have context captured for it.
+                            guard case .resolved(let powerMode) = await self.dictationSession.resolvePowerMode(
+                                for: sessionGeneration,
+                                isLive: { self.recordingState == .recording && !self.shouldCancelRecording },
+                                using: { await ActiveWindowService.shared.resolveConfiguration(powerModeId: powerModeId) }
+                            ) else {
+                                self.logger.notice("toggleRecord: recording ended while its Power Mode resolved")
+                                return
+                            }
+                            PowerModeManager.shared.setActiveConfiguration(powerMode)
+                            guard let dictationSession = self.startDictationSession(powerMode: powerMode, generation: sessionGeneration) else {
+                                // Neither this Power Mode nor the global settings have a usable
+                                // model. Keep what was recorded so it can be retried from History.
+                                DebugLogger.shared.log("ZermEngine", "no usable transcription model for this recording; cancelling")
+                                self.notifyNoUsableModel(self.transcriptionModelManager.currentTranscriptionModel)
+                                self.shouldCancelRecording = true
+                                await self.recorderUIManager?.dismissMiniRecorder()
+                                return
+                            }
+                            self.startAutoStopMonitor()
+
+                            if self.recordingState == .recording {
+                                let model = dictationSession.transcriptionModel
+                                let session = self.serviceRegistry.createSession(
+                                    for: model,
+                                    onPartialTranscript: { [weak self] partial in
+                                        Task { @MainActor in
+                                            // A provider can deliver a partial after the
+                                            // recording it belongs to has stopped. Without
+                                            // this guard that late text lands in the UI of
+                                            // whatever session is live now.
+                                            guard let self,
+                                                  self.recordingState == .recording,
+                                                  !self.shouldCancelRecording,
+                                                  self.dictationSession.generation == sessionGeneration else {
+                                                return
+                                            }
+                                            self.partialTranscript = partial
+                                        }
+                                    }
+                                )
+                                self.currentSession = session
+                                let realCallback = try await LanguagePreference.$operationOverrideCode.withValue(dictationSession.languageCode) {
+                                    try await session.prepare(model: model)
+                                }
+
+                                if let realCallback {
+                                    self.recorder.onAudioChunk = realCallback
+                                    let buffered = pendingChunks.withLock { chunks -> [Data] in
+                                        let result = chunks
+                                        chunks.removeAll()
+                                        return result
+                                    }
+                                    for chunk in buffered { realCallback(chunk) }
+                                } else {
+                                    self.recorder.onAudioChunk = nil
+                                    pendingChunks.withLock { $0.removeAll() }
+                                }
+                            }
+
+                            let model = dictationSession.transcriptionModel
+                            Task { [weak self] in
+                                await self?.loadTranscriptionModelIfNeeded(model)
+                            }
+
+                        } catch {
+                            self.cancelAutoStopMonitor()
+                            self.logger.error("❌ Failed to start recording: \(error.localizedDescription, privacy: .public)")
+                            self.setState(.idle)
+                            self.recordedFile = nil
+                            NotificationManager.shared.showNotification(title: String(localized: "Recording failed to start"), type: .error)
+                            self.logger.notice("toggleRecord: calling dismissMiniRecorder from error handler")
+                            await self.recorderUIManager?.dismissMiniRecorder()
                         }
                     }
-                } else {
-                    logger.error("❌ Recording permission denied.")
-                    DebugLogger.shared.log("ZermEngine", "recording blocked: microphone permission denied")
-                    NotificationManager.shared.showNotification(
-                        title: String(localized: "Microphone access denied — enable Zerm in System Settings → Privacy & Security → Microphone"),
-                        type: .error,
-                        duration: 6.0,
-                        actionButton: (label: String(localized: "Open Settings"), action: {
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        })
-                    )
-                    setState(.idle)
-                    Task { await self.recorderUIManager?.dismissMiniRecorder() }
                 }
+            } else {
+                logger.error("❌ Recording permission denied.")
+                DebugLogger.shared.log("ZermEngine", "recording blocked: microphone permission denied")
+                NotificationManager.shared.showNotification(
+                    title: String(localized: "Microphone access denied — enable Zerm in System Settings → Privacy & Security → Microphone"),
+                    type: .error,
+                    duration: 6.0,
+                    actionButton: (label: String(localized: "Open Settings"), action: {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    })
+                )
+                setState(.idle)
+                Task { await self.recorderUIManager?.dismissMiniRecorder() }
             }
-        } else {
-            logger.notice("toggleRecord ignored while lifecycle is busy (state=\(String(describing: self.recordingState), privacy: .public))")
         }
     }
 

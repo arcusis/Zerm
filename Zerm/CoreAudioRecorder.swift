@@ -209,7 +209,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         }
 
         // Validate device still exists before proceeding with setup
-        guard isDeviceAvailable(deviceID) else {
+        guard AudioDeviceInfo.isAlive(deviceID) else {
             logger.error("Cannot start recording - device \(deviceID, privacy: .public) is no longer available")
             dbg("startRecording FAILED: device \(deviceID) is no longer available")
             throw CoreAudioRecorderError.deviceNotAvailable
@@ -370,17 +370,14 @@ final class CoreAudioRecorder: @unchecked Sendable {
                 beforeStart: emitMarkerOnce
             )
             currentDeviceID = newDeviceID
-            sessionDeviceName = getDeviceStringProperty(
-                deviceID: newDeviceID,
-                selector: kAudioDevicePropertyDeviceNameCFString
-            ) ?? "Unknown"
+            sessionDeviceName = AudioDeviceInfo.name(of: newDeviceID) ?? "Unknown"
             logger.notice("🎙️ Successfully switched to device \(newDeviceID, privacy: .public)")
             dbg("switchDevice: switched to \(newDeviceID) (\(sessionDeviceName)), fmt=\(Int(newFormat.mSampleRate))Hz/\(newFormat.mChannelsPerFrame)ch")
         } catch {
             let migrationError = error
             logger.error("Microphone migration failed: \(error.localizedDescription, privacy: .public); attempting transactional rollback")
             do {
-                guard oldDeviceID != 0, isDeviceAvailable(oldDeviceID) else {
+                guard oldDeviceID != 0, AudioDeviceInfo.isAlive(oldDeviceID) else {
                     throw CoreAudioRecorderError.deviceNotAvailable
                 }
                 _ = try configureAndStartStoppedAudioUnit(
@@ -1113,7 +1110,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         // Mix to mono first. Prefer active (non-silent) channels so a dead stereo
         // channel doesn't dilute speech by −6 dB and trip false auto-stops.
         var mono = [Float32](repeating: 0, count: Int(frameCount))
-        Self.mixToMono(inputSamples: inputSamples, frameCount: Int(frameCount), channels: inputChannels, output: &mono)
+        AudioSampleConversion.mixToMono(inputSamples: inputSamples, frameCount: Int(frameCount), channels: inputChannels, output: &mono)
 
         let ratio = outputSampleRate / inputSampleRate
         guard ratio > 0, let outputBuffer = conversionBuffer else { return }
@@ -1123,7 +1120,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
             produced = UInt32(frameCount)
             guard produced <= conversionBufferSize else { return }
             for i in 0..<Int(frameCount) {
-                outputBuffer[i] = Self.floatToInt16(mono[i])
+                outputBuffer[i] = AudioSampleConversion.floatToInt16(mono[i])
             }
             resampleInputCursor = 0
             hasResampleHistory = false
@@ -1149,7 +1146,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
                 } else {
                     s2 = s1
                 }
-                outputBuffer[outIndex] = Self.floatToInt16(s1 + frac * (s2 - s1))
+                outputBuffer[outIndex] = AudioSampleConversion.floatToInt16(s1 + frac * (s2 - s1))
                 outIndex += 1
                 cursor += 1.0 / ratio
             }
@@ -1192,49 +1189,6 @@ final class CoreAudioRecorder: @unchecked Sendable {
             frameCount: Int(produced),
             sampleRate: inputSampleRate
         ))
-    }
-
-    /// Mix multi-channel float samples to mono, skipping near-silent channels.
-    private static func mixToMono(
-        inputSamples: UnsafePointer<Float32>,
-        frameCount: Int,
-        channels: Int,
-        output: inout [Float32]
-    ) {
-        guard channels > 0, frameCount > 0 else { return }
-        if channels == 1 {
-            for i in 0..<frameCount { output[i] = inputSamples[i] }
-            return
-        }
-
-        var channelEnergy = [Float](repeating: 0, count: channels)
-        for i in 0..<frameCount {
-            for ch in 0..<channels {
-                let s = inputSamples[i * channels + ch]
-                channelEnergy[ch] += s * s
-            }
-        }
-        let energyThreshold = channelEnergy.max().map { $0 * 0.05 } ?? 0
-        var active: [Int] = []
-        for ch in 0..<channels where channelEnergy[ch] > energyThreshold && channelEnergy[ch] > 1e-8 {
-            active.append(ch)
-        }
-        if active.isEmpty { active = [0] }
-
-        let scale = 1.0 / Float32(active.count)
-        for i in 0..<frameCount {
-            var sample: Float32 = 0
-            for ch in active {
-                sample += inputSamples[i * channels + ch]
-            }
-            output[i] = sample * scale
-        }
-    }
-
-    private static func floatToInt16(_ sample: Float32) -> Int16 {
-        let scaled = sample * 32767.0
-        let clipped = max(-32768.0, min(32767.0, scaled))
-        return Int16(clipped)
     }
 
     // MARK: - Session Diagnostics
@@ -1297,16 +1251,16 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
     private func logDeviceDetails(deviceID: AudioDeviceID) {
         // Get device name
-        let deviceName = getDeviceStringProperty(deviceID: deviceID, selector: kAudioDevicePropertyDeviceNameCFString) ?? "Unknown"
+        let deviceName = AudioDeviceInfo.name(of: deviceID) ?? "Unknown"
 
         // Get device UID
-        let deviceUID = getDeviceStringProperty(deviceID: deviceID, selector: kAudioDevicePropertyDeviceUID) ?? "Unknown"
+        let deviceUID = AudioDeviceInfo.uid(of: deviceID) ?? "Unknown"
 
         // Get transport type
-        let transportType = getTransportType(deviceID: deviceID)
+        let transportType = AudioDeviceInfo.transportName(of: deviceID)
 
         // Get manufacturer
-        let manufacturer = getDeviceStringProperty(deviceID: deviceID, selector: kAudioDevicePropertyDeviceManufacturerCFString) ?? "Unknown"
+        let manufacturer = AudioDeviceInfo.manufacturer(of: deviceID) ?? "Unknown"
 
         logger.notice("🎙️ Device info: name=\(deviceName, privacy: .public), uid=\(deviceUID, privacy: .public)")
         logger.notice("🎙️ Device details: transport=\(transportType, privacy: .public), manufacturer=\(manufacturer, privacy: .public)")
@@ -1315,112 +1269,10 @@ final class CoreAudioRecorder: @unchecked Sendable {
         dbg("device: id=\(deviceID) name=\(deviceName) uid=\(deviceUID) transport=\(transportType) manufacturer=\(manufacturer)")
 
         // Get buffer frame size
-        if let bufferSize = getBufferFrameSize(deviceID: deviceID) {
+        if let bufferSize = AudioDeviceInfo.bufferFrameSize(of: deviceID) {
             let latencyMs = (Double(bufferSize) / 48000.0) * 1000.0 // Approximate latency assuming 48kHz
             logger.notice("🎙️ Buffer size: \(bufferSize, privacy: .public) frames, ~latency: \(String(format: "%.1f", latencyMs), privacy: .public)ms")
         }
-    }
-
-    private func getDeviceStringProperty(deviceID: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
-        AudioObjectProperty.string(deviceID, selector: selector)
-    }
-
-    private func getTransportType(deviceID: AudioDeviceID) -> String {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyTransportType,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var transportType: UInt32 = 0
-        var propertySize = UInt32(MemoryLayout<UInt32>.size)
-
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &propertySize,
-            &transportType
-        )
-
-        if status != noErr {
-            return "Unknown"
-        }
-
-        switch transportType {
-        case kAudioDeviceTransportTypeBuiltIn:
-            return "Built-in"
-        case kAudioDeviceTransportTypeUSB:
-            return "USB"
-        case kAudioDeviceTransportTypeBluetooth:
-            return "Bluetooth"
-        case kAudioDeviceTransportTypeBluetoothLE:
-            return "Bluetooth LE"
-        case kAudioDeviceTransportTypeAggregate:
-            return "Aggregate"
-        case kAudioDeviceTransportTypeVirtual:
-            return "Virtual"
-        case kAudioDeviceTransportTypePCI:
-            return "PCI"
-        case kAudioDeviceTransportTypeFireWire:
-            return "FireWire"
-        case kAudioDeviceTransportTypeDisplayPort:
-            return "DisplayPort"
-        case kAudioDeviceTransportTypeHDMI:
-            return "HDMI"
-        case kAudioDeviceTransportTypeAVB:
-            return "AVB"
-        case kAudioDeviceTransportTypeThunderbolt:
-            return "Thunderbolt"
-        default:
-            return "Other (\(transportType))"
-        }
-    }
-
-    private func getBufferFrameSize(deviceID: AudioDeviceID) -> UInt32? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyBufferFrameSize,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var bufferSize: UInt32 = 0
-        var propertySize = UInt32(MemoryLayout<UInt32>.size)
-
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &propertySize,
-            &bufferSize
-        )
-
-        return status == noErr ? bufferSize : nil
-    }
-
-    /// Checks if a device is currently available using Apple's kAudioDevicePropertyDeviceIsAlive
-    private func isDeviceAvailable(_ deviceID: AudioDeviceID) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceIsAlive,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var isAlive: UInt32 = 0
-        var propertySize = UInt32(MemoryLayout<UInt32>.size)
-
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &propertySize,
-            &isAlive
-        )
-
-        return status == noErr && isAlive == 1
     }
 }
 
