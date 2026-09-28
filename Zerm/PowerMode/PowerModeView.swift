@@ -110,6 +110,36 @@ struct PowerModeView: View {
                             }
                             .buttonStyle(PlainButtonStyle())
 
+                            Menu {
+                                ForEach(PowerModeTemplate.all) { template in
+                                    Button {
+                                        powerModeManager.addConfiguration(from: template, apps: template.installedApps())
+                                    } label: {
+                                        Text(verbatim: "\(template.emoji)  \(template.name)")
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "square.on.square")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("From Template")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
+                                .foregroundColor(.primary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(6)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                                )
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .help(String(localized: "Adds a Power Mode for code, messages, or writing, bound to the matching apps installed on this Mac."))
+
                             Button(action: { openReorderPanel() }) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "arrow.up.arrow.down")

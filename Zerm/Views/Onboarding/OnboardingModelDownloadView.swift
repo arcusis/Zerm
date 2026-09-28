@@ -8,14 +8,14 @@ struct OnboardingModelDownloadView: View {
     @State private var opacity: CGFloat = 0
     @State private var isDownloading = false
     @State private var isModelSet = false
-    @State private var showTutorial = false
+    @State private var showNextStep = false
     
     private let turboModel = TranscriptionModelRegistry.models.first { $0.name == "ggml-large-v3-turbo-q5_0" } as! WhisperModel
     
     var body: some View {
         ZStack {
-            if showTutorial {
-                OnboardingTutorialView(hasCompletedOnboarding: $hasCompletedOnboarding)
+            if showNextStep {
+                OnboardingPowerModesView(hasCompletedOnboarding: $hasCompletedOnboarding)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else {
                 GeometryReader { geometry in
@@ -160,7 +160,7 @@ struct OnboardingModelDownloadView: View {
     private func handleAction() {
         if isModelSet {
             withAnimation {
-                showTutorial = true
+                showNextStep = true
             }
         } else if whisperModelManager.availableModels.contains(where: { $0.name == turboModel.name }) {
             if let modelToSet = transcriptionModelManager.allAvailableModels.first(where: { $0.name == turboModel.name }) {

@@ -247,41 +247,14 @@ class PowerModeManager: ObservableObject {
         var didChange = false
 
         if configurations.isEmpty {
-            // Seeds carry triggers only. Every setting inherits, so a fresh install dictates with
-            // the same model, language and prompt in every app.
+            // Only the default mode is seeded: app-bound modes are created from templates during
+            // onboarding or from the Power Mode page, and only for apps installed on this Mac.
             configurations = [
                 PowerModeConfig(
                     id: PowerModeMigration.seededGeneralID,
                     name: "General",
                     emoji: "⚡",
                     isDefault: true
-                ),
-                PowerModeConfig(
-                    id: PowerModeMigration.seededCodeID,
-                    name: "Code",
-                    emoji: "⌘",
-                    appConfigs: [
-                        AppConfig(bundleIdentifier: "com.todesktop.230313mzl4w4u92", appName: "Cursor"),
-                        AppConfig(bundleIdentifier: "com.microsoft.VSCode", appName: "Visual Studio Code"),
-                        AppConfig(bundleIdentifier: "com.apple.dt.Xcode", appName: "Xcode"),
-                        AppConfig(bundleIdentifier: "com.apple.Terminal", appName: "Terminal"),
-                        AppConfig(bundleIdentifier: "com.googlecode.iterm2", appName: "iTerm"),
-                        AppConfig(bundleIdentifier: "dev.warp.Warp-Stable", appName: "Warp")
-                    ],
-                    urlConfigs: [
-                        URLConfig(url: "github.com")
-                    ]
-                ),
-                PowerModeConfig(
-                    id: PowerModeMigration.seededWritingID,
-                    name: "Writing",
-                    emoji: "✎",
-                    appConfigs: [
-                        AppConfig(bundleIdentifier: "com.apple.mail", appName: "Mail"),
-                        AppConfig(bundleIdentifier: "com.apple.Notes", appName: "Notes"),
-                        AppConfig(bundleIdentifier: "com.google.Chrome", appName: "Google Chrome"),
-                        AppConfig(bundleIdentifier: "com.apple.Safari", appName: "Safari")
-                    ]
                 )
             ]
             didChange = true
