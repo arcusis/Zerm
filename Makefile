@@ -13,6 +13,9 @@ SHERPA_XCFRAMEWORK := $(SHERPA_BUILD)/sherpa-onnx.xcframework
 ONNX_XCFRAMEWORK := $(SHERPA_BUILD)/onnxruntime.xcframework
 LLAMA_DIR := $(DEPS_DIR)/llama
 LLAMA_XCFRAMEWORK := $(LLAMA_DIR)/build-apple/llama.xcframework
+# Each built framework records the upstream commit it came from, so bumping a pin rebuilds
+# it instead of silently linking a stale copy left in DEPS_DIR.
+PIN_STAMP := .zerm-pinned-commit
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 # Development builds use their own bundle identifier, so their UserDefaults, Application
 # Support data, TCC grants and updater never touch an installed Zerm. See AppStoragePaths.
@@ -45,17 +48,19 @@ WHISPER_MACOS_XCFRAMEWORK = python3 $(CURDIR)/scripts/macos-only-xcframework.py 
 # Build process
 whisper:
 	@mkdir -p $(DEPS_DIR)
-	@if [ ! -d "$(FRAMEWORK_PATH)" ]; then \
-		echo "Building whisper.xcframework in $(DEPS_DIR)..."; \
+	@if [ "$$(cat "$(FRAMEWORK_PATH)/$(PIN_STAMP)" 2>/dev/null)" != "$(WHISPER_COMMIT)" ]; then \
+		echo "Building whisper.xcframework $(WHISPER_COMMIT) in $(DEPS_DIR)..."; \
+		rm -rf "$(FRAMEWORK_PATH)"; \
 		if [ ! -d "$(WHISPER_CPP_DIR)" ]; then \
 			git clone https://github.com/ggerganov/whisper.cpp.git $(WHISPER_CPP_DIR); \
 		else \
 			(cd $(WHISPER_CPP_DIR) && git fetch origin); \
 		fi; \
 		(cd $(WHISPER_CPP_DIR) && git checkout --quiet $(WHISPER_COMMIT)); \
-		cd $(WHISPER_CPP_DIR) && $(WHISPER_MACOS_XCFRAMEWORK); \
+		(cd $(WHISPER_CPP_DIR) && $(WHISPER_MACOS_XCFRAMEWORK)) && \
+		echo "$(WHISPER_COMMIT)" > "$(FRAMEWORK_PATH)/$(PIN_STAMP)"; \
 	else \
-		echo "whisper.xcframework already built in $(DEPS_DIR), skipping build"; \
+		echo "whisper.xcframework $(WHISPER_COMMIT) already built in $(DEPS_DIR), skipping build"; \
 	fi
 
 # Build sherpa-onnx + onnxruntime xcframeworks for on-device Kokoro TTS (Read Aloud feature)
@@ -86,17 +91,19 @@ sherpa:
 # upstream script accepts a macOS slice selector and no longer matches the legacy transformer.
 llama:
 	@mkdir -p $(DEPS_DIR)
-	@if [ ! -d "$(LLAMA_XCFRAMEWORK)" ]; then \
-		echo "Building llama.xcframework in $(DEPS_DIR)..."; \
+	@if [ "$$(cat "$(LLAMA_XCFRAMEWORK)/$(PIN_STAMP)" 2>/dev/null)" != "$(LLAMA_COMMIT)" ]; then \
+		echo "Building llama.xcframework $(LLAMA_COMMIT) in $(DEPS_DIR)..."; \
+		rm -rf "$(LLAMA_XCFRAMEWORK)"; \
 		if [ ! -d "$(LLAMA_DIR)" ]; then \
 			git clone https://github.com/ggerganov/llama.cpp.git $(LLAMA_DIR); \
 		else \
 			(cd $(LLAMA_DIR) && git fetch origin); \
 		fi; \
 		(cd $(LLAMA_DIR) && git checkout --quiet $(LLAMA_COMMIT)); \
-		cd $(LLAMA_DIR) && bash build-xcframework.sh macos; \
+		(cd $(LLAMA_DIR) && bash build-xcframework.sh macos) && \
+		echo "$(LLAMA_COMMIT)" > "$(LLAMA_XCFRAMEWORK)/$(PIN_STAMP)"; \
 	else \
-		echo "llama.xcframework already built, skipping"; \
+		echo "llama.xcframework $(LLAMA_COMMIT) already built, skipping"; \
 	fi
 
 setup: whisper sherpa llama

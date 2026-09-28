@@ -76,7 +76,7 @@ jobs:
         id: native-key
         run: |
           set -euo pipefail
-          digest=$({ sed -n '/_COMMIT :=/p;/^MACOS_ONLY_XCFRAMEWORK/p;/^# Build process/,/^setup:/p' Makefile; cat scripts/macos-only-xcframework.py; xcodebuild -version; } | shasum -a 256 | cut -c1-16)
+          digest=$({ sed -n '/_COMMIT :=/p;/^WHISPER_MACOS_XCFRAMEWORK/p;/^PIN_STAMP/p;/^# Build process/,/^setup:/p' Makefile; cat scripts/macos-only-xcframework.py; xcodebuild -version; } | shasum -a 256 | cut -c1-16)
           echo "key=zerm-native-v2-${{ runner.os }}-${{ runner.arch }}-${digest}" >> "$GITHUB_OUTPUT"
 
       # Pull requests read the cache Production saved; only Production writes it, so the
