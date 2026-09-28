@@ -39,7 +39,20 @@ struct SettingsRootView: View {
                     Label("Audio", systemImage: "waveform")
                         .accessibilityIdentifier("settings-tab-audio")
                 }
-                .tag(SettingsPane.audio)
+            .tag(SettingsPane.audio)
+
+            SettingsPaneContainer(
+                title: "Clipboard History",
+                description: "Control local clipboard capture, privacy, and storage."
+            ) {
+                ClipboardHistorySettingsView()
+            }
+            .accessibilityIdentifier("settings-pane-clipboard-history")
+            .tabItem {
+                Label("Clipboard History", systemImage: "clipboard")
+                    .accessibilityIdentifier("settings-tab-clipboard-history")
+            }
+            .tag(SettingsPane.clipboardHistory)
 
             SettingsPaneContainer(
                 title: "Models & Providers",

@@ -23,7 +23,7 @@ struct OnboardingPowerModesView: View {
     var body: some View {
         ZStack {
             if showTutorial {
-                OnboardingTutorialView(hasCompletedOnboarding: $hasCompletedOnboarding)
+                OnboardingClipboardHistoryView(hasCompletedOnboarding: $hasCompletedOnboarding)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else {
                 GeometryReader { geometry in

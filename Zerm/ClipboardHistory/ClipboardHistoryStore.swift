@@ -9,11 +9,12 @@ actor ClipboardHistoryStore {
         let contentHash: String
         let kind: ClipboardItemKind
         let preview: String
-        let createdAt: Date
+        var createdAt: Date
         var lastUsedAt: Date
         var useCount: Int
         var isPinned: Bool
         var isFavorite: Bool
+        var favoriteOrder: Int?
         var collectionID: UUID?
         var title: String?
         var sourceApp: ClipboardSourceApp
@@ -80,6 +81,7 @@ actor ClipboardHistoryStore {
             useCount: 1,
             isPinned: false,
             isFavorite: false,
+            favoriteOrder: nil,
             collectionID: nil,
             title: nil,
             sourceApp: item.sourceApp
@@ -111,13 +113,13 @@ actor ClipboardHistoryStore {
     /// Returns items ordered by last use, newest first.
     func recent(limit: Int = 100) throws -> [ClipboardItem] {
         try ensureLoaded()
-        return metadata.sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(max(0, limit)).map(makeItem)
+        return metadata.sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(max(0, limit)).map { makeItem($0) }
     }
 
     /// Returns pinned items ordered by last use, newest first.
     func pinned() throws -> [ClipboardItem] {
         try ensureLoaded()
-        return metadata.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }.map(makeItem)
+        return metadata.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }.map { makeItem($0) }
     }
 
     /// Searches previews, titles, and source app names, with an optional kind filter.
@@ -131,7 +133,7 @@ actor ClipboardHistoryStore {
             }
             .sorted { $0.lastUsedAt > $1.lastUsedAt }
             .prefix(max(0, limit))
-            .map(makeItem)
+            .map { makeItem($0) }
     }
 
     /// Pins or unpins an item; pinned items bypass count and age retention.
@@ -147,6 +149,14 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         guard let index = metadata.firstIndex(where: { $0.id == id }) else { return }
         metadata[index].isFavorite = favorite
+        if !favorite { metadata[index].favoriteOrder = nil }
+        try save()
+    }
+
+    func setFavoriteOrder(_ id: UUID, order: Int?) throws {
+        try ensureLoaded()
+        guard let index = metadata.firstIndex(where: { $0.id == id }) else { return }
+        metadata[index].favoriteOrder = order
         try save()
     }
 
@@ -169,20 +179,104 @@ actor ClipboardHistoryStore {
     /// Deletes one item and its encrypted payload.
     func delete(_ id: UUID) throws {
         try ensureLoaded()
+        let didRemoveItem = metadata.contains { $0.id == id }
         metadata.removeAll { $0.id == id }
         payloads.removeValue(forKey: id)
         dirtyPayloadIDs.remove(id)
         try save()
+        if didRemoveItem { Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() } }
     }
 
-    /// Keeps pinned items unless `includingPinned` is true.
-    func clear(includingPinned: Bool = false) throws {
+    func deleteItems(from bundleIdentifier: String) throws {
         try ensureLoaded()
-        let removed = metadata.filter { includingPinned || !$0.isPinned }.map(\.id)
-        metadata.removeAll { includingPinned || !$0.isPinned }
+        let removed = Set(metadata.filter { $0.sourceApp.bundleIdentifier == bundleIdentifier }.map(\.id))
+        metadata.removeAll { removed.contains($0.id) }
         for id in removed { payloads.removeValue(forKey: id) }
         dirtyPayloadIDs.subtract(removed)
         try save()
+        if !removed.isEmpty { Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() } }
+    }
+
+    /// Keeps pinned items unless `includingPinned` is true.
+    func clear(includingPinned: Bool = false, keepingFavorites: Bool = false, keepingTagged: Bool = false) throws {
+        try ensureLoaded()
+        let shouldKeep: (Metadata) -> Bool = { row in
+            (keepingFavorites && row.isFavorite) || (keepingTagged && row.collectionID != nil)
+        }
+        let removed = metadata.filter { row in
+            !(shouldKeep(row) || (!includingPinned && row.isPinned))
+        }.map(\.id)
+        metadata.removeAll { row in shouldKeep(row) || (!includingPinned && row.isPinned) }
+        for id in removed { payloads.removeValue(forKey: id) }
+        dirtyPayloadIDs.subtract(removed)
+        try save()
+        if !removed.isEmpty { Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() } }
+    }
+
+    func cleanupRetention(now: Date = Date()) throws {
+        try ensureLoaded()
+        try enforceRetention(now: now)
+        try save()
+    }
+
+    func archiveEntries() throws -> [ClipboardHistoryArchive.Entry] {
+        try ensureLoaded()
+        return metadata.compactMap { row in
+            guard let representations = payloads[row.id] else { return nil }
+            return ClipboardHistoryArchive.Entry(
+                item: makeItem(row, representations: representations),
+                favoriteOrder: row.favoriteOrder
+            )
+        }
+    }
+
+    func mergeArchiveEntries(_ entries: [ClipboardHistoryArchive.Entry]) throws {
+        try ensureLoaded()
+        for entry in entries {
+            let imported = entry.item
+            if let existingIndex = metadata.firstIndex(where: { $0.contentHash == imported.contentHash }) {
+                let existingID = metadata[existingIndex].id
+                metadata[existingIndex].isPinned = metadata[existingIndex].isPinned || imported.isPinned
+                metadata[existingIndex].isFavorite = metadata[existingIndex].isFavorite || imported.isFavorite
+                if metadata[existingIndex].title == nil { metadata[existingIndex].title = imported.title }
+                if metadata[existingIndex].collectionID == nil { metadata[existingIndex].collectionID = imported.collectionID }
+                if metadata[existingIndex].favoriteOrder == nil { metadata[existingIndex].favoriteOrder = entry.favoriteOrder }
+                metadata[existingIndex].createdAt = min(metadata[existingIndex].createdAt, imported.createdAt)
+                metadata[existingIndex].lastUsedAt = max(metadata[existingIndex].lastUsedAt, imported.lastUsedAt)
+                metadata[existingIndex].useCount = max(metadata[existingIndex].useCount, imported.useCount)
+                if payloads[existingID] == nil { payloads[existingID] = imported.representations; dirtyPayloadIDs.insert(existingID) }
+                continue
+            }
+
+            let importedID = metadata.contains(where: { $0.id == imported.id }) ? UUID() : imported.id
+            metadata.append(Metadata(
+                id: importedID,
+                contentHash: imported.contentHash,
+                kind: imported.kind,
+                preview: imported.preview,
+                createdAt: imported.createdAt,
+                lastUsedAt: imported.lastUsedAt,
+                useCount: imported.useCount,
+                isPinned: imported.isPinned,
+                isFavorite: imported.isFavorite,
+                favoriteOrder: entry.favoriteOrder,
+                collectionID: imported.collectionID,
+                title: imported.title,
+                sourceApp: imported.sourceApp
+            ))
+            payloads[importedID] = imported.representations
+            dirtyPayloadIDs.insert(importedID)
+        }
+        try enforceRetention(now: Date())
+        try save()
+    }
+
+    func storageSize() throws -> Int64 {
+        try ensureLoaded()
+        return (try FileManager.default.enumerator(at: directoryURL, includingPropertiesForKeys: [.fileSizeKey])?.allObjects as? [URL] ?? [])
+            .reduce(Int64(0)) { total, url in
+                total + Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            }
     }
 
     /// Pastes the original representations, or the plain-text preview, through CursorPaster.
@@ -194,19 +288,21 @@ actor ClipboardHistoryStore {
             ? [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(stored.preview.utf8))]
             : representations
         try await CursorPaster.pasteClipboardHistoryItem(selected)
-        if let index = metadata.firstIndex(where: { $0.id == stored.id }) {
+        await MainActor.run { SoundManager.shared.playClipboardPasteSound() }
+        if ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.updateAfterPaste),
+           let index = metadata.firstIndex(where: { $0.id == stored.id }) {
             metadata[index].lastUsedAt = Date()
             metadata[index].useCount += 1
             try save()
         }
     }
 
-    private func makeItem(_ row: Metadata) -> ClipboardItem {
+    private func makeItem(_ row: Metadata, representations: [ClipboardRepresentation]? = nil) -> ClipboardItem {
         ClipboardItem(
             id: row.id,
             contentHash: row.contentHash,
             kind: row.kind,
-            representations: payloads[row.id] ?? [],
+            representations: representations ?? payloads[row.id] ?? [],
             preview: row.preview,
             createdAt: row.createdAt,
             lastUsedAt: row.lastUsedAt,

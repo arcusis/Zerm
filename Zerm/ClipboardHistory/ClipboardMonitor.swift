@@ -106,8 +106,14 @@ final class ClipboardMonitor {
         guard !ClipboardExclusionPolicy.excludes(
             types: pasteboardTypes,
             sourceBundleIdentifier: app.bundleIdentifier,
-            excludedApps: ClipboardHistorySettings.excludedApps
+            excludedApps: ClipboardHistorySettings.excludedApps,
+            ignoreConfidential: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreConfidential),
+            ignoreTransient: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreTransient)
         ), let captured = ClipboardItem.capture(representations: representations, sourceApp: appInfo) else { return }
-        Task { try? await store.capture(captured) }
+        Task {
+            if (try? await store.capture(captured)) != nil {
+                await MainActor.run { SoundManager.shared.playClipboardCopySound() }
+            }
+        }
     }
 }

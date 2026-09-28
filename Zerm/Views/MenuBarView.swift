@@ -1,5 +1,6 @@
 import SwiftUI
 import LaunchAtLogin
+import KeyboardShortcuts
 
 /// Cached "launch at login" state.
 ///
@@ -57,6 +58,7 @@ struct MenuBarView: View {
     @EnvironmentObject var updaterViewModel: UpdaterViewModel
     @EnvironmentObject var enhancementService: AIEnhancementService
     @ObservedObject private var launchAtLogin = LaunchAtLoginStore.shared
+    @State private var clipboardHistoryItems: [ClipboardItem] = []
     
     var body: some View {
         VStack {
@@ -88,6 +90,29 @@ struct MenuBarView: View {
                 menuBarManager.openHistoryWindow()
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
+
+            Menu("Clipboard History") {
+                Button("Open Clipboard History") { ClipboardHistoryPanelEntry.show() }
+                Button(ClipboardHistorySettings.isPaused ? "Resume Clipboard History" : "Pause Clipboard History") {
+                    ClipboardHistoryRuntime.shared.togglePause()
+                }
+                Divider()
+                if clipboardHistoryItems.isEmpty {
+                    Text("No recent clipboard items")
+                } else {
+                    ForEach(clipboardHistoryItems) { item in
+                        Button(item.title ?? item.preview) {
+                            Task { try? await ClipboardHistoryRuntime.shared.store?.paste(item) }
+                        }
+                        .lineLimit(1)
+                    }
+                }
+                Divider()
+                Button("Clipboard History Settings") {
+                    menuBarManager.openMainWindowAndNavigate(to: "Settings")
+                }
+            }
+            .onAppear { refreshClipboardHistoryItems() }
             
             Button("Settings") {
                 menuBarManager.openMainWindowAndNavigate(to: "Settings")
@@ -138,5 +163,10 @@ struct MenuBarView: View {
             String(localized: "Install Update %@…"),
             "v\(version)"
         )
+    }
+
+    private func refreshClipboardHistoryItems() {
+        guard let store = ClipboardHistoryRuntime.shared.store else { return }
+        Task { clipboardHistoryItems = ClipboardHistoryRuntime.menuRecentItems(from: (try? await store.recent(limit: 100)) ?? []) }
     }
 }
