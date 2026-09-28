@@ -26,6 +26,10 @@ class AudioDeviceManager: ObservableObject {
     @Published var inputMode: AudioInputMode = .custom
     @Published var prioritizedDevices: [PrioritizedDevice] = []
 
+    /// Transport type per input device, read once per device-list load so resolving the
+    /// recording device on the hotkey path makes no per-device CoreAudio queries.
+    private var transportTypes: [AudioDeviceID: UInt32] = [:]
+
     var isRecordingActive: Bool = false
 
     static let shared = AudioDeviceManager()
@@ -178,9 +182,13 @@ class AudioDeviceManager: ObservableObject {
             }
             return (id: deviceID, uid: uid, name: name)
         }
+        let transportTypes = Dictionary(uniqueKeysWithValues: devices.compactMap { device in
+            transportType(for: device.id).map { (device.id, $0) }
+        })
         
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            self.transportTypes = transportTypes
             self.availableDevices = devices.map { ($0.id, $0.uid, $0.name) }
             if let currentID = self.selectedDeviceID, !devices.contains(where: { $0.id == currentID }) {
                 self.logger.warning("🎙️ Currently selected device is no longer available")
@@ -329,7 +337,7 @@ class AudioDeviceManager: ObservableObject {
             availableDevices: availableDevices.map {
                 AudioInputDeviceResolver.Device(
                     id: $0.id,
-                    transportType: transportType(for: $0.id)
+                    transportType: transportTypes[$0.id]
                 )
             },
             preserveBluetoothMediaQuality: UserDefaults.standard.bool(
