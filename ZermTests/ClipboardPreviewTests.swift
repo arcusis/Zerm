@@ -121,7 +121,7 @@ struct ClipboardPreviewTests {
     }
 
     @MainActor
-    @Test func rendersEachPreviewKindToPNG() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersEachPreviewKindToPNG() async throws {
         let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/previews", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let folderURL = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-preview-folder-\(UUID().uuidString)", isDirectory: true)
