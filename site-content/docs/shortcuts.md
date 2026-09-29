@@ -20,7 +20,7 @@ You can configure two independent dictation shortcuts, **Shortcut 1** and
 **Shortcut 2**, each with its own trigger style. Shortcut 1 starts as Right Command.
 
 A shortcut can be a **bare modifier key** — Right Option, Left Option, Right Command,
-Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason
+Left Command, Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason
 Zerm feels quick: no chord to remember, just a key your other hand is not using.
 
 Or choose **Custom** and record any combination you like.
@@ -32,6 +32,12 @@ Each shortcut has a mode:
 | Push to talk | Records while held. Release to stop. |
 | Toggle | Press to start, press again to stop. |
 | Hybrid | A tap toggles; holding past half a second becomes push to talk. |
+
+For push to talk and hybrid holds, Zerm checks whether the trigger key is still down.
+If macOS misses its release event, Zerm detects the release and stops through the same
+recording finalization path. Toggle mode ignores this check because releasing its key is
+expected while dictation continues. The Permissions page reports when global keyboard
+monitoring is unavailable.
 
 **Fn is handled specially.** Pressing Fn together with another key — Fn+F1, Fn+F11,
 brightness, volume — cancels the recording trigger, so binding Zerm to Fn does not break
