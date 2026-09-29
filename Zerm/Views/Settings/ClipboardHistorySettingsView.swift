@@ -163,7 +163,7 @@ struct ClipboardHistorySettingsView: View {
                 ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
                     HStack(spacing: 12) {
                         Text(kindTitle(kind)).frame(maxWidth: .infinity, alignment: .leading)
-                        Picker("Retention for \(kindTitle(kind))", selection: retentionBinding(for: kind)) {
+                        Picker("Retention for \(Text(kindTitle(kind)))", selection: retentionBinding(for: kind)) {
                             ForEach(retentionChoicesIncludingCurrent(for: kind), id: \.storageValue) { period in
                                 retentionTitle(for: period).tag(period.storageValue)
                             }
@@ -311,9 +311,11 @@ struct ClipboardHistorySettingsView: View {
     }
 
     private var runningAppSuggestions: [(url: URL, name: String, bundleId: String, icon: NSImage)] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications.compactMap { app in
             guard let id = app.bundleIdentifier,
                   let url = app.bundleURL,
+                  seen.insert(id).inserted,
                   !selectedApps.contains(where: { $0.bundleIdentifier == id }) else { return nil }
             return (url, app.localizedName ?? url.deletingPathExtension().lastPathComponent, id, app.icon ?? NSWorkspace.shared.icon(forFile: url.path))
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -465,7 +467,7 @@ struct ClipboardHistorySettingsView: View {
         )
     }
 
-    private func kindTitle(_ kind: ClipboardItemKind) -> String {
+    private func kindTitle(_ kind: ClipboardItemKind) -> LocalizedStringKey {
         switch kind {
         case .plainText: "Plain text"
         case .richText: "Rich text"

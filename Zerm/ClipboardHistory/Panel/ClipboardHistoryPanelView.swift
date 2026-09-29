@@ -580,7 +580,7 @@ private struct CommandPaletteView: View {
                         model.isCommandPaletteVisible = false
                     } label: {
                         HStack {
-                            Text(command.title).frame(maxWidth: .infinity, alignment: .leading)
+                            Text(LocalizedStringKey(command.title)).frame(maxWidth: .infinity, alignment: .leading)
                             if let shortcut = command.shortcut { Text(shortcut).foregroundStyle(.tertiary) }
                         }
                         .font(.system(size: 12))
