@@ -118,7 +118,7 @@ struct ClipboardLibraryTests {
     }
 
     @MainActor
-    @Test func rendersLibraryStatesToPNG() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersLibraryStatesToPNG() async throws {
         try await withStore { store, feed, defaults in
             let retentionKey = ClipboardHistorySettings.Keys.retentionByKind
             defaults.set(Dictionary(uniqueKeysWithValues: ClipboardItemKind.allCases.map { ($0.rawValue, "unlimited") }), forKey: retentionKey)
@@ -181,7 +181,7 @@ struct ClipboardLibraryTests {
     }
 
     @MainActor
-    @Test func rendersLibrarySettingsAndTagScreensAppearanceLocaleMatrix() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersLibrarySettingsAndTagScreensAppearanceLocaleMatrix() async throws {
         try await withStore { store, feed, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/library", isDirectory: true)
             let tag = try await store.createTag(name: "Research", colorHex: "#4268AD")
@@ -256,7 +256,7 @@ struct ClipboardLibraryTests {
     }
 
     @MainActor
-    @Test func rendersTagManagerToPNG() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersTagManagerToPNG() async throws {
         try await withStore { store, _, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/390-library-shots", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

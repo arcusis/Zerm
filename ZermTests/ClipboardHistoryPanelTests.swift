@@ -535,7 +535,7 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
-    @Test func rendersClipboardPanelOffscreenToPNG() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersClipboardPanelOffscreenToPNG() async throws {
         try await withPanelModel { model, store, defaults in
             let now = Date()
             let samples = [
@@ -601,7 +601,7 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
-    @Test func rendersEveryPanelStateOffscreenToPNGs() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersEveryPanelStateOffscreenToPNGs() async throws {
         try await withPanelModel { _, store, defaults in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/389-shots", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -663,7 +663,7 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
-    @Test func rendersPanelAppearanceAndLocaleMatrix() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersPanelAppearanceAndLocaleMatrix() async throws {
         try await withPanelModel { _, store, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/panel", isDirectory: true)
             let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")

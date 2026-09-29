@@ -466,7 +466,7 @@ struct ClipboardHistoryTests {
         #expect(defaults.object(forKey: ClipboardHistorySettings.Keys.lastDailyClear) as? Date == now)
     }
 
-    @Test @MainActor func rendersClipboardPanelStatesForReview() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) @MainActor func rendersClipboardPanelStatesForReview() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey())
         defer { try? FileManager.default.removeItem(at: directory) }

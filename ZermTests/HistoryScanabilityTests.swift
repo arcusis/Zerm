@@ -38,7 +38,7 @@ struct HistoryScanabilityTests {
     }
 
     @MainActor
-    @Test func rendersHistoryViewsOffscreenToPNG() async throws {
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersHistoryViewsOffscreenToPNG() async throws {
         let container = try ModelContainer(
             for: Transcription.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
