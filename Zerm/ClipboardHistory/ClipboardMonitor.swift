@@ -131,15 +131,18 @@ final class ClipboardMonitor {
                 sourceApp: appInfo,
                 createdAt: now
             ) else { return }
-            let text = captured.kind == .plainText ? captured.preview : nil
+            let text = captured.kind == .plainText
+                ? ClipboardPanelText.plainText(from: captured.representations, fallback: captured.preview) : nil
             do {
                 if shouldMerge, let text {
                     guard await store.shouldCapture(captured.kind) else { return }
                     if let merged = try await store.appendCopyToPreviousText(text, separator: ClipboardHistoryEngineSettings.copyMergeSeparator) {
                         if ClipboardHistoryEngineSettings.copyMergeUpdatesClipboard {
+                            let payload = try await store.itemWithPayload(merged.id)
+                            let mergedText = ClipboardPanelText.plainText(from: payload.representations, fallback: payload.preview)
                             await MainActor.run { [weak self] in
                                 guard let self, self.pasteboard.changeCount == currentCount else { return }
-                                if ClipboardManager.setClipboard(merged.preview, on: self.pasteboard) {
+                                if ClipboardManager.setClipboard(mergedText, on: self.pasteboard) {
                                     Self.noteZermWrite(changeCount: self.pasteboard.changeCount)
                                 }
                             }

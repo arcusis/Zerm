@@ -10,7 +10,7 @@ struct ClipboardHistoryPanelView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("clipboardHistoryDoubleClickPaste") private var doubleClickPaste = true
-    @AppStorage("clipboardHistoryPasteOnClick") private var pasteOnClick = true
+    @AppStorage("clipboardHistoryPasteOnClick") private var pasteOnClick = false
     @AppStorage("clipboardHistoryShowBadges") private var showBadges = true
     @FocusState private var searchFocused: Bool
     @State private var pendingClickPaste: Task<Void, Never>?
@@ -26,7 +26,7 @@ struct ClipboardHistoryPanelView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: model.isSidebarCollapsed ? 46 : 184)
+            ScrollView { sidebar }.frame(width: model.isSidebarCollapsed ? 46 : 184)
             Divider()
             VStack(spacing: 0) {
                 listToolbar
@@ -63,6 +63,10 @@ struct ClipboardHistoryPanelView: View {
             if tracksSystemClipboard { currentClipboardHash = currentPasteboardHash() }
         }
         .sheet(isPresented: $model.isTextEditorVisible) { textEditor }
+        .alert(String(localized: "Clipboard History Error"), isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            Button(String(localized: "OK")) { model.errorMessage = nil }
+        } message: { Text(model.errorMessage ?? "") }
+        .onDisappear { pendingClickPaste?.cancel() }
         .confirmationDialog(String(localized: "Clear Clipboard History?"), isPresented: $model.isClearConfirmationVisible, titleVisibility: .visible) {
             Button(String(localized: "Clear"), role: .destructive) { Task { await model.clearHistory() } }
             Button(String(localized: "Cancel"), role: .cancel) {}
@@ -108,11 +112,7 @@ struct ClipboardHistoryPanelView: View {
          ("Emails", "envelope", .kind(.email)), ("Code", "chevron.left.forwardslash.chevron.right", .kind(.code))]
     }
 
-    private var appEntries: [(bundleIdentifier: String, name: String, count: Int)] {
-        Dictionary(grouping: model.items.filter { $0.sourceApp.bundleIdentifier != nil }, by: { $0.sourceApp.bundleIdentifier! })
-            .map { id, items in (id, items.first?.sourceApp.name ?? id, items.count) }
-            .sorted { $0.count == $1.count ? $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending : $0.count > $1.count }
-    }
+    private var appEntries: [ClipboardSourceAppCount] { model.sourceApps }
 
     private func sidebarButton(_ title: String.LocalizationValue, symbol: String, filter: ClipboardPanelRailFilter) -> some View {
         Button { model.railFilter = filter; if case .history = filter { removeAppToken() } } label: {
@@ -127,7 +127,7 @@ struct ClipboardHistoryPanelView: View {
         .accessibilityAddTraits(isSelected(filter) ? .isSelected : [])
     }
 
-    private func appButton(_ app: (bundleIdentifier: String, name: String, count: Int)) -> some View {
+    private func appButton(_ app: ClipboardSourceAppCount) -> some View {
         let selected = model.appFilter == app.bundleIdentifier
         return Button {
             model.appFilter = selected ? nil : app.bundleIdentifier
@@ -317,7 +317,7 @@ struct ClipboardHistoryPanelView: View {
     private var previewColumn: some View {
         VStack(spacing: 0) {
             previewToolbar
-            if let item = model.selectedItem {
+            if let item = model.detailItem {
                 if model.isPreviewVisible { ScrollView { ClipboardRichPreview(item: item, linkService: linkService).padding(.top, 4) }.frame(maxHeight: .infinity) }
                 if model.isDetailsVisible { detailsInspector(item) }
             } else {
@@ -329,8 +329,7 @@ struct ClipboardHistoryPanelView: View {
     private var previewToolbar: some View {
         HStack(spacing: 8) {
             actionButton("doc.on.clipboard", title: "Copy") { if let item = model.selectedItem { controller?.copy(item) } }
-            actionButton("plus.square.on.square", title: "Duplicate") { if let item = model.selectedItem { controller?.copy(item) } }
-            if let item = model.selectedItem { contextAction(item) }
+            if let item = model.detailItem { contextAction(item) }
             Spacer(minLength: 4)
             Button { if let item = model.selectedItem { Task { await model.toggleFavorite(item) } } } label: {
                 Image(systemName: model.selectedItem?.isFavorite == true ? "star.fill" : "star")
@@ -370,7 +369,10 @@ struct ClipboardHistoryPanelView: View {
                 guard let data = item.imageRepresentationData else { return }
                 Task { @MainActor in
                     let result = await ClipboardImageAnalyzer.analyze(data)
-                    guard !result.recognizedText.isEmpty else { return }
+                    guard !result.recognizedText.isEmpty else {
+                        model.errorMessage = String(localized: "No text found in this image.")
+                        return
+                    }
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(result.recognizedText, forType: .string)
                 }
@@ -431,10 +433,8 @@ struct ClipboardHistoryPanelView: View {
         Button(String(localized: "Copy")) { controller?.copy(item) }
         Button(String(localized: item.isFavorite ? "Remove Favourite" : "Add to Favourites")) { Task { await model.toggleFavorite(item) } }
         Button(String(localized: item.isPinned ? "Unpin Item" : "Pin Item")) { Task { await model.togglePinned(item) } }
-        Button(String(localized: "Edit Text")) {
-            model.select(item)
-            model.textBeingEdited = ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)
-            model.isTextEditorVisible = true
+        if [.plainText, .richText, .code, .url, .email, .color].contains(item.kind) {
+            Button(String(localized: "Edit Text")) { Task { await model.beginEditing(item) } }
         }
         if item.isFavorite {
             Button(String(localized: "Move Favourite Up")) { Task { await model.reorderFavorite(item, by: -1) } }
@@ -450,7 +450,7 @@ struct ClipboardHistoryPanelView: View {
             Text(String(localized: "Edit Text")).font(.headline)
             TextEditor(text: $model.textBeingEdited).frame(minHeight: 180)
             HStack {
-                Button(String(localized: "Cancel")) { model.isTextEditorVisible = false }
+            Button(String(localized: "Cancel")) { model.isTextEditorVisible = false }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(String(localized: "Save")) { Task { await model.saveEditedText() } }.keyboardShortcut(.defaultAction)
             }
@@ -459,8 +459,7 @@ struct ClipboardHistoryPanelView: View {
     }
 
     private func clearFilters() {
-        model.query = ClipboardPanelQuery.parse(model.query).text
-        model.railFilter = .history
+        model.clearFilters()
         searchFocused = true
     }
 
@@ -493,7 +492,7 @@ private struct ClipboardPanelImageDimensions {
     let height: Int
 
     static func size(_ item: ClipboardItem) -> ClipboardPanelImageDimensions? {
-        guard let data = item.thumbnailData ?? item.representations.first(where: { ["public.tiff", "public.png", "public.jpeg", "public.gif", "public.bmp"].contains($0.type) })?.data,
+        guard let data = item.representations.first(where: { ["public.tiff", "public.png", "public.jpeg", "public.gif", "public.bmp"].contains($0.type) })?.data ?? item.thumbnailData,
               let image = NSImage(data: data), let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         return ClipboardPanelImageDimensions(width: cgImage.width, height: cgImage.height)
     }

@@ -272,7 +272,11 @@ ln -s /Applications "$STAGING/Applications"
 VOLUME_NAME="Zerm $RELEASE_LABEL"
 BRANDED_DMG=0
 mkdir -p "$STAGING/.background"
-if swift "$REPO_ROOT/scripts/make-dmg-background.swift" \
+if [ -n "${PREBUILT_DMG_BACKGROUND:-}" ]; then
+    [ -s "$PREBUILT_DMG_BACKGROUND" ] || { echo "error: prebuilt DMG background is missing."; exit 1; }
+    cp "$PREBUILT_DMG_BACKGROUND" "$STAGING/.background/background.png"
+    BRANDED_DMG=1
+elif swift "$REPO_ROOT/scripts/make-dmg-background.swift" \
         "$REPO_ROOT/assets/logo.png" \
         "$STAGING/.background/background.png" \
         "$RELEASE_LABEL"; then

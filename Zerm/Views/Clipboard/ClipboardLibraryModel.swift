@@ -49,6 +49,8 @@ final class ClipboardLibraryModel: ObservableObject {
     private var pageCursor = 0
     private let pageSize = 100
     private var searchedRows: [ClipboardItem]?
+    private var pendingReload = false
+    private var selectionRevision = 0
 
     init(store: ClipboardHistoryStore, feed: ClipboardHistoryFeed? = nil) {
         self.store = store
@@ -89,9 +91,9 @@ final class ClipboardLibraryModel: ObservableObject {
     }
 
     func reload() async {
-        guard !isLoading else { return }
+        guard !isLoading else { pendingReload = true; return }
         isLoading = true
-        defer { isLoading = false }
+        defer { finishLoading() }
         pageCursor = 0
         items = []
         hasMore = false
@@ -120,7 +122,7 @@ final class ClipboardLibraryModel: ObservableObject {
     func loadMore() async {
         guard hasMore, !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer { finishLoading() }
         let parsed = ClipboardPanelQuery.parse(query)
         if let searchedRows {
             let matches = applyFilters(searchedRows, query: parsed)
@@ -138,11 +140,25 @@ final class ClipboardLibraryModel: ObservableObject {
     }
 
     func select(_ id: UUID) async {
-        do { detailItem = try await store.itemWithPayload(id) }
-        catch { detailItem = nil }
+        selectionRevision += 1
+        let revision = selectionRevision
+        do {
+            let item = try await store.itemWithPayload(id)
+            if revision == selectionRevision { detailItem = item }
+        } catch {
+            if revision == selectionRevision { detailItem = nil; errorMessage = error.localizedDescription }
+        }
     }
 
-    func clearDetail() { detailItem = nil }
+    func clearDetail() { selectionRevision += 1; detailItem = nil }
+
+    private func finishLoading() {
+        isLoading = false
+        if pendingReload {
+            pendingReload = false
+            Task { await reload() }
+        }
+    }
 
     func reportExportError(_ error: Error) {
         errorMessage = error.localizedDescription
@@ -189,7 +205,9 @@ final class ClipboardLibraryModel: ObservableObject {
     func copySelection() async {
         let selected = selectedItems
         guard !selected.isEmpty else { return }
-        let payloads = await fullItems(for: selected)
+        let payloads: [ClipboardItem]
+        do { payloads = try await fullItems(for: selected) }
+        catch { errorMessage = error.localizedDescription; return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let pasteboardItems = payloads.flatMap { item -> [NSPasteboardItem] in
@@ -199,6 +217,7 @@ final class ClipboardLibraryModel: ObservableObject {
                 for representation in groups[index] ?? [] {
                     entry.setData(representation.data, forType: NSPasteboard.PasteboardType(representation.type))
                 }
+                entry.setData(Data(), forType: ClipboardManager.historyIgnoreType)
                 return entry
             }
         }
@@ -206,7 +225,7 @@ final class ClipboardLibraryModel: ObservableObject {
     }
 
     func exportSelection(to url: URL) async throws {
-        let payloads = await fullItems(for: selectedItems)
+        let payloads = try await fullItems(for: selectedItems)
         let entries = payloads.map { ClipboardHistoryArchive.Entry(item: $0, favoriteOrder: nil) }
         try await Task.detached(priority: .utility) { try ClipboardHistoryArchive.write(entries, to: url) }.value
     }
@@ -297,13 +316,10 @@ final class ClipboardLibraryModel: ObservableObject {
         await reload()
     }
 
-    private func fullItems(for items: [ClipboardItem]) async -> [ClipboardItem] {
-        await withTaskGroup(of: ClipboardItem?.self) { group in
-            for item in items { group.addTask { try? await self.store.itemWithPayload(item.id) } }
-            var result: [ClipboardItem] = []
-            for await item in group { if let item { result.append(item) } }
-            return result
-        }
+    private func fullItems(for items: [ClipboardItem]) async throws -> [ClipboardItem] {
+        var result: [ClipboardItem] = []
+        for item in items { result.append(try await store.itemWithPayload(item.id)) }
+        return result
     }
 
     private func receive(_ change: ClipboardHistoryChange) async {

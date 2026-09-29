@@ -48,10 +48,11 @@ class CursorPaster {
         guard pasteboard.writeObjects(items) else { throw ClipboardHistoryError.missingPayload }
         ClipboardMonitor.noteZermWrite(changeCount: pasteboard.changeCount)
         await waitUntilModifiersReleased()
-        _ = await postPasteCommand()
+        let result = await postPasteCommand()
         if shouldRestoreClipboard {
             scheduleHistoryClipboardRestore(savedContents, expectedChangeCount: pasteboard.changeCount, on: pasteboard)
         }
+        guard result.didPostPasteCommand else { throw ClipboardHistoryError.pasteCommandFailed }
     }
 
     /// Orca intentionally turns clipboard pastes into `[Pasted text #…]` attachments. Its

@@ -2,6 +2,8 @@ import Foundation
 
 struct ClipboardHistorySearchIndex: Codable {
     private var documents: [UUID: Document] = [:]
+    private var payloadTextVersion: Int? = 2
+    var includesFullText: Bool { payloadTextVersion == 2 }
 
     private struct Document: Codable {
         let text: String

@@ -18,6 +18,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private var quickLookExtension = "png"
     private var globalMonitor: Any?
     private var isShowingQuickLook = false
+    private var isPasting = false
 
     var targetApplicationName: String? { previousApplication?.localizedName }
 
@@ -58,47 +59,48 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     }
 
     func paste(_ item: ClipboardItem, asPlainText: Bool = false, pasteSelection: Bool = true) {
-        let selection = pasteSelection ? (model?.selection ?? []) : []
+        guard !isPasting, let model else { return }
+        let selection = pasteSelection ? model.selection : []
         let selected = selection.isEmpty ? [item] : selection
         let joinedSelection = selected.count > 1
         let target = previousApplication
         let store = ClipboardHistoryRuntime.shared.store
-        if model?.isPinned != true { panel?.orderOut(nil) }
         guard let store else {
             close()
             return
         }
+        isPasting = true
         Task { @MainActor in
-            if let target, !target.isTerminated {
+            defer { isPasting = false }
+            do {
+                let loaded = try await model.fullItems(for: selected)
+                guard let target, !target.isTerminated else { throw ClipboardHistoryError.targetUnavailable }
+                if !model.isPinned { panel?.orderOut(nil) }
                 target.activate(options: [])
-                try? await Task.sleep(nanoseconds: 120_000_000)
+                try await Task.sleep(nanoseconds: 120_000_000)
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier else {
+                    throw ClipboardHistoryError.targetUnavailable
+                }
+                if joinedSelection {
+                    let text = loaded.map { ClipboardPanelText.plainText(from: $0.representations, fallback: $0.preview) }
+                        .joined(separator: "\n")
+                    try await CursorPaster.pasteClipboardHistoryItem([
+                        ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))
+                    ])
+                } else {
+                    try await store.paste(item, asPlainText: asPlainText)
+                }
+                closeIfUnpinned()
+            } catch {
+                panel?.makeKeyAndOrderFront(nil)
+                model.errorMessage = error.localizedDescription
             }
-            if joinedSelection {
-                let text = selected.map { ClipboardPanelText.plainText(from: $0.representations, fallback: $0.preview) }
-                    .joined(separator: "\n")
-                try? await CursorPaster.pasteClipboardHistoryItem([
-                    ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))
-                ])
-            } else {
-                try? await store.paste(item, asPlainText: asPlainText)
-            }
-            closeIfUnpinned()
         }
     }
 
     func copy(_ item: ClipboardItem) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let groups = Dictionary(grouping: item.representations, by: \.itemIndex)
-        let objects = groups.keys.sorted().map { index -> NSPasteboardItem in
-            let object = NSPasteboardItem()
-            for representation in groups[index] ?? [] {
-                object.setData(representation.data, forType: NSPasteboard.PasteboardType(representation.type))
-            }
-            object.setData(Data(), forType: ClipboardManager.historyIgnoreType)
-            return object
-        }
-        if !objects.isEmpty { pasteboard.writeObjects(objects) }
+        guard let model else { return }
+        Task { await model.copy(item) }
     }
 
     func perform(command id: String) {
@@ -119,6 +121,16 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     }
 
     func showQuickLook(for item: ClipboardItem) {
+        guard let model else { return }
+        Task { @MainActor in
+            do {
+                guard let loaded = try await model.fullItems(for: [item]).first else { return }
+                presentQuickLook(for: loaded)
+            } catch { model.errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func presentQuickLook(for item: ClipboardItem) {
         let imageRepresentation = item.representations.first(where: {
             ["public.tiff", "public.png", "public.jpeg", "public.gif", "public.bmp"].contains($0.type)
         })
@@ -212,14 +224,16 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private func installKeyMonitor() {
         removeKeyMonitor()
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let model = self.model else { return event }
+            guard let self, let model = self.model,
+                  Self.shouldHandleKeyEvent(in: event.window, panel: self.panel, isEditing: model.isTextEditorVisible) else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let command = modifiers.contains(.command)
             let option = modifiers.contains(.option)
             let searchHasFocus = self.panel?.firstResponder is NSTextView
 
             if event.keyCode == 48, !modifiers.contains(.command), !modifiers.contains(.option), !modifiers.contains(.control) {
-                self.panel?.selectNextKeyView(nil)
+                if modifiers.contains(.shift) { self.panel?.selectPreviousKeyView(nil) }
+                else { self.panel?.selectNextKeyView(nil) }
                 return nil
             }
 
@@ -243,11 +257,12 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
                 model.isCommandPaletteVisible.toggle()
                 return nil
             }
-            if command, event.charactersIgnoringModifiers?.lowercased() == "c", let item = model.selectedItem {
+            if model.isCommandPaletteVisible { return event }
+            if command, !searchHasFocus, event.charactersIgnoringModifiers?.lowercased() == "c", let item = model.selectedItem {
                 self.copy(item)
                 return nil
             }
-            if command, event.charactersIgnoringModifiers == "⌫" || (command && event.keyCode == 51) {
+            if command, !searchHasFocus, event.keyCode == 51 {
                 Task { await model.deleteSelection() }
                 return nil
             }
@@ -297,6 +312,11 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         localFlagsMonitor = nil
     }
 
+    static func shouldHandleKeyEvent(in window: NSWindow?, panel: NSWindow?, isEditing: Bool) -> Bool {
+        guard let panel, let window, window === panel, !isEditing else { return false }
+        return true
+    }
+
     private func fileURL(from item: ClipboardItem) -> URL? {
         guard let data = item.representations.first(where: { $0.type == "public.file-url" })?.data else { return nil }
         return URL(dataRepresentation: data, relativeTo: nil)
@@ -313,7 +333,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        if !isShowingQuickLook { closeIfUnpinned() }
+        if !isShowingQuickLook && !isPasting && model?.isTextEditorVisible != true { closeIfUnpinned() }
     }
 
     func windowWillClose(_ notification: Notification) {

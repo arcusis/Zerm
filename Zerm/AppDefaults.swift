@@ -21,7 +21,7 @@ enum AppDefaults {
             "useAppleScriptPaste": false,
             "clipboardHistoryEnabled": true,
             "ClipboardHistoryWindowPosition": "lastLocation",
-            "clipboardHistoryPasteOnClick": true,
+            "clipboardHistoryPasteOnClick": false,
             "clipboardHistoryDoubleClickPaste": true,
             "clipboardHistoryShowBadges": true,
             "clipboardHistoryUpdateAfterPaste": true,

@@ -7,7 +7,7 @@ struct ClipboardHistorySettingsView: View {
     @AppStorage(ClipboardHistorySettings.Keys.enabled) private var enabled = true
     @AppStorage(ClipboardHistorySettings.Keys.windowPosition) private var windowPosition = "lastLocation"
     @AppStorage(ClipboardHistorySettings.Keys.saveDictations) private var saveDictations = false
-    @AppStorage(ClipboardHistorySettings.Keys.pasteOnClick) private var pasteOnClick = true
+    @AppStorage(ClipboardHistorySettings.Keys.pasteOnClick) private var pasteOnClick = false
     @AppStorage(ClipboardHistorySettings.Keys.doubleClickPaste) private var doubleClickPaste = true
     @AppStorage(ClipboardHistorySettings.Keys.showBadges) private var showBadges = true
     @AppStorage(ClipboardHistorySettings.Keys.updateAfterPaste) private var updateAfterPaste = true

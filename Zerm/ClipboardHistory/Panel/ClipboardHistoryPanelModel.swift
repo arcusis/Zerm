@@ -11,19 +11,19 @@ enum ClipboardPanelSort: String, CaseIterable, Identifiable {
     var engineSort: ClipboardHistorySort { ClipboardHistorySort(rawValue: rawValue) ?? .lastCopy }
 }
 
-enum ClipboardPanelDateFilter: String, CaseIterable, Identifiable {
+enum ClipboardPanelDateFilter: String, CaseIterable, Identifiable, Sendable {
     case anytime, today, week, month
     var id: String { rawValue }
 }
 
-enum ClipboardPanelRailFilter: Equatable {
+enum ClipboardPanelRailFilter: Equatable, Sendable {
     case history
     case favorites
     case text
     case kind(ClipboardItemKind)
 }
 
-struct ClipboardPanelFilters: Equatable {
+struct ClipboardPanelFilters: Equatable, Sendable {
     var kinds: Set<ClipboardItemKind> = []
     var sourceApps: Set<String> = []
 }
@@ -128,20 +128,23 @@ final class ClipboardPanelCommandRegistry {
 final class ClipboardHistoryPanelModel: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
     @Published private(set) var visibleItems: [ClipboardItem] = []
-    @Published var query = "" { didSet { applyQuery() } }
+    @Published var query = "" { didSet { queryChanged() } }
     /// Source app chosen in the sidebar. Kept apart from `query` so the search field shows only what was typed.
-    @Published var appFilter: String? { didSet { applyQuery() } }
-    @Published var railFilter: ClipboardPanelRailFilter = .history { didSet { applyQuery() } }
-    @Published var sort: ClipboardPanelSort = .lastCopy { didSet { reload() } }
-    @Published var reversed = false { didSet { reload() } }
-    @Published var dateFilter = ClipboardPanelDateFilter.anytime { didSet { applyQuery() } }
+    @Published var appFilter: String? { didSet { queryChanged() } }
+    @Published var railFilter: ClipboardPanelRailFilter = .history { didSet { queryChanged() } }
+    @Published var sort: ClipboardPanelSort = .lastCopy { didSet { queryChanged() } }
+    @Published var reversed = false { didSet { queryChanged() } }
+    @Published var dateFilter = ClipboardPanelDateFilter.anytime { didSet { queryChanged() } }
     @Published var favoritesOnTop: Bool {
         didSet {
             defaults.set(favoritesOnTop, forKey: ClipboardHistorySettings.Keys.favoritesOnTop)
-            applyQuery()
+            queryChanged()
         }
     }
-    @Published var selectedIDs: [UUID] = []
+    @Published var selectedIDs: [UUID] = [] { didSet { loadSelectedDetail() } }
+    @Published private(set) var detailItem: ClipboardItem?
+    @Published private(set) var sourceApps: [ClipboardSourceAppCount] = []
+    @Published var errorMessage: String?
     @Published var isPinned = false
     @Published var isPreviewVisible = true
     @Published var isSidebarCollapsed = false
@@ -168,6 +171,10 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private var ocrRefreshAttempts = 0
     private var selectionAnchorID: UUID?
     private var selectionLeadID: UUID?
+    private var detailTask: Task<Void, Never>?
+    private var loadedSearchText: String?
+    private var queryRevision = 0
+    private var editingItemID: UUID?
 
     init(
         store: ClipboardHistoryStore,
@@ -192,6 +199,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         reloadTask?.cancel()
         ocrRefreshTask?.cancel()
         feedTask?.cancel()
+        detailTask?.cancel()
     }
 
     var selection: [ClipboardItem] {
@@ -229,15 +237,28 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     private func performLoadItems(preservingLoadedPage: Bool) async {
+        let revision = queryRevision
+        let searchText = ClipboardPanelQuery.parse(query).text
         if !preservingLoadedPage { pageOffset = 0 }
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
         let requestedCount = preservingLoadedPage ? max(pageOffset, 100) : 100
-        guard let fetched = try? await store.sortedPage(sort.engineSort, ascending: ascending, offset: 0, limit: requestedCount) else { return }
+        let page: (items: [ClipboardItem], total: Int)
+        do { page = try await fetchPage(ascending: ascending, offset: 0, limit: requestedCount) }
+        catch {
+            hasLoadedItems = true
+            errorMessage = error.localizedDescription
+            return
+        }
+        let fetched = page.items
+        let apps = (try? await store.sourceAppCounts()) ?? []
+        guard revision == queryRevision else { return }
+        sourceApps = apps
         items = fetched
         hasLoadedItems = true
         pageOffset = fetched.count
-        canLoadMore = ((try? await store.totalCount()) ?? fetched.count) > pageOffset
+        canLoadMore = page.total > pageOffset
+        loadedSearchText = searchText
         applyQuery()
         scheduleOCRRefreshIfNeeded(fetched)
         if selectedIDs.isEmpty, let first = visibleItems.first { selectedIDs = [first.id] }
@@ -246,12 +267,17 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private func performLoadMore() async {
         defer { isLoadingMore = false }
         guard canLoadMore else { return }
+        let revision = queryRevision
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
-        guard let additional = try? await store.sortedPage(sort.engineSort, ascending: ascending, offset: pageOffset, limit: 100) else { return }
+        let page: (items: [ClipboardItem], total: Int)
+        do { page = try await fetchPage(ascending: ascending, offset: pageOffset, limit: 100) }
+        catch { errorMessage = error.localizedDescription; return }
+        let additional = page.items
+        guard revision == queryRevision else { return }
         items.append(contentsOf: additional)
         pageOffset += additional.count
-        canLoadMore = ((try? await store.totalCount()) ?? pageOffset) > pageOffset
+        canLoadMore = page.total > pageOffset
         applyQuery()
     }
 
@@ -273,11 +299,13 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     /// cannot bring back an item that was just removed.
     private func applyRemoval(of ids: [UUID]) {
         items.removeAll { ids.contains($0.id) }
+        pageOffset = items.count
         selectedIDs.removeAll { ids.contains($0) }
         if selectionAnchorID.map(ids.contains) == true { selectionAnchorID = selectedIDs.first }
         if selectionLeadID.map(ids.contains) == true { selectionLeadID = selectedIDs.last }
         applyQuery()
         if selectedIDs.isEmpty, let first = visibleItems.first { select(first) }
+        reload()
     }
 
     private func scheduleOCRRefreshIfNeeded(_ fetched: [ClipboardItem]) {
@@ -341,15 +369,120 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func showInHistory(_ item: ClipboardItem) {
-        query = ""
+        clearFilters()
         selectedIDs = [item.id]
         selectionAnchorID = item.id
         selectionLeadID = item.id
+        Task {
+            await loadItems()
+            while !items.contains(where: { $0.id == item.id }), canLoadMore { await loadMore() }
+            if let loaded = items.first(where: { $0.id == item.id }) { select(loaded) }
+        }
+    }
+
+    func clearFilters() {
+        query = ""
+        appFilter = nil
+        railFilter = .history
+        dateFilter = .anytime
+    }
+
+    func fullItems(for selection: [ClipboardItem]) async throws -> [ClipboardItem] {
+        var loaded: [ClipboardItem] = []
+        for item in selection { loaded.append(try await store.itemWithPayload(item.id)) }
+        return loaded
+    }
+
+    func copy(_ item: ClipboardItem, to pasteboard: NSPasteboard = .general) async {
+        do {
+            let loaded = try await store.itemWithPayload(item.id)
+            let groups = Dictionary(grouping: loaded.representations, by: \.itemIndex)
+            let objects = groups.keys.sorted().map { index -> NSPasteboardItem in
+                let object = NSPasteboardItem()
+                for representation in groups[index] ?? [] {
+                    object.setData(representation.data, forType: NSPasteboard.PasteboardType(representation.type))
+                }
+                object.setData(Data(), forType: ClipboardManager.historyIgnoreType)
+                return object
+            }
+            guard !objects.isEmpty else { throw ClipboardHistoryError.missingPayload }
+            pasteboard.clearContents()
+            guard pasteboard.writeObjects(objects) else { throw ClipboardHistoryError.missingPayload }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func beginEditing(_ item: ClipboardItem) async {
+        guard [.plainText, .richText, .code, .url, .email, .color].contains(item.kind) else { return }
+        do {
+            let loaded = try await store.itemWithPayload(item.id)
+            select(item)
+            editingItemID = item.id
+            textBeingEdited = ClipboardPanelText.plainText(from: loaded.representations, fallback: loaded.preview)
+            isTextEditorVisible = true
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadSelectedDetail() {
+        detailTask?.cancel()
+        detailItem = nil
+        guard let id = selectedIDs.first else { return }
+        if let item = items.first(where: { $0.id == id }), !item.representations.isEmpty {
+            detailItem = item
+            return
+        }
+        detailTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let loaded = try await self.store.itemWithPayload(id)
+                guard !Task.isCancelled, self.selectedIDs.first == id else { return }
+                self.detailItem = loaded
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func queryChanged() {
+        queryRevision += 1
+        applyQuery()
+        if hasLoadedItems { reload() }
+    }
+
+    private func fetchPage(ascending: Bool, offset: Int, limit: Int) async throws -> (items: [ClipboardItem], total: Int) {
+        let parsed = ClipboardPanelQuery.parse(query)
+        let rail = railFilter
+        let app = appFilter
+        let filters = parsed.filters
+        let cutoff: Date? = switch dateFilter {
+        case .anytime: nil
+        case .today: Calendar.current.startOfDay(for: Date())
+        case .week: Calendar.current.date(byAdding: .day, value: -7, to: Date())
+        case .month: Calendar.current.date(byAdding: .day, value: -30, to: Date())
+        }
+        return try await store.filteredPage(sort.engineSort, ascending: ascending, offset: offset, limit: limit, text: parsed.text, favoritesOnTop: favoritesOnTop) { item in
+            switch rail {
+            case .history: break
+            case .favorites: if !item.isFavorite { return false }
+            case .text: if ![.plainText, .richText].contains(item.kind) { return false }
+            case .kind(let kind): if item.kind != kind { return false }
+            }
+            if let app, item.sourceApp.bundleIdentifier != app { return false }
+            if let cutoff, item.lastCopiedAt < cutoff { return false }
+            if !filters.kinds.isEmpty, !filters.kinds.contains(item.kind) { return false }
+            if !filters.sourceApps.isEmpty {
+                let values = [item.sourceApp.name ?? "", item.sourceApp.bundleIdentifier ?? ""].map(\.localizedLowercase)
+                if !filters.sourceApps.contains(where: { app in values.contains(where: { $0.contains(app) }) }) { return false }
+            }
+            return true
+        }
     }
 
     func deleteSelection() async {
         let ids = selectedIDs
-        for id in ids { try? await store.delete(id) }
+        do {
+            for id in ids { try await store.delete(id) }
+        } catch { errorMessage = error.localizedDescription; await loadItems(); return }
         items.removeAll { ids.contains($0.id) }
         selectedIDs = []
         selectionAnchorID = nil
@@ -359,12 +492,14 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func toggleFavorite(_ item: ClipboardItem) async {
-        try? await store.favorite(item.id, favorite: !item.isFavorite)
+        do { try await store.favorite(item.id, favorite: !item.isFavorite) }
+        catch { errorMessage = error.localizedDescription }
         reload()
     }
 
     func togglePinned(_ item: ClipboardItem) async {
-        try? await store.pin(item.id, pinned: !item.isPinned)
+        do { try await store.pin(item.id, pinned: !item.isPinned) }
+        catch { errorMessage = error.localizedDescription }
         reload()
     }
 
@@ -394,17 +529,19 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func saveEditedText() async {
-        guard let item = selectedItem else { return }
-        _ = try? await store.editText(item.id, text: textBeingEdited)
-        isTextEditorVisible = false
-        await loadItems()
+        guard let id = editingItemID else { return }
+        do {
+            _ = try await store.editText(id, text: textBeingEdited)
+            isTextEditorVisible = false
+            await loadItems()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func clearHistory() async {
-        try? await store.clear(
+        do { try await store.clear(
             keepingFavorites: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, in: defaults, defaultValue: true),
             keepingTagged: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, in: defaults, defaultValue: true)
-        )
+        ) } catch { errorMessage = error.localizedDescription; return }
         selectedIDs = []
         await loadItems()
     }
@@ -445,14 +582,27 @@ final class ClipboardHistoryPanelModel: ObservableObject {
                         (item.sourceApp.name ?? "").localizedLowercase.contains(app)
                             || (item.sourceApp.bundleIdentifier ?? "").localizedLowercase.contains(app)
                     })
-                && terms.allSatisfy { term in
+                && (loadedSearchText == parsed.text || terms.allSatisfy { term in
                     [item.preview, item.title ?? "", item.sourceApp.name ?? "", item.recognizedText,
                      item.barcodePayloads.joined(separator: " ")].contains {
                         $0.localizedCaseInsensitiveContains(term)
                     }
-                }
+                })
         }
-        let sorted = favoritesOnTop ? filtered.filter(\.isFavorite) + filtered.filter { !$0.isFavorite } : filtered
+        var ascending = reversed
+        if sort == .firstCopy { ascending.toggle() }
+        let ordered = filtered.sorted { left, right in
+            let comparison: ComparisonResult
+            switch sort {
+            case .lastCopy: comparison = left.lastCopiedAt.compare(right.lastCopiedAt)
+            case .firstCopy: comparison = left.createdAt.compare(right.createdAt)
+            case .copyCount: comparison = (left.useCount as NSNumber).compare(right.useCount as NSNumber)
+            case .size: comparison = ((left.payloadSize ?? 0) as NSNumber).compare((right.payloadSize ?? 0) as NSNumber)
+            }
+            if comparison == .orderedSame { return ascending ? left.id.uuidString < right.id.uuidString : left.id.uuidString > right.id.uuidString }
+            return ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+        }
+        let sorted = favoritesOnTop ? filtered.filter(\.isFavorite) + ordered.filter { !$0.isFavorite } : ordered
         visibleItems = sorted
         selectedIDs = selectedIDs.filter { id in sorted.contains(where: { $0.id == id }) }
         if let selectionAnchorID, !selectedIDs.contains(selectionAnchorID) {
@@ -495,11 +645,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         })
         registry.register(.init(id: "edit", title: String(localized: "Edit Text"), isEnabled: { $0.count == 1 && [.plainText, .richText].contains($0[0].kind) }) { [weak self] _ in
             guard let self, let item = self.selectedItem else { return }
-            Task { [weak self] in
-                guard let self, let loaded = try? await self.store.itemWithPayload(item.id) else { return }
-                self.textBeingEdited = ClipboardPanelText.plainText(from: loaded.representations, fallback: loaded.preview)
-                self.isTextEditorVisible = true
-            }
+            Task { await self.beginEditing(item) }
         })
         registry.register(.init(id: "favorite", title: String(localized: "Toggle Favourite"), isEnabled: { $0.count == 1 }) { [weak self] selection in
             guard let self, let item = selection.first else { return }
