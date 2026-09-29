@@ -48,6 +48,7 @@ enum TTSProviderRegistry {
     static let allProviders: [any TTSProvider] = [
         AppleSystemTTSProvider(),
         KokoroTTSProvider(),
+        BlueTTSProvider(),
         DeepgramTTSProvider(),
         InworldTTSProvider(),
         ElevenLabsTTSProvider(),

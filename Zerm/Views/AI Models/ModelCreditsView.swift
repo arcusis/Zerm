@@ -12,6 +12,7 @@ struct ModelCreditsView: View {
     @EnvironmentObject private var sherpaOnnxManager: SherpaOnnxModelManager
     @ObservedObject private var llmManager = LocalLLMModelManager.shared
     @ObservedObject private var kokoroManager = KokoroModelManager.shared
+    @ObservedObject private var blueManager = BlueModelManager.shared
 
     private var credits: [ModelCredit] {
         var entries: [ModelCredit] = []
@@ -37,6 +38,13 @@ struct ModelCreditsView: View {
         if kokoroManager.isInstalled {
             let package = KokoroModelManager.package
             entries.append(ModelCredit(id: package.name, name: package.displayName, provenance: package.provenance))
+        }
+        if blueManager.isInstalled {
+            entries.append(ModelCredit(
+                id: BlueModelManager.packageName,
+                name: BlueModelManager.displayName,
+                provenance: BlueModelCatalog.provenance
+            ))
         }
         if TranscriptionModelRegistry.models.contains(where: {
             $0.provider == .fluidAudio && fluidManager.isFluidAudioModelDownloaded(named: $0.name)

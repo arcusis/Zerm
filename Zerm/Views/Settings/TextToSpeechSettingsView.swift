@@ -14,12 +14,14 @@ struct TextToSpeechSettingsView: View {
     @State private var verifyState: VerifyState = .idle
     @State private var isPreviewing = false
     @State private var isShowingKokoroNotice = false
+    @State private var isShowingBlueNotice = false
 
     /// The app-level controller (wired to the recorder widget), so Preview shows the same
     /// "Speaking" widget a real trigger does — a reliable way to see Read Aloud working.
     @EnvironmentObject private var ttsController: TTSController
 
     @ObservedObject private var kokoro = KokoroModelManager.shared
+    @ObservedObject private var blue = BlueModelManager.shared
     @ObservedObject private var localLLM = LocalLLMModelManager.shared
     @EnvironmentObject private var hotkeyManager: HotkeyManager
 
@@ -81,6 +83,9 @@ struct TextToSpeechSettingsView: View {
                 if providerKind == .kokoro {
                     kokoroDownloadCard
                 }
+                if providerKind == .blue {
+                    blueDownloadCard
+                }
 
                 previewSection
             }
@@ -91,6 +96,15 @@ struct TextToSpeechSettingsView: View {
             let package = KokoroModelManager.package
             ModelDownloadNoticeView(assetID: package.name, modelName: package.displayName, provenance: package.provenance) {
                 Task { await kokoro.download() }
+            }
+        }
+        .sheet(isPresented: $isShowingBlueNotice) {
+            ModelDownloadNoticeView(
+                assetID: BlueModelManager.packageName,
+                modelName: BlueModelManager.displayName,
+                provenance: BlueModelCatalog.provenance
+            ) {
+                Task { await blue.download() }
             }
         }
         .onAppear(perform: reloadForProvider)
@@ -319,7 +333,7 @@ struct TextToSpeechSettingsView: View {
                     systemImage: "play.circle.fill"
                 )
             }
-            .disabled(isPreviewing || (providerKind == .kokoro && !kokoro.isInstalled))
+            .disabled(isPreviewing || (providerKind == .kokoro && !kokoro.isInstalled) || (providerKind == .blue && !blue.isInstalled))
             InfoTip(String(localized: "Speaks a sample sentence with the current provider, voice and speed, using the same recorder widget a real trigger uses. A quick way to check your key and settings work before relying on them."))
             Spacer()
         }
@@ -410,6 +424,60 @@ struct TextToSpeechSettingsView: View {
             isShowingKokoroNotice = true
         } else {
             Task { await kokoro.download() }
+        }
+    }
+
+    @ViewBuilder
+    private var blueDownloadCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "cpu")
+                    Text(verbatim: BlueModelManager.displayName).font(.headline)
+                    Spacer()
+                    Text("~300 MB").font(.caption).foregroundStyle(.secondary)
+                }
+                if blue.isInstalled {
+                    HStack {
+                        Label("Downloaded — runs fully offline", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Spacer()
+                        Button(role: .destructive) { blue.delete() } label: { Label("Delete", systemImage: "trash") }
+                    }
+                } else if blue.isPaused {
+                    HStack {
+                        ProgressView(value: blue.downloadProgress ?? blue.downloadFraction)
+                        Spacer()
+                        Button("Resume") { blue.resumeDownload() }
+                        Button("Cancel") { blue.cancelDownload() }
+                    }
+                } else if blue.isDownloading {
+                    HStack {
+                        ProgressView(value: blue.downloadProgress ?? 0)
+                        Text(verbatim: blue.statusText ?? String(localized: "Downloading…")).font(.caption)
+                        Spacer()
+                        Button("Pause") { blue.pauseDownload() }
+                        Button("Cancel") { blue.cancelDownload() }
+                    }
+                } else {
+                    HStack {
+                        Text("Download once for offline Hebrew and English speech.").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(action: requestBlueDownload) {
+                            Label(blue.statusText == nil ? "Download model" : "Retry Download", systemImage: "arrow.down.circle")
+                        }
+                    }
+                    if let status = blue.statusText { Text(verbatim: status).font(.caption).foregroundStyle(.red) }
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private func requestBlueDownload() {
+        if ModelDownloadNoticePolicy.requiresNotice(assetID: BlueModelManager.packageName, provenance: BlueModelCatalog.provenance) {
+            isShowingBlueNotice = true
+        } else {
+            Task { await blue.download() }
         }
     }
 

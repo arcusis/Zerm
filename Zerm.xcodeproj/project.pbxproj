@@ -380,6 +380,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ZERM_DEPS_DIR = "$(HOME)/Zerm-Dependencies";
+				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/Zerm/TextToSpeech/Blue/Vendor/include";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -444,6 +445,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ZERM_DEPS_DIR = "$(HOME)/Zerm-Dependencies";
+				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/Zerm/TextToSpeech/Blue/Vendor/include";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
