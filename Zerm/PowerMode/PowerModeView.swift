@@ -111,53 +111,18 @@ struct PowerModeView: View {
                             .buttonStyle(PlainButtonStyle())
 
                             Menu {
-                                ForEach(PowerModeTemplate.all) { template in
-                                    Button {
-                                        powerModeManager.addConfiguration(from: template, apps: template.installedApps())
-                                    } label: {
-                                        Text(verbatim: "\(template.emoji)  \(template.name)")
-                                    }
+                                Menu("From Template") {
+                                    templateActions
                                 }
+                                Button("Reorder") { openReorderPanel() }
                             } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "square.on.square")
-                                        .font(.system(size: 12, weight: .medium))
-                                    Text("From Template")
-                                        .font(.system(size: 13, weight: .medium))
-                                }
-                                .foregroundColor(.primary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                                )
+                                Image(systemName: "ellipsis")
+                                    .frame(width: 30, height: 28)
+                                    .contentShape(Rectangle())
                             }
                             .menuStyle(.borderlessButton)
                             .menuIndicator(.hidden)
-                            .fixedSize()
-                            .help(String(localized: "Adds a Power Mode for code, messages, or writing, bound to the matching apps installed on this Mac."))
-
-                            Button(action: { openReorderPanel() }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.up.arrow.down")
-                                        .font(.system(size: 12, weight: .medium))
-                                    Text("Reorder")
-                                        .font(.system(size: 13, weight: .medium))
-                                }
-                                .foregroundColor(.primary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(PlainButtonStyle())
+                            .help("More Power Mode actions")
 
                             InfoTip(
                                 String(localized: "Order decides which mode wins when more than one could match — the topmost match is applied. Put your most specific modes above the broader ones."),
@@ -182,24 +147,10 @@ struct PowerModeView: View {
                                             Spacer()
                                                 .frame(height: geometry.size.height * 0.2)
                                             
-                                            VStack(spacing: 16) {
-                                                Image(systemName: "square.grid.2x2.fill")
-                                                    .font(.system(size: 48, weight: .regular))
-                                                    .foregroundColor(.secondary.opacity(0.6))
-                                                
-                                                VStack(spacing: 8) {
-                                                    Text("No Power Modes Yet")
-                                                        .font(.system(size: 20, weight: .medium))
-                                                        .foregroundColor(.primary)
-                                                    
-                                                    Text("Create one to have Zerm switch settings by itself — a formal prompt in your mail client, a code-friendly model in your editor, plain transcription everywhere else.")
-                                                        .font(.system(size: 14))
-                                                        .foregroundColor(.secondary)
-                                                        .multilineTextAlignment(.center)
-                                                        .lineSpacing(2)
-                                                        .frame(maxWidth: 420)
-                                                }
-                                            }
+                                            PowerModeEmptyStateView(
+                                                templates: PowerModeTemplate.all,
+                                                onSelectTemplate: addConfiguration(from:)
+                                            )
                                             
                                             Spacer()
                                         }
@@ -270,6 +221,25 @@ struct PowerModeView: View {
         withAnimation(.smooth(duration: 0.3)) {
             isReorderPanelOpen = false
         }
+    }
+
+    @ViewBuilder
+    private var templateActions: some View {
+        ForEach(PowerModeTemplate.all) { template in
+            templateAction(template)
+        }
+    }
+
+    private func templateAction(_ template: PowerModeTemplate) -> some View {
+        Button {
+            addConfiguration(from: template)
+        } label: {
+            Text(verbatim: "\(template.emoji)  \(template.name)")
+        }
+    }
+
+    private func addConfiguration(from template: PowerModeTemplate) {
+        powerModeManager.addConfiguration(from: template, apps: template.installedApps())
     }
 }
 

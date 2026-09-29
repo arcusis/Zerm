@@ -90,5 +90,6 @@ struct NativeAppleModelCardView: View {
                 .controlSize(.small)
             }
         }
+        .frame(minWidth: 156, alignment: .trailing)
     }
-} 
+}

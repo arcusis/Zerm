@@ -23,7 +23,8 @@ struct ZermButton: View {
 }
 
 struct PowerModeEmptyStateView: View {
-    let action: () -> Void
+    let templates: [PowerModeTemplate]
+    let onSelectTemplate: (PowerModeTemplate) -> Void
     
     var body: some View {
         VStack(spacing: 16) {
@@ -39,11 +40,16 @@ struct PowerModeEmptyStateView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             
-            ZermButton(
-                title: "Add New Power Mode",
-                action: action
-            )
-            .frame(maxWidth: 250)
+            Menu("Start from Template") {
+                ForEach(templates) { template in
+                    Button {
+                        onSelectTemplate(template)
+                    } label: {
+                        Text(verbatim: "\(template.emoji)  \(template.name)")
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

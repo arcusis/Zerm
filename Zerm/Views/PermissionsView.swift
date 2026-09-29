@@ -165,110 +165,56 @@ struct PermissionCard: View {
     let title: LocalizedStringKey
     let description: LocalizedStringKey
     let isGranted: Bool
+    var statusTitle: LocalizedStringKey? = nil
     let buttonTitle: LocalizedStringKey
     let buttonAction: () -> Void
-    let checkPermission: () -> Void
     var infoTipMessage: String?
     var infoTipLink: String?
-    @State private var isRefreshing = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 16) {
-                // Icon with background
-                ZStack {
-                    Circle()
-                        .fill(isGranted ? Color.green.opacity(0.15) : Color.orange.opacity(0.15))
-                        .frame(width: 44, height: 44)
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isGranted ? Color.green : Color.orange)
+                .frame(width: 30, height: 30)
+                .background((isGranted ? Color.green : Color.orange).opacity(0.12), in: Circle())
 
-                    Image(systemName: isGranted ? "\(icon).fill" : icon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(isGranted ? .green : .orange)
-                        .symbolRenderingMode(.hierarchical)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(title)
-                            .font(.headline)
-                        if let message = infoTipMessage {
-                            if let link = infoTipLink, !link.isEmpty {
-                                InfoTip(message, learnMoreURL: link)
-                            } else {
-                                InfoTip(message)
-                            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title).font(.headline)
+                    if let message = infoTipMessage {
+                        if let link = infoTipLink, !link.isEmpty {
+                            InfoTip(message, learnMoreURL: link)
+                        } else {
+                            InfoTip(message)
                         }
                     }
-                    Text(description)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
                 }
-                
-                Spacer()
-                
-                // Status indicator with refresh
-                HStack(spacing: 12) {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            isRefreshing = true
-                        }
-                        checkPermission()
-                        
-                        // Reset the animation after a delay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            isRefreshing = false
-                        }
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .rotationEffect(.degrees(isRefreshing ? 360 : 0))
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .accessibilityLabel("Refresh permission status")
-                    
-                    if isGranted {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.green)
-                            .symbolRenderingMode(.hierarchical)
-                    } else {
-                        Image(systemName: "xmark.seal.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.orange)
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                }
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
+
+            Spacer(minLength: 8)
+
+            Label(isGranted ? "Granted" : (statusTitle ?? "Blocked"), systemImage: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(isGranted ? Color.green : Color.orange)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background((isGranted ? Color.green : Color.orange).opacity(0.1), in: Capsule())
 
             if !isGranted {
-                Button(action: buttonAction) {
-                    HStack {
-                        Text(buttonTitle)
-                        Spacer()
-                        Image(systemName: "arrow.forward")
-                    }
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.accentColor, Color.accentColor.opacity(0.8)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(10)
-                }
-                .buttonStyle(.plain)
+                Button(buttonTitle, action: buttonAction)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(CardBackground(isSelected: false))
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -287,88 +233,21 @@ struct PermissionsView: View {
                 )
                 
                 // Permission Cards
-                VStack(spacing: 16) {
-                    // Keyboard Shortcut Permission
-                    PermissionCard(
-                        icon: "keyboard",
-                        title: "Keyboard Shortcut",
-                        description: "Set up a keyboard shortcut to use Zerm anywhere",
-                        isGranted: hotkeyManager.selectedHotkey1 != .none,
-                        buttonTitle: "Configure Shortcut",
-                        buttonAction: {
-                            NotificationCenter.default.post(
-                                name: .navigateToDestination,
-                                object: nil,
-                                userInfo: ["destination": "Settings"]
-                            )
-                        },
-                        checkPermission: { permissionManager.checkKeyboardShortcut() },
-                        infoTipMessage: String(localized: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it."),
-                        infoTipLink: Links.docString(.shortcuts)
-                    )
-                    
-                    // Audio Permission
-                    PermissionCard(
-                        icon: "mic",
-                        title: "Microphone Access",
-                        description: "Allow Zerm to record your voice for transcription",
-                        isGranted: permissionManager.audioPermissionStatus == .authorized,
-                        buttonTitle: permissionManager.audioPermissionStatus == .notDetermined ? "Request Permission" : "Open System Settings",
-                        buttonAction: {
-                            if permissionManager.audioPermissionStatus == .notDetermined {
-                                permissionManager.requestAudioPermission()
-                            } else {
-                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                        },
-                        checkPermission: { permissionManager.checkAudioPermissionStatus() },
-                        infoTipMessage: String(localized: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone."),
-                        infoTipLink: Links.docString(.permissions)
-                    )
+                HStack {
+                    Spacer()
+                    Button(action: refreshPermissions) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Refresh permission status")
+                    .accessibilityLabel("Refresh permission status")
+                }
+                .padding(.bottom, -24)
 
-                    // Accessibility Permission
-                    PermissionCard(
-                        icon: "hand.raised",
-                        title: "Accessibility Access",
-                        description: "Allow Zerm to paste transcribed text directly at your cursor position",
-                        isGranted: permissionManager.isAccessibilityEnabled,
-                        buttonTitle: "Open System Settings",
-                        buttonAction: {
-                            permissionManager.openAccessibilitySettings(promptIfNeeded: true)
-                        },
-                        checkPermission: {
-                            permissionManager.checkAccessibilityPermissions()
-                            permissionManager.pollPermissions(forSeconds: 3)
-                        },
-                        infoTipMessage: String(localized: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."),
-                        infoTipLink: Links.docString(.permissions)
-                    )
-
-                    // Screen Recording Permission
-                    PermissionCard(
-                        icon: "rectangle.on.rectangle",
-                        title: "Screen Recording Access",
-                        description: permissionManager.screenRecordingNeedsRelaunch
-                            ? "Permission looks granted — fully quit Zerm (Cmd+Q) and reopen to finish enabling Screen Recording"
-                            : "Allow Zerm to understand context from your screen for transcript Enhancement",
-                        isGranted: permissionManager.isScreenRecordingEnabled,
-                        buttonTitle: permissionManager.screenRecordingNeedsRelaunch ? "Quit Zerm to Finish" : "Request Permission",
-                        buttonAction: {
-                            if permissionManager.screenRecordingNeedsRelaunch {
-                                NSApp.terminate(nil)
-                            } else {
-                                permissionManager.requestScreenRecordingPermission()
-                            }
-                        },
-                        checkPermission: {
-                            permissionManager.checkScreenRecordingPermission()
-                            permissionManager.pollPermissions(forSeconds: 3)
-                        },
-                        infoTipMessage: String(localized: "Zerm can read on-screen text when Screen Context is enabled. Zerm does not save that captured text to disk, but enhancement requests can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac. After enabling Screen Recording, fully quit and reopen Zerm if this check stays red."),
-                        infoTipLink: Links.docString(.contextualAwareness)
-                    )
+                VStack(spacing: 8) {
+                    ForEach(orderedPermissions, id: \.self) { permission in
+                        permissionCard(permission)
+                    }
                 }
             }
             .padding(24)
@@ -377,6 +256,90 @@ struct PermissionsView: View {
         .onAppear {
             permissionManager.checkAllPermissions()
             permissionManager.pollPermissions(forSeconds: 2)
+        }
+    }
+
+    private enum PermissionKind: CaseIterable {
+        case microphone, accessibility, screenRecording, shortcut
+    }
+
+    private var orderedPermissions: [PermissionKind] {
+        PermissionKind.allCases.sorted { !isGranted($0) && isGranted($1) }
+    }
+
+    private func isGranted(_ permission: PermissionKind) -> Bool {
+        switch permission {
+        case .microphone: permissionManager.audioPermissionStatus == .authorized
+        case .accessibility: permissionManager.isAccessibilityEnabled
+        case .screenRecording: permissionManager.isScreenRecordingEnabled
+        case .shortcut: hotkeyManager.selectedHotkey1 != .none
+        }
+    }
+
+    @ViewBuilder
+    private func permissionCard(_ permission: PermissionKind) -> some View {
+        switch permission {
+        case .microphone:
+            PermissionCard(
+                icon: "mic", title: "Microphone Access",
+                description: "Allow Zerm to record your voice for transcription",
+                isGranted: isGranted(permission),
+                statusTitle: permissionManager.audioPermissionStatus == .notDetermined ? "Not requested" : nil,
+                buttonTitle: "Open System Settings",
+                buttonAction: { openPrivacySettings("Privacy_Microphone") },
+                infoTipMessage: String(localized: "The one permission Zerm cannot work without — no microphone access means no audio to transcribe. macOS only asks once, so if you declined the first time you have to grant it in System Settings under Privacy & Security › Microphone."),
+                infoTipLink: Links.docString(.permissions)
+            )
+        case .accessibility:
+            PermissionCard(
+                icon: "hand.raised", title: "Accessibility Access",
+                description: "Allow Zerm to paste transcribed text directly at your cursor position",
+                isGranted: isGranted(permission), buttonTitle: "Open System Settings",
+                buttonAction: { permissionManager.openAccessibilitySettings(promptIfNeeded: true) },
+                infoTipMessage: String(localized: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."),
+                infoTipLink: Links.docString(.permissions)
+            )
+        case .screenRecording:
+            PermissionCard(
+                icon: "rectangle.on.rectangle", title: "Screen Recording Access",
+                description: permissionManager.screenRecordingNeedsRelaunch
+                    ? "Permission looks granted — fully quit Zerm (Cmd+Q) and reopen to finish enabling Screen Recording"
+                    : "Allow Zerm to understand context from your screen for transcript Enhancement",
+                isGranted: isGranted(permission),
+                statusTitle: permissionManager.screenRecordingNeedsRelaunch ? "Relaunch required" : nil,
+                buttonTitle: permissionManager.screenRecordingNeedsRelaunch ? "Quit Zerm to Finish" : "Open System Settings",
+                buttonAction: {
+                    if permissionManager.screenRecordingNeedsRelaunch { NSApp.terminate(nil) }
+                    else { permissionManager.requestScreenRecordingPermission() }
+                },
+                infoTipMessage: String(localized: "Zerm can read on-screen text when Screen Context is enabled. Zerm does not save that captured text to disk, but enhancement requests can send it to your configured enhancement provider. Choose an on-device provider to keep it on your Mac. After enabling Screen Recording, fully quit and reopen Zerm if this check stays red."),
+                infoTipLink: Links.docString(.contextualAwareness)
+            )
+        case .shortcut:
+            PermissionCard(
+                icon: "keyboard", title: "Keyboard Shortcut",
+                description: "Set up a keyboard shortcut to use Zerm anywhere",
+                isGranted: isGranted(permission), statusTitle: "Not set", buttonTitle: "Configure Shortcut",
+                buttonAction: {
+                    NotificationCenter.default.post(
+                        name: .navigateToDestination, object: nil,
+                        userInfo: ["destination": "Settings"]
+                    )
+                },
+                infoTipMessage: String(localized: "Not a macOS permission — this is simply whether you have picked a key to start dictation with. Without one there is no way to open the recorder except from the menu bar. Configure Shortcut takes you to the Settings pane where you choose it."),
+                infoTipLink: Links.docString(.shortcuts)
+            )
+        }
+    }
+
+    private func refreshPermissions() {
+        permissionManager.checkAllPermissions()
+        permissionManager.pollPermissions(forSeconds: 2)
+    }
+
+    private func openPrivacySettings(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
         }
     }
 }

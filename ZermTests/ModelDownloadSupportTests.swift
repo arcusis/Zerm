@@ -2,6 +2,13 @@ import XCTest
 @testable import Zerm
 
 final class ModelDownloadSupportTests: XCTestCase {
+    func testCatalogStatusPrioritizesPauseAndDownloadOverInstalledState() {
+        XCTAssertEqual(ModelCatalogStatus.resolve(isDownloaded: false, isDownloading: false, isPaused: false), .available)
+        XCTAssertEqual(ModelCatalogStatus.resolve(isDownloaded: true, isDownloading: true, isPaused: false), .downloading)
+        XCTAssertEqual(ModelCatalogStatus.resolve(isDownloaded: true, isDownloading: true, isPaused: true), .paused)
+        XCTAssertEqual(ModelCatalogStatus.resolve(isDownloaded: true, isDownloading: false, isPaused: false), .downloaded)
+    }
+
     func testStateMachinePauseResumeCancelFailureAndCompletion() {
         var machine = ModelDownloadStateMachine()
         machine.start()
