@@ -42,6 +42,7 @@ struct ClipboardHistorySettingsView: View {
     @State private var archiveAction: ArchiveAction = .export
     @State private var showingArchiveError = false
     @State private var archiveError = ""
+    @State private var isArchiveBusy = false
     @State private var soundChoices: [String: String] = [:]
     @State private var soundVolumes: [String: Double] = [:]
 
@@ -49,7 +50,7 @@ struct ClipboardHistorySettingsView: View {
     private let retentionChoices: [ClipboardRetentionPeriod] = [
         .days(1), .days(3), .days(7), .days(14), .days(30), .days(90), .days(180), .days(365), .unlimited, .never
     ]
-    private let soundActions: [(id: String, title: String, key: String, fallback: String)] = [
+    private let soundActions: [(id: String, title: LocalizedStringKey, key: String, fallback: String)] = [
         ("copy", "Copy", ClipboardHistorySettings.Keys.copySound, "Pop"),
         ("paste", "Paste", ClipboardHistorySettings.Keys.pasteSound, "Purr"),
         ("delete", "Delete", ClipboardHistorySettings.Keys.deleteSound, "Basso"),
@@ -162,7 +163,7 @@ struct ClipboardHistorySettingsView: View {
                 ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
                     HStack(spacing: 12) {
                         Text(kindTitle(kind)).frame(maxWidth: .infinity, alignment: .leading)
-                        Picker("Retention for \(kindTitle(kind))", selection: retentionBinding(for: kind)) {
+                        Picker("Retention for \(Text(kindTitle(kind)))", selection: retentionBinding(for: kind)) {
                             ForEach(retentionChoicesIncludingCurrent(for: kind), id: \.storageValue) { period in
                                 retentionTitle(for: period).tag(period.storageValue)
                             }
@@ -188,7 +189,10 @@ struct ClipboardHistorySettingsView: View {
                 Toggle("Warn before clearing history", isOn: $warnBeforeClear)
                 HStack {
                     Button("Export History…", action: exportArchive)
+                        .disabled(isArchiveBusy)
                     Button("Import History…", action: importArchive)
+                        .disabled(isArchiveBusy)
+                    if isArchiveBusy { ProgressView().controlSize(.small).accessibilityLabel("Loading clipboard history") }
                     Spacer()
                     Button("Clear history…", role: .destructive) {
                         if warnBeforeClear { showingClearConfirmation = true }
@@ -238,7 +242,7 @@ struct ClipboardHistorySettingsView: View {
                 Text("Archive Password").font(.headline)
                 SecureField("Password", text: $archivePassword)
                 HStack {
-                    Button("Cancel") { showingArchivePassword = false }
+                    Button("Cancel") { showingArchivePassword = false }.keyboardShortcut(.cancelAction)
                     Spacer()
                     Button("Continue", action: continueArchiveAction).keyboardShortcut(.defaultAction)
                 }
@@ -261,7 +265,7 @@ struct ClipboardHistorySettingsView: View {
                         Image(systemName: "xmark.circle.fill")
                     }
                     .buttonStyle(.plain)
-                    .opacity(hoveredAppID == app.bundleIdentifier ? 1 : 0)
+                    .foregroundStyle(hoveredAppID == app.bundleIdentifier ? Color.primary : Color.secondary)
                     .accessibilityLabel("Remove \(app.appName)")
                 }
                 .padding(7)
@@ -271,7 +275,7 @@ struct ClipboardHistorySettingsView: View {
         }
     }
 
-    private func soundRow(_ action: (id: String, title: String, key: String, fallback: String)) -> some View {
+    private func soundRow(_ action: (id: String, title: LocalizedStringKey, key: String, fallback: String)) -> some View {
         HStack(spacing: 10) {
             Text(action.title).frame(width: 75, alignment: .leading)
             Picker(action.title, selection: soundBinding(for: action)) {
@@ -292,6 +296,7 @@ struct ClipboardHistorySettingsView: View {
             .accessibilityLabel(String(localized: "Play preview"))
             Slider(value: volumeBinding(for: action), in: 0...1)
                 .frame(minWidth: 90)
+                .accessibilityLabel(Text(action.title))
             Text("\(Int((soundVolumes[action.id] ?? 0.22) * 100))%")
                 .monospacedDigit()
                 .frame(width: 42, alignment: .trailing)
@@ -306,9 +311,11 @@ struct ClipboardHistorySettingsView: View {
     }
 
     private var runningAppSuggestions: [(url: URL, name: String, bundleId: String, icon: NSImage)] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications.compactMap { app in
             guard let id = app.bundleIdentifier,
                   let url = app.bundleURL,
+                  seen.insert(id).inserted,
                   !selectedApps.contains(where: { $0.bundleIdentifier == id }) else { return nil }
             return (url, app.localizedName ?? url.deletingPathExtension().lastPathComponent, id, app.icon ?? NSWorkspace.shared.icon(forFile: url.path))
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -347,7 +354,7 @@ struct ClipboardHistorySettingsView: View {
         return Text("\(size / 1_048_576) MB")
     }
 
-    private func soundBinding(for action: (id: String, title: String, key: String, fallback: String)) -> Binding<String> {
+    private func soundBinding(for action: (id: String, title: LocalizedStringKey, key: String, fallback: String)) -> Binding<String> {
         Binding(
             get: { soundChoices[action.key] ?? "none" },
             set: { value in
@@ -357,7 +364,7 @@ struct ClipboardHistorySettingsView: View {
         )
     }
 
-    private func volumeBinding(for action: (id: String, title: String, key: String, fallback: String)) -> Binding<Double> {
+    private func volumeBinding(for action: (id: String, title: LocalizedStringKey, key: String, fallback: String)) -> Binding<Double> {
         Binding(
             get: { soundVolumes[action.id] ?? 0.22 },
             set: { value in
@@ -367,7 +374,7 @@ struct ClipboardHistorySettingsView: View {
         )
     }
 
-    private func chooseSoundFile(for action: (id: String, title: String, key: String, fallback: String)) {
+    private func chooseSoundFile(for action: (id: String, title: LocalizedStringKey, key: String, fallback: String)) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio]
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
@@ -460,7 +467,7 @@ struct ClipboardHistorySettingsView: View {
         )
     }
 
-    private func kindTitle(_ kind: ClipboardItemKind) -> String {
+    private func kindTitle(_ kind: ClipboardItemKind) -> LocalizedStringKey {
         switch kind {
         case .plainText: "Plain text"
         case .richText: "Rich text"
@@ -502,12 +509,11 @@ struct ClipboardHistorySettingsView: View {
 
     private func clearHistory() {
         Task {
-            try? await ClipboardHistoryRuntime.shared.store?.clear(
-                includingPinned: false,
-                keepingFavorites: keepFavorites,
-                keepingTagged: nil
-            )
-            await refreshStorageSize()
+            do {
+                guard let store = ClipboardHistoryRuntime.shared.store else { throw ClipboardHistoryError.missingPayload }
+                try await store.clear(includingPinned: false, keepingFavorites: keepFavorites, keepingTagged: nil)
+                await refreshStorageSize()
+            } catch { archiveError = error.localizedDescription; showingArchiveError = true }
         }
     }
 
@@ -536,7 +542,9 @@ struct ClipboardHistorySettingsView: View {
         panel.nameFieldStringValue = String(localized: "Zerm Clipboard History.zermclip")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let password = archivePassword
+        isArchiveBusy = true
         Task {
+            defer { isArchiveBusy = false }
             do { try await ClipboardHistoryRuntime.shared.exportArchive(to: url, password: password.isEmpty ? nil : password) }
             catch { archiveError = error.localizedDescription; showingArchiveError = true }
         }
@@ -547,7 +555,9 @@ struct ClipboardHistorySettingsView: View {
         panel.allowedContentTypes = [.data]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let password = archivePassword
+        isArchiveBusy = true
         Task {
+            defer { isArchiveBusy = false }
             do {
                 try await ClipboardHistoryRuntime.shared.importArchive(from: url, password: password.isEmpty ? nil : password)
                 await refreshStorageSize()

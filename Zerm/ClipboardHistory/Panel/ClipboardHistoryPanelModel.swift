@@ -143,6 +143,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
     @Published var selectedIDs: [UUID] = [] { didSet { loadSelectedDetail() } }
     @Published private(set) var detailItem: ClipboardItem?
+    @Published private(set) var isLoadingDetail = false
     @Published private(set) var sourceApps: [ClipboardSourceAppCount] = []
     @Published var errorMessage: String?
     @Published var isPinned = false
@@ -154,6 +155,8 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     @Published var isClearConfirmationVisible = false
     @Published var isTextEditorVisible = false
     @Published var textBeingEdited = ""
+    @Published private(set) var editingErrorMessage: String?
+    @Published private(set) var isSavingEdit = false
 
     let registry = ClipboardPanelCommandRegistry()
     var onCommand: ((String) -> Void)?
@@ -166,6 +169,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private var loadChain: Task<Void, Never>?
     private var pageOffset = 0
     @Published private(set) var hasLoadedItems = false
+    @Published private(set) var isLoadingItems = false
     @Published private(set) var canLoadMore = false
     @Published private(set) var isLoadingMore = false
     private var ocrRefreshAttempts = 0
@@ -208,9 +212,19 @@ final class ClipboardHistoryPanelModel: ObservableObject {
 
     var selectedItem: ClipboardItem? { selection.first }
 
-    func reload() {
+    var hasActiveFilters: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || appFilter != nil || railFilter != .history || dateFilter != .anytime
+    }
+
+    func reload(debounced: Bool = false) {
         reloadTask?.cancel()
         reloadTask = Task { [weak self] in
+            if debounced {
+                do { try await Task.sleep(for: .milliseconds(120)) }
+                catch { return }
+            }
+            guard !Task.isCancelled else { return }
             await self?.loadItems()
         }
     }
@@ -237,6 +251,8 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     private func performLoadItems(preservingLoadedPage: Bool) async {
+        isLoadingItems = true
+        defer { isLoadingItems = false }
         let revision = queryRevision
         let searchText = ClipboardPanelQuery.parse(query).text
         if !preservingLoadedPage { pageOffset = 0 }
@@ -246,6 +262,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         let page: (items: [ClipboardItem], total: Int)
         do { page = try await fetchPage(ascending: ascending, offset: 0, limit: requestedCount) }
         catch {
+            guard revision == queryRevision else { return }
             hasLoadedItems = true
             errorMessage = error.localizedDescription
             return
@@ -417,6 +434,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
             let loaded = try await store.itemWithPayload(item.id)
             select(item)
             editingItemID = item.id
+            editingErrorMessage = nil
             textBeingEdited = ClipboardPanelText.plainText(from: loaded.representations, fallback: loaded.preview)
             isTextEditorVisible = true
         } catch { errorMessage = error.localizedDescription }
@@ -425,20 +443,25 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private func loadSelectedDetail() {
         detailTask?.cancel()
         detailItem = nil
+        isLoadingDetail = false
         guard let id = selectedIDs.first else { return }
         if let item = items.first(where: { $0.id == id }), !item.representations.isEmpty {
             detailItem = item
             return
         }
+        isLoadingDetail = true
         detailTask = Task { [weak self] in
             guard let self else { return }
+            defer { if !Task.isCancelled, self.selectedIDs.first == id { self.isLoadingDetail = false } }
             do {
                 let loaded = try await self.store.itemWithPayload(id)
                 guard !Task.isCancelled, self.selectedIDs.first == id else { return }
                 self.detailItem = loaded
             } catch {
-                guard !Task.isCancelled else { return }
-                self.errorMessage = error.localizedDescription
+                guard !Task.isCancelled, self.selectedIDs.first == id else { return }
+                if self.isTextEditorVisible, self.editingItemID == id {
+                    self.editingErrorMessage = error.localizedDescription
+                } else { self.errorMessage = error.localizedDescription }
             }
         }
     }
@@ -446,7 +469,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private func queryChanged() {
         queryRevision += 1
         applyQuery()
-        if hasLoadedItems { reload() }
+        if hasLoadedItems { reload(debounced: true) }
     }
 
     private func fetchPage(ascending: Bool, offset: Int, limit: Int) async throws -> (items: [ClipboardItem], total: Int) {
@@ -504,37 +527,48 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func transformSelection(_ transform: ClipboardTextTransform) async {
-        guard let selectedItem,
-              let item = try? await store.itemWithPayload(selectedItem.id),
-              let value = transform.apply(to: ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)),
-              let replacement = ClipboardItem.capture(
+        guard let selectedItem else { return }
+        do {
+            let item = try await store.itemWithPayload(selectedItem.id)
+            guard let value = transform.apply(to: ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)) else {
+                errorMessage = String(localized: "This transform cannot be applied to the selected text.")
+                return
+            }
+            guard let replacement = ClipboardItem.capture(
                 representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(value.utf8))],
                 sourceApp: item.sourceApp
-              ),
-              let saved = try? await store.capture(replacement) else { return }
-        await loadItems()
-        select(saved)
+                  ) else { throw ClipboardHistoryError.missingPayload }
+            let saved = try await store.capture(replacement)
+            await loadItems()
+            select(saved)
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func mergeSelection() async {
-        guard let merged = try? await store.merge(selectedIDs) else { return }
-        await loadItems()
-        select(merged)
+        do {
+            guard let merged = try await store.merge(selectedIDs) else { throw ClipboardHistoryError.missingPayload }
+            await loadItems()
+            select(merged)
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func splitSelection() async {
         guard let item = selectedItem else { return }
-        _ = try? await store.split(item.id)
+        do { _ = try await store.split(item.id) }
+        catch { errorMessage = error.localizedDescription; return }
         await loadItems()
     }
 
     func saveEditedText() async {
-        guard let id = editingItemID else { return }
+        guard let id = editingItemID, !isSavingEdit else { return }
+        isSavingEdit = true
+        editingErrorMessage = nil
+        defer { isSavingEdit = false }
         do {
-            _ = try await store.editText(id, text: textBeingEdited)
+            guard try await store.editText(id, text: textBeingEdited) != nil else { throw ClipboardHistoryError.missingPayload }
             isTextEditorVisible = false
             await loadItems()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { editingErrorMessage = error.localizedDescription }
     }
 
     func clearHistory() async {
@@ -554,7 +588,8 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         var reordered = favorites.map(\.id)
         let moved = reordered.remove(at: index)
         reordered.insert(moved, at: target)
-        try? await store.reorderFavorites(reordered)
+        do { try await store.reorderFavorites(reordered) }
+        catch { errorMessage = error.localizedDescription; return }
         reload()
     }
 
@@ -637,13 +672,15 @@ final class ClipboardHistoryPanelModel: ObservableObject {
             .init(id: "showInHistory", title: String(localized: "Show in History"), isEnabled: { !$0.isEmpty }) {
                 [weak self] _ in self?.onCommand?("showInHistory")
             })
-        registry.register(.init(id: "merge", title: String(localized: "Merge Selected Items"), isEnabled: { $0.count > 1 }) { [weak self] _ in
+        registry.register(.init(id: "merge", title: String(localized: "Merge Selected Items"), isEnabled: { selection in
+            selection.count > 1 && selection.allSatisfy { [.plainText, .richText, .url, .email, .color].contains($0.kind) }
+        }) { [weak self] _ in
             Task { await self?.mergeSelection() }
         })
         registry.register(.init(id: "split", title: String(localized: "Split into Lines"), isEnabled: { $0.count == 1 && [.plainText, .richText].contains($0[0].kind) }) { [weak self] _ in
             Task { await self?.splitSelection() }
         })
-        registry.register(.init(id: "edit", title: String(localized: "Edit Text"), isEnabled: { $0.count == 1 && [.plainText, .richText].contains($0[0].kind) }) { [weak self] _ in
+        registry.register(.init(id: "edit", title: String(localized: "Edit Text"), isEnabled: { $0.count == 1 && [.plainText, .richText, .code, .url, .email, .color].contains($0[0].kind) }) { [weak self] _ in
             guard let self, let item = self.selectedItem else { return }
             Task { await self.beginEditing(item) }
         })
@@ -675,7 +712,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         registry.register(.init(id: "resetPasteSequence", title: String(localized: "Reset Paste Sequence")) { [weak self] _ in self?.onCommand?("resetPasteSequence") })
         for transform in ClipboardTextTransform.allCases {
             registry.register(.init(id: "transform.\(transform.rawValue)", title: transform.localizedName, isEnabled: { selection in
-                selection.count == 1 && [.plainText, .richText, .url, .email, .color].contains(selection[0].kind)
+                selection.count == 1 && [.plainText, .richText, .code, .url, .email, .color].contains(selection[0].kind)
             }) { [weak self] _ in
                 Task { await self?.transformSelection(transform) }
             })

@@ -130,6 +130,47 @@ enum ClipboardHistoryRenderError: Error {
 @Suite(.serialized)
 struct ClipboardHistoryPanelTests {
     @MainActor
+    @Test func emptyFilteredPageKeepsRecoveryAndClearFiltersRestoresHistory() async throws {
+        try await withPanelModel { model, store, _ in
+            let item = try #require(ClipboardItem.capture(representations: [text("Keep this history item")], sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor")))
+            _ = try await store.capture(item)
+            await model.loadItems()
+            model.query = "no-such-text"
+            await model.loadItems()
+            #expect(model.items.isEmpty)
+            #expect(model.hasActiveFilters)
+            model.clearFilters()
+            await model.loadItems()
+            #expect(!model.hasActiveFilters)
+            #expect(model.visibleItems.map(\.id) == [item.id])
+            model.railFilter = .favorites
+            await model.loadItems()
+            #expect(model.visibleItems.isEmpty && model.hasActiveFilters)
+            model.clearFilters()
+            await model.loadItems()
+            #expect(model.visibleItems.map(\.id) == [item.id])
+        }
+    }
+
+    @MainActor
+    @Test func removedItemCannotSilentlyDiscardEditorDraft() async throws {
+        try await withPanelModel { model, store, _ in
+            let item = try #require(ClipboardItem.capture(representations: [text("Original")], sourceApp: .init(bundleIdentifier: nil, name: nil)))
+            _ = try await store.capture(item)
+            await model.loadItems()
+            await model.beginEditing(item)
+            model.textBeingEdited = "Unsaved draft"
+            try await store.delete(item.id)
+            await model.saveEditedText()
+            #expect(model.isTextEditorVisible)
+            #expect(model.textBeingEdited == "Unsaved draft")
+            #expect(model.editingErrorMessage != nil)
+            #expect(model.errorMessage == nil)
+            #expect(!model.isSavingEdit)
+        }
+    }
+
+    @MainActor
     @Test func copyAndEditLoadFullPayloadInsteadOfTruncatedMetadata() async throws {
         try await withPanelModel { model, store, _ in
             let value = String(repeating: "long clipboard text ", count: 60) + "end-marker"
@@ -397,6 +438,46 @@ struct ClipboardHistoryPanelTests {
             #expect(ClipboardTextTransform.allCases.allSatisfy {
                 model.registry.command(withID: "transform.\($0.rawValue)", for: oneItem) != nil
             })
+        }
+    }
+
+    @MainActor
+    @Test func codeItemCanFormatJSONAndOpenEditorThroughCommands() async throws {
+        try await withPanelModel { model, store, _ in
+            let value = "{\"value\":1}"
+            let code = ClipboardItem(contentHash: "code-actions", kind: .code, representations: [text(value)], preview: value, sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor"))
+            _ = try await store.capture(code)
+            await model.loadItems()
+            let command = try #require(model.registry.command(withID: "transform.jsonPrettyPrint", for: model.selection))
+            command.perform(model.selection)
+            await eventually { model.selectedItem?.id != nil && model.selectedItem?.id != code.id }
+            let formatted = try #require(model.selectedItem)
+            let payload = try await store.itemWithPayload(formatted.id)
+            let formattedText = ClipboardPanelText.plainText(from: payload.representations, fallback: payload.preview)
+            #expect(formattedText.contains("\n"))
+            let object = try #require(JSONSerialization.jsonObject(with: Data(formattedText.utf8)) as? [String: Int])
+            #expect(object["value"] == 1)
+            let edit = try #require(model.registry.command(withID: "edit", for: model.selection))
+            edit.perform(model.selection)
+            await eventually { model.isTextEditorVisible }
+            #expect(model.textBeingEdited == formattedText)
+        }
+    }
+
+    @MainActor
+    @Test func invalidJSONTransformExplainsFailureAndPreservesOriginal() async throws {
+        try await withPanelModel { model, store, _ in
+            let value = "{invalid JSON}"
+            let code = ClipboardItem(contentHash: "invalid-json-actions", kind: .code, representations: [text(value)], preview: value, sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor"))
+            _ = try await store.capture(code)
+            await model.loadItems()
+            let command = try #require(model.registry.command(withID: "transform.jsonPrettyPrint", for: model.selection))
+            command.perform(model.selection)
+            await eventually { model.errorMessage != nil }
+            #expect(model.errorMessage == String(localized: "This transform cannot be applied to the selected text."))
+            #expect(model.selectedIDs == [code.id])
+            let original = try await store.itemWithPayload(code.id)
+            #expect(ClipboardPanelText.plainText(from: original.representations, fallback: original.preview) == value)
         }
     }
 
@@ -864,8 +945,11 @@ struct ClipboardHistoryPanelTests {
             longList.select(longItems[118])
             let appFiltered = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1, samples[1].1])
             appFiltered.appFilter = "com.apple.finder"
+            let commands = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1])
+            commands.select(samples[0].1)
+            commands.isCommandPaletteVisible = true
 
-            for (name, model) in [("empty", empty), ("no-matches", noMatches), ("sidebar-app-filter", appFiltered), ("long-list", longList)] {
+            for (name, model) in [("empty", empty), ("no-matches", noMatches), ("sidebar-app-filter", appFiltered), ("long-list", longList), ("commands", commands)] {
                 try await ClipboardHistoryRenderSupport.renderMatrix(
                     ClipboardHistoryPanelView(model: model, linkService: service),
                     screen: "panel-\(name)",

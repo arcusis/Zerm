@@ -212,7 +212,7 @@ struct ClipboardRichPreview: View {
     private func textCard() -> some View {
         return ScrollView {
             Text(item.preview.isEmpty ? String(localized: "No text preview") : item.preview)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 13))
                 .lineSpacing(3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
