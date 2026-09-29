@@ -182,7 +182,7 @@ struct ClipboardLibraryTests {
 
     @MainActor
     @Test func rendersLibrarySettingsAndTagScreensAppearanceLocaleMatrix() async throws {
-        try await withStore { store, feed in
+        try await withStore { store, feed, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/library", isDirectory: true)
             let tag = try await store.createTag(name: "Research", colorHex: "#4268AD")
             let first = try #require(ClipboardItem.capture(
