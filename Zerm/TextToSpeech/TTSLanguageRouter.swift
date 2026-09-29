@@ -44,17 +44,57 @@ enum TTSLanguageRouter {
         return code
     }
 
+    @MainActor
     static func resolve(
         provider: any TTSProvider,
         voice: TTSVoice,
         text: String,
-        appleVoices: [TTSVoice]? = nil
+        appleVoices: [TTSVoice]? = nil,
+        blueIsInstalled: Bool? = nil
     ) throws -> Resolution {
         guard let language = dominantLanguage(of: text) else {
             return Resolution(provider: provider, voice: voice, rerouteNotice: nil)
         }
         let voiceLanguage = languageCode(voice.language)
+
+        if provider.kind == .blue, language == "he" || language == "en",
+           !(blueIsInstalled ?? BlueModelManager.shared.isInstalled) {
+            let apple = AppleSystemTTSProvider()
+            let candidates = appleVoices ?? apple.voices
+            if let appleVoice = bestVoice(for: language, in: candidates) {
+                let format = String(localized: "Blue v2 is not downloaded — reading with %@")
+                return Resolution(
+                    provider: apple,
+                    voice: appleVoice,
+                    rerouteNotice: String.localizedStringWithFormat(format, appleVoice.displayName)
+                )
+            }
+            throw RoutingError.unsupportedLanguage(
+                providerName: provider.displayName,
+                languageName: Locale.current.localizedString(forLanguageCode: language) ?? language
+            )
+        }
+
         if voiceLanguage == language {
+            return Resolution(provider: provider, voice: voice, rerouteNotice: nil)
+        }
+
+        if provider.kind == .blue, language != "he", language != "en" {
+            let apple = AppleSystemTTSProvider()
+            let candidates = appleVoices ?? apple.voices
+            if let appleVoice = bestVoice(for: language, in: candidates) {
+                let format = String(localized: "Blue v2 supports Hebrew and English — reading with %@")
+                return Resolution(
+                    provider: apple,
+                    voice: appleVoice,
+                    rerouteNotice: String.localizedStringWithFormat(format, appleVoice.displayName)
+                )
+            }
+            throw RoutingError.unsupportedLanguage(providerName: provider.displayName, languageName: Locale.current.localizedString(forLanguageCode: language) ?? language)
+        }
+
+        // Blue has separate model paths for Hebrew and English and selects them at synthesis.
+        if provider.kind == .blue, language == "he" || language == "en" {
             return Resolution(provider: provider, voice: voice, rerouteNotice: nil)
         }
 

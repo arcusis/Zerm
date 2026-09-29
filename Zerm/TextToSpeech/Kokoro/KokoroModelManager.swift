@@ -87,7 +87,7 @@ final class KokoroModelManager: ObservableObject {
             model: packageDir.appendingPathComponent("model.onnx").path,
             voices: packageDir.appendingPathComponent("voices.bin").path,
             tokens: packageDir.appendingPathComponent("tokens.txt").path,
-            dataDir: packageDir.appendingPathComponent(Self.package.dataDirName).path
+            dataDir: EspeakDataSupport.dataDirectory(in: modelsDirectory).path
         )
     }
 
@@ -96,7 +96,7 @@ final class KokoroModelManager: ObservableObject {
         let filesPresent = Self.package.requiredFiles.allSatisfy {
             fm.fileExists(atPath: packageDir.appendingPathComponent($0).path)
         }
-        let dataPresent = fm.fileExists(atPath: packageDir.appendingPathComponent(Self.package.dataDirName).path)
+        let dataPresent = EspeakDataSupport.containsData(in: modelsDirectory)
         isInstalled = filesPresent && dataPresent
     }
 

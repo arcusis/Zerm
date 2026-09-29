@@ -278,6 +278,7 @@ struct OfficeKokoroRuntimeIntegrationTests {
     }
 }
 
+@MainActor
 struct ReadAloudLanguageRoutingTests {
     private let hebrewVoice = TTSVoice(id: "he", displayName: "Carmit (Hebrew)", provider: .appleSystem, language: "he-IL")
     private let russianVoice = TTSVoice(id: "ru", displayName: "Milena (Russian)", provider: .appleSystem, language: "ru-RU")

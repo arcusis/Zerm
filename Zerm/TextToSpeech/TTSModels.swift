@@ -36,6 +36,7 @@ enum ReadAloudMode: String, Codable, CaseIterable, Identifiable {
 enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
     case appleSystem = "Apple System"
     case kokoro = "Kokoro"          // local, on-device (sherpa-onnx)
+    case blue = "Blue"                // local, on-device (ONNX Runtime)
     case deepgram = "Deepgram"      // default cloud provider
     case inworld = "Inworld"
     case elevenLabs = "ElevenLabs"
@@ -46,8 +47,7 @@ enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
     /// `APIKeyManager` provider identifier, or `nil` for the local engine.
     var apiKeyProvider: String? {
         switch self {
-        case .appleSystem: return nil
-        case .kokoro: return nil
+        case .appleSystem, .kokoro, .blue: return nil
         case .deepgram: return "deepgram"
         case .inworld: return "inworld"
         case .elevenLabs: return "elevenlabs"
@@ -57,7 +57,7 @@ enum TTSProviderKind: String, Codable, CaseIterable, Hashable {
         }
     }
 
-    var isLocal: Bool { self == .kokoro || self == .appleSystem }
+    var isLocal: Bool { self == .kokoro || self == .blue || self == .appleSystem }
 
     /// Engines whose voice catalogue cannot pronounce anything but English. Read Aloud reroutes
     /// other languages to an installed Apple system voice (see `TTSLanguageRouter`).

@@ -6,5 +6,7 @@
 
 #import "sherpa-onnx/c-api/c-api.h"
 #import "LocalLLM/LlamaBridge.h"
+#import <onnxruntime_c_api.h>
+#import "TextToSpeech/Blue/BlueORTBridge.h"
 
 #endif  // SWIFT_API_EXAMPLES_SHERPAONNX_BRIDGING_HEADER_H_

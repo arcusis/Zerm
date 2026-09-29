@@ -67,6 +67,11 @@ Before its first download, review the source and license notice. Kokoro download
 paused, resumed, or cancelled; paused transfer data remains available after quitting and
 reopening Zerm.
 
+**Blue v2** is an on-device voice for Hebrew and English. Its ONNX voice and pronunciation
+models download once from their pinned sources; the download notice lists MIT, CC-BY-4.0,
+and eSpeak NG attribution. The download can pause and resume, and deleting the model frees
+its space. The selected speed applies to Blue, and Preview voice uses the same local model.
+
 **Apple System** uses the voices already on the Mac, including Hebrew ones if you have
 installed them.
 
@@ -79,9 +84,11 @@ does not lose your choice. **Preview voice** plays a sample before you rely on i
 
 ### Other languages
 
-Kokoro and Deepgram speak English only. When the selection is in another language, Zerm
-reads it with the best installed Apple voice for that language and says so. If no
-matching Apple voice is installed, Zerm asks you to install one in System Settings.
+Blue speaks Hebrew and English. When selected, Zerm splits mixed Hebrew and English text
+into script runs and synthesizes each run with its matching pronunciation frontend. Blue
+keeps Russian on Apple System. Other unsupported languages use the best installed Apple
+voice for that language; if no matching voice is installed, Zerm asks you to install one
+in System Settings. When Blue is not downloaded, Hebrew uses Apple System.
 
 ## Playback
 
@@ -89,7 +96,8 @@ matching Apple voice is installed, Zerm asks you to install one in System Settin
 
 Reading is interruptible: pressing the key again stops playback immediately. Starting a
 dictation while Zerm is speaking is blocked rather than overlapped — one voice at a
-time.
+time. Speech is synthesized in sentence chunks and queued as each chunk becomes ready, so
+playback can begin before the complete selection finishes synthesizing.
 
 ## History and statistics
 

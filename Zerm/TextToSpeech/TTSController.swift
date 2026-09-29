@@ -106,6 +106,7 @@ final class TTSController: ObservableObject {
     /// Chunked, streaming synthesis + playback. Assumes a session is already started.
     private func synthesizeAndPlay(_ text: String, mode: ReadAloudMode, generation: Int) async {
         guard generation == sessionGeneration else { return }
+        let playbackPathStartedAt = ContinuousClock.now
         guard let provider = TTSProviderRegistry.provider(for: TTSSettings.providerKind) else {
             endSession(String(localized: "No speech provider selected"), beep: true); return
         }
@@ -184,7 +185,7 @@ final class TTSController: ObservableObject {
         }
 
         lastPreparedText = finalText
-        let chunks = Self.splitIntoChunks(finalText)
+        let chunks = BlueTextFrontend.sentenceChunks(finalText)
 
         player.startStreaming { [weak self] in
             Task { @MainActor [weak self] in
@@ -215,6 +216,9 @@ final class TTSController: ObservableObject {
                 if !startedPlaying {
                     startedPlaying = true
                     recorderUIManager?.markSpeechPlaying()   // first chunk → live audio bars
+                    let elapsed = playbackPathStartedAt.duration(to: .now).components
+                    let latency = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+                    logger.info("Read Aloud first audio enqueued: provider=\(spokenProvider.kind.rawValue, privacy: .public) latency=\(latency, privacy: .public)s")
                 }
             }
             player.finishEnqueueing()
@@ -233,26 +237,6 @@ final class TTSController: ObservableObject {
     private func prepareInstantText(from raw: String) -> String {
         let base = TTSSettings.smartCleanup ? TTSTextNormalizer.normalize(raw) : raw
         return base.isEmpty ? raw : base
-    }
-
-    /// Splits text into sentence-based chunks. The first chunk is a single sentence (so audio
-    /// starts fast); later chunks accumulate to ~220 chars to limit per-chunk overhead.
-    private static func splitIntoChunks(_ text: String) -> [String] {
-        var chunks: [String] = []
-        var current = ""
-        text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { sub, _, _, _ in
-            guard let sub, !sub.isEmpty else { return }
-            current += sub
-            let threshold = chunks.isEmpty ? 1 : 220
-            if current.count >= threshold {
-                chunks.append(current)
-                current = ""
-            }
-        }
-        if !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            chunks.append(current)
-        }
-        return chunks.isEmpty ? [text] : chunks
     }
 
     private func notify(_ message: String) {
