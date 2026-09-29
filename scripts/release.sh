@@ -193,6 +193,14 @@ validate_release_app "$APP_PATH"
 # Notarization rejects any ad-hoc / hardened-runtime-less nested code, and at launch
 # dyld's library validation aborts with "different Team IDs" on a downloaded copy.
 # So re-sign every nested Mach-O bottom-up (deepest first) before sealing the app.
+echo "==> Checking shipped binaries for build-machine paths"
+# A path under the builder's home folder reveals their user name to everyone who installs Zerm.
+LEAKS=$(find "$APP_PATH" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.a' \) -exec strings -a {} + 2>/dev/null | grep -c "$HOME/" || true)
+if [ "$LEAKS" -ne 0 ]; then
+    echo "error: $LEAKS strings under $HOME/ found in $APP_PATH; rebuild the native frameworks (make whisper llama)" >&2
+    exit 1
+fi
+
 echo "==> Re-signing nested code inside-out (Developer ID + hardened runtime)"
 # Collect nested bundles plus loose Mach-O helpers (e.g. Sparkle's Autoupdate),
 # then sign deepest paths first so inner bundles are sealed before their parents.
