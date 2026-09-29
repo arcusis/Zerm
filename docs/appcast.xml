@@ -3,26 +3,27 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.6</title>
+            <title>2.8.7</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.6</h3>
+                <h3>What's New in v2.8.7</h3>
                 <ul>
-                    <li>The right model, every time. Power Modes no longer lock in the dictation model, language and prompt that happened to be selected when they were created, so dictation stops switching models depending on which app is in front. Every Power Mode setting now shows "Use global setting" unless you choose otherwise.</li>
-                    <li>Parakeet keeps your last words. Stopping a dictation right after you finish speaking no longer cuts the end off, and switching between Whisper models loads the new one once instead of on every dictation.</li>
-                    <li>AI enhancement, rebuilt. One Output setting decides what happens (Instant, Instant + Refine, or Enhanced); each dictation is enhanced with exactly the prompt, provider and model it started with; the timeout setting works; and when enhancement is skipped or fails, Zerm tells you why instead of silently pasting the raw text. Prompts can now use their own provider and model.</li>
-                    <li>Transcribe File. Drop in audio or video files and get a full transcript with speaker identification, timestamps, renameable speakers, and export to TXT, Markdown, SRT, WebVTT or JSON. Open any audio file with Zerm from Finder.</li>
-                    <li>Meetings has been removed and replaced by Transcribe File. <strong>Meeting recordings saved by earlier versions are permanently deleted when 2.8.6 first launches.</strong> Dictation recordings and History are not affected.</li>
-                    <li>A wider, current model catalog. New on-device models: Parakeet Unified (English), Parakeet 110M for 8 GB Macs, and ivrit.ai Whisper models tuned for Hebrew. Outdated Whisper tiny, base and small models and Parakeet V2 are retired, and anyone using one is moved to its replacement. Recommended now picks the best English, multilingual and Hebrew models for your Mac.</li>
-                    <li>Cloud models are up to date and filterable by provider: OpenAI gpt-transcribe, Gemini 3.5 Transcribe, AssemblyAI Universal-3.5 Pro, Mistral Voxtral, and the new Gladia provider. Model settings such as Output Format and Dictionary terms are now sent the way each provider actually supports them, and custom OpenAI-compatible endpoints are verified when you save them.</li>
-                    <li>Dashboard time saved and totals follow the range you select, and History has a copy button on every row.</li>
-                    <li>Zerm is translated into Hebrew throughout, including the Dashboard, History and Models screens.</li>
+                    <li><strong>Clipboard History.</strong> Zerm now keeps a private, encrypted history of copied items, right on your Mac. Press ⇧⌘V to search it, preview any item and paste it into the app you're in. Filter by kind (text, images, links, files, colors, emails, code) or by the app it came from. Items are previewed properly: links with their title and image, Spotify, YouTube, Apple Music and SoundCloud links as media cards, files with thumbnails, colors with their values, and code with syntax highlighting. Text inside copied images is searchable.</li>
+                    <li>Clipboard History does more than paste. It has favorites, pinning, Paste Next for pasting a sequence of items, Copy & Merge (press ⌘C twice to append), text transforms, and merging or splitting items. The main window has a full Clipboard History page, too.</li>
+                    <li>Clipboard History preserves full text when copying, editing, merging or splitting. Search finds older items and text beyond the short list preview. A click selects an item to preview; double-click or Return pastes it. Empty searches offer Clear Filters, editing failures preserve drafts, and layouts and controls are clearer in English and Hebrew.</li>
+                    <li>You decide what's kept. Clipboard History has its own settings: how long each kind is kept, a storage limit, clearing on quit, restart, lock, sleep or at a set time, apps to exclude (password managers are suggested), a sound for each action, and whether links are fetched for previews. Items marked confidential by their app are ignored by default; exclude sensitive apps to avoid capturing ordinary copied text from them.</li>
+                    <li>A natural Hebrew voice for Read Aloud. The new on-device Blue voice reads Hebrew and English aloud without an internet connection. Download it from Read Aloud settings.</li>
+                    <li>Many more on-device models. The Whisper catalog is back to its full range, with English-only and quantized versions. Parakeet V2 and Redux are added, along with Moonshine for English and a Russian model. Each model shows who made it, its license and where it comes from. Downloads can be paused and resumed, even after quitting Zerm.</li>
+                    <li>Faster on M5 Macs. Dictation and on-device AI use the Neural Accelerators in M5 chips.</li>
+                    <li>Your language, every time. The language you choose in Settings is used everywhere, so Hebrew and Russian no longer come out as Arabic. With My languages, automatic detection only chooses between the languages you actually speak.</li>
+                    <li>Better with AirPods and other Bluetooth headphones. Zerm records from another microphone when one is available, so your headphones keep full sound quality while you dictate. The start sound plays when your voice is actually being picked up. Missed key releases are recovered for push-to-talk; short hybrid taps keep hands-free recording running.</li>
+                    <li>Dictation starts and pastes faster, and many screens are clearer, including Dictation History, Read Aloud History, Settings, Transcribe File, Dictation Models and Permissions.</li>
                 </ul>
             ]]></description>
-            <pubDate>Mon, 14 Sep 2026 05:22:15 +0000</pubDate>
-            <sparkle:version>286</sparkle:version>
-            <sparkle:shortVersionString>2.8.6</sparkle:shortVersionString>
+            <pubDate>Tue, 29 Sep 2026 19:03:37 +0000</pubDate>
+            <sparkle:version>287</sparkle:version>
+            <sparkle:shortVersionString>2.8.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.6/Zerm-2.8.6-macos.zip" length="34240925" type="application/octet-stream" sparkle:edSignature="6Hhbzxe5QWQPDNJ7zkz+0BVbrwh/8CnJDbBVGOkriRA3qOmbv03MUWi23be4H9ThRhoFLEBlvgtdfSYZ4qchDA=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.7/Zerm-2.8.7-macos.zip" length="38873140" type="application/octet-stream" sparkle:edSignature="jCnHuf9KH5N/2bANuWDHhqH8vyZaaGFdxHdB66JZbX7JhZ41bEgmPJM/WK6lx/ZV+dtK044bJ1UvGtXQXhqcDQ=="/>
         </item>
     </channel>
 </rss>
