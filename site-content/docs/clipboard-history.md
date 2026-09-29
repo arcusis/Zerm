@@ -4,11 +4,15 @@ Clipboard History keeps copied items in an encrypted local store. It supports te
 
 An open panel receives new copies, edits, removals, and clear operations immediately. History loads in pages as you browse. Image lists use encrypted thumbnails; original clipboard data loads when needed. Items larger than the configured maximum are skipped. Default maximum is 50 MB.
 
+The main window also has **Clipboard → History** and **Clipboard → Tags**. History is a searchable library with item-kind, source-app, tag, and date filters, sorting, multi-selection, a rich preview, and usage summaries. Select items to copy them back to the clipboard, pin or favourite them, add or remove tags, delete them, or export them as an archive. This page copies items; use the floating panel when you want to paste into the active app.
+
+Tags lists each tag with its item count. Create, rename, recolour, merge, or delete tags there. Selecting a tag opens History with that tag filter applied.
+
 ## Open and search
 
 Open the floating panel with **Shift-Command-V** or choose **Open Clipboard History** from the menu bar. The shortcut can be changed in Settings. Search matches item text, titles, source apps, tags, OCR text, and QR or barcode values. Add `kind:`, `app:`, or `tag:` tokens to filter results.
 
-Select one or more items to paste, copy, merge, or delete them. The command palette opens with **Command-K**. It includes text transforms, editing, splitting text into lines, tag actions, pinning, favourite ordering, paste-sequence controls, and history clearing. Transforms save their result as a new item.
+Select one or more items to paste, copy, merge, or delete them. The command palette opens with **Command-K**. It includes text transforms, editing, splitting text into lines, tag actions, pinning, favourite ordering, paste-sequence controls, and history clearing. Transforms save their result as a new item. Search accepts `kind:`, `app:`, and `tag:` tokens in both the panel and main-window library.
 
 The panel shows compact rows beside a large preview of the selected item. Turn on **Details** to show source app, type, size, last copy time, copy count, and tags under the preview. Active type, app, and tag filters appear below search; clear filters while keeping your search text.
 
