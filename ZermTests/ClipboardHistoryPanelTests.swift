@@ -169,6 +169,34 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
+    @Test func loadMoreAppendsEveryPageAndPreservesSelection() async throws {
+        try await withPanelModel { model, store in
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            let items = (0..<205).map { index in
+                ClipboardItem(
+                    contentHash: "panel-page-\(index)",
+                    kind: .plainText,
+                    representations: [text("Page item \(index)")],
+                    preview: "Page item \(index)",
+                    createdAt: now.addingTimeInterval(TimeInterval(index)),
+                    sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+                )
+            }
+            _ = try await store.captureBatch(items, now: now)
+            await model.loadItems()
+            let firstItem = try #require(model.items.first)
+            model.select(firstItem)
+            let selectedID = firstItem.id
+
+            while model.canLoadMore { await model.loadMore() }
+
+            #expect(model.items.count == 205)
+            #expect(model.selectedIDs == [selectedID])
+            #expect(model.canLoadMore == false)
+        }
+    }
+
+    @MainActor
     @Test func panelLoadsHistoryInPages() async throws {
         try await withPanelModel { model, store in
             let now = Date()
@@ -399,11 +427,124 @@ struct ClipboardHistoryPanelTests {
             let png = try #require(bitmap.representation(using: .png, properties: [:]))
             let directory = URL(fileURLWithPath: "/tmp/zerm-work", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let output = directory.appendingPathComponent("378-a2-panel.png")
+            let output = directory.appendingPathComponent("389-panel-before.png")
             try png.write(to: output)
             print("Clipboard history panel render: \(output.path)")
             window.close()
         }
+    }
+
+    @MainActor
+    @Test func rendersEveryPanelStateOffscreenToPNGs() async throws {
+        try await withPanelModel { _, store in
+            let directory = URL(fileURLWithPath: "/tmp/zerm-work/389-shots", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
+            let sampleImage = try pngRepresentation()
+            let rtf = ClipboardRepresentation(type: "public.rtf", data: Data("{\\rtf1\\ansi Rich clipboard sample}".utf8))
+            let samples: [(String, ClipboardItem)] = [
+                ("plain-text", panelItem(.plainText, "Release checklist", [text("Release checklist")], source: source)),
+                ("rich-text", panelItem(.richText, "Formatted clipboard sample", [rtf], source: source)),
+                ("image", panelItem(.image, "Copied image", [sampleImage], source: source)),
+                ("file", panelItem(.fileURLs, "release-notes.txt", [fileRepresentation("/tmp/zerm-work/389-file.txt")], source: source)),
+                ("link", panelItem(.url, "https://example.test/guide", [text("https://example.test/guide", type: "public.url")], source: source)),
+                ("email", panelItem(.email, "person@example.test", [text("person@example.test")], source: source)),
+                ("color", panelItem(.color, "#336699", [text("#336699")], source: source)),
+                ("other", panelItem(.other, "Other clipboard data", [], source: source)),
+            ]
+            let previewService = LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil)
+            for (name, item) in samples {
+                let model = ClipboardHistoryPanelModel(store: store, initialItems: [item])
+                model.select(item)
+                model.isDetailsVisible = true
+                try await savePanelShot(name, model: model, service: previewService, to: directory)
+            }
+
+            let emptyModel = ClipboardHistoryPanelModel(store: store)
+            await emptyModel.loadItems()
+            try await savePanelShot("empty", model: emptyModel, service: previewService, to: directory)
+
+            let noMatchModel = ClipboardHistoryPanelModel(store: store, initialItems: [samples[0].1])
+            noMatchModel.query = "kind:url no-result"
+            try await savePanelShot("no-matches", model: noMatchModel, service: previewService, to: directory)
+
+            let tagID = UUID()
+            let tagged = panelItem(.plainText, "Tagged clipboard note", [text("Tagged clipboard note")], source: source, tagIDs: [tagID])
+            let tagModel = ClipboardHistoryPanelModel(
+                store: store,
+                initialItems: [tagged],
+                initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
+            )
+            tagModel.query = "tag:Release"
+            tagModel.select(tagged)
+            try await savePanelShot("active-tag-filter", model: tagModel, service: previewService, to: directory)
+            try await savePanelShot(
+                "active-tag-filter-he",
+                model: tagModel,
+                service: previewService,
+                to: directory,
+                locale: Locale(identifier: "he")
+            )
+
+            let longItems = (0..<240).map { index in
+                panelItem(.plainText, "Long history row \(index) with searchable release notes", [text("Long history row \(index) with searchable release notes")], source: source)
+            }
+            let longModel = ClipboardHistoryPanelModel(store: store, initialItems: longItems)
+            longModel.select(longItems[118])
+            try await savePanelShot("long-list", model: longModel, service: previewService, to: directory)
+        }
+    }
+
+    @MainActor
+    private func savePanelShot(
+        _ name: String,
+        model: ClipboardHistoryPanelModel,
+        service: LinkPreviewService,
+        to directory: URL,
+        locale: Locale = .current
+    ) async throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: -3_200, y: -2_200, width: 1_040, height: 650),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(
+            rootView: ClipboardHistoryPanelView(model: model, linkService: service).environment(\.locale, locale)
+        )
+        window.contentView?.frame = NSRect(origin: .zero, size: NSSize(width: 1_040, height: 650))
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.orderFrontRegardless()
+        try await Task.sleep(nanoseconds: 180_000_000)
+        window.displayIfNeeded()
+        let content = try #require(window.contentView)
+        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        let png = try #require(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: directory.appendingPathComponent("\(name).png"))
+        window.close()
+    }
+
+    private func panelItem(
+        _ kind: ClipboardItemKind,
+        _ preview: String,
+        _ representations: [ClipboardRepresentation],
+        source: ClipboardSourceApp,
+        tagIDs: [UUID] = []
+    ) -> ClipboardItem {
+        ClipboardItem(
+            contentHash: "panel-render-\(UUID().uuidString)",
+            kind: kind,
+            representations: representations,
+            preview: preview,
+            tagIDs: tagIDs,
+            sourceApp: source
+        )
+    }
+
+    private func fileRepresentation(_ path: String) -> ClipboardRepresentation {
+        ClipboardRepresentation(type: "public.file-url", data: URL(fileURLWithPath: path).dataRepresentation)
     }
 
     /// Polls until the live feed has delivered, instead of a fixed sleep that is too short on slow CI runners.
@@ -426,8 +567,8 @@ struct ClipboardHistoryPanelTests {
         try await body(model, store)
     }
 
-    private func text(_ value: String) -> ClipboardRepresentation {
-        ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(value.utf8))
+    private func text(_ value: String, type: String = NSPasteboard.PasteboardType.string.rawValue) -> ClipboardRepresentation {
+        ClipboardRepresentation(type: type, data: Data(value.utf8))
     }
 
     private func pngRepresentation() throws -> ClipboardRepresentation {
@@ -439,5 +580,11 @@ struct ClipboardHistoryPanelTests {
         let bitmap = try #require(image.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0) })
         let data = try #require(bitmap.representation(using: .png, properties: [:]))
         return ClipboardRepresentation(type: "public.png", data: data)
+    }
+}
+
+private actor PanelPreviewFetcher: ClipboardLinkMetadataFetching {
+    func fetch(_ url: URL, kind: ClipboardPreviewLinkKind) async throws -> ClipboardLinkMetadata {
+        ClipboardLinkMetadata(title: "Guide preview", siteName: "Example", author: "Clipboard History")
     }
 }

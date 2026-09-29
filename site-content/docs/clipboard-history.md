@@ -10,6 +10,10 @@ Open the floating panel with **Shift-Command-V** or choose **Open Clipboard Hist
 
 Select one or more items to paste, copy, merge, or delete them. The command palette opens with **Command-K**. It includes text transforms, editing, splitting text into lines, tag actions, pinning, favourite ordering, paste-sequence controls, and history clearing. Transforms save their result as a new item.
 
+The panel shows compact rows beside a large preview of the selected item. Turn on **Details** to show source app, type, size, last copy time, copy count, and tags under the preview. Active type, app, and tag filters appear below search; clear filters while keeping your search text.
+
+Use **Return** to paste the selected item, **Option-Return** to paste plain text, **Command-1–9** to paste one of the first nine visible items, and **Command-K** to open the command palette. Arrow keys move selection. More history loads as you scroll; new copies update the open panel while preserving your selection.
+
 Panel settings control its position, paste-on-click and double-click behavior, quick-paste badges, favourite ordering, and confirmation before clearing. The Details pane shows source app, dates, size, tags, and recognized image text.
 
 ## Retention, storage, and privacy
