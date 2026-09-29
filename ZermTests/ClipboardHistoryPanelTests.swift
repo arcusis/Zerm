@@ -442,6 +442,46 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
+    @Test func codeItemCanFormatJSONAndOpenEditorThroughCommands() async throws {
+        try await withPanelModel { model, store, _ in
+            let value = "{\"value\":1}"
+            let code = ClipboardItem(contentHash: "code-actions", kind: .code, representations: [text(value)], preview: value, sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor"))
+            _ = try await store.capture(code)
+            await model.loadItems()
+            let command = try #require(model.registry.command(withID: "transform.jsonPrettyPrint", for: model.selection))
+            command.perform(model.selection)
+            await eventually { model.selectedItem?.id != nil && model.selectedItem?.id != code.id }
+            let formatted = try #require(model.selectedItem)
+            let payload = try await store.itemWithPayload(formatted.id)
+            let formattedText = ClipboardPanelText.plainText(from: payload.representations, fallback: payload.preview)
+            #expect(formattedText.contains("\n"))
+            let object = try #require(JSONSerialization.jsonObject(with: Data(formattedText.utf8)) as? [String: Int])
+            #expect(object["value"] == 1)
+            let edit = try #require(model.registry.command(withID: "edit", for: model.selection))
+            edit.perform(model.selection)
+            await eventually { model.isTextEditorVisible }
+            #expect(model.textBeingEdited == formattedText)
+        }
+    }
+
+    @MainActor
+    @Test func invalidJSONTransformExplainsFailureAndPreservesOriginal() async throws {
+        try await withPanelModel { model, store, _ in
+            let value = "{invalid JSON}"
+            let code = ClipboardItem(contentHash: "invalid-json-actions", kind: .code, representations: [text(value)], preview: value, sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor"))
+            _ = try await store.capture(code)
+            await model.loadItems()
+            let command = try #require(model.registry.command(withID: "transform.jsonPrettyPrint", for: model.selection))
+            command.perform(model.selection)
+            await eventually { model.errorMessage != nil }
+            #expect(model.errorMessage == String(localized: "This transform cannot be applied to the selected text."))
+            #expect(model.selectedIDs == [code.id])
+            let original = try await store.itemWithPayload(code.id)
+            #expect(ClipboardPanelText.plainText(from: original.representations, fallback: original.preview) == value)
+        }
+    }
+
+    @MainActor
     @Test func feedUpdatesOpenModelAndPropagatesRemovalAndClear() async throws {
         try await withPanelModel { model, store, defaults in
             let first = try #require(ClipboardItem.capture(

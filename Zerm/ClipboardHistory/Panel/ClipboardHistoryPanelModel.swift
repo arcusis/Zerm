@@ -530,8 +530,11 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         guard let selectedItem else { return }
         do {
             let item = try await store.itemWithPayload(selectedItem.id)
-            guard let value = transform.apply(to: ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)),
-                  let replacement = ClipboardItem.capture(
+            guard let value = transform.apply(to: ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)) else {
+                errorMessage = String(localized: "This transform cannot be applied to the selected text.")
+                return
+            }
+            guard let replacement = ClipboardItem.capture(
                 representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(value.utf8))],
                 sourceApp: item.sourceApp
                   ) else { throw ClipboardHistoryError.missingPayload }
@@ -677,7 +680,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         registry.register(.init(id: "split", title: String(localized: "Split into Lines"), isEnabled: { $0.count == 1 && [.plainText, .richText].contains($0[0].kind) }) { [weak self] _ in
             Task { await self?.splitSelection() }
         })
-        registry.register(.init(id: "edit", title: String(localized: "Edit Text"), isEnabled: { $0.count == 1 && [.plainText, .richText].contains($0[0].kind) }) { [weak self] _ in
+        registry.register(.init(id: "edit", title: String(localized: "Edit Text"), isEnabled: { $0.count == 1 && [.plainText, .richText, .code, .url, .email, .color].contains($0[0].kind) }) { [weak self] _ in
             guard let self, let item = self.selectedItem else { return }
             Task { await self.beginEditing(item) }
         })
@@ -709,7 +712,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         registry.register(.init(id: "resetPasteSequence", title: String(localized: "Reset Paste Sequence")) { [weak self] _ in self?.onCommand?("resetPasteSequence") })
         for transform in ClipboardTextTransform.allCases {
             registry.register(.init(id: "transform.\(transform.rawValue)", title: transform.localizedName, isEnabled: { selection in
-                selection.count == 1 && [.plainText, .richText, .url, .email, .color].contains(selection[0].kind)
+                selection.count == 1 && [.plainText, .richText, .code, .url, .email, .color].contains(selection[0].kind)
             }) { [weak self] _ in
                 Task { await self?.transformSelection(transform) }
             })
