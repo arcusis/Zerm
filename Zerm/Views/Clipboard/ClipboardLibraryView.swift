@@ -22,14 +22,15 @@ struct ClipboardLibraryView: View {
     @State private var showsExportError = false
     @State private var showsInspector = true
     @State private var searchFocused = false
+    @State private var showsKindFilter = false
+    @State private var showsAppFilter = false
 
     init(
         store: ClipboardHistoryStore,
-        initialTagID: UUID? = nil,
         linkService: LinkPreviewService = .shared,
         layoutDirectionOverride: LayoutDirection? = nil
     ) {
-        _model = StateObject(wrappedValue: ClipboardLibraryModel(store: store, initialTagID: initialTagID))
+        _model = StateObject(wrappedValue: ClipboardLibraryModel(store: store))
         self.linkService = linkService
         self.layoutDirectionOverride = layoutDirectionOverride
     }
@@ -132,19 +133,8 @@ struct ClipboardLibraryView: View {
                 Button(String(localized: "Unpin")) { Task { await model.togglePinned(false) } }
                 Button(String(localized: "Add to Favorites")) { Task { await model.toggleFavorite(true) } }
                 Button(String(localized: "Remove from Favorites")) { Task { await model.toggleFavorite(false) } }
-                Divider()
-                Menu(String(localized: "Add Tag")) {
-                    ForEach(model.tags) { tag in
-                        Button(tag.name) { Task { await model.setTag(tag, attached: true) } }
-                    }
-                }
-                Menu(String(localized: "Remove Tag")) {
-                    ForEach(model.tags) { tag in
-                        Button(tag.name) { Task { await model.setTag(tag, attached: false) } }
-                    }
-                }
             } label: {
-                Label("Organize", systemImage: "tag")
+                Label("Organize", systemImage: "slider.horizontal.3")
             }
             .help(String(localized: "Organize selected items"))
             Button(role: .destructive) { confirmsDelete = true } label: {
@@ -188,25 +178,49 @@ struct ClipboardLibraryView: View {
                 )
                 .frame(minWidth: 160, idealWidth: 280, maxWidth: 340)
 
-                Menu {
-                    ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
-                        Toggle(kind.libraryLocalizedName, isOn: Binding(
-                            get: { model.selectedKinds.contains(kind) },
-                            set: { _ in model.toggleKind(kind) }
-                        ))
+                Button { showsKindFilter = true } label: {
+                    filterLabel("Kind", symbol: "line.3.horizontal.decrease.circle", active: !model.selectedKinds.isEmpty)
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "Filter by Kind"))
+                .popover(isPresented: $showsKindFilter, arrowEdge: .bottom) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Button(String(localized: "All Kinds")) { model.selectedKinds.removeAll(); showsKindFilter = false }
+                            ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
+                                Button(kind.libraryLocalizedName) { model.toggleKind(kind); showsKindFilter = false }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
                     }
-                } label: { filterLabel("Kind", symbol: "line.3.horizontal.decrease.circle", active: !model.selectedKinds.isEmpty) }
-                    .help(String(localized: "Filter by Kind"))
-                Menu {
-                    Button(String(localized: "All Apps")) { model.setAppFilter(nil) }
-                    ForEach(model.appNames, id: \.self) { name in Button(name) { model.setAppFilter(name) } }
-                } label: { filterLabel("App", symbol: "app", active: model.selectedAppName != nil) }
-                    .help(String(localized: "Filter by Source App"))
-                Menu {
-                    Button(String(localized: "All Tags")) { model.setTagFilter(nil) }
-                    ForEach(model.tags) { tag in Button { model.setTagFilter(tag.id) } label: { Label(tag.name, systemImage: "tag.fill") } }
-                } label: { filterLabel("Tag", symbol: "tag", active: model.selectedTagID != nil) }
-                    .help(String(localized: "Filter by Tag"))
+                    .frame(width: 220, height: 280)
+                }
+                Button { showsAppFilter = true } label: {
+                    filterLabel("App", symbol: "app", active: model.selectedAppName != nil)
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "Filter by Source App"))
+                .popover(isPresented: $showsAppFilter, arrowEdge: .bottom) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Button(String(localized: "All Apps")) { model.setAppFilter(nil); showsAppFilter = false }
+                            ForEach(model.appNames, id: \.self) { name in
+                                Button { model.setAppFilter(name); showsAppFilter = false } label: {
+                                    HStack(spacing: 7) {
+                                        ClipboardSourceAppIcon(bundleIdentifier: model.items.first(where: { $0.sourceApp.name == name })?.sourceApp.bundleIdentifier, size: 16)
+                                        Text(verbatim: name)
+                                    }
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                    }
+                    .frame(width: 260, height: 280)
+                }
                 Picker(String(localized: "Date"), selection: Binding(get: { model.dateFilter }, set: { model.setDateFilter($0) })) {
                     Text(verbatim: String(localized: "Any Time")).tag(ClipboardLibraryDateFilter.anytime)
                     Text(verbatim: String(localized: "Today")).tag(ClipboardLibraryDateFilter.today)
@@ -232,7 +246,6 @@ struct ClipboardLibraryView: View {
                     Button(String(localized: "Clear Filters")) {
                         model.selectedKinds.removeAll()
                         model.setAppFilter(nil)
-                        model.setTagFilter(nil)
                         model.setDateFilter(.anytime)
                         model.query = ""
                     }
@@ -261,7 +274,7 @@ struct ClipboardLibraryView: View {
             } else {
                 List(selection: $model.selectedIDs) {
                     ForEach(model.items) { item in
-                        ClipboardLibraryRow(item: item, tags: model.tags, linkService: linkService)
+                        ClipboardLibraryRow(item: item, linkService: linkService)
                             .tag(item.id)
                             .contextMenu { rowMenu(item) }
                     }
@@ -287,7 +300,6 @@ struct ClipboardLibraryView: View {
         Button(String(localized: "Copy")) { model.selectedIDs = [item.id]; Task { await model.copySelection() } }
         Button(item.isPinned ? String(localized: "Unpin") : String(localized: "Pin")) { model.selectedIDs = [item.id]; Task { await model.togglePinned(!item.isPinned) } }
         Button(item.isFavorite ? String(localized: "Remove from Favorites") : String(localized: "Add to Favorites")) { model.selectedIDs = [item.id]; Task { await model.toggleFavorite(!item.isFavorite) } }
-        Menu(String(localized: "Add Tag")) { ForEach(model.tags) { tag in Button(tag.name) { model.selectedIDs = [item.id]; Task { await model.setTag(tag, attached: true) } } } }
         Button(String(localized: "Delete"), role: .destructive) { model.selectedIDs = [item.id]; confirmsDelete = true }
     }
 
@@ -334,7 +346,10 @@ struct ClipboardLibraryView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     Divider()
                     HStack(spacing: 14) {
-                        Label(item.sourceApp.name ?? String(localized: "Unknown App"), systemImage: "app")
+                        HStack(spacing: 6) {
+                            ClipboardSourceAppIcon(bundleIdentifier: item.sourceApp.bundleIdentifier, size: 16)
+                            Text(verbatim: item.sourceApp.name ?? String(localized: "Unknown App"))
+                        }
                         Spacer()
                         Text(verbatim: item.lastCopiedAt.formatted(date: .abbreviated, time: .shortened))
                     }
@@ -357,13 +372,12 @@ struct ClipboardLibraryView: View {
     }
 
     private var filtersActive: Bool {
-        !model.query.isEmpty || !model.selectedKinds.isEmpty || model.selectedAppName != nil || model.selectedTagID != nil || model.dateFilter != .anytime
+        !model.query.isEmpty || !model.selectedKinds.isEmpty || model.selectedAppName != nil || model.dateFilter != .anytime
     }
 
     private func clearFilters() {
         model.selectedKinds.removeAll()
         model.setAppFilter(nil)
-        model.setTagFilter(nil)
         model.setDateFilter(.anytime)
         model.query = ""
     }
@@ -389,59 +403,10 @@ struct ClipboardLibraryView: View {
 
 private struct ClipboardLibraryRow: View {
     let item: ClipboardItem
-    let tags: [ClipboardTag]
     let linkService: LinkPreviewService
 
     var body: some View {
-        HStack(spacing: 11) {
-            ClipboardRowThumbnail(item: item, linkService: linkService)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(verbatim: item.title?.clipboardLibraryNonEmpty ?? item.preview.clipboardLibraryNonEmpty ?? item.kind.libraryLocalizedName)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(2)
-                        .textSelection(.enabled)
-                    Spacer(minLength: 0)
-                    if item.isPinned {
-                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.accentColor)
-                            .accessibilityLabel(String(localized: "Pinned"))
-                    }
-                    if item.isFavorite {
-                        Image(systemName: "star.fill").font(.caption2).foregroundStyle(Color.accentColor)
-                            .accessibilityLabel(String(localized: "Favorite"))
-                    }
-                }
-                HStack(spacing: 6) {
-                    Text(verbatim: item.sourceApp.name ?? String(localized: "Unknown App"))
-                    Image(systemName: "circle.fill").font(.system(size: 2))
-                    Text(verbatim: item.lastCopiedAt.formatted(date: .abbreviated, time: .shortened))
-                    Spacer(minLength: 2)
-                    ForEach(tags.filter { item.tagIDs.contains($0.id) }.prefix(2)) { tag in
-                        Text(verbatim: tag.name)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(clipboardHex: tag.colorHex).opacity(0.14), in: Capsule())
-                            .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Tag: %@"), tag.name))
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Text(verbatim: item.kind.libraryLocalizedName)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: String.localizedStringWithFormat(
-            String(localized: "clipboard_row_accessibility_label"),
-            item.kind.libraryLocalizedName,
-            item.title?.clipboardLibraryNonEmpty ?? item.preview.clipboardLibraryNonEmpty ?? item.kind.libraryLocalizedName,
-            item.sourceApp.name ?? String(localized: "Unknown App"),
-            item.lastCopiedAt.formatted(date: .abbreviated, time: .shortened)
-        )))
+        ClipboardHistoryListRow(item: item, index: nil, showQuickPasteBadge: false, query: "", linkService: linkService, isSelected: false, isCurrentClipboard: false)
     }
 }
 
@@ -455,6 +420,7 @@ extension ClipboardItemKind {
         case .url: String(localized: "Link")
         case .email: String(localized: "Email")
         case .color: String(localized: "Color")
+        case .code: String(localized: "Code")
         case .other: String(localized: "Other")
         }
     }
@@ -468,6 +434,7 @@ extension ClipboardItemKind {
         case .url: "link"
         case .email: "envelope"
         case .color: "eyedropper"
+        case .code: "chevron.left.forwardslash.chevron.right"
         case .other: "doc.questionmark"
         }
     }

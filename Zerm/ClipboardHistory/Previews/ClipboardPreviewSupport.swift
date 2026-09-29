@@ -61,6 +61,10 @@ struct ClipboardLinkMetadata: Codable, Equatable, Sendable {
     var imageData: Data?
 
     var isEmpty: Bool { title == nil && siteName == nil && author == nil && iconData == nil && imageData == nil }
+    var hasPreviewContent: Bool {
+        [title, author].contains { $0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
+            || iconData?.isEmpty == false || imageData?.isEmpty == false
+    }
 }
 
 struct ClipboardOEmbed: Decodable, Equatable, Sendable {
@@ -121,10 +125,35 @@ struct ClipboardPreviewHTTPClient: Sendable {
     }
 }
 
+@MainActor
+protocol ClipboardLinkPresentationProviding: AnyObject {
+    func startFetchingMetadata(for url: URL, completionHandler: @escaping (LPLinkMetadata?, Error?) -> Void)
+    func cancel()
+}
+
+@MainActor
+private final class SystemClipboardLinkPresentationProvider: ClipboardLinkPresentationProviding {
+    private let provider = LPMetadataProvider()
+
+    func startFetchingMetadata(for url: URL, completionHandler: @escaping (LPLinkMetadata?, Error?) -> Void) {
+        provider.timeout = 10
+        provider.startFetchingMetadata(for: url, completionHandler: completionHandler)
+    }
+
+    func cancel() { provider.cancel() }
+}
+
 struct DefaultClipboardLinkMetadataFetcher: ClipboardLinkMetadataFetching {
     let http: ClipboardPreviewHTTPClient
+    private let makeProvider: @MainActor @Sendable () -> any ClipboardLinkPresentationProviding
 
-    init(http: ClipboardPreviewHTTPClient = ClipboardPreviewHTTPClient()) { self.http = http }
+    init(
+        http: ClipboardPreviewHTTPClient = ClipboardPreviewHTTPClient(),
+        makeProvider: @escaping @MainActor @Sendable () -> any ClipboardLinkPresentationProviding = { SystemClipboardLinkPresentationProvider() }
+    ) {
+        self.http = http
+        self.makeProvider = makeProvider
+    }
 
     func fetch(_ url: URL, kind: ClipboardPreviewLinkKind) async throws -> ClipboardLinkMetadata {
         if let endpoint = oEmbedEndpoint(for: url, kind: kind),
@@ -132,7 +161,8 @@ struct DefaultClipboardLinkMetadataFetcher: ClipboardLinkMetadataFetching {
            let response = try? JSONDecoder().decode(ClipboardOEmbed.self, from: data) {
             var artwork: Data?
             if let thumbnailURL = response.thumbnailURL { artwork = try? await http.data(from: thumbnailURL) }
-            return response.metadata(thumbnail: artwork)
+            let metadata = response.metadata(thumbnail: artwork)
+            if metadata.hasPreviewContent { return metadata }
         }
         return try await linkPresentationMetadata(for: url)
     }
@@ -151,9 +181,9 @@ struct DefaultClipboardLinkMetadataFetcher: ClipboardLinkMetadataFetching {
         return components?.url
     }
 
+    @MainActor
     private func linkPresentationMetadata(for url: URL) async throws -> ClipboardLinkMetadata {
-        let provider = LPMetadataProvider()
-        provider.timeout = 10
+        let provider = makeProvider()
         let metadata = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LPLinkMetadata, Error>) in
                 provider.startFetchingMetadata(for: url) { metadata, error in
@@ -163,14 +193,14 @@ struct DefaultClipboardLinkMetadataFetcher: ClipboardLinkMetadataFetching {
                 }
             }
         } onCancel: {
-            provider.cancel()
+            Task { @MainActor in provider.cancel() }
         }
-        async let icon = loadImageData(metadata.iconProvider)
-        async let image = loadImageData(metadata.imageProvider)
+        async let icon = Self.loadImageData(metadata.iconProvider)
+        async let image = Self.loadImageData(metadata.imageProvider)
         return ClipboardLinkMetadata(title: metadata.title, siteName: metadata.url?.host, author: nil, iconData: await icon, imageData: await image)
     }
 
-    private func loadImageData(_ provider: NSItemProvider?) async -> Data? {
+    nonisolated private static func loadImageData(_ provider: NSItemProvider?) async -> Data? {
         guard let provider else { return nil }
         let cancellation = ClipboardPreviewProgress()
         return await withTaskCancellationHandler {
@@ -210,12 +240,17 @@ actor ClipboardLinkPreviewCache {
         let file = cacheURL(for: url)
         guard let bytes = try? Data(contentsOf: file), let clear = try? encryption.open(bytes),
               let entry = try? JSONDecoder().decode(Entry.self, from: clear) else { return nil }
+        let lifetime: TimeInterval = entry.metadata.hasPreviewContent ? 30 * 24 * 60 * 60 : 5 * 60
+        guard Date().timeIntervalSince(entry.storedAt) < lifetime else {
+            try? FileManager.default.removeItem(at: file)
+            return nil
+        }
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
         return entry.metadata
     }
 
-    func store(_ metadata: ClipboardLinkMetadata, for url: URL) {
-        guard !metadata.isEmpty, let data = try? JSONEncoder().encode(Entry(metadata: metadata, storedAt: Date())),
+    func store(_ metadata: ClipboardLinkMetadata, for url: URL, storedAt: Date = Date()) {
+        guard let data = try? JSONEncoder().encode(Entry(metadata: metadata, storedAt: storedAt)),
               let sealed = try? encryption.seal(data) else { return }
         do {
             try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)

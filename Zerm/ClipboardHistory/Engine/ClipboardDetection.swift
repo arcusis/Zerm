@@ -44,3 +44,78 @@ enum ClipboardDetection {
         return expected.map { parts.count == $0 || parts.count == $0 + 1 } ?? false
     }
 }
+
+enum ClipboardCodeLanguage: String, CaseIterable, Sendable {
+    case swift, javascript, typescript, python, go, rust, java, kotlin
+    case c, cpp, shell, sql, json, yaml, html, css, markdown, code
+}
+
+enum ClipboardCodeDetection {
+    private static let patterns: [(ClipboardCodeLanguage, String)] = [
+        (.go, #"(?m)^\s*package\s+\w+|\bgo\s+func\b|\bfmt\.Print|:=\s*\w*"#),
+        (.swift, #"\b(?:import\s+(?:SwiftUI|Foundation|AppKit|UIKit|Combine|SwiftData)|func\s+\w+\s*\(|struct\s+\w+\s*[:{]|let\s+\w+\s*=|var\s+\w+\s*=|guard\s+.+\s+else|@(?:State|ViewBuilder|MainActor))"#),
+        (.typescript, #"\b(?:interface|type)\s+\w+\s*=|:\s*(?:string|number|boolean|void)\b|\b(?:const|let)\s+\w+\s*:\s*"#),
+        (.javascript, #"\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|\b(?:async\s+)?function\s+\w+\s*\(|\bexport\s+default\b|\bconsole\.log|=>\s*[{(]"#),
+        (.python, #"(?m)^\s*(?:def\s+\w+\s*\(|class\s+\w+\s*[:(]|from\s+\S+\s+import\s+|if\s+__name__\s*==|print\s*\()"#),
+        (.kotlin, #"\b(?:fun\s+\w+\s*\(|val\s+\w+\s*=|var\s+\w+\s*=|data\s+class\s+\w+|object\s+\w+)|\bwhen\s*\("#),
+        (.java, #"\b(?:public|private|protected)\s+(?:static\s+)?(?:class|interface|enum|void|int|String)\b|\bSystem\.out\.println"#),
+        (.cpp, #"#include\s*<(?:iostream|string|vector|map|memory|utility)>|\bstd::\w+|\bclass\s+\w+\s*\{"#),
+        (.rust, #"\b(?:fn\s+\w+\s*\(|impl\s+\w+|trait\s+\w+|enum\s+\w+|pub\s+fn|let\s+mut)|::\w+|\buse\s+\w+::"#),
+        (.c, #"#include\s*<stdio\.h>|\b(?:int|void|char)\s+main\s*\("#),
+        (.shell, #"(?m)^\s*(?:if\s+\[.+|fi|then|for\s+\w+\s+in\s+.+|export\s+\w+=.+|sudo\s+.+)$"#),
+        (.sql, #"(?im)^\s*(?:SELECT\s+.+\s+FROM\s+[\w.`"]+\s*;|INSERT\s+INTO\s+\w+\s*\(|CREATE\s+TABLE\s+\w+|UPDATE\s+\w+\s+SET)"#),
+        (.html, #"(?is)<(?:!doctype\s+html|html|head|body|div|main|section|p|script|style)(?:\s|>)"#),
+        (.css, #"(?m)(?:^|\s)[.#][\w-]+\s*\{[^}]*\b(?:color|margin|display|font|padding)\s*:"#),
+        (.yaml, #"(?m)^[A-Za-z_][\w.-]*:\s*(?:\S.*)?$"#),
+    ]
+
+    static func language(in text: String) -> ClipboardCodeLanguage? {
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+        guard lines.count >= 2 else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let fence = trimmed.firstMatch(#"(?m)^```(swift|js|javascript|ts|typescript|py|python|go|rs|rust|java|kotlin|c|cpp|sh|bash|sql|json|yaml|html|css|md|markdown)?\s*$"#) {
+            switch fence.lowercased() {
+            case "js", "javascript": return .javascript
+            case "ts", "typescript": return .typescript
+            case "py", "python": return .python
+            case "rs", "rust": return .rust
+            case "sh", "bash": return .shell
+            case "md", "markdown", "": return .markdown
+            default: return ClipboardCodeLanguage(rawValue: fence.lowercased())
+            }
+        }
+        if let data = trimmed.data(using: .utf8),
+           (trimmed.first == "{" || trimmed.first == "["),
+           (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil {
+            return .json
+        }
+        if lines.contains(where: { $0.hasPrefix("#!") }) { return .shell }
+        for (language, pattern) in patterns where trimmed.range(of: pattern, options: .regularExpression) != nil {
+            if language == .yaml {
+                let yamlKeys = trimmed.matches(of: #"(?m)^[A-Za-z_][\w.-]*:\s*[^\n]*$"#).count
+                guard yamlKeys >= 2 else { continue }
+            }
+            return language
+        }
+        let codeSignalCount = [#"[{};]"#, #"(?m)^\s{2,}\S"#, #"(?m)^\s*(?:if|for|while|return|let|const|var)\b"#]
+            .filter { trimmed.range(of: $0, options: .regularExpression) != nil }.count
+        guard codeSignalCount >= 2 else { return nil }
+        return .code
+    }
+}
+
+private extension String {
+    func matches(of pattern: String) -> [NSTextCheckingResult] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        return regex.matches(in: self, range: NSRange(startIndex..., in: self))
+    }
+
+    func firstMatch(_ pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: self, range: NSRange(startIndex..., in: self)),
+              match.numberOfRanges > 1 else { return nil }
+        if match.range(at: 1).location == NSNotFound { return "" }
+        guard let range = Range(match.range(at: 1), in: self) else { return nil }
+        return String(self[range])
+    }
+}

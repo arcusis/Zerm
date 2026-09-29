@@ -19,6 +19,8 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private var globalMonitor: Any?
     private var isShowingQuickLook = false
 
+    var targetApplicationName: String? { previousApplication?.localizedName }
+
     private override init() { super.init() }
 
     func toggle() {
@@ -37,9 +39,9 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         let model = ClipboardHistoryPanelModel(store: store)
         model.onCommand = { [weak self] id in self?.executeRegisteredCommand(id) }
         self.model = model
-        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 1_040, height: 650))
+        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 820, height: 444))
         panel.delegate = self
-        panel.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model, controller: self))
+        panel.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model, controller: self, tracksSystemClipboard: true))
         self.panel = panel
         position(panel)
         panel.makeKeyAndOrderFront(nil)
@@ -164,7 +166,10 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         switch option {
         case .lastLocation:
             if let saved = UserDefaults.standard.string(forKey: savedKey) {
-                let savedFrame = NSRectFromString(saved)
+                var savedFrame = NSRectFromString(saved)
+                // Frames saved by older layouts can be smaller than the current minimum.
+                savedFrame.size.width = max(savedFrame.width, ClipboardHistoryPanel.minimumContentSize.width)
+                savedFrame.size.height = max(savedFrame.height, ClipboardHistoryPanel.minimumContentSize.height)
                 if screen.visibleFrame.intersects(savedFrame) {
                     frame = savedFrame
                 } else {
@@ -213,6 +218,11 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             let option = modifiers.contains(.option)
             let searchHasFocus = self.panel?.firstResponder is NSTextView
 
+            if event.keyCode == 48, !modifiers.contains(.command), !modifiers.contains(.option), !modifiers.contains(.control) {
+                self.panel?.selectNextKeyView(nil)
+                return nil
+            }
+
             if event.keyCode == 53 {
                 if !model.query.isEmpty {
                     model.query = ""
@@ -244,7 +254,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             if (event.keyCode == 36 || event.keyCode == 76), let item = model.selectedItem,
                 !modifiers.contains(.control), !modifiers.contains(.shift), !modifiers.contains(.function)
             {
-                if command || (!model.isTextEditorVisible && !model.isTagEditorVisible) {
+                if command || !model.isTextEditorVisible {
                     self.paste(item, asPlainText: option)
                     return nil
                 }
@@ -338,27 +348,26 @@ extension ClipboardHistoryPanelController: @preconcurrency QLPreviewPanelDataSou
 }
 
 final class ClipboardHistoryPanel: NSPanel {
+    static let minimumContentSize = NSSize(width: 740, height: 420)
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.nonactivatingPanel, .titled, .closable, .resizable, .fullSizeContentView], backing: .buffered,
+            // Borderless: a titled window keeps a hidden title-bar strip that clips the top of the content.
+            styleMask: [.nonactivatingPanel, .borderless, .resizable, .fullSizeContentView], backing: .buffered,
             defer: false)
         isFloatingPanel = true
         level = .floating
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isMovable = true
-        isMovableByWindowBackground = true
-        title = String(localized: "Clipboard History")
-        titlebarAppearsTransparent = true
-        titleVisibility = .visible
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
-        isMovableByWindowBackground = false
-        minSize = NSSize(width: 600, height: 390)
+        isMovableByWindowBackground = true
+        minSize = Self.minimumContentSize
     }
 }

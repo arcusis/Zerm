@@ -27,7 +27,6 @@ struct ClipboardLibraryStats: Equatable {
 @MainActor
 final class ClipboardLibraryModel: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
-    @Published private(set) var tags: [ClipboardTag] = []
     @Published private(set) var appNames: [String] = []
     @Published private(set) var stats = ClipboardLibraryStats()
     @Published private(set) var detailItem: ClipboardItem?
@@ -38,7 +37,6 @@ final class ClipboardLibraryModel: ObservableObject {
     @Published var selectedIDs: Set<UUID> = []
     @Published var selectedKinds: Set<ClipboardItemKind> = []
     @Published var selectedAppName: String?
-    @Published var selectedTagID: UUID?
     @Published var dateFilter = ClipboardLibraryDateFilter.anytime
     @Published var sort = ClipboardPanelSort.lastCopy
     @Published var ascending = false
@@ -52,10 +50,9 @@ final class ClipboardLibraryModel: ObservableObject {
     private let pageSize = 100
     private var searchedRows: [ClipboardItem]?
 
-    init(store: ClipboardHistoryStore, feed: ClipboardHistoryFeed? = nil, initialTagID: UUID? = nil) {
+    init(store: ClipboardHistoryStore, feed: ClipboardHistoryFeed? = nil) {
         self.store = store
         self.feed = feed ?? ClipboardHistoryFeed.shared
-        selectedTagID = initialTagID
     }
 
     var visibleCount: Int { items.count }
@@ -70,7 +67,6 @@ final class ClipboardLibraryModel: ObservableObject {
                 await self.receive(change)
             }
         }
-        await loadTags()
         await refreshStats()
         await reload()
     }
@@ -163,11 +159,6 @@ final class ClipboardLibraryModel: ObservableObject {
         scheduleSearch()
     }
 
-    func setTagFilter(_ id: UUID?) {
-        selectedTagID = id
-        scheduleSearch()
-    }
-
     func setDateFilter(_ filter: ClipboardLibraryDateFilter) {
         dateFilter = filter
         scheduleSearch()
@@ -185,13 +176,6 @@ final class ClipboardLibraryModel: ObservableObject {
 
     func togglePinned(_ value: Bool) async { await updateSelected { try await self.store.pin($0.id, pinned: value) } }
     func toggleFavorite(_ value: Bool) async { await updateSelected { try await self.store.favorite($0.id, favorite: value) } }
-
-    func setTag(_ tag: ClipboardTag, attached: Bool) async {
-        await updateSelected { item in
-            if attached { try await self.store.attachTag(tag.id, to: item.id) }
-            else { try await self.store.detachTag(tag.id, from: item.id) }
-        }
-    }
 
     func deleteSelection() async {
         let ids = selectedIDs
@@ -225,47 +209,6 @@ final class ClipboardLibraryModel: ObservableObject {
         let payloads = await fullItems(for: selectedItems)
         let entries = payloads.map { ClipboardHistoryArchive.Entry(item: $0, favoriteOrder: nil) }
         try await Task.detached(priority: .utility) { try ClipboardHistoryArchive.write(entries, to: url) }.value
-    }
-
-    func loadTags() async {
-        tags = (try? await store.allTags()) ?? []
-    }
-
-    func createTag(name: String, colorHex: String) async {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        _ = try? await store.createTag(name: name, colorHex: colorHex)
-        await loadTags()
-    }
-
-    func updateTag(_ tag: ClipboardTag, name: String, colorHex: String) async {
-        try? await store.renameTag(tag.id, name: name)
-        try? await store.recolorTag(tag.id, colorHex: colorHex)
-        await loadTags()
-    }
-
-    func deleteTag(_ tag: ClipboardTag) async {
-        try? await store.deleteTag(tag.id)
-        if selectedTagID == tag.id { selectedTagID = nil }
-        await loadTags()
-        await reload()
-    }
-
-    func mergeTag(_ source: ClipboardTag, into destination: ClipboardTag) async {
-        guard source.id != destination.id,
-              let taggedItems = try? await store.search(tagID: source.id, limit: Int.max) else { return }
-        for item in taggedItems {
-            try? await store.attachTag(destination.id, to: item.id)
-            try? await store.detachTag(source.id, from: item.id)
-        }
-        try? await store.deleteTag(source.id)
-        await loadTags()
-        await reload()
-    }
-
-    func tagCounts() async -> [UUID: Int] {
-        var counts: [UUID: Int] = [:]
-        for tag in tags { counts[tag.id] = (try? await store.search(tagID: tag.id, limit: Int.max).count) ?? 0 }
-        return counts
     }
 
     func refreshStats() async {
@@ -316,7 +259,6 @@ final class ClipboardLibraryModel: ObservableObject {
     private func applyFilters(_ rows: [ClipboardItem], query: ClipboardPanelQuery) -> [ClipboardItem] {
         let kinds = selectedKinds.union(query.filters.kinds)
         let apps = query.filters.sourceApps
-        let tagNames = query.filters.tags
         let cutoff: Date? = switch dateFilter {
         case .anytime: nil
         case .today: Calendar.current.startOfDay(for: Date())
@@ -328,9 +270,6 @@ final class ClipboardLibraryModel: ObservableObject {
             let appValues = [item.sourceApp.name, item.sourceApp.bundleIdentifier].compactMap { $0?.localizedLowercase }
             if let selectedAppName, !appValues.contains(where: { $0.contains(selectedAppName.localizedLowercase) }) { return false }
             if !apps.isEmpty && !apps.contains(where: { token in appValues.contains(where: { $0.contains(token) }) }) { return false }
-            if let selectedTagID, !item.tagIDs.contains(selectedTagID) { return false }
-            let itemTags = tags.filter { item.tagIDs.contains($0.id) }.map { $0.name.localizedLowercase }
-            if !tagNames.isEmpty && !tagNames.contains(where: { token in itemTags.contains(where: { $0.contains(token) }) }) { return false }
             if let cutoff, item.lastCopiedAt < cutoff { return false }
             return true
         }
@@ -381,7 +320,6 @@ final class ClipboardLibraryModel: ObservableObject {
         feedRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled, let self else { return }
-            await self.loadTags()
             await self.reload()
             await self.refreshStats()
         }

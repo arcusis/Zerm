@@ -24,6 +24,7 @@ enum ClipboardItemKind: String, Codable, CaseIterable, Sendable {
     case url
     case email
     case color
+    case code
     case other
 }
 
@@ -56,13 +57,16 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
     let sourceApp: ClipboardSourceApp
 
     var thumbnail: NSImage? {
-        guard kind == .image,
-              let data = thumbnailData ?? representations.first(where: {
-                  ["public.tiff", "public.png", "public.jpeg", "public.gif", "public.bmp"].contains($0.type)
-              })?.data else {
-            return nil
+        guard kind == .image else { return nil }
+        let candidates = [thumbnailData] + representations.filter {
+            ["public.tiff", "public.png", "public.jpeg", "public.gif", "public.bmp"].contains($0.type)
+        }.map(\.data)
+        for data in candidates.compactMap({ $0 }) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
+            return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
         }
-        return NSImage(data: data)
+        return nil
     }
 
     init(
@@ -168,6 +172,11 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         if types.contains("public.file-url") { return .fileURLs }
         if types.contains("public.tiff") || types.contains("public.png") || types.contains("public.jpeg") { return .image }
         if types.contains("public.color") || types.contains(where: { $0.localizedCaseInsensitiveContains("color") }) { return .color }
+        if let text = representations.first(where: { $0.type == NSPasteboard.PasteboardType.string.rawValue })
+            .flatMap({ String(data: $0.data, encoding: .utf8) }) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.contains(where: \.isNewline), ClipboardDetection.isURL(trimmed) { return .url }
+        }
         if types.contains("public.rtf") || types.contains("public.html") || types.contains("com.apple.rtfd") { return .richText }
         if types.contains("public.url") { return .url }
         if let text = representations.first(where: { $0.type == NSPasteboard.PasteboardType.string.rawValue })
@@ -175,9 +184,21 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
             if ClipboardDetection.isEmail(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return .email }
             if ClipboardDetection.isURL(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return .url }
             if ClipboardDetection.colorToken(in: text) != nil { return .color }
+            if ClipboardCodeDetection.language(in: text) != nil { return .code }
         }
         if types.contains("public.utf8-plain-text") || types.contains("NSStringPboardType") { return .plainText }
         return .other
+    }
+
+    static func migratedKind(from legacyKind: ClipboardItemKind, representations: [ClipboardRepresentation]) -> ClipboardItemKind? {
+        let detectedKind = detectKind(in: representations)
+        if legacyKind == .richText && detectedKind == .url { return .url }
+        guard legacyKind == .plainText, detectedKind == .plainText,
+              let text = representations.first(where: {
+                  [NSPasteboard.PasteboardType.string.rawValue, "public.utf8-plain-text", "NSStringPboardType"].contains($0.type)
+              }).flatMap({ String(data: $0.data, encoding: .utf8) }),
+              ClipboardCodeDetection.language(in: text) != nil else { return nil }
+        return .code
     }
 
     private static func makePreview(from representations: [ClipboardRepresentation], kind: ClipboardItemKind) -> String {
@@ -216,6 +237,7 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         case .richText: return String(localized: "Rich text")
         case .url: return String(localized: "Link")
         case .email: return String(localized: "Email")
+        case .code: return String(localized: "Code")
         case .plainText, .other: return ""
         }
     }

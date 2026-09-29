@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LinkPresentation
 import SwiftUI
 import Testing
 
@@ -56,6 +57,39 @@ struct ClipboardPreviewTests {
         #expect(await cache.metadata(for: firstURL) == metadata)
         await cache.store(ClipboardLinkMetadata(title: String(repeating: "x", count: 200)), for: secondURL)
         #expect(await cache.count() == 0)
+    }
+
+    @Test func encryptedCacheExpiresFailureMetadataForRetry() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-preview-expiry-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = try ClipboardLinkPreviewCache(directory: directory, keyData: Data(repeating: 8, count: 32))
+        let url = try #require(URL(string: "https://partial.example.test"))
+        await cache.store(ClipboardLinkMetadata(siteName: "partial.example.test"), for: url, storedAt: Date().addingTimeInterval(-6 * 60))
+        #expect(await cache.metadata(for: url) == nil)
+    }
+
+    @MainActor
+    @Test func linkPresentationProviderStartsOnMainThread() async throws {
+        let provider = MainThreadLinkPresentationProvider()
+        let fetcher = DefaultClipboardLinkMetadataFetcher(makeProvider: { provider })
+        let url = try #require(URL(string: "https://example.test"))
+        _ = try await fetcher.fetch(url, kind: .website)
+        #expect(provider.startedOnMainThread)
+    }
+
+    @MainActor
+    @Test func cancellingLinkPresentationFetchCancelsProvider() async throws {
+        let provider = MainThreadLinkPresentationProvider(completesImmediately: false)
+        let fetcher = DefaultClipboardLinkMetadataFetcher(makeProvider: { provider })
+        let url = try #require(URL(string: "https://example.test/cancel"))
+        let task = Task { try await fetcher.fetch(url, kind: .website) }
+        while !provider.startedOnMainThread { try await Task.sleep(for: .milliseconds(10)) }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancelled metadata fetch")
+        } catch is CancellationError {}
+        #expect(provider.cancelled)
     }
 
     @Test func linkServiceFetchesOnMissAndUsesEncryptedCacheOnHit() async throws {
@@ -122,7 +156,7 @@ struct ClipboardPreviewTests {
 
     @MainActor
     @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersEachPreviewKindToPNG() async throws {
-        let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/previews", isDirectory: true)
+        let directory = URL(fileURLWithPath: "/tmp/zerm-work/414-shots/previews", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let folderURL = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-preview-folder-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
@@ -181,5 +215,26 @@ private actor PreviewFixtureFetcher: ClipboardLinkMetadataFetching {
         calls += 1
         if fails { throw URLError(.notConnectedToInternet) }
         return metadata
+    }
+}
+
+@MainActor
+private final class MainThreadLinkPresentationProvider: ClipboardLinkPresentationProviding {
+    private let completesImmediately: Bool
+    private(set) var startedOnMainThread = false
+    private(set) var cancelled = false
+    private var completion: ((LPLinkMetadata?, Error?) -> Void)?
+
+    init(completesImmediately: Bool = true) { self.completesImmediately = completesImmediately }
+
+    func startFetchingMetadata(for url: URL, completionHandler: @escaping (LPLinkMetadata?, Error?) -> Void) {
+        startedOnMainThread = Thread.isMainThread
+        completion = completionHandler
+        if completesImmediately { completionHandler(LPLinkMetadata(), nil) }
+    }
+
+    func cancel() {
+        cancelled = true
+        completion?(nil, CancellationError())
     }
 }
