@@ -664,7 +664,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func rendersPanelAppearanceAndLocaleMatrix() async throws {
-        try await withPanelModel { _, store in
+        try await withPanelModel { _, store, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/panel", isDirectory: true)
             let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
             let textItem = panelItem(.plainText, "Release checklist", [text("Release checklist")], source: source)
@@ -715,7 +715,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func panelAndLibraryInteractiveElementsHaveAccessibilityLabels() async throws {
-        try await withPanelModel { _, store in
+        try await withPanelModel { _, store, _ in
             let source = ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
             let item = try #require(ClipboardItem.capture(
                 representations: [text("Accessible clipboard sample")],
