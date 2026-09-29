@@ -684,9 +684,9 @@ class HotkeyManager: ObservableObject {
                     self.handlingWatchdogRelease = false
                 }
             },
-            shouldForceStop: { [weak self] in
+            shouldForceStop: { [weak self] releasedAt in
                 guard let self, self.engine.recordingState == .recording else { return false }
-                return mode == .pushToTalk || ProcessInfo.processInfo.systemUptime - pressedAt >= Self.hybridPressThreshold
+                return mode == .pushToTalk || HotkeyReleaseWatchdog.isHybridPushToTalk(pressDuration: releasedAt - pressedAt, threshold: Self.hybridPressThreshold)
             },
             onForceStop: { [weak self] in self?.forceStopAfterMissedRelease() }
         )
@@ -704,9 +704,9 @@ class HotkeyManager: ObservableObject {
                     self.handlingWatchdogRelease = false
                 }
             },
-            shouldForceStop: { [weak self] in
+            shouldForceStop: { [weak self] releasedAt in
                 guard let self, self.engine.recordingState == .recording else { return false }
-                return mode == .pushToTalk || ProcessInfo.processInfo.systemUptime - pressedAt >= Self.hybridPressThreshold
+                return mode == .pushToTalk || HotkeyReleaseWatchdog.isHybridPushToTalk(pressDuration: releasedAt - pressedAt, threshold: Self.hybridPressThreshold)
             },
             onForceStop: { [weak self] in self?.forceStopAfterMissedRelease() }
         )
