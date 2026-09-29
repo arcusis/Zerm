@@ -223,6 +223,7 @@ struct WhisperModelCardView: View {
                 .frame(width: 20, height: 20)
             }
         }
+        .frame(minWidth: 156, alignment: .trailing)
     }
 
     private func requestDownload() {
@@ -337,6 +338,7 @@ struct ImportedWhisperModelCardView: View {
                     .frame(width: 20, height: 20)
                 }
             }
+            .frame(minWidth: 156, alignment: .trailing)
         }
         .padding(16)
         .background(CardBackground(isSelected: isCurrent, useAccentGradientWhenSelected: isCurrent))

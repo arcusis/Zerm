@@ -199,6 +199,7 @@ struct CloudModelCardView: View {
                 .frame(width: 20, height: 20)
             }
         }
+        .frame(minWidth: 156, alignment: .trailing)
     }
     
     private var configurationSection: some View {

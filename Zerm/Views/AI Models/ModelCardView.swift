@@ -1,6 +1,25 @@
 import SwiftUI
 import AppKit
 
+enum ModelCatalogStatus: CaseIterable, Equatable {
+    case available, downloading, paused, downloaded
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .available: "Available"
+        case .downloading: "Downloading"
+        case .paused: "Paused"
+        case .downloaded: "Downloaded"
+        }
+    }
+
+    static func resolve(isDownloaded: Bool, isDownloading: Bool, isPaused: Bool) -> ModelCatalogStatus {
+        if isPaused { return .paused }
+        if isDownloading { return .downloading }
+        return isDownloaded ? .downloaded : .available
+    }
+}
+
 struct ModelCardView: View {
     let model: any TranscriptionModel
     let fluidAudioModelManager: FluidAudioModelManager
@@ -170,6 +189,7 @@ private struct SherpaOnnxModelCardView: View {
                     .controlSize(.small)
                 }
             }
+            .frame(minWidth: 156, alignment: .trailing)
         }
         .padding(16)
         .background(CardBackground(isSelected: isCurrent, useAccentGradientWhenSelected: isCurrent))

@@ -235,6 +235,7 @@ struct FluidAudioModelCardView: View {
                 .frame(width: 20, height: 20)
             }
         }
+        .frame(minWidth: 156, alignment: .trailing)
     }
 
     private func requestDownload() {

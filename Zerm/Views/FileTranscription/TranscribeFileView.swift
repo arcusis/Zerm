@@ -46,7 +46,11 @@ struct TranscribeFileView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                dropZone
+                if queue.jobs.isEmpty {
+                    dropZone
+                } else {
+                    addFilesRow
+                }
                 FileTranscriptionOptionsView()
 
                 if !queue.jobs.isEmpty {
@@ -87,6 +91,21 @@ struct TranscribeFileView: View {
         .accessibilityIdentifier("transcribe-file-drop-zone")
     }
 
+    private var addFilesRow: some View {
+        HStack {
+            Label("Add files", systemImage: "plus")
+                .font(.headline)
+            Spacer()
+            Button("Choose Files…") { isChoosingFiles = true }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityIdentifier("transcribe-file-add-files")
+    }
+
     private var jobList: some View {
         GroupBox {
             VStack(spacing: 0) {
@@ -122,25 +141,26 @@ private struct FileTranscriptionJobRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(iconColor)
-                .frame(width: 28)
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: job.fileName)
                     .fontWeight(.medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                status
                 Text(verbatim: summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 12)
+            status
+                .frame(width: 180, alignment: .leading)
+            Text(verbatim: duration)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .trailing)
             actions
+                .frame(width: 180, alignment: .trailing)
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())
@@ -237,24 +257,6 @@ private struct FileTranscriptionJobRow: View {
         .accessibilityLabel("Remove from list")
     }
 
-    private var icon: String {
-        switch job.state {
-        case .completed: "checkmark.circle.fill"
-        case .failed: "exclamationmark.circle.fill"
-        case .cancelled: "stop.circle"
-        case .queued: "clock"
-        case .converting, .transcribing, .diarizing: "waveform"
-        }
-    }
-
-    private var iconColor: Color {
-        switch job.state {
-        case .completed: .green
-        case .failed: .red
-        default: .secondary
-        }
-    }
-
     private var summary: String {
         let options = job.options
         let model = modelManager.allAvailableModels.first { $0.name == options.modelName }
@@ -271,5 +273,10 @@ private struct FileTranscriptionJobRow: View {
             parts.append(String(localized: "No speaker labels"))
         }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private var duration: String {
+        guard let transcript = job.transcript else { return "—" }
+        return transcript.timestamp(transcript.duration)
     }
 }

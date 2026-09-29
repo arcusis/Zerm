@@ -163,9 +163,9 @@ struct ModelManagementView: View {
     private var defaultModelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
-                Text("Default Model")
+                Label("Default Model", systemImage: "pin.fill")
                     .font(.headline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.accentColor)
                 InfoTip(
                     String(localized: "The model that transcribes your speech unless a Power Mode says otherwise. Choose a different one with Set as Default on any card below."),
                     doc: .models
@@ -188,6 +188,7 @@ struct ModelManagementView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CardBackground(isSelected: false))
         .cornerRadius(10)
+        .accessibilityIdentifier("dictation-default-model")
     }
 
     /// A selected local model whose files are missing (never downloaded, replaced by a migration,
@@ -399,9 +400,9 @@ struct ModelManagementView: View {
                 importLocalModelCard
             case .cloud:
                 cloudProviderChips
-                modelCards(filteredCloudModels)
+                modelCatalogSections(filteredCloudModels)
             case .custom:
-                modelCards(transcriptionModelManager.allAvailableModels.filter { $0.provider == .custom })
+                modelCatalogSections(transcriptionModelManager.allAvailableModels.filter { $0.provider == .custom })
                 customModelSection
             }
         }
@@ -414,6 +415,50 @@ struct ModelManagementView: View {
                 modelCard(model)
             }
         }
+    }
+
+    private struct ModelProviderGroup: Identifiable {
+        let provider: ModelProvider
+        let models: [any TranscriptionModel]
+        var id: String { provider.rawValue }
+    }
+
+    private func modelCatalogSections(_ models: [any TranscriptionModel]) -> some View {
+        let providers = Dictionary(grouping: models, by: \.provider)
+            .map { ModelProviderGroup(provider: $0.key, models: $0.value) }
+            .sorted { $0.provider.rawValue.localizedStandardCompare($1.provider.rawValue) == .orderedAscending }
+
+        return VStack(alignment: .leading, spacing: 18) {
+            ForEach(providers) { group in
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(verbatim: group.provider.rawValue)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(ModelCatalogStatus.allCases, id: \.self) { status in
+                        let matching = group.models
+                            .filter { catalogStatus(for: $0) == status }
+                            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+                        if !matching.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(status.title)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.tertiary)
+                                modelCards(matching)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func catalogStatus(for model: any TranscriptionModel) -> ModelCatalogStatus {
+        ModelCatalogStatus.resolve(
+            isDownloaded: isModelDownloaded(model),
+            isDownloading: isDownloading(model),
+            isPaused: isPaused(model)
+        )
     }
 
     private func modelCard(_ model: any TranscriptionModel) -> some View {
@@ -506,6 +551,11 @@ struct ModelManagementView: View {
 
     private var recommendedList: some View {
         let models = transcriptionModelManager.allAvailableModels
+        let localPicks = HardwareCapability.RecommendationNeed.allCases.compactMap {
+            HardwareCapability.recommendedLocalModel(for: $0, among: models)
+        }
+        var seenLocalNames = Set<String>()
+        let uniqueLocalPicks = localPicks.filter { seenLocalNames.insert($0.name).inserted }
         let cloudPicks = cloudModels.filter { model in
             model.isRecommended && transcriptionModelManager.usableModels.contains { $0.name == model.name }
         }
@@ -514,37 +564,7 @@ struct ModelManagementView: View {
             Text("Picked for this Mac: \(HardwareCapability.summary)")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
-
-            ForEach(HardwareCapability.RecommendationNeed.allCases, id: \.self) { need in
-                if let model = HardwareCapability.recommendedLocalModel(for: need, among: models) {
-                    recommendationGroup(title(for: need)) {
-                        modelCard(model)
-                    }
-                }
-            }
-
-            if !cloudPicks.isEmpty {
-                recommendationGroup("Cloud") {
-                    modelCards(cloudPicks)
-                }
-            }
-        }
-    }
-
-    private func title(for need: HardwareCapability.RecommendationNeed) -> LocalizedStringKey {
-        switch need {
-        case .english: return "Best for English"
-        case .multilingual: return "Best for many languages"
-        case .hebrew: return "Best for Hebrew"
-        }
-    }
-
-    private func recommendationGroup<Content: View>(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary)
-            content()
+            modelCatalogSections(uniqueLocalPicks + cloudPicks)
         }
     }
 
@@ -565,12 +585,7 @@ struct ModelManagementView: View {
     }
 
     private var localModelSections: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            localModelSection("Apple Speech", models: localModels.filter { $0.provider == .nativeApple })
-            localModelSection("Parakeet", models: localModels.filter { $0.provider == .fluidAudio })
-            localModelSection("Sherpa ONNX", models: localModels.filter { $0.provider == .sherpaOnnx })
-            localModelSection("Whisper and ivrit.ai", models: localModels.filter { $0.provider == .whisper })
-        }
+        modelCatalogSections(localModels)
     }
 
     @ViewBuilder
