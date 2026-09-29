@@ -60,6 +60,8 @@ final class ClipboardLibraryModel: ObservableObject {
     var visibleCount: Int { items.count }
     var selectedItems: [ClipboardItem] { items.filter { selectedIDs.contains($0.id) } }
 
+    func dismissError() { errorMessage = nil }
+
     func start() async {
         guard feedTask == nil else { return }
         let stream = feed.changes()

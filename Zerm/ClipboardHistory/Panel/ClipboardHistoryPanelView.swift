@@ -26,7 +26,7 @@ struct ClipboardHistoryPanelView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView { sidebar }.frame(width: model.isSidebarCollapsed ? 46 : 184)
+            sidebar.frame(width: model.isSidebarCollapsed ? 46 : 184)
             Divider()
             VStack(spacing: 0) {
                 listToolbar
@@ -53,7 +53,16 @@ struct ClipboardHistoryPanelView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay { if model.isCommandPaletteVisible { CommandPaletteView(model: model, controller: controller) } }
+        .overlay {
+            if model.isCommandPaletteVisible {
+                ZStack {
+                    Color.primary.opacity(0.06).contentShape(Rectangle())
+                        .onTapGesture { model.isCommandPaletteVisible = false }
+                        .accessibilityHidden(true)
+                    CommandPaletteView(model: model, controller: controller)
+                }
+            }
+        }
         .environment(\.layoutDirection, Locale.Language(identifier: locale.identifier).characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)
         .onAppear {
             searchFocused = true
@@ -63,15 +72,15 @@ struct ClipboardHistoryPanelView: View {
             if tracksSystemClipboard { currentClipboardHash = currentPasteboardHash() }
         }
         .sheet(isPresented: $model.isTextEditorVisible) { textEditor }
-        .alert(String(localized: "Clipboard History Error"), isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
-            Button(String(localized: "OK")) { model.errorMessage = nil }
-        } message: { Text(model.errorMessage ?? "") }
+        .alert("Clipboard History Error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            Button("OK") { model.errorMessage = nil }
+        } message: { Text(verbatim: model.errorMessage ?? "") }
         .onDisappear { pendingClickPaste?.cancel() }
-        .confirmationDialog(String(localized: "Clear Clipboard History?"), isPresented: $model.isClearConfirmationVisible, titleVisibility: .visible) {
-            Button(String(localized: "Clear"), role: .destructive) { Task { await model.clearHistory() } }
-            Button(String(localized: "Cancel"), role: .cancel) {}
+        .confirmationDialog("Clear Clipboard History?", isPresented: $model.isClearConfirmationVisible, titleVisibility: .visible) {
+            Button("Clear", role: .destructive) { Task { await model.clearHistory() } }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text(String(localized: "Pinned items and items protected by your settings stay in history."))
+            Text("Pinned items and items protected by your settings stay in history.")
         }
     }
 
@@ -81,32 +90,39 @@ struct ClipboardHistoryPanelView: View {
                 if !model.isSidebarCollapsed { Text("Clipboard History").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
                 Spacer(minLength: 0)
                 Button { model.isSidebarCollapsed.toggle() } label: { Image(systemName: model.isSidebarCollapsed ? "sidebar.left" : "sidebar.leading") }
-                    .buttonStyle(.plain).help(String(localized: "Toggle Sidebar")).accessibilityLabel(String(localized: "Toggle Sidebar"))
+                    .buttonStyle(.plain).help("Toggle Sidebar").accessibilityLabel("Toggle Sidebar")
             }.padding(.horizontal, 8).padding(.bottom, 5)
-            sidebarButton("All", symbol: "clock.arrow.circlepath", filter: .history)
-            sidebarButton("Favorites", symbol: "star", filter: .favorites)
-            Divider().padding(.vertical, 4)
-            ForEach(sidebarKinds.indices, id: \.self) { index in
-                let entry = sidebarKinds[index]
-                sidebarButton(entry.title, symbol: entry.symbol, filter: entry.filter)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    sidebarButton("All", symbol: "clock.arrow.circlepath", filter: .history)
+                    sidebarButton("Favorites", symbol: "star", filter: .favorites)
+                    Divider().padding(.vertical, 4)
+                    ForEach(sidebarKinds.indices, id: \.self) { index in
+                        let entry = sidebarKinds[index]
+                        sidebarButton(entry.title, symbol: entry.symbol, filter: entry.filter)
+                    }
+                    Divider().padding(.vertical, 4)
+                    if !model.isSidebarCollapsed { Text("Apps").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 8) }
+                    ForEach(Array(appEntries.prefix(showsAllApps ? appEntries.count : 5))) { app in
+                        appButton(app)
+                    }
+                    if appEntries.count > 5 {
+                        Button { showsAllApps.toggle() } label: {
+                            if model.isSidebarCollapsed { Image(systemName: showsAllApps ? "chevron.up" : "ellipsis") }
+                            else { Text(showsAllApps ? LocalizedStringKey("Show Fewer") : LocalizedStringKey("More…")) }
+                        }
+                        .buttonStyle(.plain).font(.callout).padding(.leading, model.isSidebarCollapsed ? 8 : 26)
+                        .accessibilityLabel(Text(showsAllApps ? LocalizedStringKey("Show Fewer Apps") : LocalizedStringKey("More Apps")))
+                        .help(showsAllApps ? LocalizedStringKey("Show Fewer Apps") : LocalizedStringKey("More Apps"))
+                    }
+                }.padding(.bottom, 8)
             }
-            Divider().padding(.vertical, 4)
-            if !model.isSidebarCollapsed { Text("Apps").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 8) }
-            ForEach(Array(appEntries.prefix(showsAllApps ? appEntries.count : 5).enumerated()), id: \.offset) { entry in
-                appButton(entry.element)
-            }
-            if appEntries.count > 5 {
-                Button(String(localized: showsAllApps ? "Show Fewer" : "More…")) { showsAllApps.toggle() }
-                    .buttonStyle(.plain).font(.callout).padding(.leading, model.isSidebarCollapsed ? 8 : 26)
-                    .accessibilityLabel(String(localized: showsAllApps ? "Show Fewer Apps" : "More Apps"))
-            }
-            Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
         .frame(maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var sidebarKinds: [(title: String.LocalizationValue, symbol: String, filter: ClipboardPanelRailFilter)] {
+    private var sidebarKinds: [(title: LocalizedStringKey, symbol: String, filter: ClipboardPanelRailFilter)] {
         [("Text", "doc", .text), ("Images", "photo", .kind(.image)), ("Links", "link", .kind(.url)),
          ("Files", "doc.on.doc", .kind(.fileURLs)), ("Colors", "paintpalette", .kind(.color)),
          ("Emails", "envelope", .kind(.email)), ("Code", "chevron.left.forwardslash.chevron.right", .kind(.code))]
@@ -114,16 +130,16 @@ struct ClipboardHistoryPanelView: View {
 
     private var appEntries: [ClipboardSourceAppCount] { model.sourceApps }
 
-    private func sidebarButton(_ title: String.LocalizationValue, symbol: String, filter: ClipboardPanelRailFilter) -> some View {
+    private func sidebarButton(_ title: LocalizedStringKey, symbol: String, filter: ClipboardPanelRailFilter) -> some View {
         Button { model.railFilter = filter; if case .history = filter { removeAppToken() } } label: {
             HStack(spacing: 8) {
                 Image(systemName: symbol).frame(width: 16)
-                if !model.isSidebarCollapsed { Text(String(localized: title)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading) }
+                if !model.isSidebarCollapsed { Text(title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading) }
             }
             .font(.callout).padding(.horizontal, 9).frame(height: 27)
             .background(isSelected(filter) ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain).help(String(localized: title)).accessibilityLabel(String(localized: title))
+        .buttonStyle(.plain).help(title).accessibilityLabel(Text(title))
         .accessibilityAddTraits(isSelected(filter) ? .isSelected : [])
     }
 
@@ -165,27 +181,33 @@ struct ClipboardHistoryPanelView: View {
     private var listToolbar: some View {
         HStack(spacing: 8) {
             dateMenu
-            TextField(String(localized: "Type to search…"), text: $model.query)
+            TextField("Type to search…", text: $model.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($searchFocused)
-                .accessibilityLabel(String(localized: "Type to search…"))
-                .help(String(localized: "Search clipboard history"))
+                .accessibilityLabel("Type to search…")
+                .help("Search clipboard history")
                 .frame(maxWidth: .infinity)
+            if !model.query.isEmpty {
+                Button { model.query = ""; searchFocused = true } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain).help("Clear Search").accessibilityLabel("Clear Search")
+            }
             Button {
                 model.isPinned.toggle()
                 controller?.panel?.level = model.isPinned ? .floating : .normal
             } label: { Image(systemName: model.isPinned ? "pin.fill" : "pin").font(.system(size: 15, weight: .regular)).frame(width: 23, height: 28) }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                .help(String(localized: "Keep Window Open"))
-                .accessibilityLabel(String(localized: "Keep Window Open"))
+                .help("Keep Window Open")
+                .accessibilityLabel("Keep Window Open")
                 .accessibilityValue(model.isPinned ? String(localized: "On") : String(localized: "Off"))
             sortMenu
             Button { model.isCommandPaletteVisible.toggle() } label: { Text("⌘").font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 28) }
-                .buttonStyle(.plain).help(String(localized: "Commands")).accessibilityLabel(String(localized: "Commands"))
+                .buttonStyle(.plain).help("Commands").accessibilityLabel("Commands")
             if !model.isPreviewVisible {
                 Button { model.isPreviewVisible = true } label: { Image(systemName: "sidebar.right").font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 28) }
-                    .buttonStyle(.plain).help(String(localized: "Toggle Preview")).accessibilityLabel(String(localized: "Toggle Preview"))
+                    .buttonStyle(.plain).help("Toggle Preview").accessibilityLabel("Toggle Preview")
             }
         }
         .padding(.horizontal, 9).frame(height: 40)
@@ -194,41 +216,42 @@ struct ClipboardHistoryPanelView: View {
 
     private var dateMenu: some View {
         Menu {
-            Picker(String(localized: "Date"), selection: $model.dateFilter) {
-                Text(String(localized: "Any Time")).tag(ClipboardPanelDateFilter.anytime)
-                Text(String(localized: "Today")).tag(ClipboardPanelDateFilter.today)
-                Text(String(localized: "Last 7 Days")).tag(ClipboardPanelDateFilter.week)
-                Text(String(localized: "Last 30 Days")).tag(ClipboardPanelDateFilter.month)
+            Picker("Date", selection: $model.dateFilter) {
+                Text("Any Time").tag(ClipboardPanelDateFilter.anytime)
+                Text("Today").tag(ClipboardPanelDateFilter.today)
+                Text("Last 7 Days").tag(ClipboardPanelDateFilter.week)
+                Text("Last 30 Days").tag(ClipboardPanelDateFilter.month)
             }
         } label: {
-            Image(systemName: "calendar").font(.system(size: 15)).foregroundStyle(.secondary).frame(width: 23, height: 28)
+            Image(systemName: model.dateFilter == .anytime ? "calendar" : "calendar.badge.clock")
+                .font(.system(size: 15)).foregroundStyle(model.dateFilter == .anytime ? Color.secondary : Color.accentColor).frame(width: 23, height: 28)
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .help(String(localized: "Filter by Date")).accessibilityLabel(String(localized: "Filter by Date"))
+        .help("Filter by Date").accessibilityLabel("Filter by Date")
     }
 
     private var sortMenu: some View {
         Menu {
-            Picker(String(localized: "Sort By"), selection: $model.sort) {
-                Text(String(localized: "Last Copy")).tag(ClipboardPanelSort.lastCopy)
-                Text(String(localized: "First Copy")).tag(ClipboardPanelSort.firstCopy)
-                Text(String(localized: "Copy Count")).tag(ClipboardPanelSort.copyCount)
-                Text(String(localized: "Size")).tag(ClipboardPanelSort.size)
+            Picker("Sort By", selection: $model.sort) {
+                Text("Last Copy").tag(ClipboardPanelSort.lastCopy)
+                Text("First Copy").tag(ClipboardPanelSort.firstCopy)
+                Text("Copy Count").tag(ClipboardPanelSort.copyCount)
+                Text("Size").tag(ClipboardPanelSort.size)
             }
-            Toggle(String(localized: "Reverse Order"), isOn: $model.reversed)
+            Toggle("Reverse Order", isOn: $model.reversed)
             Divider()
-            Toggle(String(localized: "Favorites on Top"), isOn: $model.favoritesOnTop)
-            Toggle(String(localized: "Paste on Double Click"), isOn: $doubleClickPaste)
-            Toggle(String(localized: "Show Quick Paste Badges"), isOn: $showBadges)
+            Toggle("Favorites on Top", isOn: $model.favoritesOnTop)
+            Toggle("Paste on Double Click", isOn: $doubleClickPaste)
+            Toggle("Show Quick Paste Badges", isOn: $showBadges)
         } label: { Image(systemName: "arrow.up.arrow.down").font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 28) }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).help(String(localized: "Sort clipboard history"))
-            .accessibilityLabel(String(localized: "Sort clipboard history"))
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).help("Sort clipboard history")
+            .accessibilityLabel("Sort clipboard history")
     }
 
     private var historyList: some View {
         Group {
-            if !model.hasLoadedItems && model.items.isEmpty {
-                ProgressView(String(localized: "Loading clipboard history")).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if ((!model.hasLoadedItems && model.items.isEmpty) || model.isLoadingItems) && model.visibleItems.isEmpty {
+                ProgressView("Loading clipboard history").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.visibleItems.isEmpty {
                 unavailableHistoryView
             } else {
@@ -254,14 +277,14 @@ struct ClipboardHistoryPanelView: View {
                     if model.canLoadMore {
                         HStack(spacing: 7) {
                             ProgressView().controlSize(.small).opacity(model.isLoadingMore ? 1 : 0)
-                            Text(String(localized: "Loading more history")).font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text("Loading more history").font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 8).listRowSeparator(.hidden)
                         .task(id: model.items.count) { await model.loadMore() }
                     }
                 }
                 .listStyle(.plain).scrollContentBackground(.hidden)
-                .accessibilityLabel(String(localized: "Clipboard History"))
+                .accessibilityLabel("Clipboard History")
             }
         }
         .frame(maxHeight: .infinity)
@@ -280,14 +303,17 @@ struct ClipboardHistoryPanelView: View {
     }
 
     private var unavailableHistoryView: some View {
-        let isEmpty = model.items.isEmpty
+        let isEmpty = !model.hasActiveFilters && model.items.isEmpty
         return ContentUnavailableView {
-            Label(String(localized: isEmpty ? "No clipboard items yet" : "No matching items"), systemImage: isEmpty ? "clipboard" : "line.3.horizontal.decrease.circle")
+            Label(isEmpty ? LocalizedStringKey("No clipboard items yet") : LocalizedStringKey("No matching items"), systemImage: isEmpty ? "clipboard" : "line.3.horizontal.decrease.circle")
         } description: {
-            Text(String(localized: isEmpty ? "Copy text, images, or links to add them while Clipboard History is enabled." : "Try another search or clear filters to see more items."))
+            Text(isEmpty ? LocalizedStringKey("Copy text, images, or links to add them while Clipboard History is enabled.") : LocalizedStringKey("Try another search or clear filters to see more items."))
         } actions: {
-            if isEmpty { Button(String(localized: "Clipboard History Settings")) { openSettings() } }
-            else { Button(String(localized: "Clear Filters"), action: clearFilters) }
+            if isEmpty { Button("Clipboard History Settings") {
+                UserDefaults.standard.set(SettingsPane.clipboardHistory.rawValue, forKey: "selectedSettingsPane")
+                openSettings()
+            } }
+            else { Button("Clear Filters", action: clearFilters) }
         }
     }
 
@@ -295,14 +321,14 @@ struct ClipboardHistoryPanelView: View {
         HStack(spacing: 6) {
             keyCap("↓")
             keyCap("↑")
-            Text(String(localized: "Navigate")).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            Text("Navigate").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
             Spacer(minLength: 5)
             keyCap("↵")
             if let targetApplicationName = controller?.targetApplicationName {
                 Text(String.localizedStringWithFormat(String(localized: "Paste to %@"), targetApplicationName))
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(.primary).lineLimit(1).truncationMode(.middle)
             } else {
-                Text(String(localized: "Paste")).font(.system(size: 10, weight: .medium)).foregroundStyle(.primary)
+                Text("Paste").font(.system(size: 10, weight: .medium)).foregroundStyle(.primary)
             }
         }
         .padding(.horizontal, 8).frame(height: 32).overlay(alignment: .top) { Divider() }
@@ -320,8 +346,10 @@ struct ClipboardHistoryPanelView: View {
             if let item = model.detailItem {
                 if model.isPreviewVisible { ScrollView { ClipboardRichPreview(item: item, linkService: linkService).padding(.top, 4) }.frame(maxHeight: .infinity) }
                 if model.isDetailsVisible { detailsInspector(item) }
+            } else if model.isLoadingDetail {
+                ProgressView("Loading preview").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContentUnavailableView(String(localized: "Select an item to preview"), systemImage: "doc.text.magnifyingglass").frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView("Select an item to preview", systemImage: "doc.text.magnifyingglass").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -329,6 +357,7 @@ struct ClipboardHistoryPanelView: View {
     private var previewToolbar: some View {
         HStack(spacing: 8) {
             actionButton("doc.on.clipboard", title: "Copy") { if let item = model.selectedItem { controller?.copy(item) } }
+                .disabled(model.selectedItem == nil)
             if let item = model.detailItem { contextAction(item) }
             Spacer(minLength: 4)
             Button { if let item = model.selectedItem { Task { await model.toggleFavorite(item) } } } label: {
@@ -337,24 +366,25 @@ struct ClipboardHistoryPanelView: View {
             }
             .buttonStyle(.plain).help(String(localized: model.selectedItem?.isFavorite == true ? "Remove Favourite" : "Add to Favourites"))
             .accessibilityLabel(String(localized: model.selectedItem?.isFavorite == true ? "Remove Favourite" : "Add to Favourites"))
+            .disabled(model.selectedItem == nil)
             Menu {
                 if let item = model.selectedItem { rowMenu(item) }
                 Divider()
-                Button(String(localized: "Clear Clipboard History")) { model.isClearConfirmationVisible = true }
+                Button("Clear Clipboard History") { model.isClearConfirmationVisible = true }
             } label: { Image(systemName: "ellipsis").font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 27) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).help(String(localized: "More Actions")).accessibilityLabel(String(localized: "More Actions"))
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).help("More Actions").accessibilityLabel("More Actions")
             Button { model.isDetailsVisible.toggle() } label: { Image(systemName: model.isDetailsVisible ? "rectangle.bottomthird.inset.filled" : "rectangle").font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 27) }
-                .buttonStyle(.plain).help(String(localized: "Toggle Details")).accessibilityLabel(String(localized: "Toggle Details"))
+                .buttonStyle(.plain).help("Toggle Details").accessibilityLabel("Toggle Details")
                 .accessibilityValue(model.isDetailsVisible ? String(localized: "On") : String(localized: "Off"))
             Button { model.isPreviewVisible.toggle() } label: { Image(systemName: "sidebar.right").font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 27) }
-                .buttonStyle(.plain).help(String(localized: "Toggle Preview")).accessibilityLabel(String(localized: "Toggle Preview"))
+                .buttonStyle(.plain).help("Toggle Preview").accessibilityLabel("Toggle Preview")
         }
         .padding(.horizontal, 10).frame(height: 40).overlay(alignment: .bottom) { Divider() }
     }
 
-    private func actionButton(_ symbol: String, title: String.LocalizationValue, action: @escaping () -> Void) -> some View {
+    private func actionButton(_ symbol: String, title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).font(.system(size: 15, weight: .regular)).foregroundStyle(.secondary).frame(width: 23, height: 27) }
-            .buttonStyle(.plain).help(String(localized: title)).accessibilityLabel(String(localized: title))
+            .buttonStyle(.plain).help(title).accessibilityLabel(Text(title))
     }
 
     @ViewBuilder
@@ -415,9 +445,9 @@ struct ClipboardHistoryPanelView: View {
         .frame(maxHeight: 142, alignment: .top)
     }
 
-    private func detailRow(_ title: String.LocalizationValue, value: String, bundleIdentifier: String? = nil) -> some View {
+    private func detailRow(_ title: LocalizedStringKey, value: String, bundleIdentifier: String? = nil) -> some View {
         HStack(spacing: 7) {
-            Text(String(localized: title)).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
+            Text(title).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 112, alignment: .leading)
             HStack(spacing: 6) {
                 if let bundleIdentifier { ClipboardSourceAppIcon(bundleIdentifier: bundleIdentifier, size: 13) }
                 Text(value).font(.system(size: 11)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
@@ -429,30 +459,37 @@ struct ClipboardHistoryPanelView: View {
 
     @ViewBuilder
     private func rowMenu(_ item: ClipboardItem) -> some View {
-        Button(String(localized: "Paste")) { controller?.paste(item, pasteSelection: false) }
-        Button(String(localized: "Copy")) { controller?.copy(item) }
+        Button("Paste") { controller?.paste(item, pasteSelection: false) }
+        Button("Copy") { controller?.copy(item) }
         Button(String(localized: item.isFavorite ? "Remove Favourite" : "Add to Favourites")) { Task { await model.toggleFavorite(item) } }
         Button(String(localized: item.isPinned ? "Unpin Item" : "Pin Item")) { Task { await model.togglePinned(item) } }
         if [.plainText, .richText, .code, .url, .email, .color].contains(item.kind) {
-            Button(String(localized: "Edit Text")) { Task { await model.beginEditing(item) } }
+            Button("Edit Text") { Task { await model.beginEditing(item) } }
         }
         if item.isFavorite {
-            Button(String(localized: "Move Favourite Up")) { Task { await model.reorderFavorite(item, by: -1) } }
-            Button(String(localized: "Move Favourite Down")) { Task { await model.reorderFavorite(item, by: 1) } }
+            Button("Move Favourite Up") { Task { await model.reorderFavorite(item, by: -1) } }
+            Button("Move Favourite Down") { Task { await model.reorderFavorite(item, by: 1) } }
         }
         Divider()
-        Button(String(localized: "Show in History")) { model.showInHistory(item) }
-        Button(String(localized: "Delete"), role: .destructive) { model.select(item); Task { await model.deleteSelection() } }
+        Button("Show in History") { model.showInHistory(item) }
+        Button("Delete", role: .destructive) { model.select(item); Task { await model.deleteSelection() } }
     }
 
     private var textEditor: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(String(localized: "Edit Text")).font(.headline)
+            Text("Edit Text").font(.headline)
             TextEditor(text: $model.textBeingEdited).frame(minHeight: 180)
+                .accessibilityLabel("Edit Text").disabled(model.isSavingEdit)
+            if let message = model.editingErrorMessage {
+                Text(verbatim: message).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            }
             HStack {
-            Button(String(localized: "Cancel")) { model.isTextEditorVisible = false }.keyboardShortcut(.cancelAction)
+            Button("Cancel") { model.isTextEditorVisible = false }.keyboardShortcut(.cancelAction)
+                    .disabled(model.isSavingEdit)
                 Spacer()
-                Button(String(localized: "Save")) { Task { await model.saveEditedText() } }.keyboardShortcut(.defaultAction)
+                if model.isSavingEdit { ProgressView().controlSize(.small).accessibilityLabel("Saving changes") }
+                Button("Save") { Task { await model.saveEditedText() } }.keyboardShortcut(.defaultAction)
+                    .disabled(model.isSavingEdit)
             }
         }
         .padding(22).frame(width: 460)
@@ -525,35 +562,38 @@ private struct CommandPaletteView: View {
     let controller: ClipboardHistoryPanelController?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(String(localized: "Commands"))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 11).padding(.vertical, 8)
-            ForEach(model.registry.available(for: model.selection)) { command in
-                Button {
-                    switch command.id {
-                    case "paste": if let item = model.selectedItem { controller?.paste(item) }
-                    case "copy": if let item = model.selectedItem { controller?.copy(item) }
-                    case "delete": Task { await model.deleteSelection() }
-                    case "showInHistory": if let item = model.selectedItem { model.showInHistory(item) }
-                    default: command.perform(model.selection)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Commands")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 11).padding(.vertical, 8)
+                ForEach(model.registry.available(for: model.selection)) { command in
+                    Button {
+                        switch command.id {
+                        case "paste": if let item = model.selectedItem { controller?.paste(item) }
+                        case "copy": if let item = model.selectedItem { controller?.copy(item) }
+                        case "delete": Task { await model.deleteSelection() }
+                        case "showInHistory": if let item = model.selectedItem { model.showInHistory(item) }
+                        default: command.perform(model.selection)
+                        }
+                        model.isCommandPaletteVisible = false
+                    } label: {
+                        HStack {
+                            Text(command.title).frame(maxWidth: .infinity, alignment: .leading)
+                            if let shortcut = command.shortcut { Text(shortcut).foregroundStyle(.tertiary) }
+                        }
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 11).padding(.vertical, 7)
+                        .contentShape(Rectangle())
                     }
-                    model.isCommandPaletteVisible = false
-                } label: {
-                    HStack {
-                        Text(command.title).frame(maxWidth: .infinity, alignment: .leading)
-                        if let shortcut = command.shortcut { Text(shortcut).foregroundStyle(.tertiary) }
-                    }
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 11).padding(.vertical, 7)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(7)
         }
-        .padding(7)
         .frame(width: 300, alignment: .leading)
+        .frame(maxHeight: 320)
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
     }

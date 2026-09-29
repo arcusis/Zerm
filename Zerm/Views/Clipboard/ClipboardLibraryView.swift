@@ -270,7 +270,14 @@ struct ClipboardLibraryView: View {
     private var itemList: some View {
         VStack(spacing: 0) {
             if let message = model.errorMessage {
-                Text(verbatim: message).foregroundStyle(.red).padding(10).accessibilityLabel(message)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+                    Text(verbatim: message).font(.callout).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { model.dismissError() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).help("Dismiss").accessibilityLabel("Dismiss")
+                }
+                .padding(10).background(Color(nsColor: .controlBackgroundColor))
             }
             if model.items.isEmpty && !model.isLoading {
                 emptyState

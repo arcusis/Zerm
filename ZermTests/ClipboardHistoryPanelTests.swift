@@ -130,6 +130,47 @@ enum ClipboardHistoryRenderError: Error {
 @Suite(.serialized)
 struct ClipboardHistoryPanelTests {
     @MainActor
+    @Test func emptyFilteredPageKeepsRecoveryAndClearFiltersRestoresHistory() async throws {
+        try await withPanelModel { model, store, _ in
+            let item = try #require(ClipboardItem.capture(representations: [text("Keep this history item")], sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor")))
+            _ = try await store.capture(item)
+            await model.loadItems()
+            model.query = "no-such-text"
+            await model.loadItems()
+            #expect(model.items.isEmpty)
+            #expect(model.hasActiveFilters)
+            model.clearFilters()
+            await model.loadItems()
+            #expect(!model.hasActiveFilters)
+            #expect(model.visibleItems.map(\.id) == [item.id])
+            model.railFilter = .favorites
+            await model.loadItems()
+            #expect(model.visibleItems.isEmpty && model.hasActiveFilters)
+            model.clearFilters()
+            await model.loadItems()
+            #expect(model.visibleItems.map(\.id) == [item.id])
+        }
+    }
+
+    @MainActor
+    @Test func removedItemCannotSilentlyDiscardEditorDraft() async throws {
+        try await withPanelModel { model, store, _ in
+            let item = try #require(ClipboardItem.capture(representations: [text("Original")], sourceApp: .init(bundleIdentifier: nil, name: nil)))
+            _ = try await store.capture(item)
+            await model.loadItems()
+            await model.beginEditing(item)
+            model.textBeingEdited = "Unsaved draft"
+            try await store.delete(item.id)
+            await model.saveEditedText()
+            #expect(model.isTextEditorVisible)
+            #expect(model.textBeingEdited == "Unsaved draft")
+            #expect(model.editingErrorMessage != nil)
+            #expect(model.errorMessage == nil)
+            #expect(!model.isSavingEdit)
+        }
+    }
+
+    @MainActor
     @Test func copyAndEditLoadFullPayloadInsteadOfTruncatedMetadata() async throws {
         try await withPanelModel { model, store, _ in
             let value = String(repeating: "long clipboard text ", count: 60) + "end-marker"
@@ -864,8 +905,11 @@ struct ClipboardHistoryPanelTests {
             longList.select(longItems[118])
             let appFiltered = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1, samples[1].1])
             appFiltered.appFilter = "com.apple.finder"
+            let commands = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1])
+            commands.select(samples[0].1)
+            commands.isCommandPaletteVisible = true
 
-            for (name, model) in [("empty", empty), ("no-matches", noMatches), ("sidebar-app-filter", appFiltered), ("long-list", longList)] {
+            for (name, model) in [("empty", empty), ("no-matches", noMatches), ("sidebar-app-filter", appFiltered), ("long-list", longList), ("commands", commands)] {
                 try await ClipboardHistoryRenderSupport.renderMatrix(
                     ClipboardHistoryPanelView(model: model, linkService: service),
                     screen: "panel-\(name)",
