@@ -45,18 +45,19 @@ struct ClipboardLibraryView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            pageHeader
-            statsHeader
-            Divider()
-            filters
-            Divider()
-            itemList
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Plain columns instead of .inspector: the inspector nests a second split view inside the main
+        // window's NavigationSplitView, and their min-size negotiation looped until AppKit aborted.
+        HStack(spacing: 0) {
+            browser
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .clipped()
+            if showsInspector {
+                Divider()
+                previewPane
+                    .frame(width: 320)
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .inspector(isPresented: $showsInspector) { previewPane }
-        .inspectorColumnWidth(min: 340, ideal: 380, max: 520)
         .environment(\.layoutDirection, layoutDirectionOverride ?? currentLayoutDirection)
         .task { await model.start() }
         .onDisappear { model.stop() }
@@ -78,6 +79,18 @@ struct ClipboardLibraryView: View {
         }
     }
 
+    private var browser: some View {
+        VStack(spacing: 0) {
+            pageHeader
+            statsHeader
+            Divider()
+            filters
+            Divider()
+            itemList
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     private var pageHeader: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
@@ -92,43 +105,54 @@ struct ClipboardLibraryView: View {
                 Text(verbatim: String.localizedStringWithFormat(String(localized: "%lld selected"), model.selectedIDs.count))
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.secondary)
-                Button { Task { await model.copySelection() } } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+                // Icon-only when the window is narrow, so the header never forces a minimum width
+                // wider than the split view can give it.
+                ViewThatFits(in: .horizontal) {
+                    selectionActions.labelStyle(.titleAndIcon)
+                    selectionActions.labelStyle(.iconOnly)
                 }
-                .keyboardShortcut("c", modifiers: .command)
-                .help(String(localized: "Copy selected items"))
-                Button { exportSelection() } label: { Label("Export", systemImage: "square.and.arrow.up") }
-                    .help(String(localized: "Export selected items"))
-                Menu {
-                    Button(String(localized: "Pin")) { Task { await model.togglePinned(true) } }
-                    Button(String(localized: "Unpin")) { Task { await model.togglePinned(false) } }
-                    Button(String(localized: "Add to Favorites")) { Task { await model.toggleFavorite(true) } }
-                    Button(String(localized: "Remove from Favorites")) { Task { await model.toggleFavorite(false) } }
-                    Divider()
-                    Menu(String(localized: "Add Tag")) {
-                        ForEach(model.tags) { tag in
-                            Button(tag.name) { Task { await model.setTag(tag, attached: true) } }
-                        }
-                    }
-                    Menu(String(localized: "Remove Tag")) {
-                        ForEach(model.tags) { tag in
-                            Button(tag.name) { Task { await model.setTag(tag, attached: false) } }
-                        }
-                    }
-                } label: {
-                    Label("Organize", systemImage: "tag")
-                }
-                .help(String(localized: "Organize selected items"))
-                Button(role: .destructive) { confirmsDelete = true } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .keyboardShortcut(.delete, modifiers: [])
-                .help(String(localized: "Delete selected items"))
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, 22)
         .padding(.bottom, 14)
+    }
+
+    private var selectionActions: some View {
+        HStack {
+            Button { Task { await model.copySelection() } } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            .keyboardShortcut("c", modifiers: .command)
+            .help(String(localized: "Copy selected items"))
+            Button { exportSelection() } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                .help(String(localized: "Export selected items"))
+            Menu {
+                Button(String(localized: "Pin")) { Task { await model.togglePinned(true) } }
+                Button(String(localized: "Unpin")) { Task { await model.togglePinned(false) } }
+                Button(String(localized: "Add to Favorites")) { Task { await model.toggleFavorite(true) } }
+                Button(String(localized: "Remove from Favorites")) { Task { await model.toggleFavorite(false) } }
+                Divider()
+                Menu(String(localized: "Add Tag")) {
+                    ForEach(model.tags) { tag in
+                        Button(tag.name) { Task { await model.setTag(tag, attached: true) } }
+                    }
+                }
+                Menu(String(localized: "Remove Tag")) {
+                    ForEach(model.tags) { tag in
+                        Button(tag.name) { Task { await model.setTag(tag, attached: false) } }
+                    }
+                }
+            } label: {
+                Label("Organize", systemImage: "tag")
+            }
+            .help(String(localized: "Organize selected items"))
+            Button(role: .destructive) { confirmsDelete = true } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .keyboardShortcut(.delete, modifiers: [])
+            .help(String(localized: "Delete selected items"))
+        }
     }
 
     private var statsHeader: some View {
@@ -154,67 +178,70 @@ struct ClipboardLibraryView: View {
     }
 
     private var filters: some View {
-        HStack(spacing: 10) {
-            ClipboardHistorySearchField(
-                text: $model.query,
-                isFocused: $searchFocused,
-                placeholder: String(localized: "Search clipboard history")
-            )
-            .frame(minWidth: 180, idealWidth: 280, maxWidth: 340)
+        // Scrolls when narrow: a row of fixed-width menus would otherwise set the page minimum width.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ClipboardHistorySearchField(
+                    text: $model.query,
+                    isFocused: $searchFocused,
+                    placeholder: String(localized: "Search clipboard history")
+                )
+                .frame(minWidth: 160, idealWidth: 280, maxWidth: 340)
 
-            Menu {
-                ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
-                    Toggle(kind.libraryLocalizedName, isOn: Binding(
-                        get: { model.selectedKinds.contains(kind) },
-                        set: { _ in model.toggleKind(kind) }
-                    ))
+                Menu {
+                    ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
+                        Toggle(kind.libraryLocalizedName, isOn: Binding(
+                            get: { model.selectedKinds.contains(kind) },
+                            set: { _ in model.toggleKind(kind) }
+                        ))
+                    }
+                } label: { filterLabel("Kind", symbol: "line.3.horizontal.decrease.circle", active: !model.selectedKinds.isEmpty) }
+                    .help(String(localized: "Filter by Kind"))
+                Menu {
+                    Button(String(localized: "All Apps")) { model.setAppFilter(nil) }
+                    ForEach(model.appNames, id: \.self) { name in Button(name) { model.setAppFilter(name) } }
+                } label: { filterLabel("App", symbol: "app", active: model.selectedAppName != nil) }
+                    .help(String(localized: "Filter by Source App"))
+                Menu {
+                    Button(String(localized: "All Tags")) { model.setTagFilter(nil) }
+                    ForEach(model.tags) { tag in Button { model.setTagFilter(tag.id) } label: { Label(tag.name, systemImage: "tag.fill") } }
+                } label: { filterLabel("Tag", symbol: "tag", active: model.selectedTagID != nil) }
+                    .help(String(localized: "Filter by Tag"))
+                Picker(String(localized: "Date"), selection: Binding(get: { model.dateFilter }, set: { model.setDateFilter($0) })) {
+                    Text(verbatim: String(localized: "Any Time")).tag(ClipboardLibraryDateFilter.anytime)
+                    Text(verbatim: String(localized: "Today")).tag(ClipboardLibraryDateFilter.today)
+                    Text(verbatim: String(localized: "Last 7 Days")).tag(ClipboardLibraryDateFilter.week)
+                    Text(verbatim: String(localized: "Last 30 Days")).tag(ClipboardLibraryDateFilter.month)
                 }
-            } label: { filterLabel("Kind", symbol: "line.3.horizontal.decrease.circle", active: !model.selectedKinds.isEmpty) }
-                .help(String(localized: "Filter by Kind"))
-            Menu {
-                Button(String(localized: "All Apps")) { model.setAppFilter(nil) }
-                ForEach(model.appNames, id: \.self) { name in Button(name) { model.setAppFilter(name) } }
-            } label: { filterLabel("App", symbol: "app", active: model.selectedAppName != nil) }
-                .help(String(localized: "Filter by Source App"))
-            Menu {
-                Button(String(localized: "All Tags")) { model.setTagFilter(nil) }
-                ForEach(model.tags) { tag in Button { model.setTagFilter(tag.id) } label: { Label(tag.name, systemImage: "tag.fill") } }
-            } label: { filterLabel("Tag", symbol: "tag", active: model.selectedTagID != nil) }
-                .help(String(localized: "Filter by Tag"))
-            Picker(String(localized: "Date"), selection: Binding(get: { model.dateFilter }, set: { model.setDateFilter($0) })) {
-                Text(verbatim: String(localized: "Any Time")).tag(ClipboardLibraryDateFilter.anytime)
-                Text(verbatim: String(localized: "Today")).tag(ClipboardLibraryDateFilter.today)
-                Text(verbatim: String(localized: "Last 7 Days")).tag(ClipboardLibraryDateFilter.week)
-                Text(verbatim: String(localized: "Last 30 Days")).tag(ClipboardLibraryDateFilter.month)
+                .labelsHidden()
+                .frame(width: 112)
+                Menu {
+                    Picker(String(localized: "Sort By"), selection: Binding(get: { model.sort }, set: { model.setSort($0) })) {
+                        Text(verbatim: String(localized: "Last Copy")).tag(ClipboardPanelSort.lastCopy)
+                        Text(verbatim: String(localized: "First Copy")).tag(ClipboardPanelSort.firstCopy)
+                        Text(verbatim: String(localized: "Copy Count")).tag(ClipboardPanelSort.copyCount)
+                        Text(verbatim: String(localized: "Size")).tag(ClipboardPanelSort.size)
+                    }
+                    Divider()
+                    Button(model.ascending ? String(localized: "Newest First") : String(localized: "Oldest First")) { model.toggleOrder() }
+                } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 28, height: 28) }
+                    .help(String(localized: "Sort clipboard history"))
+                    .accessibilityLabel(String(localized: "Sort clipboard history"))
+                Spacer(minLength: 0)
+                if filtersActive {
+                    Button(String(localized: "Clear Filters")) {
+                        model.selectedKinds.removeAll()
+                        model.setAppFilter(nil)
+                        model.setTagFilter(nil)
+                        model.setDateFilter(.anytime)
+                        model.query = ""
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                }
             }
-            .labelsHidden()
-            .frame(width: 112)
-            Menu {
-                Picker(String(localized: "Sort By"), selection: Binding(get: { model.sort }, set: { model.setSort($0) })) {
-                    Text(verbatim: String(localized: "Last Copy")).tag(ClipboardPanelSort.lastCopy)
-                    Text(verbatim: String(localized: "First Copy")).tag(ClipboardPanelSort.firstCopy)
-                    Text(verbatim: String(localized: "Copy Count")).tag(ClipboardPanelSort.copyCount)
-                    Text(verbatim: String(localized: "Size")).tag(ClipboardPanelSort.size)
-                }
-                Divider()
-                Button(model.ascending ? String(localized: "Newest First") : String(localized: "Oldest First")) { model.toggleOrder() }
-            } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 28, height: 28) }
-                .help(String(localized: "Sort clipboard history"))
-                .accessibilityLabel(String(localized: "Sort clipboard history"))
-            Spacer(minLength: 0)
-            if filtersActive {
-                Button(String(localized: "Clear Filters")) {
-                    model.selectedKinds.removeAll()
-                    model.setAppFilter(nil)
-                    model.setTagFilter(nil)
-                    model.setDateFilter(.anytime)
-                    model.query = ""
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-            }
+            .font(.callout)
         }
-        .font(.callout)
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
     }

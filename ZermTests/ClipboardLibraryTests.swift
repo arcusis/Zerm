@@ -280,6 +280,63 @@ struct ClipboardLibraryTests {
         }
     }
 
+    /// Regression for the constraint-loop abort: the History page with its inspector, a sidebar at
+    /// its 280 pt maximum and a selection must lay out inside the main window's 760 pt minimum.
+    @MainActor
+    @Test func libraryFitsTheMinimumMainWindowWithSidebarAndInspector() async throws {
+        try await withStore { store, feed, _ in
+            let item = try #require(ClipboardItem.capture(
+                representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data("Narrow window sample".utf8))],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            ))
+            _ = try await store.capture(item)
+            let image = NSImage(size: NSSize(width: 1600, height: 900), flipped: false) { rect in
+                NSColor.systemBlue.setFill(); rect.fill(); return true
+            }
+            let png = try #require(image.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) })
+            let imageItem = try #require(ClipboardItem.capture(
+                representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.png.rawValue, data: png)],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            ))
+            _ = try await store.capture(imageItem)
+            let link = try #require(ClipboardItem.capture(
+                representations: [ClipboardRepresentation(type: "public.url", data: Data("https://example.test/a/very/long/path/that/keeps/going/and/going".utf8))],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.browser", name: "Test Browser")
+            ))
+            _ = try await store.capture(link)
+            let model = ClipboardLibraryModel(store: store, feed: feed)
+            let root = NavigationSplitView {
+                List { Text("Sidebar") }.navigationSplitViewColumnWidth(min: 280, ideal: 280, max: 280)
+            } detail: {
+                ClipboardLibraryView(model: model)
+            }
+            let window = NSWindow(
+                contentRect: NSRect(x: -4000, y: -4000, width: 760, height: 560),
+                styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered, defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: root)
+            for width in [1200, 900, 760] {
+                window.setContentSize(NSSize(width: width, height: 560))
+                window.contentView?.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+            }
+            await model.start()
+            for selected in model.items {
+                model.selectedIDs = [selected.id]
+                await model.select(selected.id)
+                for width in [760, 1100, 760, 820] {
+                    window.setContentSize(NSSize(width: width, height: 560))
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    window.displayIfNeeded()
+                }
+            }
+            #expect(window.contentView?.frame.width == 760)
+            model.stop()
+            window.close()
+        }
+    }
+
     private func withStore(
         _ operation: @MainActor (ClipboardHistoryStore, ClipboardHistoryFeed, UserDefaults) async throws -> Void
     ) async throws {
