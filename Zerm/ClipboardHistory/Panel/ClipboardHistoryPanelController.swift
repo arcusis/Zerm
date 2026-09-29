@@ -37,7 +37,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         let model = ClipboardHistoryPanelModel(store: store)
         model.onCommand = { [weak self] id in self?.executeRegisteredCommand(id) }
         self.model = model
-        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 860, height: 570))
+        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 1_040, height: 650))
         panel.delegate = self
         panel.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model, controller: self))
         self.panel = panel
@@ -242,9 +242,13 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
                 Task { await model.deleteSelection() }
                 return nil
             }
-            if command, event.keyCode == 36 || event.keyCode == 76, let item = model.selectedItem {
-                self.paste(item, asPlainText: option)
-                return nil
+            if (event.keyCode == 36 || event.keyCode == 76), let item = model.selectedItem,
+                !modifiers.contains(.control), !modifiers.contains(.shift), !modifiers.contains(.function)
+            {
+                if command || (!model.isTextEditorVisible && !model.isTagEditorVisible) {
+                    self.paste(item, asPlainText: option)
+                    return nil
+                }
             }
             if command, event.charactersIgnoringModifiers?.lowercased() == "y", let item = model.selectedItem,
                 item.supportsQuickLook

@@ -151,7 +151,9 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     /// Loads run one after another in call order, so a slower load can never overwrite a newer one.
     private var loadChain: Task<Void, Never>?
     private var pageOffset = 0
+    @Published private(set) var hasLoadedItems = false
     @Published private(set) var canLoadMore = false
+    @Published private(set) var isLoadingMore = false
     private var ocrRefreshAttempts = 0
     private var selectionAnchorID: UUID?
     private var selectionLeadID: UUID?
@@ -195,6 +197,9 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func loadMore() async {
+        // Checked at call time: the paging sentinel can fire again before the queued load runs.
+        guard canLoadMore, !isLoadingMore else { return }
+        isLoadingMore = true
         await enqueueLoad { [weak self] in await self?.performLoadMore() }
     }
 
@@ -215,6 +220,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         let requestedCount = preservingLoadedPage ? max(pageOffset, 100) : 100
         guard let fetched = try? await store.sortedPage(sort.engineSort, ascending: ascending, offset: 0, limit: requestedCount) else { return }
         items = fetched
+        hasLoadedItems = true
         pageOffset = fetched.count
         canLoadMore = ((try? await store.totalCount()) ?? fetched.count) > pageOffset
         tags = (try? await store.allTags()) ?? tags
@@ -225,6 +231,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     private func performLoadMore() async {
+        defer { isLoadingMore = false }
         guard canLoadMore else { return }
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
