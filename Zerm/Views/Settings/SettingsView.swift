@@ -11,9 +11,94 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case modelsProviders
     case permissionsPrivacy
     case storageBackup
-    case advancedDiagnostics
+    case advanced = "advancedDiagnostics"
+    case diagnostics
 
     var id: Self { self }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .general: "General"
+        case .shortcutsAutomation: "Shortcuts & Automation"
+        case .audio: "Audio"
+        case .clipboardHistory: "Clipboard History"
+        case .modelsProviders: "Models & Providers"
+        case .permissionsPrivacy: "Permissions & Privacy"
+        case .storageBackup: "Storage & Backup"
+        case .advanced: "Advanced"
+        case .diagnostics: "Diagnostics"
+        }
+    }
+
+    var tabTitle: LocalizedStringKey {
+        switch self {
+        case .general: "General"
+        case .shortcutsAutomation: "Shortcuts"
+        case .audio: "Audio"
+        case .clipboardHistory: "Clipboard History"
+        case .modelsProviders: "Models"
+        case .permissionsPrivacy: "Privacy"
+        case .storageBackup: "Storage"
+        case .advanced: "Advanced"
+        case .diagnostics: "Diagnostics"
+        }
+    }
+
+    var description: LocalizedStringKey {
+        switch self {
+        case .general: "Choose launch behavior, recorder appearance, and update checks."
+        case .shortcutsAutomation: "Set dictation shortcuts, paste behavior, and Power Modes."
+        case .audio: "Choose microphones and control recording feedback."
+        case .clipboardHistory: "Control local clipboard capture, privacy, and storage."
+        case .modelsProviders: "Choose local or cloud models and configure their languages."
+        case .permissionsPrivacy: "Review system access and privacy controls."
+        case .storageBackup: "Review storage use, retention, and portable settings backups."
+        case .advanced: "Change experimental audio behavior."
+        case .diagnostics: "Review logs and prepare files for troubleshooting."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .shortcutsAutomation: "command"
+        case .audio: "waveform"
+        case .clipboardHistory: "clipboard"
+        case .modelsProviders: "cpu"
+        case .permissionsPrivacy: "hand.raised"
+        case .storageBackup: "externaldrive"
+        case .advanced: "slider.horizontal.3"
+        case .diagnostics: "stethoscope"
+        }
+    }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .general: "settings-tab-general"
+        case .shortcutsAutomation: "settings-tab-shortcuts"
+        case .audio: "settings-tab-audio"
+        case .clipboardHistory: "settings-tab-clipboard-history"
+        case .modelsProviders: "settings-tab-models"
+        case .permissionsPrivacy: "settings-tab-privacy"
+        case .storageBackup: "settings-tab-storage"
+        case .advanced: "settings-tab-advanced"
+        case .diagnostics: "settings-tab-diagnostics"
+        }
+    }
+
+    var paneAccessibilityIdentifier: String {
+        switch self {
+        case .general: "settings-pane-general"
+        case .shortcutsAutomation: "settings-pane-shortcuts"
+        case .audio: "settings-pane-audio"
+        case .clipboardHistory: "settings-pane-clipboard-history"
+        case .modelsProviders: "settings-pane-models"
+        case .permissionsPrivacy: "settings-pane-privacy"
+        case .storageBackup: "settings-pane-storage"
+        case .advanced: "settings-pane-advanced"
+        case .diagnostics: "settings-pane-diagnostics"
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -39,6 +124,7 @@ struct SettingsView: View {
     @State private var showResetOnboardingAlert = false
     @State private var currentShortcut = KeyboardShortcuts.getShortcut(for: .toggleMiniRecorder)
     @State private var isCustomCancelEnabled = KeyboardShortcuts.getShortcut(for: .cancelRecorder) != nil
+    @State private var shortcutRefresh = 0
 
     // Expansion states - all collapsed by default
     @State private var isCustomCancelExpanded = false
@@ -74,7 +160,9 @@ struct SettingsView: View {
                             accessibilityIdentifier: "settings-shortcut-1-key"
                         )
                         if hotkeyManager.selectedHotkey1 == .custom {
-                            KeyboardShortcuts.Recorder(for: .toggleMiniRecorder)
+                            KeyboardShortcuts.Recorder(for: .toggleMiniRecorder) { _ in
+                                shortcutRefresh += 1
+                            }
                                 .controlSize(.small)
                         }
                     }
@@ -84,6 +172,7 @@ struct SettingsView: View {
                         InfoTip(shortcutHelp, doc: .shortcuts)
                     }
                 }
+                shortcutConflict(for: .toggleMiniRecorder)
 
                 if hotkeyManager.selectedHotkey2 != .none {
                     LabeledContent {
@@ -100,7 +189,9 @@ struct SettingsView: View {
                                 accessibilityIdentifier: "settings-shortcut-2-key"
                             )
                             if hotkeyManager.selectedHotkey2 == .custom {
-                                KeyboardShortcuts.Recorder(for: .toggleMiniRecorder2)
+                                KeyboardShortcuts.Recorder(for: .toggleMiniRecorder2) { _ in
+                                    shortcutRefresh += 1
+                                }
                                     .controlSize(.small)
                             }
                             Button {
@@ -122,6 +213,7 @@ struct SettingsView: View {
                             )
                         }
                     }
+                    shortcutConflict(for: .toggleMiniRecorder2)
                 }
 
                 if hotkeyManager.selectedHotkey1 != .none && hotkeyManager.selectedHotkey2 == .none {
@@ -137,12 +229,16 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Shortcuts")
+            } footer: {
+                Text("Choose one or two keys to start dictation and select how each key behaves.")
             }
 
             // MARK: - Additional Shortcuts
-            Section("Additional Shortcuts") {
+            Section {
                 LabeledContent {
-                    KeyboardShortcuts.Recorder(for: .pasteLastTranscription)
+                    KeyboardShortcuts.Recorder(for: .pasteLastTranscription) { _ in
+                        shortcutRefresh += 1
+                    }
                         .controlSize(.small)
                 } label: {
                     HStack(spacing: 4) {
@@ -153,9 +249,12 @@ struct SettingsView: View {
                         )
                     }
                 }
+                shortcutConflict(for: .pasteLastTranscription)
 
                 LabeledContent {
-                    KeyboardShortcuts.Recorder(for: .pasteLastEnhancement)
+                    KeyboardShortcuts.Recorder(for: .pasteLastEnhancement) { _ in
+                        shortcutRefresh += 1
+                    }
                         .controlSize(.small)
                 } label: {
                     HStack(spacing: 4) {
@@ -166,9 +265,12 @@ struct SettingsView: View {
                         )
                     }
                 }
+                shortcutConflict(for: .pasteLastEnhancement)
 
                 LabeledContent {
-                    KeyboardShortcuts.Recorder(for: .retryLastTranscription)
+                    KeyboardShortcuts.Recorder(for: .retryLastTranscription) { _ in
+                        shortcutRefresh += 1
+                    }
                         .controlSize(.small)
                 } label: {
                     HStack(spacing: 4) {
@@ -179,6 +281,7 @@ struct SettingsView: View {
                         )
                     }
                 }
+                shortcutConflict(for: .retryLastTranscription)
 
                 // Custom Cancel - hierarchical
                 ExpandableSettingsRow(
@@ -189,7 +292,9 @@ struct SettingsView: View {
                     infoURL: Links.docString(.shortcuts)
                 ) {
                     LabeledContent("Shortcut") {
-                        KeyboardShortcuts.Recorder(for: .cancelRecorder)
+                        KeyboardShortcuts.Recorder(for: .cancelRecorder) { _ in
+                            shortcutRefresh += 1
+                        }
                             .controlSize(.small)
                     }
                 }
@@ -199,6 +304,7 @@ struct SettingsView: View {
                         isCustomCancelExpanded = false
                     }
                 }
+                shortcutConflict(for: .cancelRecorder)
 
                 // Middle-Click
                 ExpandableSettingsRow(
@@ -227,10 +333,19 @@ struct SettingsView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Additional Shortcuts")
+            } footer: {
+                HStack {
+                    Text("Restore default dictation keys and clear custom shortcuts.")
+                    Spacer()
+                    Button("Restore Defaults", action: restoreShortcutDefaults)
+                        .accessibilityIdentifier("settings-shortcuts-restore-defaults")
+                }
             }
 
             // MARK: - Paste Options
-            Section("Paste Options") {
+            Section {
                 ExpandableSettingsRow(
                     isExpanded: $isRestoreClipboardExpanded,
                     isEnabled: $restoreClipboardAfterPaste,
@@ -259,12 +374,16 @@ struct SettingsView: View {
                         InfoTip(String(localized: "Enable this if pasting doesn't work with your keyboard layout (e.g. Neo2). Uses AppleScript instead of simulated key events."))
                     }
                 }
+            } header: {
+                Text("Paste Options")
+            } footer: {
+                Text("Control clipboard restoration and the method used to paste transcripts.")
             }
             }
 
             // MARK: - Recording Feedback
             if pane == nil || pane == .audio {
-            Section("Recording Feedback") {
+            Section {
                 // Sound Feedback
                 ExpandableSettingsRow(
                     isExpanded: $isSoundFeedbackExpanded,
@@ -309,6 +428,10 @@ struct SettingsView: View {
                 }
 
                 MicTestView()
+            } header: {
+                Text("Recording Feedback")
+            } footer: {
+                Text("Choose sounds and audio behavior while Zerm records.")
             }
             }
 
@@ -319,7 +442,7 @@ struct SettingsView: View {
 
             // MARK: - Interface
             if pane == nil || pane == .general {
-            Section("Interface") {
+            Section {
                 Picker(selection: $recorderUIManager.recorderType) {
                     Text("Notch").tag("notch")
                     Text("Mini").tag("mini")
@@ -331,17 +454,21 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
+            } header: {
+                Text("Recorder Appearance")
+            } footer: {
+                Text("Choose where the recorder appears while you dictate.")
             }
             }
 
             // MARK: - Experimental
-            if pane == nil || pane == .advancedDiagnostics {
+            if pane == nil || pane == .advanced {
                 ExperimentalSection()
             }
 
             // MARK: - General
             if pane == nil || pane == .general {
-            Section("General") {
+            Section {
                 Toggle(isOn: $menuBarManager.isMenuBarOnly) {
                     HStack(spacing: 4) {
                         Text("Hide Dock Icon")
@@ -420,17 +547,29 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            } header: {
+                Text("Launch & Updates")
+            } footer: {
+                Text("Choose how Zerm starts and how it checks for updates.")
             }
             }
 
             // MARK: - Privacy
             if pane == nil || pane == .storageBackup {
             Section {
+                AudioStorageUsageSummaryView()
+            } header: {
+                Text("Storage Usage")
+            } footer: {
+                Text("Current disk use for audio recordings still available to Zerm.")
+            }
+
+            Section {
                 AudioCleanupSettingsView()
             } header: {
-                Text("Privacy")
+                Text("Data Retention")
             } footer: {
-                Text("Control how Zerm handles your transcription data and audio recordings.")
+                Text("Choose how long transcripts and audio recordings stay on this Mac.")
             }
             }
 
@@ -482,20 +621,25 @@ struct SettingsView: View {
             } header: {
                 Text("Backup")
             } footer: {
-                Text("Export or import all your settings, prompts, power modes, dictionary, and custom models.")
+                Text("Export settings for safekeeping or restore them from a previous backup.")
             }
             }
 
             // MARK: - Diagnostics
-            if pane == nil || pane == .advancedDiagnostics {
-            Section("Diagnostics") {
+            if pane == nil || pane == .diagnostics {
+            Section {
                 DiagnosticsSettingsView()
+            } header: {
+                Text("Troubleshooting")
+            } footer: {
+                Text("Collect logs and inspect local diagnostic information.")
             }
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(Color(NSColor.controlBackgroundColor))
+        .onAppear { shortcutRefresh += 1 }
         .alert("Reset Onboarding", isPresented: $showResetOnboardingAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) {
@@ -511,6 +655,55 @@ struct SettingsView: View {
     /// Covers both pickers on a shortcut row — the key itself and the mode beside it.
     private var shortcutHelp: String {
         String(localized: "The key that opens the recorder and starts dictation. Toggle starts on one press and stops on the next; Push to Talk records only while the key is held; Hybrid does both — a quick tap toggles, holding for longer than half a second records until you let go. Choose Custom to record any key combination you like.")
+    }
+
+    @ViewBuilder
+    private func shortcutConflict(for name: KeyboardShortcuts.Name) -> some View {
+        if hasShortcutConflict(for: name) {
+            Label("This shortcut is also assigned to another Zerm action.", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("settings-shortcut-conflict-\(name.rawValue)")
+        }
+    }
+
+    private func hasShortcutConflict(for name: KeyboardShortcuts.Name) -> Bool {
+        _ = shortcutRefresh
+        guard let shortcut = KeyboardShortcuts.getShortcut(for: name) else { return false }
+
+        let otherNames: [KeyboardShortcuts.Name] = [
+            .toggleMiniRecorder,
+            .toggleMiniRecorder2,
+            .pasteLastTranscription,
+            .pasteLastEnhancement,
+            .retryLastTranscription,
+            .cancelRecorder,
+            .toggleEnhancement,
+            .readSelectedTextAloud
+        ]
+
+        return otherNames.contains { otherName in
+            otherName != name && KeyboardShortcuts.getShortcut(for: otherName) == shortcut
+        }
+    }
+
+    private func restoreShortcutDefaults() {
+        hotkeyManager.selectedHotkey1 = .rightCommand
+        hotkeyManager.selectedHotkey2 = .none
+        hotkeyManager.hotkeyMode1 = .hybrid
+        hotkeyManager.hotkeyMode2 = .hybrid
+
+        [
+            KeyboardShortcuts.Name.toggleMiniRecorder,
+            .toggleMiniRecorder2,
+            .pasteLastTranscription,
+            .pasteLastEnhancement,
+            .retryLastTranscription,
+            .cancelRecorder
+        ].forEach { KeyboardShortcuts.setShortcut(nil, for: $0) }
+
+        isCustomCancelEnabled = false
+        shortcutRefresh += 1
     }
 
     @ViewBuilder
@@ -646,6 +839,8 @@ struct PowerModeSection: View {
             .toggleStyle(.switch)
         } header: {
             Text("Power Mode")
+        } footer: {
+            Text("Apply app-specific settings when a matching app or website is active.")
         }
         .alert("Power Mode Still Active", isPresented: $showDisableAlert) {
             Button("Got it", role: .cancel) { }
@@ -685,6 +880,8 @@ struct ExperimentalSection: View {
             }
         } header: {
             Text("Experimental")
+        } footer: {
+            Text("Test alternate audio processing behavior for difficult recording environments.")
         }
     }
 }
