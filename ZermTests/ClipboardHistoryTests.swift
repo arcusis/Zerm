@@ -314,13 +314,13 @@ struct ClipboardHistoryTests {
         runtime.installLifecycleHooks()
 
         lockNotifications.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
-        try await Task.sleep(for: .milliseconds(100))
+        try await Self.waitUntilEmpty(store)
         #expect(try await store.recent().isEmpty)
 
         let sleepItem = try #require(ClipboardItem.capture(representations: [Self.text("sleep item")], sourceApp: Self.source))
         _ = try await store.capture(sleepItem)
         workspaceNotifications.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
-        try await Task.sleep(for: .milliseconds(100))
+        try await Self.waitUntilEmpty(store)
         #expect(try await store.recent().isEmpty)
 
         let restartItem = try #require(ClipboardItem.capture(representations: [Self.text("restart item")], sourceApp: Self.source))
@@ -470,6 +470,14 @@ struct ClipboardHistoryTests {
         #expect(KeyboardShortcuts.Name.pauseClipboardHistory == KeyboardShortcuts.Name("pauseClipboardHistory"))
         #expect(KeyboardShortcuts.Name.pasteNextClipboardItem == KeyboardShortcuts.Name("pasteNextClipboardItem"))
         #expect(KeyboardShortcuts.Name.pasteNextClipboardItemFormatted == KeyboardShortcuts.Name("pasteNextClipboardItemFormatted"))
+    }
+
+    /// Polls until the store is empty or 5 s pass; clearing runs asynchronously after the notification.
+    private static func waitUntilEmpty(_ store: ClipboardHistoryStore) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while try await !store.recent().isEmpty, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private static let source = ClipboardSourceApp(bundleIdentifier: "com.apple.TextEdit", name: "TextEdit")
