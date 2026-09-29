@@ -1,41 +1,6 @@
 import SwiftUI
 import SwiftData
 
-struct AudioStorageUsageSummaryView: View {
-    @Environment(\.modelContext) private var modelContext
-    @State private var usage: (fileCount: Int, totalSize: Int64)?
-    @State private var didLoadUsage = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Audio recordings") {
-                if let usage {
-                    Text(AudioCleanupManager.shared.formatFileSize(usage.totalSize))
-                        .monospacedDigit()
-                } else if didLoadUsage {
-                    Text("Unavailable")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Loading storage usage")
-                }
-            }
-
-            if let usage {
-                Text("\(usage.fileCount) audio files currently stored")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .task {
-            usage = AudioCleanupManager.shared.getStorageUsageInfo(modelContext: modelContext)
-            didLoadUsage = true
-        }
-        .accessibilityIdentifier("settings-audio-storage-usage")
-    }
-}
-
 struct AudioCleanupSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.layoutDirection) private var layoutDirection
@@ -61,10 +26,6 @@ struct AudioCleanupSettingsView: View {
 
     var body: some View {
         Group {
-            Text("Choose how long transcripts and recordings stay on this Mac.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             // Transcript cleanup - hierarchical
             VStack(alignment: .leading, spacing: 0) {
                 HStack {

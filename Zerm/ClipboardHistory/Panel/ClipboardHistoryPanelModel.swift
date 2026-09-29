@@ -147,6 +147,9 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private let store: ClipboardHistoryStore
     private var reloadTask: Task<Void, Never>?
     private var ocrRefreshTask: Task<Void, Never>?
+    private var feedTask: Task<Void, Never>?
+    private var pageOffset = 0
+    @Published private(set) var canLoadMore = false
     private var ocrRefreshAttempts = 0
     private var selectionAnchorID: UUID?
     private var selectionLeadID: UUID?
@@ -158,11 +161,18 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         applyQuery()
         registerCoreCommands()
         registerTagCommands()
+        feedTask = Task { [weak self] in
+            for await change in ClipboardHistoryFeed.shared.changes() {
+                guard let self else { return }
+                await self.receive(change)
+            }
+        }
     }
 
     deinit {
         reloadTask?.cancel()
         ocrRefreshTask?.cancel()
+        feedTask?.cancel()
     }
 
     var selection: [ClipboardItem] {
@@ -178,16 +188,50 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         }
     }
 
-    func loadItems() async {
+    func loadItems(preservingLoadedPage: Bool = false) async {
+        if !preservingLoadedPage { pageOffset = 0 }
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
-        guard let fetched = try? await store.sorted(sort.engineSort, ascending: ascending, limit: 500) else { return }
+        let requestedCount = preservingLoadedPage ? max(pageOffset, 100) : 100
+        guard let fetched = try? await store.sortedPage(sort.engineSort, ascending: ascending, offset: 0, limit: requestedCount) else { return }
         items = fetched
+        pageOffset = fetched.count
+        canLoadMore = ((try? await store.totalCount()) ?? fetched.count) > pageOffset
         tags = (try? await store.allTags()) ?? tags
         registerTagCommands()
         applyQuery()
         scheduleOCRRefreshIfNeeded(fetched)
         if selectedIDs.isEmpty, let first = visibleItems.first { selectedIDs = [first.id] }
+    }
+
+    func loadMore() async {
+        guard canLoadMore else { return }
+        var ascending = reversed
+        if sort == .firstCopy { ascending.toggle() }
+        guard let additional = try? await store.sortedPage(sort.engineSort, ascending: ascending, offset: pageOffset, limit: 100) else { return }
+        items.append(contentsOf: additional)
+        pageOffset += additional.count
+        canLoadMore = ((try? await store.totalCount()) ?? pageOffset) > pageOffset
+        applyQuery()
+    }
+
+    private func receive(_ change: ClipboardHistoryChange) async {
+        switch change {
+        case let .inserted(storeID, _), let .updated(storeID, _):
+            guard storeID == store.feedStoreID else { return }
+            await loadItems(preservingLoadedPage: true)
+        case let .insertedBatch(storeID, _):
+            guard storeID == store.feedStoreID else { return }
+            await loadItems(preservingLoadedPage: true)
+        case let .removed(storeID, ids), let .cleared(storeID, ids):
+            guard storeID == store.feedStoreID else { return }
+            items.removeAll { ids.contains($0.id) }
+            selectedIDs.removeAll { ids.contains($0) }
+            if selectionAnchorID.map(ids.contains) == true { selectionAnchorID = selectedIDs.first }
+            if selectionLeadID.map(ids.contains) == true { selectionLeadID = selectedIDs.last }
+            applyQuery()
+            if selectedIDs.isEmpty, let first = visibleItems.first { select(first) }
+        }
     }
 
     private func scheduleOCRRefreshIfNeeded(_ fetched: [ClipboardItem]) {
@@ -321,7 +365,8 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func transformSelection(_ transform: ClipboardTextTransform) async {
-        guard let item = selectedItem,
+        guard let selectedItem,
+              let item = try? await store.itemWithPayload(selectedItem.id),
               let value = transform.apply(to: ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)),
               let replacement = ClipboardItem.capture(
                 representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(value.utf8))],
@@ -373,7 +418,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func estimatedSize(of item: ClipboardItem) -> Int {
-        item.representations.reduce(0) { $0 + $1.data.count }
+        item.payloadSize ?? item.representations.reduce(0) { $0 + $1.data.count }
     }
 
     func applyQuery() {
@@ -430,8 +475,11 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         })
         registry.register(.init(id: "edit", title: String(localized: "Edit Text"), isEnabled: { $0.count == 1 && [.plainText, .richText].contains($0[0].kind) }) { [weak self] _ in
             guard let self, let item = self.selectedItem else { return }
-            self.textBeingEdited = ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)
-            self.isTextEditorVisible = true
+            Task { [weak self] in
+                guard let self, let loaded = try? await self.store.itemWithPayload(item.id) else { return }
+                self.textBeingEdited = ClipboardPanelText.plainText(from: loaded.representations, fallback: loaded.preview)
+                self.isTextEditorVisible = true
+            }
         })
         registry.register(.init(id: "favorite", title: String(localized: "Toggle Favourite"), isEnabled: { $0.count == 1 }) { [weak self] selection in
             guard let self, let item = selection.first else { return }

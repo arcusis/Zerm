@@ -1,6 +1,8 @@
 import AppKit
 import CryptoKit
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 struct ClipboardRepresentation: Codable, Equatable, Sendable {
     let itemIndex: Int
@@ -36,6 +38,8 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
     let contentHash: String
     let kind: ClipboardItemKind
     let representations: [ClipboardRepresentation]
+    let thumbnailData: Data?
+    let payloadSize: Int?
     let preview: String
     let createdAt: Date
     var lastCopiedAt: Date
@@ -52,7 +56,7 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
 
     var thumbnail: NSImage? {
         guard kind == .image,
-              let data = representations.first(where: {
+              let data = thumbnailData ?? representations.first(where: {
                   ["public.tiff", "public.png", "public.jpeg", "public.gif", "public.bmp"].contains($0.type)
               })?.data else {
             return nil
@@ -65,6 +69,8 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         contentHash: String,
         kind: ClipboardItemKind,
         representations: [ClipboardRepresentation],
+        thumbnailData: Data? = nil,
+        payloadSize: Int? = nil,
         preview: String,
         createdAt: Date = Date(),
         lastCopiedAt: Date? = nil,
@@ -83,6 +89,8 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         self.contentHash = contentHash
         self.kind = kind
         self.representations = representations
+        self.thumbnailData = thumbnailData
+        self.payloadSize = payloadSize
         self.preview = preview
         self.createdAt = createdAt
         self.lastCopiedAt = lastCopiedAt ?? createdAt
@@ -101,10 +109,12 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
     static func capture(
         representations: [ClipboardRepresentation],
         sourceApp: ClipboardSourceApp,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        maximumSize: Int = ClipboardHistorySettings.maximumItemSize
     ) -> ClipboardItem? {
         let pasteableRepresentations = representations.filter { $0.type != "org.nspasteboard.source" }
-        guard !pasteableRepresentations.isEmpty else { return nil }
+        guard !pasteableRepresentations.isEmpty,
+              pasteableRepresentations.reduce(0, { $0 + $1.data.count }) <= maximumSize else { return nil }
         let sorted = pasteableRepresentations.sorted { ($0.itemIndex, $0.type) < ($1.itemIndex, $1.type) }
         var hashInput = Data()
         for representation in sorted {
@@ -126,11 +136,28 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
             contentHash: hash,
             kind: kind,
             representations: pasteableRepresentations,
+            thumbnailData: Self.makeThumbnail(from: pasteableRepresentations, kind: kind),
             preview: preview,
             createdAt: createdAt,
             lastUsedAt: createdAt,
             sourceApp: sourceApp
         )
+    }
+
+    private static func makeThumbnail(from representations: [ClipboardRepresentation], kind: ClipboardItemKind) -> Data? {
+        guard kind == .image,
+              let data = representations.first(where: { ["public.tiff", "public.png", "public.jpeg"].contains($0.type) })?.data,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 320,
+                  kCGImageSourceCreateThumbnailWithTransform: true
+              ] as CFDictionary) else { return nil }
+        let destinationData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(destinationData, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return destinationData as Data
     }
 
     static func detectKind(in representations: [ClipboardRepresentation]) -> ClipboardItemKind {

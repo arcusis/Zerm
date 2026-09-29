@@ -111,34 +111,6 @@ class AudioCleanupManager {
             return (0, 0, [])
         }
     }
-
-    func getStorageUsageInfo(modelContext: ModelContext) -> (fileCount: Int, totalSize: Int64)? {
-        do {
-            let descriptor = FetchDescriptor<Transcription>(
-                predicate: #Predicate<Transcription> { $0.audioFileURL != nil }
-            )
-            let transcriptions = try modelContext.fetch(descriptor)
-            var fileCount = 0
-            var totalSize: Int64 = 0
-
-            for transcription in transcriptions {
-                guard let urlString = transcription.audioFileURL,
-                      let url = URL(string: urlString),
-                      FileManager.default.fileExists(atPath: url.path),
-                      let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-                      let fileSize = attributes[.size] as? Int64 else {
-                    continue
-                }
-                fileCount += 1
-                totalSize += fileSize
-            }
-
-            return (fileCount, totalSize)
-        } catch {
-            logger.error("Failed to gather audio storage info: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-    }
     
     /// Perform the cleanup operation
     private func performCleanup(modelContext: ModelContext) async {

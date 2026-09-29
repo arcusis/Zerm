@@ -1,46 +1,108 @@
 import SwiftUI
 
-/// The native macOS Settings root. The app scene and main-window destination share this root.
+/// The native macOS Settings root. The app scene can present this view from `Settings { ... }`;
+/// the main-window Settings destination uses the same root so both entry points stay identical.
 struct SettingsRootView: View {
     @AppStorage("selectedSettingsPane") private var selectedPane: SettingsPane = .general
 
     var body: some View {
         TabView(selection: $selectedPane) {
-            ForEach(SettingsPane.allCases) { pane in
-                paneContent(for: pane)
-                    .accessibilityIdentifier(pane.paneAccessibilityIdentifier)
-                    .tabItem {
-                        Label(pane.tabTitle, systemImage: pane.symbol)
-                            .accessibilityIdentifier(pane.accessibilityIdentifier)
-                    }
-                    .tag(pane)
+            SettingsPaneContainer(
+                title: "General",
+                description: "App behavior, appearance and updates."
+            ) {
+                SettingsView(pane: .general)
             }
+            .accessibilityIdentifier("settings-pane-general")
+            .tabItem {
+                Label("General", systemImage: "gearshape")
+                    .accessibilityIdentifier("settings-tab-general")
+            }
+            .tag(SettingsPane.general)
+
+            SettingsPaneContainer(
+                title: "Shortcuts & Automation",
+                description: "Dictation shortcuts, paste behavior and Power Modes."
+            ) {
+                SettingsView(pane: .shortcutsAutomation)
+            }
+            .accessibilityIdentifier("settings-pane-shortcuts")
+            .tabItem {
+                Label("Shortcuts", systemImage: "command")
+                    .accessibilityIdentifier("settings-tab-shortcuts")
+            }
+            .tag(SettingsPane.shortcutsAutomation)
+
+            AudioSettingsRootPane()
+                .accessibilityIdentifier("settings-pane-audio")
+                .tabItem {
+                    Label("Audio", systemImage: "waveform")
+                        .accessibilityIdentifier("settings-tab-audio")
+                }
+            .tag(SettingsPane.audio)
+
+            SettingsPaneContainer(
+                title: "Clipboard History",
+                description: "Control local clipboard capture, privacy, and storage."
+            ) {
+                ClipboardHistorySettingsView()
+            }
+            .accessibilityIdentifier("settings-pane-clipboard-history")
+            .tabItem {
+                Label("Clipboard History", systemImage: "clipboard")
+                    .accessibilityIdentifier("settings-tab-clipboard-history")
+            }
+            .tag(SettingsPane.clipboardHistory)
+
+            SettingsPaneContainer(
+                title: "Models & Providers",
+                description: "Choose local or cloud models and configure their languages."
+            ) {
+                ModelManagementView()
+            }
+            .accessibilityIdentifier("settings-pane-models")
+            .tabItem {
+                Label("Models", systemImage: "cpu")
+                    .accessibilityIdentifier("settings-tab-models")
+            }
+            .tag(SettingsPane.modelsProviders)
+
+            PrivacySettingsRootPane()
+                .accessibilityIdentifier("settings-pane-privacy")
+                .tabItem {
+                    Label("Privacy", systemImage: "hand.raised")
+                        .accessibilityIdentifier("settings-tab-privacy")
+                }
+                .tag(SettingsPane.permissionsPrivacy)
+
+            SettingsPaneContainer(
+                title: "Storage & Backup",
+                description: "Manage audio retention and portable settings backups."
+            ) {
+                SettingsView(pane: .storageBackup)
+            }
+            .accessibilityIdentifier("settings-pane-storage")
+            .tabItem {
+                Label("Storage", systemImage: "externaldrive")
+                    .accessibilityIdentifier("settings-tab-storage")
+            }
+            .tag(SettingsPane.storageBackup)
+
+            SettingsPaneContainer(
+                title: "Advanced & Diagnostics",
+                description: "Experimental audio behavior and troubleshooting information."
+            ) {
+                SettingsView(pane: .advancedDiagnostics)
+            }
+            .accessibilityIdentifier("settings-pane-advanced")
+            .tabItem {
+                Label("Advanced", systemImage: "stethoscope")
+                    .accessibilityIdentifier("settings-tab-advanced")
+            }
+            .tag(SettingsPane.advancedDiagnostics)
         }
         .frame(minWidth: 760, minHeight: 600)
         .accessibilityIdentifier("settings-root")
-    }
-
-    @ViewBuilder
-    private func paneContent(for pane: SettingsPane) -> some View {
-        switch pane {
-        case .general, .shortcutsAutomation, .storageBackup, .advanced, .diagnostics:
-            SettingsPaneContainer(pane: pane) {
-                SettingsView(pane: pane)
-            }
-        case .audio:
-            AudioSettingsRootPane()
-        case .clipboardHistory:
-            SettingsPaneContainer(pane: pane) {
-                ClipboardHistorySettingsView()
-            }
-        case .modelsProviders:
-            SettingsPaneContainer(pane: pane) {
-                ModelManagementView()
-            }
-        case .permissionsPrivacy:
-            PrivacySettingsRootPane()
-                .accessibilityIdentifier("settings-pane-privacy")
-        }
     }
 }
 
@@ -64,7 +126,10 @@ private struct AudioSettingsRootPane: View {
     }
 
     var body: some View {
-        SettingsPaneContainer(pane: .audio) {
+        SettingsPaneContainer(
+            title: "Audio",
+            description: "Choose microphones and control recording feedback."
+        ) {
             VStack(spacing: 0) {
                 Picker("Audio settings", selection: $section) {
                     ForEach(Section.allCases) { section in
@@ -98,22 +163,26 @@ private struct AudioSettingsRootPane: View {
 
 private struct PrivacySettingsRootPane: View {
     var body: some View {
-        SettingsPaneContainer(pane: .permissionsPrivacy) {
+        SettingsPaneContainer(
+            title: "Permissions & Privacy",
+            description: "Review the system access Zerm needs and the privacy impact of each permission."
+        ) {
             PermissionsView()
         }
     }
 }
 
 private struct SettingsPaneContainer<Content: View>: View {
-    let pane: SettingsPane
+    let title: LocalizedStringKey
+    let description: LocalizedStringKey
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(pane.title)
+                Text(title)
                     .font(.title2.weight(.semibold))
-                Text(pane.description)
+                Text(description)
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 24)

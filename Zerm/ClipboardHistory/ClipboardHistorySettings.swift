@@ -25,6 +25,7 @@ enum ClipboardHistorySettings {
         static let ignoreConfidential = "clipboardHistoryIgnoreConfidential"
         static let ignoreTransient = "clipboardHistoryIgnoreTransient"
         static let retentionCount = "clipboardHistoryRetentionCount"
+        static let maximumItemSize = "clipboardHistoryMaximumItemSize"
         static let retentionByKind = "clipboardHistoryRetentionByKind"
         static let sort = "clipboardHistorySort"
         static let copyMergeEnabled = "clipboardHistoryCopyMergeEnabled"
@@ -47,6 +48,10 @@ enum ClipboardHistorySettings {
     static var retentionCount: Int {
         get { max(1, UserDefaults.standard.object(forKey: Keys.retentionCount) as? Int ?? 500) }
         set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.retentionCount) }
+    }
+    static var maximumItemSize: Int {
+        get { max(1, UserDefaults.standard.object(forKey: Keys.maximumItemSize) as? Int ?? 50 * 1_024 * 1_024) }
+        set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.maximumItemSize) }
     }
     static var windowPosition: String {
         get { UserDefaults.standard.string(forKey: Keys.windowPosition) ?? "lastLocation" }

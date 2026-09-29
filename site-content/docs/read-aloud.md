@@ -94,8 +94,7 @@ time.
 ## History and statistics
 
 Read Aloud History keeps your most recent 500 sessions on your Mac: the selected text,
-what was spoken, and the voice used. Search the text, sort by date, or filter by reading
-mode. Delete entries one at a time or choose **Clear History** from the actions menu.
+what was spoken, and the voice used. Delete entries one at a time or clear the list.
 
 Words read and sessions completed are also counted for the dashboard. Those are counters
 only, with no text in them. See [privacy and retention](privacy-retention.html).

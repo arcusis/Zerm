@@ -98,6 +98,7 @@ struct ClipboardHistoryTests {
                 representations: [Self.text(payload)], sourceApp: Self.source
             ))
             _ = try await store.capture(item)
+            try await store.flushPendingWrites()
             let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             for file in files where file.pathExtension == "enc" {
                 let diskData = try Data(contentsOf: file)
@@ -106,7 +107,8 @@ struct ClipboardHistoryTests {
             let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key)
             let reloadedItems = try await reloaded.recent()
             let found = reloadedItems.first
-            #expect(found?.representations.first?.data == Data(payload.utf8))
+            let loaded = try await reloaded.itemWithPayload(try #require(found).id)
+            #expect(loaded.representations.first?.data == Data(payload.utf8))
         }
     }
 
@@ -147,6 +149,7 @@ struct ClipboardHistoryTests {
             ClipboardHistorySettings.Keys.keepFavoritesOnClear, ClipboardHistorySettings.Keys.keepTaggedOnClear,
             ClipboardHistorySettings.Keys.ignoreConfidential, ClipboardHistorySettings.Keys.ignoreTransient,
             ClipboardHistorySettings.Keys.retentionCount, ClipboardHistorySettings.Keys.retentionByKind,
+            ClipboardHistorySettings.Keys.maximumItemSize,
             ClipboardHistorySettings.Keys.sort, ClipboardHistorySettings.Keys.copyMergeEnabled,
             ClipboardHistorySettings.Keys.copyMergeSeparator, ClipboardHistorySettings.Keys.copyMergeUpdatesClipboard,
             ClipboardHistorySettings.Keys.saveDictations, ClipboardHistorySettings.Keys.paused,
@@ -160,6 +163,7 @@ struct ClipboardHistoryTests {
         #expect(ClipboardHistorySettings.isEnabled)
         #expect(ClipboardHistorySettings.windowPosition == "lastLocation")
         #expect(ClipboardHistorySettings.retentionCount == 500)
+        #expect(ClipboardHistorySettings.maximumItemSize == 50 * 1_024 * 1_024)
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear))
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear))
         #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText) == .days(90))

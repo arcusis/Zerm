@@ -211,7 +211,7 @@ transcripts will not bring them back. See [privacy and retention](privacy-retent
 
 ## Reporting something else
 
-Turn on **Debug Logging** in Settings → Diagnostics, reproduce the problem, then use
+Turn on **Debug Logging** in Settings → Advanced, reproduce the problem, then use
 **Export Logs**. Open an issue at
 [github.com/arcusis/Zerm/issues](https://github.com/arcusis/Zerm/issues) with:
 
