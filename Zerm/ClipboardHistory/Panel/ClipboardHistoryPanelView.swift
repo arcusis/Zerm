@@ -13,13 +13,14 @@ struct ClipboardHistoryPanelView: View {
     private let linkService: LinkPreviewService
     @Environment(\.locale) private var locale
     @Environment(\.openSettings) private var openSettings
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocused = false
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("clipboardHistoryDoubleClickPaste") private var doubleClickPaste = true
     @AppStorage("clipboardHistoryPasteOnClick") private var pasteOnClick = true
     @AppStorage("clipboardHistoryShowBadges") private var showBadges = true
     @State private var pendingClickPaste: Task<Void, Never>?
     @State private var editingTagName = ""
-    @State private var editingTagColor = Color.gray
+    @State private var editingTagColor = Color.accentColor
 
     init(
         model: ClipboardHistoryPanelModel,
@@ -34,7 +35,7 @@ struct ClipboardHistoryPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(0.55)
+            Divider()
             HStack(spacing: 0) {
                 historyList
                     .frame(minWidth: 310, idealWidth: 360, maxWidth: 400)
@@ -45,10 +46,18 @@ struct ClipboardHistoryPanelView: View {
                 }
             }
             .frame(maxHeight: .infinity)
-            Divider().opacity(0.55)
+            Divider()
             footer
         }
-        .background(.regularMaterial)
+        .background {
+            if reduceTransparency {
+                Color(nsColor: .windowBackgroundColor)
+            } else if #available(macOS 26.0, *) {
+                Color.clear.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(alignment: .center) {
             if model.isCommandPaletteVisible { CommandPaletteView(model: model, controller: controller) }
@@ -79,21 +88,12 @@ struct ClipboardHistoryPanelView: View {
                 Image(systemName: "clipboard")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
-                TextField(String(localized: "Search clipboard history"), text: $model.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($searchFocused)
-                    .accessibilityLabel(String(localized: "Search clipboard history"))
-                if !model.query.isEmpty {
-                    Button {
-                        model.query = ""
-                        searchFocused = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(String(localized: "Clear Search"))
-                }
+                ClipboardHistorySearchField(
+                    text: $model.query,
+                    isFocused: $searchFocused,
+                    placeholder: String(localized: "Search clipboard history")
+                )
+                .frame(minWidth: 180, idealWidth: 260, maxWidth: 320)
                 kindFilter
                 appFilter
                 tagFilter
@@ -106,6 +106,8 @@ struct ClipboardHistoryPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .help(String(localized: "Toggle Preview"))
+                .accessibilityLabel(String(localized: "Toggle Preview"))
+                .accessibilityHint(String(localized: "Shows or hides the selected item preview."))
                 Button {
                     model.isDetailsVisible.toggle()
                 } label: {
@@ -114,6 +116,8 @@ struct ClipboardHistoryPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .help(String(localized: "Toggle Details"))
+                .accessibilityLabel(String(localized: "Toggle Details"))
+                .accessibilityHint(String(localized: "Shows or hides selected item details."))
                 Button {
                     model.isPinned.toggle()
                     controller?.panel?.level = model.isPinned ? .floating : .normal
@@ -124,6 +128,9 @@ struct ClipboardHistoryPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .help(String(localized: "Keep Window Open"))
+                .accessibilityLabel(String(localized: "Keep Window Open"))
+                .accessibilityValue(model.isPinned ? String(localized: "On") : String(localized: "Off"))
+                .accessibilityHint(String(localized: "Keeps Clipboard History open after paste."))
             }
             let filters = activeFilters
             if !filters.isEmpty {
@@ -139,9 +146,12 @@ struct ClipboardHistoryPanelView: View {
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(.quaternary, in: Capsule())
+                            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(String.localizedStringWithFormat(
+                            String(localized: "Remove filter %@"), filter.title
+                        ))
                     }
                     Button(String(localized: "Clear Filters"), action: clearFilters)
                         .font(.system(size: 10, weight: .medium))
@@ -172,6 +182,7 @@ struct ClipboardHistoryPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .help(String(localized: "Sort clipboard history"))
+        .accessibilityLabel(String(localized: "Sort clipboard history"))
     }
 
     private var activeFilters: [ClipboardActiveFilter] {
@@ -221,6 +232,7 @@ struct ClipboardHistoryPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .help(String(localized: "Filter by Kind"))
+        .accessibilityLabel(String(localized: "Filter by Kind"))
     }
 
     private var appFilter: some View {
@@ -248,6 +260,7 @@ struct ClipboardHistoryPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .help(String(localized: "Filter by Source App"))
+        .accessibilityLabel(String(localized: "Filter by Source App"))
     }
 
     private var tagFilter: some View {
@@ -276,6 +289,7 @@ struct ClipboardHistoryPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .help(String(localized: "Filter by Tag"))
+        .accessibilityLabel(String(localized: "Filter by Tag"))
     }
 
     private var tagEditor: some View {
@@ -316,7 +330,7 @@ struct ClipboardHistoryPanelView: View {
         if let tag = model.editingTag, let color = NSColor(hex: tag.colorHex) {
             editingTagColor = Color(nsColor: color)
         } else {
-            editingTagColor = .gray
+            editingTagColor = .accentColor
         }
     }
 
@@ -335,28 +349,30 @@ struct ClipboardHistoryPanelView: View {
     }
 
     private var historyList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 2) {
+        Group {
+            if !model.hasLoadedItems && model.items.isEmpty {
+                ProgressView(String(localized: "Loading clipboard history"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.visibleItems.isEmpty {
+                unavailableHistoryView
+            } else {
+                List(selection: selectionBinding) {
                     ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                         ClipboardHistoryRow(
                             item: item,
                             index: index,
-                            selectedIDs: model.selectedIDs,
                             showQuickPasteBadge: showBadges && model.isShowingQuickPasteBadges,
                             query: model.query,
                             linkService: linkService
-                        ) {
-                            let flags = NSApp.currentEvent?.modifierFlags ?? []
-                            model.select(item, toggling: flags.contains(.command), playSelectionSound: true)
-                        }
-                        .id(item.id)
+                        )
+                        .tag(item.id)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
                         .onTapGesture(count: 1) {
                             guard pasteOnClick else { return }
                             pendingClickPaste?.cancel()
                             pendingClickPaste = Task { @MainActor in
                                 try? await Task.sleep(nanoseconds: 250_000_000)
-                                guard !Task.isCancelled else { return }
+                                guard !Task.isCancelled, model.selectedItem?.id == item.id else { return }
                                 controller?.paste(item, pasteSelection: false)
                             }
                         }
@@ -364,93 +380,101 @@ struct ClipboardHistoryPanelView: View {
                             pendingClickPaste?.cancel()
                             if doubleClickPaste { controller?.paste(item, pasteSelection: false) }
                         }
-                        .contextMenu {
-                            Button(String(localized: "Paste")) { controller?.paste(item, pasteSelection: false) }
-                            Button(String(localized: "Copy")) { controller?.copy(item) }
-                            Button(String(localized: item.isFavorite ? "Remove Favourite" : "Add to Favourites")) {
-                                Task { await model.toggleFavorite(item) }
-                            }
-                            Button(String(localized: item.isPinned ? "Unpin Item" : "Pin Item")) {
-                                Task { await model.togglePinned(item) }
-                            }
-                            Button(String(localized: "Edit Text")) {
-                                model.select(item)
-                                model.textBeingEdited = ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)
-                                model.isTextEditorVisible = true
-                            }
-                            if item.isFavorite {
-                                Button(String(localized: "Move Favourite Up")) { Task { await model.reorderFavorite(item, by: -1) } }
-                                Button(String(localized: "Move Favourite Down")) { Task { await model.reorderFavorite(item, by: 1) } }
-                            }
-                            if !model.tags.isEmpty {
-                                Menu(String(localized: "Tags")) {
-                                    ForEach(model.tags) { tag in
-                                        Button(String(localized: item.tagIDs.contains(tag.id) ? "Remove Tag" : "Add Tag")) {
-                                            model.select(item)
-                                            Task { await model.setTag(tag, attached: !item.tagIDs.contains(tag.id)) }
-                                        }
-                                    }
-                                }
-                            }
-                            Divider()
-                            Button(String(localized: "Show in History")) { model.showInHistory(item) }
-                            Button(String(localized: "Delete"), role: .destructive) {
-                                model.select(item)
-                                Task { await model.deleteSelection() }
-                            }
-                        }
+                        .contextMenu { rowMenu(item) }
                     }
-                    if model.visibleItems.isEmpty { emptyState }
                     if model.canLoadMore {
                         HStack(spacing: 7) {
                             ProgressView().controlSize(.small).opacity(model.isLoadingMore ? 1 : 0)
                             Text(String(localized: "Loading more history"))
-                                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .listRowSeparator(.hidden)
                         .task(id: model.items.count) { await model.loadMore() }
                     }
                 }
-                .padding(9)
-            }
-            .onAppear {
-                if let id = model.selectedIDs.last { proxy.scrollTo(id, anchor: .center) }
-            }
-            .onChange(of: model.selectedIDs) { _, ids in
-                if let id = ids.last { proxy.scrollTo(id, anchor: .center) }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .accessibilityLabel(String(localized: "Clipboard History"))
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+        .frame(maxHeight: .infinity)
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: model.items.isEmpty ? "clipboard" : "line.3.horizontal.decrease.circle")
-                .font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
-            if !model.hasLoadedItems && model.items.isEmpty {
-                ProgressView().controlSize(.small)
-                Text(String(localized: "Loading clipboard history"))
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-            } else {
-                Text(model.items.isEmpty ? String(localized: "No clipboard items yet") : String(localized: "No matching items"))
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary)
-                Text(
-                    model.items.isEmpty
-                        ? String(localized: "Copy text, images, or links to add them while Clipboard History is enabled.")
-                        : String(localized: "Try another search or clear filters to see more items.")
-                )
-                .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                .frame(maxWidth: 240)
-                if model.items.isEmpty {
-                    Button(String(localized: "Clipboard History Settings")) { openSettings() }
-                        .font(.system(size: 11, weight: .medium)).buttonStyle(.link)
+    private var selectionBinding: Binding<Set<UUID>> {
+        Binding(
+            get: { Set(model.selectedIDs) },
+            set: { selection in
+                let previous = Set(model.selectedIDs)
+                let ordered = model.visibleItems.filter { selection.contains($0.id) }
+                let nextIDs = ordered.map(\.id)
+                if nextIDs.count == previous.count + 1,
+                   let added = ordered.first(where: { !previous.contains($0.id) }) {
+                    model.select(added, toggling: true, playSelectionSound: true)
+                } else if nextIDs.count == 1, let item = ordered.first {
+                    model.select(item, playSelectionSound: true)
                 } else {
-                    Button(String(localized: "Clear Filters"), action: clearFilters)
-                        .font(.system(size: 11, weight: .medium)).buttonStyle(.link)
+                    model.selectedIDs = nextIDs
+                }
+            }
+        )
+    }
+
+    private var unavailableHistoryView: some View {
+        let isEmpty = model.items.isEmpty
+        return ContentUnavailableView {
+            Label(
+                String(localized: isEmpty ? "No clipboard items yet" : "No matching items"),
+                systemImage: isEmpty ? "clipboard" : "line.3.horizontal.decrease.circle"
+            )
+        } description: {
+            Text(String(localized: isEmpty
+                ? "Copy text, images, or links to add them while Clipboard History is enabled."
+                : "Try another search or clear filters to see more items."))
+        } actions: {
+            if isEmpty {
+                Button(String(localized: "Clipboard History Settings")) { openSettings() }
+            } else {
+                Button(String(localized: "Clear Filters"), action: clearFilters)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rowMenu(_ item: ClipboardItem) -> some View {
+        Button(String(localized: "Paste")) { controller?.paste(item, pasteSelection: false) }
+        Button(String(localized: "Copy")) { controller?.copy(item) }
+        Button(String(localized: item.isFavorite ? "Remove Favourite" : "Add to Favourites")) {
+            Task { await model.toggleFavorite(item) }
+        }
+        Button(String(localized: item.isPinned ? "Unpin Item" : "Pin Item")) {
+            Task { await model.togglePinned(item) }
+        }
+        Button(String(localized: "Edit Text")) {
+            model.select(item)
+            model.textBeingEdited = ClipboardPanelText.plainText(from: item.representations, fallback: item.preview)
+            model.isTextEditorVisible = true
+        }
+        if item.isFavorite {
+            Button(String(localized: "Move Favourite Up")) { Task { await model.reorderFavorite(item, by: -1) } }
+            Button(String(localized: "Move Favourite Down")) { Task { await model.reorderFavorite(item, by: 1) } }
+        }
+        if !model.tags.isEmpty {
+            Menu(String(localized: "Tags")) {
+                ForEach(model.tags) { tag in
+                    Button(String(localized: item.tagIDs.contains(tag.id) ? "Remove Tag" : "Add Tag")) {
+                        model.select(item)
+                        Task { await model.setTag(tag, attached: !item.tagIDs.contains(tag.id)) }
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 190)
+        Divider()
+        Button(String(localized: "Show in History")) { model.showInHistory(item) }
+        Button(String(localized: "Delete"), role: .destructive) {
+            model.select(item)
+            Task { await model.deleteSelection() }
+        }
     }
 
     @ViewBuilder
@@ -495,14 +519,15 @@ struct ClipboardHistoryPanelView: View {
                     Text(item.recognizedText).lineLimit(1).textSelection(.enabled)
                 }
             }
-            .font(.system(size: 9)).foregroundStyle(.tertiary)
+            .font(.system(size: 10)).foregroundStyle(.tertiary)
             let names = model.tags.filter { item.tagIDs.contains($0.id) }.map(\.name)
             if !names.isEmpty {
                 HStack(spacing: 5) {
                     ForEach(names, id: \.self) { name in
-                        Text(name).font(.system(size: 9, weight: .medium))
+                        Text(name).font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(.quaternary, in: Capsule())
+                            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                            .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Tag: %@"), name))
                     }
                 }
             }
@@ -546,13 +571,9 @@ struct ClipboardHistoryPanelView: View {
 private struct ClipboardHistoryRow: View {
     let item: ClipboardItem
     let index: Int
-    let selectedIDs: [UUID]
     let showQuickPasteBadge: Bool
     let query: String
     let linkService: LinkPreviewService
-    let action: () -> Void
-
-    private var isSelected: Bool { selectedIDs.contains(item.id) }
 
     var body: some View {
         HStack(spacing: 9) {
@@ -571,27 +592,34 @@ private struct ClipboardHistoryRow: View {
                     Text(item.lastUsedAt, style: .relative)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    if item.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                    if item.isFavorite {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityLabel(String(localized: "Favorite"))
+                    }
                 }
-                .font(.system(size: 9.5))
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             }
             if showQuickPasteBadge, index < 9 {
                 Text("⌘\(index + 1)")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .padding(.horizontal, 5).padding(.vertical, 3)
-                    .background(.quaternary, in: Capsule())
+                    .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                    .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Paste with Command %lld"), Int64(index + 1)))
             }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
-        .background(isSelected ? Color.accentColor.opacity(0.19) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9).stroke(
-                isSelected ? Color.accentColor.opacity(0.35) : .clear, lineWidth: 1)
-        )
         .contentShape(Rectangle())
-        .onTapGesture(perform: action)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: String.localizedStringWithFormat(
+            String(localized: "clipboard_row_accessibility_label"),
+            item.kind.localizedName,
+            item.title?.nilIfBlank ?? item.preview,
+            item.sourceApp.name ?? String(localized: "Unknown App"),
+            item.lastUsedAt.formatted(date: .abbreviated, time: .shortened)
+        )))
     }
 
     private var highlightedPreview: Text {
@@ -634,7 +662,7 @@ private struct ClipboardKindIcon: View {
             } else {
                 Image(systemName: item.kind.symbolName)
                     .font(.system(size: size * 0.47, weight: .medium))
-                    .foregroundStyle(item.kind == .color ? Color.purple : Color.accentColor)
+                    .foregroundStyle(item.kind == .color ? Color.secondary : Color.accentColor)
             }
         }
         .frame(width: size, height: size)
@@ -750,7 +778,7 @@ private struct ClipboardItemPreview: View {
                 red: Double((rgb >> 16) & 0xff) / 255, green: Double((rgb >> 8) & 0xff) / 255,
                 blue: Double(rgb & 0xff) / 255)
         }
-        return .purple
+        return .secondary
     }
 
     private var filePath: String {
@@ -826,9 +854,8 @@ private struct CommandPaletteView: View {
         }
         .padding(7)
         .frame(width: 300, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.16), lineWidth: 1))
-        .shadow(color: .black.opacity(0.24), radius: 22, y: 9)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
     }
 }
 

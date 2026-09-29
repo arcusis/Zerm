@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ClipboardTagsView: View {
     @StateObject private var model: ClipboardLibraryModel
+    @Environment(\.locale) private var locale
     let onOpenHistory: (UUID) -> Void
     private let layoutDirectionOverride: LayoutDirection?
     @State private var itemCounts: [UUID: Int] = [:]
@@ -35,6 +36,7 @@ struct ClipboardTagsView: View {
                     showsEditor = true
                 } label: { Label("New Tag", systemImage: "plus") }
                 .keyboardShortcut("n", modifiers: .command)
+                .help(String(localized: "Create Tag"))
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
@@ -46,9 +48,11 @@ struct ClipboardTagsView: View {
                     ForEach(model.tags) { tag in tagRow(tag) }
                 }
                 .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+                .accessibilityLabel(String(localized: "Tags"))
             }
         }
-        .background(.regularMaterial)
+        .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.layoutDirection, layoutDirectionOverride ?? currentLayoutDirection)
         .task { await refreshTags() }
         .sheet(isPresented: $showsEditor) {
@@ -76,7 +80,8 @@ struct ClipboardTagsView: View {
             Circle()
                 .fill(Color(clipboardHex: tag.colorHex))
                 .frame(width: 12, height: 12)
-                .overlay(Circle().stroke(.primary.opacity(0.12), lineWidth: 1))
+                .overlay(Circle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+                .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Tag color: %@"), tag.name))
             Button { onOpenHistory(tag.id) } label: {
                 HStack {
                     Text(verbatim: tag.name).font(.body.weight(.medium))
@@ -89,6 +94,7 @@ struct ClipboardTagsView: View {
             }
             .buttonStyle(.plain)
             .help(String(localized: "Open History Filtered by Tag"))
+            .accessibilityHint(String(localized: "Opens Clipboard History filtered to this tag."))
             Menu {
                 Button(String(localized: "Edit Tag")) { editingTag = tag; showsEditor = true }
                 Menu(String(localized: "Merge Into")) {
@@ -106,18 +112,19 @@ struct ClipboardTagsView: View {
             }
             .menuStyle(.borderlessButton)
             .help(String(localized: "Tag Actions"))
+            .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Tag Actions: %@"), tag.name))
         }
         .padding(.vertical, 5)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "tag").font(.system(size: 32, weight: .light)).foregroundStyle(.tertiary)
-            Text("No Tags Yet").font(.headline)
-            Text("Create tags to organize clipboard items").font(.callout).foregroundStyle(.secondary)
-            Button { editingTag = nil; showsEditor = true } label: { Label("Create Tag", systemImage: "plus") }.padding(.top, 4)
+        ContentUnavailableView {
+            Label("No Tags Yet", systemImage: "tag")
+        } description: {
+            Text("Create tags to organize clipboard items")
+        } actions: {
+            Button { editingTag = nil; showsEditor = true } label: { Label("Create Tag", systemImage: "plus") }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func refreshTags() async {
@@ -130,7 +137,7 @@ struct ClipboardTagsView: View {
     }
 
     private var currentLayoutDirection: LayoutDirection {
-        Locale.Language(identifier: Locale.current.identifier).characterDirection == .rightToLeft ? .rightToLeft : .leftToRight
+        Locale.Language(identifier: locale.identifier).characterDirection == .rightToLeft ? .rightToLeft : .leftToRight
     }
 }
 

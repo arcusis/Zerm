@@ -211,7 +211,6 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let command = modifiers.contains(.command)
             let option = modifiers.contains(.option)
-            let shift = modifiers.contains(.shift)
             let searchHasFocus = self.panel?.firstResponder is NSTextView
 
             if event.keyCode == 53 {
@@ -258,22 +257,6 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             }
             if !searchHasFocus, event.keyCode == 49, let item = model.selectedItem, item.supportsQuickLook {
                 self.showQuickLook(for: item)
-                return nil
-            }
-            if event.keyCode == 126 {
-                model.moveSelection(by: -1, extending: shift)
-                return nil
-            }
-            if event.keyCode == 125 {
-                model.moveSelection(by: 1, extending: shift)
-                return nil
-            }
-            if event.keyCode == 116 {
-                model.moveSelection(by: -8, extending: shift)
-                return nil
-            }
-            if event.keyCode == 121 {
-                model.moveSelection(by: 8, extending: shift)
                 return nil
             }
             let quickPasteNumbers: [UInt16: Int] = [18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9]
@@ -371,10 +354,11 @@ final class ClipboardHistoryPanel: NSPanel {
         isMovableByWindowBackground = true
         title = String(localized: "Clipboard History")
         titlebarAppearsTransparent = true
-        titleVisibility = .hidden
+        titleVisibility = .visible
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
+        isMovableByWindowBackground = false
         minSize = NSSize(width: 600, height: 390)
     }
 }

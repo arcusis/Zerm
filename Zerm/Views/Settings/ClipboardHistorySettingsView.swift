@@ -202,6 +202,8 @@ struct ClipboardHistorySettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .controlBackgroundColor))
         .padding(20)
         .onAppear(perform: loadSettings)
         .onChange(of: maximumStorageSize) { _, _ in
@@ -260,7 +262,7 @@ struct ClipboardHistorySettingsView: View {
                     .accessibilityLabel("Remove \(app.appName)")
                 }
                 .padding(7)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
                 .onHover { hoveredAppID = $0 ? app.bundleIdentifier : nil }
             }
         }
@@ -284,6 +286,7 @@ struct ClipboardHistorySettingsView: View {
             }
             .buttonStyle(.borderless)
             .help("Play preview")
+            .accessibilityLabel(String(localized: "Play preview"))
             Slider(value: volumeBinding(for: action), in: 0...1)
                 .frame(minWidth: 90)
             Text("\(Int((soundVolumes[action.id] ?? 0.22) * 100))%")
