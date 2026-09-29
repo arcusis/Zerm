@@ -8,8 +8,19 @@ import Testing
 @Suite(.serialized)
 struct ClipboardHistoryPanelTests {
     @MainActor
+    @Test func favoritesOnTopUsesInjectedDefaults() async throws {
+        try await withPanelModel { _, store, defaults in
+            defaults.set(false, forKey: ClipboardHistorySettings.Keys.favoritesOnTop)
+            let model = ClipboardHistoryPanelModel(store: store, defaults: defaults)
+            #expect(!model.favoritesOnTop)
+            model.favoritesOnTop = true
+            #expect(defaults.bool(forKey: ClipboardHistorySettings.Keys.favoritesOnTop))
+        }
+    }
+
+    @MainActor
     @Test func filtersSortsSelectsAndMapsQuickPasteSlots() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let base = Date(timeIntervalSince1970: 1_700_000_000)
             let alpha = try #require(
                 ClipboardItem.capture(
@@ -85,7 +96,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func commandRegistryFiltersAndInvokesRegisteredCommands() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let item = try #require(
                 ClipboardItem.capture(
                     representations: [text("palette sample")],
@@ -111,7 +122,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func commandAvailabilityTracksSelectionAndRegistersEveryTransform() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let first = try #require(ClipboardItem.capture(
                 representations: [text("first")],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
@@ -139,7 +150,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func feedUpdatesOpenModelAndPropagatesRemovalAndClear() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let first = try #require(ClipboardItem.capture(
                 representations: [text("selected item")],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
@@ -170,7 +181,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func loadMoreAppendsEveryPageAndPreservesSelection() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let now = Date(timeIntervalSince1970: 1_700_000_000)
             let items = (0..<205).map { index in
                 ClipboardItem(
@@ -198,7 +209,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func panelLoadsHistoryInPages() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let now = Date()
             let items = (0..<250).map { index in
                 ClipboardItem(
@@ -224,7 +235,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func tagSearchTokenFiltersMatchingItems() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let tagged = try #require(ClipboardItem.capture(
                 representations: [text("release notes")],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
@@ -246,7 +257,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func imageOCRTextIsSearchableInPanelModel() async throws {
-        try await withPanelModel { _, store in
+        try await withPanelModel { _, store, defaults in
             let image = ClipboardItem(
                 contentHash: "ocr-search-sample",
                 kind: .image,
@@ -256,7 +267,7 @@ struct ClipboardHistoryPanelTests {
                 barcodePayloads: ["QR-7341"],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
             )
-            let searchModel = ClipboardHistoryPanelModel(store: store, initialItems: [image])
+            let searchModel = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [image])
             searchModel.query = "7341"
             #expect(searchModel.visibleItems.map(\.id) == [image.id])
         }
@@ -264,7 +275,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func transformCommandCreatesExpectedClipboardItem() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let item = try #require(ClipboardItem.capture(
                 representations: [text("Mixed Case")],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
@@ -328,7 +339,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func lazyPanelHostOpensWithFiveHundredItemsWithinOneSecond() async throws {
-        try await withPanelModel { _, store in
+        try await withPanelModel { _, store, defaults in
             let now = Date()
             let items = (0..<500).map { index in
                 ClipboardItem(
@@ -341,7 +352,7 @@ struct ClipboardHistoryPanelTests {
                     sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
                 )
             }
-            let model = ClipboardHistoryPanelModel(store: store, initialItems: items)
+            let model = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: items)
             model.select(items[0])
             let startedAt = ProcessInfo.processInfo.systemUptime
             let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 860, height: 570))
@@ -358,7 +369,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func rendersClipboardPanelOffscreenToPNG() async throws {
-        try await withPanelModel { model, store in
+        try await withPanelModel { model, store, defaults in
             let now = Date()
             let samples = [
                 ("Weekly release checklist", now.addingTimeInterval(-90)),
@@ -402,6 +413,7 @@ struct ClipboardHistoryPanelTests {
             )
             let renderModel = ClipboardHistoryPanelModel(
                 store: store,
+                defaults: defaults,
                 initialItems: [image, taggedItem],
                 initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
             )
@@ -436,7 +448,7 @@ struct ClipboardHistoryPanelTests {
 
     @MainActor
     @Test func rendersEveryPanelStateOffscreenToPNGs() async throws {
-        try await withPanelModel { _, store in
+        try await withPanelModel { _, store, defaults in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/389-shots", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
@@ -454,17 +466,17 @@ struct ClipboardHistoryPanelTests {
             ]
             let previewService = LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil)
             for (name, item) in samples {
-                let model = ClipboardHistoryPanelModel(store: store, initialItems: [item])
+                let model = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [item])
                 model.select(item)
                 model.isDetailsVisible = true
                 try await savePanelShot(name, model: model, service: previewService, to: directory)
             }
 
-            let emptyModel = ClipboardHistoryPanelModel(store: store)
+            let emptyModel = ClipboardHistoryPanelModel(store: store, defaults: defaults)
             await emptyModel.loadItems()
             try await savePanelShot("empty", model: emptyModel, service: previewService, to: directory)
 
-            let noMatchModel = ClipboardHistoryPanelModel(store: store, initialItems: [samples[0].1])
+            let noMatchModel = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1])
             noMatchModel.query = "kind:url no-result"
             try await savePanelShot("no-matches", model: noMatchModel, service: previewService, to: directory)
 
@@ -472,6 +484,7 @@ struct ClipboardHistoryPanelTests {
             let tagged = panelItem(.plainText, "Tagged clipboard note", [text("Tagged clipboard note")], source: source, tagIDs: [tagID])
             let tagModel = ClipboardHistoryPanelModel(
                 store: store,
+                defaults: defaults,
                 initialItems: [tagged],
                 initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
             )
@@ -489,7 +502,7 @@ struct ClipboardHistoryPanelTests {
             let longItems = (0..<240).map { index in
                 panelItem(.plainText, "Long history row \(index) with searchable release notes", [text("Long history row \(index) with searchable release notes")], source: source)
             }
-            let longModel = ClipboardHistoryPanelModel(store: store, initialItems: longItems)
+            let longModel = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: longItems)
             longModel.select(longItems[118])
             try await savePanelShot("long-list", model: longModel, service: previewService, to: directory)
         }
@@ -557,14 +570,19 @@ struct ClipboardHistoryPanelTests {
     }
 
     private func withPanelModel(
-        _ body: @MainActor (ClipboardHistoryPanelModel, ClipboardHistoryStore) async throws -> Void
+        _ body: @MainActor (ClipboardHistoryPanelModel, ClipboardHistoryStore, UserDefaults) async throws -> Void
     ) async throws {
+        let suite = "ClipboardHistoryPanelTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "clipboard-panel-tests-\(UUID().uuidString)", isDirectory: true)
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 7, count: 32))
-        let model = await MainActor.run { ClipboardHistoryPanelModel(store: store) }
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try await body(model, store)
+            suite, isDirectory: true)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 7, count: 32), defaults: defaults)
+        let model = await MainActor.run { ClipboardHistoryPanelModel(store: store, defaults: defaults) }
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await body(model, store, defaults)
     }
 
     private func text(_ value: String, type: String = NSPasteboard.PasteboardType.string.rawValue) -> ClipboardRepresentation {

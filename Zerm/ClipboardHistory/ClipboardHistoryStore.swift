@@ -10,6 +10,13 @@ enum ClipboardHistoryStoreCaptureError: Error {
 
 /// Local encrypted clipboard history. Every public operation is asynchronous and serialized by the actor.
 actor ClipboardHistoryStore {
+    private enum SortKey: String, Codable, Hashable, CaseIterable {
+        case lastCopy
+        case firstCopy
+        case copyCount
+        case size
+    }
+
     private struct Metadata: Codable {
         let id: UUID
         var contentHash: String
@@ -41,10 +48,13 @@ actor ClipboardHistoryStore {
     private let directoryURL: URL
     private let indexURL: URL
     private let searchIndexURL: URL
+    private let sortIndexURL: URL
     private let tagsURL: URL
     private let encryption: ClipboardHistoryEncryption
-    private let settingsDefaults: UserDefaults
+    private let defaults: UserDefaults
     private var metadata: [Metadata]
+    private var metadataIndexByID: [UUID: Int] = [:]
+    private var sortOrderIDs: [SortKey: [UUID]] = [:]
     private var payloads: [UUID: [ClipboardRepresentation]]
     private var dirtyPayloadIDs: Set<UUID>
     private var pendingBlobDeletes: Set<UUID> = []
@@ -64,12 +74,13 @@ actor ClipboardHistoryStore {
     init(
         directoryURL: URL = AppStoragePaths.root.appendingPathComponent("ClipboardHistory", isDirectory: true),
         keyData: Data? = nil,
-        settingsDefaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard
     ) throws {
         self.directoryURL = directoryURL
-        self.settingsDefaults = settingsDefaults
+        self.defaults = defaults
         indexURL = directoryURL.appendingPathComponent("index.enc")
         searchIndexURL = directoryURL.appendingPathComponent("search-index.enc")
+        sortIndexURL = directoryURL.appendingPathComponent("sort-index.enc")
         tagsURL = directoryURL.appendingPathComponent("tags.enc")
         let resolvedKey: Data
         if let keyData {
@@ -95,11 +106,11 @@ actor ClipboardHistoryStore {
     /// Inserts a new clipboard payload or moves a matching content hash to the top.
     func capture(_ item: ClipboardItem, now: Date = Date()) throws -> ClipboardItem {
         try ensureLoaded()
-        guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults) else {
+        guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: defaults) else {
             throw ClipboardHistoryStoreCaptureError.itemTooLarge
         }
-        guard ClipboardHistoryEngineSettings.shouldCapture(item.kind) else { throw ClipboardHistoryCaptureError.retentionDisabled }
-        if let maximumSize = ClipboardHistoryEngineSettings.maximumSize(for: item.kind, defaults: settingsDefaults),
+        guard ClipboardHistoryEngineSettings.shouldCapture(item.kind, defaults: defaults) else { throw ClipboardHistoryCaptureError.retentionDisabled }
+        if let maximumSize = ClipboardHistoryEngineSettings.maximumSize(for: item.kind, defaults: defaults),
            item.representations.reduce(0, { $0 + $1.data.count }) > maximumSize {
             throw ClipboardHistoryStoreCaptureError.itemTooLarge
         }
@@ -112,6 +123,7 @@ actor ClipboardHistoryStore {
             metadata[index].payloadSize = item.representations.reduce(0) { $0 + $1.data.count }
             metadata[index].recognizedText = item.recognizedText.nilIfEmpty
             metadata[index].barcodePayloads = item.barcodePayloads
+            updateSortIndexes(for: metadata[index].id)
             if let thumbnailData = item.thumbnailData { thumbnails[metadata[index].id] = thumbnailData }
             payloadOCR.removeValue(forKey: metadata[index].id)
             payloadBarcodes.removeValue(forKey: metadata[index].id)
@@ -145,6 +157,8 @@ actor ClipboardHistoryStore {
         row.recognizedText = item.recognizedText.nilIfEmpty
         row.barcodePayloads = item.barcodePayloads
         metadata.append(row)
+        metadataIndexByID[row.id] = metadata.count - 1
+        insertIntoSortIndexes(row.id)
         refreshSearchDocument(row)
         payloads[row.id] = item.representations
         if let thumbnailData = item.thumbnailData { thumbnails[row.id] = thumbnailData }
@@ -161,12 +175,14 @@ actor ClipboardHistoryStore {
     func captureBatch(_ items: [ClipboardItem], now: Date = Date()) throws -> [ClipboardItem] {
         try ensureLoaded()
         var inserted: [ClipboardItem] = []
+        var changed = false
         for item in items {
-            guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults) else { continue }
-            guard ClipboardHistoryEngineSettings.shouldCapture(item.kind) else { continue }
-            if let maximumSize = ClipboardHistoryEngineSettings.maximumSize(for: item.kind, defaults: settingsDefaults),
+            guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: defaults) else { continue }
+            guard ClipboardHistoryEngineSettings.shouldCapture(item.kind, defaults: defaults) else { continue }
+            if let maximumSize = ClipboardHistoryEngineSettings.maximumSize(for: item.kind, defaults: defaults),
                item.representations.reduce(0, { $0 + $1.data.count }) > maximumSize { continue }
             if let index = metadata.firstIndex(where: { $0.contentHash == item.contentHash }) {
+                changed = true
                 metadata[index].lastUsedAt = now
                 metadata[index].lastCopiedAt = now
                 metadata[index].useCount += 1
@@ -189,6 +205,7 @@ actor ClipboardHistoryStore {
             row.recognizedText = item.recognizedText.nilIfEmpty
             row.barcodePayloads = item.barcodePayloads
             metadata.append(row)
+            changed = true
             refreshSearchDocument(row)
             payloads[row.id] = item.representations
             if let thumbnailData = item.thumbnailData { thumbnails[row.id] = thumbnailData }
@@ -196,6 +213,7 @@ actor ClipboardHistoryStore {
             inserted.append(makeItem(row))
         }
         try enforceRetention(now: now)
+        if changed { rebuildSortIndexes() }
         try save(writeIndex: false)
         scheduleIndexWrite()
         if !inserted.isEmpty { publish(.insertedBatch(storeID: feedStoreID, items: inserted)) }
@@ -344,8 +362,8 @@ actor ClipboardHistoryStore {
     /// Keeps pinned items unless `includingPinned` is true.
     func clear(includingPinned: Bool = false, keepingFavorites: Bool? = nil, keepingTagged: Bool? = nil) throws {
         try ensureLoaded()
-        let keepFavorites = keepingFavorites ?? ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, defaultValue: true)
-        let keepTagged = keepingTagged ?? ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, defaultValue: true)
+        let keepFavorites = keepingFavorites ?? ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, in: defaults, defaultValue: true)
+        let keepTagged = keepingTagged ?? ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, in: defaults, defaultValue: true)
         let protected: (Metadata) -> Bool = { row in
             (keepFavorites && row.isFavorite) || (keepTagged && !(row.tagIDs ?? []).isEmpty)
         }
@@ -368,11 +386,23 @@ actor ClipboardHistoryStore {
 
     func mergeArchiveEntries(_ entries: [ClipboardHistoryArchive.Entry]) throws {
         try ensureLoaded()
+        var archivedTagIDs: [UUID: UUID] = [:]
+        for tag in entries.flatMap({ $0.item.tagDefinitions ?? [] }) {
+            if let existing = tags.first(where: { $0.name.localizedCaseInsensitiveCompare(tag.name) == .orderedSame }) {
+                archivedTagIDs[tag.id] = existing.id
+            } else {
+                let id = tags.contains(where: { $0.id == tag.id }) ? UUID() : tag.id
+                tags.append(ClipboardTag(id: id, name: tag.name, colorHex: tag.colorHex))
+                archivedTagIDs[tag.id] = id
+                tagsDirty = true
+            }
+        }
         for entry in entries {
-            let imported = entry.item
+            var imported = entry.item
+            imported.tagIDs = imported.tagIDs.compactMap { archivedTagIDs[$0] }
             let importedSize = imported.representations.reduce(0) { $0 + $1.data.count }
-            guard importedSize <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults),
-                  ClipboardHistoryEngineSettings.maximumSize(for: imported.kind, defaults: settingsDefaults).map({ importedSize <= $0 }) ?? true else { continue }
+            guard importedSize <= ClipboardHistorySettings.maximumItemSize(in: defaults),
+                  ClipboardHistoryEngineSettings.maximumSize(for: imported.kind, defaults: defaults).map({ importedSize <= $0 }) ?? true else { continue }
             if let existingIndex = metadata.firstIndex(where: { $0.contentHash == imported.contentHash }) {
                 let existingID = metadata[existingIndex].id
                 metadata[existingIndex].isPinned = metadata[existingIndex].isPinned || imported.isPinned
@@ -380,6 +410,7 @@ actor ClipboardHistoryStore {
                 if metadata[existingIndex].title == nil { metadata[existingIndex].title = imported.title }
                 if metadata[existingIndex].collectionID == nil { metadata[existingIndex].collectionID = imported.collectionID }
                 if metadata[existingIndex].favoriteOrder == nil { metadata[existingIndex].favoriteOrder = entry.favoriteOrder }
+                metadata[existingIndex].tagIDs = Array(Set((metadata[existingIndex].tagIDs ?? []) + imported.tagIDs))
                 metadata[existingIndex].createdAt = min(metadata[existingIndex].createdAt, imported.createdAt)
                 metadata[existingIndex].lastCopiedAt = max(metadata[existingIndex].lastCopiedAt ?? imported.lastCopiedAt, imported.lastCopiedAt)
                 metadata[existingIndex].lastUsedAt = max(metadata[existingIndex].lastUsedAt, imported.lastUsedAt)
@@ -412,6 +443,7 @@ actor ClipboardHistoryStore {
             dirtyPayloadIDs.insert(importedID)
         }
         try enforceRetention(now: Date())
+        rebuildSortIndexes()
         refreshAllSearchDocuments()
         try save()
     }
@@ -444,6 +476,7 @@ actor ClipboardHistoryStore {
            let index = metadata.firstIndex(where: { $0.id == stored.id }) {
             metadata[index].lastUsedAt = Date()
             metadata[index].useCount += 1
+            updateSortIndexes(for: stored.id)
             try save()
         }
     }
@@ -525,27 +558,98 @@ actor ClipboardHistoryStore {
 
     private func sortedRows(_ order: ClipboardHistorySort, ascending: Bool) throws -> [Metadata] {
         try ensureLoaded()
-        return metadata.sorted { left, right in
-            let result: ComparisonResult
-            switch order {
-            case .lastCopy: result = (left.lastCopiedAt ?? left.lastUsedAt).compare(right.lastCopiedAt ?? right.lastUsedAt)
-            case .firstCopy, .copySequence: result = left.createdAt.compare(right.createdAt)
-            case .copyCount: result = left.useCount == right.useCount ? .orderedSame : (left.useCount < right.useCount ? .orderedAscending : .orderedDescending)
-            case .size:
-                let lhs = left.payloadSize ?? 0
-                let rhs = right.payloadSize ?? 0
-                result = lhs == rhs ? .orderedSame : (lhs < rhs ? .orderedAscending : .orderedDescending)
-            }
-            if result == .orderedSame {
-                return ascending ? left.id.uuidString < right.id.uuidString : left.id.uuidString > right.id.uuidString
-            }
-            return ascending ? result == .orderedAscending : result == .orderedDescending
+        let ids = sortOrderIDs[sortKey(for: order)] ?? []
+        let orderedIDs = ascending ? ids : ids.reversed()
+        return orderedIDs.compactMap { id in metadataIndexByID[id].map { metadata[$0] } }
+    }
+
+    private func sortKey(for order: ClipboardHistorySort) -> SortKey {
+        switch order {
+        case .lastCopy: return .lastCopy
+        case .firstCopy, .copySequence: return .firstCopy
+        case .copyCount: return .copyCount
+        case .size: return .size
         }
     }
 
+    private func comesBefore(_ leftID: UUID, _ rightID: UUID, for key: SortKey) -> Bool {
+        guard let leftIndex = metadataIndexByID[leftID], let rightIndex = metadataIndexByID[rightID] else { return leftID.uuidString < rightID.uuidString }
+        let left = metadata[leftIndex]
+        let right = metadata[rightIndex]
+        let result: ComparisonResult
+        switch key {
+        case .lastCopy:
+            result = (left.lastCopiedAt ?? left.lastUsedAt).compare(right.lastCopiedAt ?? right.lastUsedAt)
+        case .firstCopy:
+            result = left.createdAt.compare(right.createdAt)
+        case .copyCount:
+            result = left.useCount == right.useCount ? .orderedSame : (left.useCount < right.useCount ? .orderedAscending : .orderedDescending)
+        case .size:
+            let lhs = left.payloadSize ?? 0
+            let rhs = right.payloadSize ?? 0
+            result = lhs == rhs ? .orderedSame : (lhs < rhs ? .orderedAscending : .orderedDescending)
+        }
+        return result == .orderedSame ? left.id.uuidString < right.id.uuidString : result == .orderedAscending
+    }
+
+    private func rebuildMetadataIndex() {
+        metadataIndexByID = Dictionary(uniqueKeysWithValues: metadata.enumerated().map { ($0.element.id, $0.offset) })
+    }
+
+    private func rebuildSortIndexes() {
+        rebuildMetadataIndex()
+        for key in SortKey.allCases {
+            sortOrderIDs[key] = metadata.map(\.id).sorted { comesBefore($0, $1, for: key) }
+        }
+    }
+
+    private func insertIntoSortIndexes(_ id: UUID) {
+        for key in SortKey.allCases {
+            guard var ids = sortOrderIDs[key] else { continue }
+            var low = 0
+            var high = ids.count
+            while low < high {
+                let middle = (low + high) / 2
+                if comesBefore(ids[middle], id, for: key) { low = middle + 1 }
+                else { high = middle }
+            }
+            ids.insert(id, at: low)
+            sortOrderIDs[key] = ids
+        }
+    }
+
+    private func updateSortIndexes(for id: UUID) {
+        for key in SortKey.allCases {
+            guard var ids = sortOrderIDs[key], let oldIndex = ids.firstIndex(of: id) else { continue }
+            ids.remove(at: oldIndex)
+            sortOrderIDs[key] = ids
+            insertIntoSortIndex(id, for: key)
+        }
+    }
+
+    private func insertIntoSortIndex(_ id: UUID, for key: SortKey) {
+        guard var ids = sortOrderIDs[key] else { return }
+        var low = 0
+        var high = ids.count
+        while low < high {
+            let middle = (low + high) / 2
+            if comesBefore(ids[middle], id, for: key) { low = middle + 1 }
+            else { high = middle }
+        }
+        ids.insert(id, at: low)
+        sortOrderIDs[key] = ids
+    }
+
     func sortedPage(_ order: ClipboardHistorySort, ascending: Bool = false, offset: Int, limit: Int) throws -> [ClipboardItem] {
-        let rows = try sortedRows(order, ascending: ascending)
-        return try rows.dropFirst(min(max(0, offset), rows.count)).prefix(max(0, limit)).map { try makePageItem($0) }
+        try ensureLoaded()
+        let ids = sortOrderIDs[sortKey(for: order)] ?? []
+        let start = min(max(0, offset), ids.count)
+        let end = min(start + max(0, limit), ids.count)
+        let pageIDs = ascending
+            ? Array(ids[start..<end])
+            : Array(ids[(ids.count - end)..<(ids.count - start)].reversed())
+        let rows = pageIDs.compactMap { id in metadataIndexByID[id].map { metadata[$0] } }
+        return try rows.map { try makePageItem($0) }
     }
 
     func cleanupExpired(now: Date = Date()) throws {
@@ -555,7 +659,7 @@ actor ClipboardHistoryStore {
     }
 
     func shouldCapture(_ kind: ClipboardItemKind) -> Bool {
-        ClipboardHistoryEngineSettings.shouldCapture(kind)
+        ClipboardHistoryEngineSettings.shouldCapture(kind, defaults: defaults)
     }
 
     func pasteNext(
@@ -631,14 +735,15 @@ actor ClipboardHistoryStore {
         guard let index = metadata.firstIndex(where: { $0.id == id }),
               let replacement = ClipboardItem.capture(representations: representations, sourceApp: metadata[index].sourceApp) else { return nil }
         let replacementSize = replacement.representations.reduce(0) { $0 + $1.data.count }
-        guard replacementSize <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults),
-              ClipboardHistoryEngineSettings.maximumSize(for: replacement.kind, defaults: settingsDefaults).map({ replacementSize <= $0 }) ?? true else {
+        guard replacementSize <= ClipboardHistorySettings.maximumItemSize(in: defaults),
+              ClipboardHistoryEngineSettings.maximumSize(for: replacement.kind, defaults: defaults).map({ replacementSize <= $0 }) ?? true else {
             throw ClipboardHistoryStoreCaptureError.itemTooLarge
         }
         metadata[index].contentHash = replacement.contentHash
         metadata[index].kind = replacement.kind
         metadata[index].preview = replacement.preview
         metadata[index].payloadSize = replacement.representations.reduce(0) { $0 + $1.data.count }
+        updateSortIndexes(for: id)
         refreshSearchDocument(metadata[index])
         payloads[id] = replacement.representations
         payloadOCR.removeValue(forKey: id)
@@ -693,6 +798,8 @@ actor ClipboardHistoryStore {
         let removed = Set(ids)
         if let pasteSequenceLastID, removed.contains(pasteSequenceLastID) { resetPasteSequence() }
         metadata.removeAll { removed.contains($0.id) }
+        for key in SortKey.allCases { sortOrderIDs[key]?.removeAll { removed.contains($0) } }
+        rebuildMetadataIndex()
         searchIndex.remove(removed)
         for id in removed {
             payloads.removeValue(forKey: id)
@@ -706,7 +813,8 @@ actor ClipboardHistoryStore {
     }
 
     private func makeItem(_ row: Metadata, representations: [ClipboardRepresentation]? = nil) -> ClipboardItem {
-        ClipboardItem(
+        let tagIDs = row.tagIDs ?? []
+        return ClipboardItem(
             id: row.id,
             contentHash: row.contentHash,
             kind: row.kind,
@@ -722,7 +830,8 @@ actor ClipboardHistoryStore {
             isFavorite: row.isFavorite,
             collectionID: row.collectionID,
             title: row.title,
-            tagIDs: row.tagIDs ?? [],
+            tagIDs: tagIDs,
+            tagDefinitions: tags.filter { tagIDs.contains($0.id) },
             recognizedText: row.recognizedText ?? payloadOCR[row.id] ?? "",
             barcodePayloads: row.barcodePayloads ?? payloadBarcodes[row.id] ?? [],
             sourceApp: row.sourceApp
@@ -730,15 +839,15 @@ actor ClipboardHistoryStore {
     }
 
     private func enforceRetention(now: Date) throws {
-        let oversized = metadata.filter { ($0.payloadSize ?? 0) > ClipboardHistorySettings.maximumItemSize(in: settingsDefaults) }.map(\.id)
+        let oversized = metadata.filter { ($0.payloadSize ?? 0) > ClipboardHistorySettings.maximumItemSize(in: defaults) }.map(\.id)
         removeItems(oversized)
-        let keepFavorites = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, defaultValue: true)
-        let keepTagged = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, defaultValue: true)
+        let keepFavorites = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, in: defaults, defaultValue: true)
+        let keepTagged = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, in: defaults, defaultValue: true)
         let expired = metadata.filter { row in
             guard !row.isPinned,
                   !(keepFavorites && row.isFavorite),
                   !(keepTagged && !(row.tagIDs ?? []).isEmpty) else { return false }
-            let period = ClipboardHistoryEngineSettings.retentionPeriod(for: row.kind)
+            let period = ClipboardHistoryEngineSettings.retentionPeriod(for: row.kind, defaults: defaults)
             guard let days = period.dayCount else { return period == .never }
             return (row.lastCopiedAt ?? row.lastUsedAt) < now.addingTimeInterval(-Double(days) * 86_400)
         }.map(\.id)
@@ -747,30 +856,43 @@ actor ClipboardHistoryStore {
             !$0.isPinned
                 && !(keepFavorites && $0.isFavorite)
                 && !(keepTagged && !($0.tagIDs ?? []).isEmpty)
-        }.sorted { $0.lastUsedAt > $1.lastUsedAt }
-        let excess = Set(unpinned.dropFirst(ClipboardHistorySettings.retentionCount).map(\.id))
-        removeItems(Array(excess))
+        }
+        let retentionCount = ClipboardHistorySettings.retentionCount(in: defaults)
+        if unpinned.count > retentionCount {
+            let excess = Set(unpinned.sorted { $0.lastUsedAt > $1.lastUsedAt }.dropFirst(retentionCount).map(\.id))
+            removeItems(Array(excess))
+        }
         enforceSizeLimits()
     }
 
     private func enforceSizeLimits() {
-        let eligible = metadata.filter { !$0.isPinned }.sorted {
-            let leftProtected = $0.isFavorite || !($0.tagIDs ?? []).isEmpty
-            let rightProtected = $1.isFavorite || !($1.tagIDs ?? []).isEmpty
-            if leftProtected != rightProtected { return !leftProtected }
-            return $0.lastUsedAt < $1.lastUsedAt
+        var eligible: [Metadata]?
+        func evictionOrder() -> [Metadata] {
+            if let eligible { return eligible }
+            let ordered = metadata.filter { !$0.isPinned }.sorted {
+                let leftProtected = $0.isFavorite || !($0.tagIDs ?? []).isEmpty
+                let rightProtected = $1.isFavorite || !($1.tagIDs ?? []).isEmpty
+                if leftProtected != rightProtected { return !leftProtected }
+                return $0.lastUsedAt < $1.lastUsedAt
+            }
+            eligible = ordered
+            return ordered
         }
         for kind in ClipboardItemKind.allCases {
-            guard let limit = ClipboardHistoryEngineSettings.maximumSize(for: kind, defaults: settingsDefaults) else { continue }
-            var remaining = metadata.filter { $0.kind == kind }.reduce(0) { $0 + ($1.payloadSize ?? 0) }
-            for row in eligible.filter({ $0.kind == kind }) where remaining > limit {
+            guard let limit = ClipboardHistoryEngineSettings.maximumSize(for: kind, defaults: defaults) else { continue }
+            let kindItems = metadata.filter { $0.kind == kind }
+            var remaining = kindItems.reduce(0) { $0 + ($1.payloadSize ?? 0) }
+            guard remaining > limit else { continue }
+            for row in evictionOrder().filter({ $0.kind == kind }) where remaining > limit {
                 removeItems([row.id])
                 remaining -= row.payloadSize ?? 0
             }
         }
 
         var remaining = metadata.reduce(0) { $0 + ($1.payloadSize ?? 0) }
-        for row in eligible where remaining > ClipboardHistorySettings.maximumStorageSize(in: settingsDefaults) {
+        let totalLimit = ClipboardHistorySettings.maximumStorageSize(in: defaults)
+        guard remaining > totalLimit else { return }
+        for row in evictionOrder() where remaining > totalLimit {
             guard metadata.contains(where: { $0.id == row.id }) else { continue }
             removeItems([row.id])
             remaining -= row.payloadSize ?? 0
@@ -799,6 +921,23 @@ actor ClipboardHistoryStore {
                 refreshAllSearchDocuments()
                 try save()
             }
+            if FileManager.default.fileExists(atPath: sortIndexURL.path),
+               let savedOrders = try? JSONDecoder().decode([SortKey: [UUID]].self, from: encryption.open(Data(contentsOf: sortIndexURL))) {
+                let itemIDs = Set(metadata.map(\.id))
+                if savedOrders.count == SortKey.allCases.count,
+                   SortKey.allCases.allSatisfy({ key in
+                       guard let ids = savedOrders[key] else { return false }
+                       return ids.count == metadata.count && Set(ids) == itemIDs
+                   }) {
+                    sortOrderIDs = savedOrders
+                    rebuildMetadataIndex()
+                    let indexesAreOrdered = SortKey.allCases.allSatisfy { key in
+                        guard let ids = sortOrderIDs[key] else { return false }
+                        return zip(ids, ids.dropFirst()).allSatisfy { comesBefore($0.0, $0.1, for: key) }
+                    }
+                    if !indexesAreOrdered { sortOrderIDs.removeAll() }
+                }
+            }
             let previousIDs = Set(metadata.map(\.id))
             try enforceRetention(now: Date())
             if Set(metadata.map(\.id)) != previousIDs { try save() }
@@ -811,6 +950,8 @@ actor ClipboardHistoryStore {
         guard !hasLoaded else { return }
         try load()
         hasLoaded = true
+        if sortOrderIDs.count == SortKey.allCases.count { rebuildMetadataIndex() }
+        else { rebuildSortIndexes() }
     }
 
     private func save(writeIndex: Bool = true) throws {
@@ -847,6 +988,7 @@ actor ClipboardHistoryStore {
         if writeIndex {
             try encryption.seal(encoder.encode(metadata)).write(to: indexURL, options: .atomic)
             try encryption.seal(encoder.encode(searchIndex)).write(to: searchIndexURL, options: .atomic)
+            try encryption.seal(encoder.encode(sortOrderIDs)).write(to: sortIndexURL, options: .atomic)
         }
         if tagsDirty {
             try encryption.seal(encoder.encode(tags)).write(to: tagsURL, options: .atomic)

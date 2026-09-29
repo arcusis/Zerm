@@ -88,11 +88,14 @@ enum ClipboardHistorySettings {
         set { UserDefaults.standard.set(newValue, forKey: Keys.enabled) }
     }
     static var retentionCount: Int {
-        get { max(1, UserDefaults.standard.object(forKey: Keys.retentionCount) as? Int ?? 500) }
+        get { retentionCount(in: .standard) }
         set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.retentionCount) }
     }
+    static func retentionCount(in defaults: UserDefaults) -> Int {
+        max(1, defaults.object(forKey: Keys.retentionCount) as? Int ?? 500)
+    }
     static var maximumItemSize: Int {
-        get { max(1, UserDefaults.standard.object(forKey: Keys.maximumItemSize) as? Int ?? 50 * 1_024 * 1_024) }
+        get { maximumItemSize(in: .standard) }
         set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.maximumItemSize) }
     }
     static var maximumStorageSize: Int64 {
@@ -122,7 +125,10 @@ enum ClipboardHistorySettings {
         set { windowPosition = newValue.rawValue }
     }
     static func bool(_ key: String, defaultValue: Bool = false) -> Bool {
-        UserDefaults.standard.object(forKey: key) as? Bool ?? defaultValue
+        bool(key, in: .standard, defaultValue: defaultValue)
+    }
+    static func bool(_ key: String, in defaults: UserDefaults, defaultValue: Bool = false) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? defaultValue
     }
     static func set(_ value: Bool, for key: String) { UserDefaults.standard.set(value, forKey: key) }
     static var excludedApps: Set<String> {

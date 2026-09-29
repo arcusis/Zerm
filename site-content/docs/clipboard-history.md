@@ -34,4 +34,4 @@ Copy, paste, delete, and selection actions each support no sound, a macOS system
 
 Clipboard History can be paused from Settings or the menu bar. Settings control which apps and confidential or transient content are ignored, whether dictated text is saved, and retention by item kind. Pinned, favourited, and tagged items can be protected from cleanup or clearing.
 
-Export writes a ZIP archive. An optional password encrypts the archive; without one, the archive is unencrypted. Import merges archive entries into the current history.
+Export writes a ZIP archive with item tag assignments and tag names and colours. Import merges archive entries into the current history and matches tags by name. Version 1 archives remain importable. An optional password encrypts the archive; without one, the archive is unencrypted.

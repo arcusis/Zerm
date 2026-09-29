@@ -10,20 +10,19 @@ import Testing
 struct ClipboardHistoryScaleTests {
     @Test func tenThousandItemsCaptureAndSearchStayWithinBounds() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-scale-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 9, count: 32))
-        let defaults = UserDefaults.standard
-        let previousRetention = defaults.object(forKey: ClipboardHistorySettings.Keys.retentionCount)
-        defaults.set(12_000, forKey: ClipboardHistorySettings.Keys.retentionCount)
+        let suite = "ClipboardHistoryScaleTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
         defer {
-            if let previousRetention { defaults.set(previousRetention, forKey: ClipboardHistorySettings.Keys.retentionCount) }
-            else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.retentionCount) }
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: suite)
         }
+        defaults.set(12_000, forKey: ClipboardHistorySettings.Keys.retentionCount)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 9, count: 32), defaults: defaults)
         let source = ClipboardSourceApp(bundleIdentifier: "test.scale", name: "Scale Test")
         let now = Date()
         let items = (0..<10_000).map { index in
             ClipboardItem(
-                contentHash: "scale-\(index)", kind: .plainText,
+                contentHash: "scale-\(index)", kind: .other,
                 representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data("scale row \(index)".utf8))],
                 preview: "scale row \(index)", createdAt: now.addingTimeInterval(Double(index)),
                 lastUsedAt: now.addingTimeInterval(Double(index)), sourceApp: source
@@ -39,19 +38,25 @@ struct ClipboardHistoryScaleTests {
         let results = try await store.search(text: "scale row 9999")
         let searchMilliseconds = (ProcessInfo.processInfo.systemUptime - searchStart) * 1_000
 
-        let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 9, count: 32))
+        let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 9, count: 32), defaults: defaults)
+        let loadStart = ProcessInfo.processInfo.systemUptime
+        let loadedCount = try await reloaded.totalCount()
+        let loadMilliseconds = (ProcessInfo.processInfo.systemUptime - loadStart) * 1_000
         let pageStart = ProcessInfo.processInfo.systemUptime
         let firstPage = try await reloaded.sortedPage(.lastCopy, offset: 0, limit: 100)
+        let totalCount = try await reloaded.totalCount()
         let firstPageMilliseconds = (ProcessInfo.processInfo.systemUptime - pageStart) * 1_000
         let memoryDelta = max(0, Self.residentMemory() - memoryBefore)
 
-        let measurements = "capture_10000_ms=\(Int(captureMilliseconds))\nsearch_ms=\(String(format: "%.2f", searchMilliseconds))\nfirst_page_ms=\(String(format: "%.2f", firstPageMilliseconds))\nresident_delta_mib=\(memoryDelta / 1_048_576)\n"
+        let measurements = "capture_10000_ms=\(Int(captureMilliseconds))\nsearch_ms=\(String(format: "%.2f", searchMilliseconds))\ncold_store_load_ms=\(String(format: "%.2f", loadMilliseconds))\nfirst_page_plus_count_ms=\(String(format: "%.2f", firstPageMilliseconds))\nresident_delta_mib=\(memoryDelta / 1_048_576)\n"
         try? FileManager.default.createDirectory(atPath: "/tmp/zerm-work", withIntermediateDirectories: true)
-        try? measurements.write(toFile: "/tmp/zerm-work/386-scale-metrics.txt", atomically: true, encoding: .utf8)
+        try? measurements.write(toFile: "/tmp/zerm-work/389-scale-metrics.txt", atomically: true, encoding: .utf8)
         print("Clipboard scale: \(measurements.replacingOccurrences(of: "\n", with: "; "))")
         #expect(results.first?.preview == "scale row 9999")
         #expect(firstPage.count == 100)
-        #expect(firstPageMilliseconds < 1_500, "10,000-item first page took \(firstPageMilliseconds) ms")
+        #expect(loadedCount == 10_000)
+        #expect(totalCount == 10_000)
+        #expect(firstPageMilliseconds < 150, "10,000-item first page plus count took \(firstPageMilliseconds) ms")
         #expect(searchMilliseconds < 150, "10,000-item search took \(searchMilliseconds) ms")
         #expect(memoryDelta < 512 * 1_048_576, "10,000-item resident growth was \(memoryDelta) bytes")
     }
@@ -97,16 +102,13 @@ struct ClipboardHistoryScaleTests {
     }
 
     @Test func storeSkipsItemsAboveConfiguredMaximum() async throws {
-        let defaults = UserDefaults.standard
-        let previous = defaults.object(forKey: ClipboardHistorySettings.Keys.maximumItemSize)
-        defer {
-            if let previous { defaults.set(previous, forKey: ClipboardHistorySettings.Keys.maximumItemSize) }
-            else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.maximumItemSize) }
-        }
+        let suite = "ClipboardHistorySizeTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(10, forKey: ClipboardHistorySettings.Keys.maximumItemSize)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-size-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 4, count: 32))
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 4, count: 32), defaults: defaults)
         let item = try #require(ClipboardItem.capture(
             representations: [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(repeating: 65, count: 11))],
             sourceApp: ClipboardSourceApp(bundleIdentifier: "test.scale", name: "Scale Test"),

@@ -75,6 +75,13 @@ final class ClipboardHistoryRuntime {
         installLifecycleHooks()
         installShortcutHandlers()
         startCleanupTimer()
+        warmStore()
+    }
+
+    /// Decrypts the index in the background at launch, so the first panel open does not pay for it.
+    private func warmStore() {
+        guard let store else { return }
+        Task.detached(priority: .utility) { _ = try? await store.totalCount() }
     }
 
     func startCleanupTimer() {

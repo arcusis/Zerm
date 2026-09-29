@@ -50,6 +50,7 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
     var collectionID: UUID?
     var title: String?
     var tagIDs: [UUID]
+    var tagDefinitions: [ClipboardTag]?
     var recognizedText: String
     var barcodePayloads: [String]
     let sourceApp: ClipboardSourceApp
@@ -81,6 +82,7 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         collectionID: UUID? = nil,
         title: String? = nil,
         tagIDs: [UUID] = [],
+        tagDefinitions: [ClipboardTag]? = nil,
         recognizedText: String = "",
         barcodePayloads: [String] = [],
         sourceApp: ClipboardSourceApp
@@ -101,6 +103,7 @@ struct ClipboardItem: Codable, Identifiable, Equatable, Sendable {
         self.collectionID = collectionID
         self.title = title
         self.tagIDs = tagIDs
+        self.tagDefinitions = tagDefinitions
         self.recognizedText = recognizedText
         self.barcodePayloads = barcodePayloads
         self.sourceApp = sourceApp

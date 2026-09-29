@@ -9,7 +9,7 @@ import Testing
 struct ClipboardLibraryTests {
     @MainActor
     @Test func tokenAndDateFiltersApplyToPagedHistory() async throws {
-        try await withStore { store, feed in
+        try await withStore { store, feed, _ in
             let now = Date()
             let tagged = try #require(ClipboardItem.capture(
                 representations: [text("Release checklist")],
@@ -39,7 +39,7 @@ struct ClipboardLibraryTests {
 
     @MainActor
     @Test func liveFeedAndBulkTagActionsUpdateItems() async throws {
-        try await withStore { store, feed in
+        try await withStore { store, feed, _ in
             let model = ClipboardLibraryModel(store: store, feed: feed)
             await model.start()
             let tag = try await store.createTag(name: "Work", colorHex: "#577FBC")
@@ -75,7 +75,7 @@ struct ClipboardLibraryTests {
 
     @MainActor
     @Test func tagCanBeCreatedRenamedRecoloredAndDeleted() async throws {
-        try await withStore { store, feed in
+        try await withStore { store, feed, _ in
             let model = ClipboardLibraryModel(store: store, feed: feed)
             await model.createTag(name: "Draft", colorHex: "#527DDB")
             let tag = try #require(model.tags.first)
@@ -97,7 +97,7 @@ struct ClipboardLibraryTests {
 
     @MainActor
     @Test func mergingTagsMovesItemsAndDeletesSourceTag() async throws {
-        try await withStore { store, feed in
+        try await withStore { store, feed, _ in
             let item = try #require(ClipboardItem.capture(
                 representations: [text("Tag merge sample")],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
@@ -117,15 +117,9 @@ struct ClipboardLibraryTests {
 
     @MainActor
     @Test func rendersLibraryStatesToPNG() async throws {
-        try await withStore { store, feed in
-            let defaults = UserDefaults.standard
+        try await withStore { store, feed, defaults in
             let retentionKey = ClipboardHistorySettings.Keys.retentionByKind
-            let previousRetention = defaults.object(forKey: retentionKey)
             defaults.set(Dictionary(uniqueKeysWithValues: ClipboardItemKind.allCases.map { ($0.rawValue, "unlimited") }), forKey: retentionKey)
-            defer {
-                if let previousRetention { defaults.set(previousRetention, forKey: retentionKey) }
-                else { defaults.removeObject(forKey: retentionKey) }
-            }
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/390-library-shots", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let tag = try await store.createTag(name: "Research", colorHex: "#4268AD")
@@ -186,7 +180,7 @@ struct ClipboardLibraryTests {
 
     @MainActor
     @Test func rendersTagManagerToPNG() async throws {
-        try await withStore { store, _ in
+        try await withStore { store, _, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/390-library-shots", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let first = try await store.createTag(name: "Research", colorHex: "#4268AD")
@@ -210,13 +204,18 @@ struct ClipboardLibraryTests {
     }
 
     private func withStore(
-        _ operation: @MainActor (ClipboardHistoryStore, ClipboardHistoryFeed) async throws -> Void
+        _ operation: @MainActor (ClipboardHistoryStore, ClipboardHistoryFeed, UserDefaults) async throws -> Void
     ) async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-library-tests-\(UUID().uuidString)", isDirectory: true)
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 8, count: 32))
+        let suite = "ClipboardLibraryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Data(repeating: 8, count: 32), defaults: defaults)
         let feed = await MainActor.run { ClipboardHistoryFeed() }
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try await operation(store, feed)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await operation(store, feed, defaults)
     }
 
     private func previewItems(tagID: UUID) throws -> [ClipboardItem] {

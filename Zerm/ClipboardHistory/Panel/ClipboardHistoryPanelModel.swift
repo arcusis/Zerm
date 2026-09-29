@@ -123,9 +123,9 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     @Published var query = "" { didSet { applyQuery() } }
     @Published var sort: ClipboardPanelSort = .lastCopy { didSet { reload() } }
     @Published var reversed = false { didSet { reload() } }
-    @Published var favoritesOnTop = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.favoritesOnTop, defaultValue: true) {
+    @Published var favoritesOnTop: Bool {
         didSet {
-            UserDefaults.standard.set(favoritesOnTop, forKey: ClipboardHistorySettings.Keys.favoritesOnTop)
+            defaults.set(favoritesOnTop, forKey: ClipboardHistorySettings.Keys.favoritesOnTop)
             applyQuery()
         }
     }
@@ -145,6 +145,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     let registry = ClipboardPanelCommandRegistry()
     var onCommand: ((String) -> Void)?
     private let store: ClipboardHistoryStore
+    private let defaults: UserDefaults
     private var reloadTask: Task<Void, Never>?
     private var ocrRefreshTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
@@ -158,8 +159,15 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private var selectionAnchorID: UUID?
     private var selectionLeadID: UUID?
 
-    init(store: ClipboardHistoryStore, initialItems: [ClipboardItem] = [], initialTags: [ClipboardTag] = []) {
+    init(
+        store: ClipboardHistoryStore,
+        defaults: UserDefaults = .standard,
+        initialItems: [ClipboardItem] = [],
+        initialTags: [ClipboardTag] = []
+    ) {
         self.store = store
+        self.defaults = defaults
+        _favoritesOnTop = Published(initialValue: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.favoritesOnTop, in: defaults, defaultValue: true))
         items = initialItems
         tags = initialTags
         applyQuery()
@@ -431,8 +439,8 @@ final class ClipboardHistoryPanelModel: ObservableObject {
 
     func clearHistory() async {
         try? await store.clear(
-            keepingFavorites: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, defaultValue: true),
-            keepingTagged: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, defaultValue: true)
+            keepingFavorites: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, in: defaults, defaultValue: true),
+            keepingTagged: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, in: defaults, defaultValue: true)
         )
         selectedIDs = []
         await loadItems()
@@ -532,7 +540,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         })
         registry.register(.init(id: "clear", title: String(localized: "Clear Clipboard History")) { [weak self] _ in
             guard let self else { return }
-            if ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.warnBeforeClear, defaultValue: true) {
+            if ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.warnBeforeClear, in: self.defaults, defaultValue: true) {
                 self.isClearConfirmationVisible = true
             } else {
                 Task { await self.clearHistory() }
