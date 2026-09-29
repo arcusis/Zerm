@@ -332,7 +332,7 @@ tell application "Finder"
         delay 2
         -- Deliberately not closed. Closing the window makes Finder rewrite .DS_Store without
         -- the background alias, and the styling then vanishes during hdiutil convert. Measured
-        -- over three variants: with `close` the shipped DMG carries 0 background references,
+        -- over three variants: with close the shipped DMG carries 0 background references,
         -- without it 5. Detaching the volume closes the window anyway.
     end tell
 end tell

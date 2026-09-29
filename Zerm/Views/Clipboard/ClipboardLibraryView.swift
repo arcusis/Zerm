@@ -270,7 +270,7 @@ struct ClipboardLibraryView: View {
     private var itemList: some View {
         VStack(spacing: 0) {
             if let message = model.errorMessage {
-                Text(message).foregroundStyle(.red).padding(10).accessibilityLabel(message)
+                Text(verbatim: message).foregroundStyle(.red).padding(10).accessibilityLabel(message)
             }
             if model.items.isEmpty && !model.isLoading {
                 emptyState
