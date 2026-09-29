@@ -43,7 +43,14 @@ healthcheck: check
 
 # whisper.cpp packages seven Apple platform slices; Zerm links only macOS. Keep its
 # transformed recipe checked by scripts/macos-only-xcframework.py.
-WHISPER_MACOS_XCFRAMEWORK = python3 $(CURDIR)/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh && bash build-xcframework-macos.sh
+WHISPER_MACOS_XCFRAMEWORK = python3 $(CURDIR)/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh && $(call INJECT_PREFIX_MAP,build-xcframework-macos.sh) && bash build-xcframework-macos.sh
+
+# Shipped binaries must not embed build-machine paths (they reveal the builder's user name).
+# Map every source path under the home folder to "." in the upstream build scripts, and refuse
+# a framework that still contains one.
+PREFIX_MAP_FLAGS := -ffile-prefix-map=$(DEPS_DIR)=. -ffile-prefix-map=$(HOME)=.
+INJECT_PREFIX_MAP = sed -i '' -E 's|^(COMMON_C(XX)?_FLAGS="[^"]*)"|\1 $(PREFIX_MAP_FLAGS)"|' $(1) && grep -q -- '-ffile-prefix-map=$(HOME)=' $(1)
+CHECK_NO_HOME_PATHS = if find "$(1)" -type f \( -perm -u+x -o -name '*.a' \) -exec strings -a {} + | grep -q "$(HOME)/"; then echo "error: $(1) embeds paths under $(HOME)"; exit 1; fi
 
 # Build process
 whisper:
@@ -56,8 +63,9 @@ whisper:
 		else \
 			(cd $(WHISPER_CPP_DIR) && git fetch origin); \
 		fi; \
-		(cd $(WHISPER_CPP_DIR) && git checkout --quiet $(WHISPER_COMMIT)); \
+		(cd $(WHISPER_CPP_DIR) && git checkout --quiet --force $(WHISPER_COMMIT)); \
 		(cd $(WHISPER_CPP_DIR) && $(WHISPER_MACOS_XCFRAMEWORK)) && \
+		$(call CHECK_NO_HOME_PATHS,$(FRAMEWORK_PATH)) && \
 		echo "$(WHISPER_COMMIT)" > "$(FRAMEWORK_PATH)/$(PIN_STAMP)"; \
 	else \
 		echo "whisper.xcframework $(WHISPER_COMMIT) already built in $(DEPS_DIR), skipping build"; \
@@ -94,13 +102,14 @@ llama:
 	@if [ "$$(cat "$(LLAMA_XCFRAMEWORK)/$(PIN_STAMP)" 2>/dev/null)" != "$(LLAMA_COMMIT)" ]; then \
 		echo "Building llama.xcframework $(LLAMA_COMMIT) in $(DEPS_DIR)..."; \
 		rm -rf "$(LLAMA_XCFRAMEWORK)"; \
-		if [ ! -d "$(LLAMA_DIR)" ]; then \
-			git clone https://github.com/ggerganov/llama.cpp.git $(LLAMA_DIR); \
+		if [ ! -d "$(LLAMA_DIR)/.git" ]; then \
+			rm -rf "$(LLAMA_DIR)" && git clone https://github.com/ggerganov/llama.cpp.git $(LLAMA_DIR); \
 		else \
 			(cd $(LLAMA_DIR) && git fetch origin); \
 		fi; \
-		(cd $(LLAMA_DIR) && git checkout --quiet $(LLAMA_COMMIT)); \
-		(cd $(LLAMA_DIR) && bash build-xcframework.sh macos) && \
+		(cd $(LLAMA_DIR) && git checkout --quiet --force $(LLAMA_COMMIT)); \
+		(cd $(LLAMA_DIR) && $(call INJECT_PREFIX_MAP,build-xcframework.sh) && bash build-xcframework.sh macos) && \
+		$(call CHECK_NO_HOME_PATHS,$(LLAMA_XCFRAMEWORK)) && \
 		echo "$(LLAMA_COMMIT)" > "$(LLAMA_XCFRAMEWORK)/$(PIN_STAMP)"; \
 	else \
 		echo "llama.xcframework $(LLAMA_COMMIT) already built, skipping"; \

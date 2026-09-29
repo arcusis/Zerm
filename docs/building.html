@@ -178,8 +178,11 @@ to publish.</p>
 </ol>
 <div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">git clone https://github.com/ggerganov/whisper.cpp.git
 <span class="pl-c1">cd</span> whisper.cpp
-./build-xcframework.sh</pre></div>
-<p dir="auto">This will create the XCFramework at <code class="notranslate">build-apple/whisper.xcframework</code>.</p>
+python3 /path/to/Zerm/scripts/macos-only-xcframework.py build-xcframework.sh build-xcframework-macos.sh
+bash build-xcframework-macos.sh</pre></div>
+<p dir="auto">This will create the XCFramework at <code class="notranslate">build-apple/whisper.xcframework</code>. The transform builds only<br>
+the macOS slice Zerm links; upstream's <code class="notranslate">./build-xcframework.sh</code> also works but builds six extra<br>
+iOS, visionOS and tvOS slices. <code class="notranslate">make whisper</code> and <code class="notranslate">make llama</code> do this for you.</p>
 <h3 dir="auto">Building Zerm</h3>
 <ol dir="auto">
 <li>Clone the Zerm repository:</li>

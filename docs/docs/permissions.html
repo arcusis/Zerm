@@ -73,6 +73,12 @@ Quit from the menu bar item.</p>
 <p>If it is still red after a relaunch, remove Zerm from the Accessibility list with the<br>
 minus button, then add it back. That clears a stale entry, which usually happens after<br>
 the app has been moved or replaced by an update.</p>
+<h2>Global keyboard monitoring</h2>
+<p>Global keyboard monitoring lets dictation shortcuts work while another app is active.<br>
+If macOS blocks the monitor or Accessibility trust is missing, the Permissions page marks<br>
+keyboard monitoring unavailable and the hotkey notification explains where to enable it.<br>
+Push to talk and hybrid holds also check the physical trigger key state, so a missed key-up<br>
+event still stops and finalizes the recording. Toggle mode keeps recording after key release.</p>
 <h2>Screen Recording</h2>
 <p><strong>Optional.</strong> Only needed if you want enhancement in Enhanced output to see what is on<br>
 your screen. See <a href="contextual-awareness.html">contextual awareness</a>.</p>
@@ -89,8 +95,8 @@ for each browser.</p>
 <p>Decline it and website triggers never match. Application triggers and everything else<br>
 are unaffected.</p>
 <h2>What Zerm does not ask for</h2>
-<p>No Full Disk Access, no Contacts, no Calendar, no Input Monitoring beyond the modifier<br>
-keys used as hotkeys, and no account of any kind.</p>
+<p>No Full Disk Access, no Contacts, no Calendar, and no account of any kind. Global hotkey<br>
+monitoring may require Accessibility or Input Monitoring on macOS.</p>
 <p>Zerm does not capture system audio, so there is no System Audio Recording permission.<br>
 <a href="transcribe-file.html">Transcribe File</a> works on files you choose and needs no<br>
 permission at all. All of it is in the source, under GPLv3.</p>

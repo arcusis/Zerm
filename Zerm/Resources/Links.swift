@@ -25,6 +25,7 @@ enum Links {
     enum Doc: String, CaseIterable {
         case announcements = "announcements"
         case audioInput = "audio-input"
+        case clipboardHistory = "clipboard-history"
         case commonIssues = "common-issues"
         case contextualAwareness = "contextual-awareness"
         case customLocalWhisperModels = "custom-local-whisper-models"

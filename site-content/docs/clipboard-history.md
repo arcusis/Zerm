@@ -1,35 +1,70 @@
-# Clipboard History
+---
+title: Clipboard History
+eyebrow: Clipboard
+summary: Everything you copy, kept privately on your Mac. Search it, preview it and paste it back with ⇧⌘V.
+---
 
-Clipboard History keeps copied items in an encrypted local store. It supports text, code, rich text, images, files, links, and other pasteboard content. Code snippets are detected from text structure and shown with syntax highlighting; pasted text stays unchanged. Image text and QR or barcode values are indexed for search and shown in item details.
+Clipboard History keeps what you copy — text, links, images, files, colors, email
+addresses and code — in an encrypted history that never leaves your Mac. Press
+**Shift-Command-V** anywhere to open it, find what you need, and paste it into the app you
+are in.
 
-An open panel receives new copies, edits, removals, and clear operations immediately. History loads in pages as you browse. Image lists use encrypted thumbnails; original clipboard data loads when needed. Items larger than the configured maximum are skipped. Default maximum is 50 MB.
+## The panel
 
-The main window has **Clipboard → History**. History is a searchable library with item-kind, source-app, and date filters, sorting, multi-selection, a rich preview, and usage summaries. Select items to copy them back to the clipboard, pin or favourite them, delete them, or export them as an archive. This page copies items; use the floating panel when you want to paste into the active app.
+**Shift-Command-V** opens a floating panel over whatever app you are using. You can change
+the shortcut in **Settings → Clipboard History**, and **Open Clipboard History** is also in
+the menu bar.
 
-## Open and search
+- The **sidebar** filters the list: **All**, **Favorites**, a kind (Text, Images, Links,
+  Files, Colors, Emails, Code), or one of the apps you copied from.
+- The **list** shows each item with the app it came from and when you copied it. New copies
+  appear while the panel is open.
+- The **preview** shows the selected item in full: links with their title and image;
+  Spotify, YouTube, Apple Music and SoundCloud links as media cards; files with thumbnails;
+  colors with their values; and code with syntax highlighting.
+- **Details** show the app, the type, and the exact time you copied it.
 
-Open the floating panel with **Shift-Command-V** or choose **Open Clipboard History** from the menu bar. The shortcut can be changed in Settings. Search matches item text, titles, source apps, OCR text, and QR or barcode values. Add `kind:` or `app:` tokens to filter results.
+Search matches the text of your items, the apps they came from, and the text inside copied
+images and QR codes.
 
-Select one or more items to paste, copy, merge, or delete them. The command palette opens with **Command-K**. It includes text transforms, editing, splitting text into lines, pinning, favourite ordering, paste-sequence controls, and history clearing. Transforms save their result as a new item. Search accepts `kind:` and `app:` tokens in both the panel and main-window library.
+## Pasting
 
-The floating panel has a labeled, collapsible sidebar, a history list, and a large preview. Use the sidebar to switch between all items, favourites, item kinds, and source apps. Date and sort controls sit above the list with search, pinning, and commands. The preview toolbar provides item actions and controls for details and preview visibility. Details show the source app, type, kind-specific metadata, and absolute copy time.
+- **Return** pastes the selected item into the app you came from.
+- **Option-Return** pastes it as plain text.
+- **Command-1** to **Command-9** paste one of the first nine items.
+- **Command-K** opens the command list: pin, favorite, edit, text transforms (change case,
+  tidy whitespace and lines, URL and Base64 encoding, format JSON and more), merge several items into one, split
+  an item into lines, and clear history.
 
-Use **Return** to paste the selected item, **Option-Return** to paste plain text, **Command-1–9** to paste one of the first nine visible items, and **Command-K** to open the command palette. Arrow keys move selection; Tab moves focus across panel controls. The footer names the app that was active when the panel opened. More history loads as you scroll; new copies update the open panel while preserving your selection.
+**Paste Next** pastes your recent items one after another, oldest first, each time you
+press its shortcut. **Copy & Merge** (off by default) appends to the last item when you
+press **Command-C** twice. Both are set up in Settings.
 
-Panel settings control its position, paste-on-click and double-click behavior, quick-paste badges, favourite ordering, and confirmation before clearing. The Details pane shows source app, dates, size, and recognized image text.
+## In the main window
 
-## Retention, storage, and privacy
+**Clipboard → History** in the sidebar is a full library of your history: search and filter
+by kind, app and date, sort, and select several items to copy, pin, favorite, delete or
+export them. Pasting into other apps is done from the panel.
 
-Storage settings show the current encrypted store size and let you set total, per-kind, and per-item size limits. When a size limit is reached, older unpinned items are removed first; ordinary items are removed before favourites. Per-kind age retention and the maximum item count also apply during capture and scheduled cleanup.
+## Privacy and storage
 
-History can be cleared on quit, restart, screen lock, sleep, or once daily at a chosen local time. Clear operations can preserve favourites. App exclusions stop future captures from those apps. Confidential and transient pasteboard types can also be ignored. Link previews can be disabled; when enabled, link titles and images are fetched from the linked site.
+Your history is encrypted and stored only on this Mac. Passwords and other items that
+apps mark as confidential are never saved, and you can exclude any app — password managers
+are suggested for you.
+
+In **Settings → Clipboard History** you choose:
+
+- How long each kind of item is kept, and how much storage the history may use.
+- Whether history is cleared when you quit, restart, lock the screen, put the Mac to sleep,
+  or at a set time each day. Favorites can be kept when clearing.
+- Whether link previews are fetched. When they are on, a link's title and image are
+  downloaded from that site.
+- Whether your dictations are saved to the history too.
+
+Pause Clipboard History from Settings or the menu bar at any time. You can export your
+history to a file, optionally protected with a password, and import it again.
 
 ## Sounds
 
-Copy, paste, delete, and selection actions each support no sound, a macOS system sound, or a chosen audio file. Each action has its own volume and preview control.
-
-## Settings and privacy
-
-Clipboard History can be paused from Settings or the menu bar. Settings control which apps and confidential or transient content are ignored, whether dictated text is saved, and retention by item kind. Pinned and favourited items can be protected from cleanup or clearing.
-
-Export writes a ZIP archive of clipboard history. Version 1 archives remain importable. An optional password encrypts the archive; without one, the archive is unencrypted.
+Copy, paste, delete and selection can each play a sound: none, any macOS system sound, or
+an audio file you choose, each with its own volume.

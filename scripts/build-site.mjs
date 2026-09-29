@@ -326,6 +326,10 @@ const DOC_GROUPS = [
     slugs: ["models", "custom-local-whisper-models", "transcribe-file", "read-aloud"],
   },
   {
+    title: "Clipboard",
+    slugs: ["clipboard-history"],
+  },
+  {
     title: "Privacy",
     slugs: ["privacy-retention", "contextual-awareness"],
   },
