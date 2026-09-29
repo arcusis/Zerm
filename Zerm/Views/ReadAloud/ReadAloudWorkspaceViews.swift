@@ -79,88 +79,189 @@ struct ReadAloudSpeakView: View {
 }
 
 struct ReadAloudHistoryView: View {
-    @ObservedObject private var store = ReadAloudHistoryStore.shared
+    @ObservedObject private var store: ReadAloudHistoryStore
     @State private var searchText = ""
+    @State private var sortOrder: HistorySortOrder = .newestFirst
+    @State private var selectedMode: ReadAloudMode?
     @State private var itemToDelete: ReadAloudHistoryItem?
+    @State private var showClearConfirmation = false
+
+    init(store: ReadAloudHistoryStore = .shared) {
+        _store = ObservedObject(wrappedValue: store)
+    }
 
     private var filteredItems: [ReadAloudHistoryItem] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return store.items }
-        return store.items.filter {
-            $0.sourceText.localizedCaseInsensitiveContains(query)
-                || $0.spokenText.localizedCaseInsensitiveContains(query)
-                || $0.mode.title.localizedCaseInsensitiveContains(query)
-        }
+        ReadAloudHistoryPresentation.visibleItems(
+            from: store.items,
+            query: searchText,
+            mode: selectedMode,
+            sortOrder: sortOrder
+        )
+    }
+
+    private var hasActiveHistoryFilters: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedMode != nil
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text("Read Aloud History")
-                    .font(.largeTitle.bold())
+                    .font(.title2.bold())
                 Spacer()
-                if !store.items.isEmpty {
-                    Button("Clear History", role: .destructive) { store.clear() }
+                Text("history_result_count \(filteredItems.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Menu {
+                    Picker("Sort by", selection: $sortOrder) {
+                        ForEach(HistorySortOrder.allCases) { order in
+                            Text(order.title).tag(order)
+                        }
+                    }
+
+                    Menu("Filter by Mode") {
+                        Button("All Modes") { selectedMode = nil }
+                        ForEach(ReadAloudMode.allCases) { mode in
+                            Button {
+                                selectedMode = mode
+                            } label: {
+                                if selectedMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(verbatim: mode.title)
+                                }
+                            }
+                        }
+                    }
+
+                    if !store.items.isEmpty {
+                        Divider()
+                        Button("Clear History", role: .destructive) {
+                            showClearConfirmation = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 16))
+                }
+                .menuStyle(.borderlessButton)
+                .help("Sort, Filter, or Clear History")
+                .accessibilityLabel("Sort, Filter, or Clear History")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+
+            HStack(spacing: 8) {
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search source or spoken text", text: $searchText)
+                        .textFieldStyle(.plain)
+                }
+                .padding(10)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+                if selectedMode != nil {
+                    Button {
+                        selectedMode = nil
+                    } label: {
+                        Label("Filter", systemImage: "line.3.horizontal.decrease.circle.fill")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .help("Clear mode filter")
+                    .accessibilityLabel("Clear mode filter")
                 }
             }
-            .padding(24)
-
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search source or spoken text", text: $searchText)
-                    .textFieldStyle(.plain)
-            }
-            .padding(10)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
 
             if filteredItems.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No Read Aloud History" : "No Results",
-                    systemImage: "speaker.wave.2",
-                    description: Text(searchText.isEmpty
-                        ? "Completed readings will appear here with the original and prepared text."
-                        : "Try another search term.")
-                )
-            } else {
-                List(filteredItems) { item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Label(item.mode.title, systemImage: "speaker.wave.2")
-                                .font(.headline)
-                            Spacer()
-                            Text(item.createdAt, format: .dateTime.month().day().hour().minute())
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text(verbatim: item.spokenText)
-                            .lineLimit(4)
-                            .textSelection(.enabled)
-                        HStack {
-                            Text(verbatim: item.providerName)
-                            Text(verbatim: "•")
-                            Text(verbatim: item.voiceName)
-                            if let model = item.localModelName {
-                                Text(verbatim: "•")
-                                Text(verbatim: model)
-                            }
-                            Spacer()
-                            Button("Copy") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(item.spokenText, forType: .string)
-                            }
-                            Button(role: .destructive) { itemToDelete = item } label: {
-                                Image(systemName: "trash")
-                            }
-                            .accessibilityLabel("Delete history item")
-                        }
-                        .font(.caption)
+                VStack(spacing: 10) {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 36))
                         .foregroundStyle(.secondary)
+                    Text(hasActiveHistoryFilters ? "No Results" : "No Read Aloud History")
+                        .font(.headline)
+                    Text(hasActiveHistoryFilters
+                        ? "Try another search term."
+                        : "Completed readings will appear here with the original and prepared text.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    if hasActiveHistoryFilters {
+                        Button("Clear Filters") {
+                            searchText = ""
+                            selectedMode = nil
+                        }
+                        .buttonStyle(.link)
+                    } else {
+                        Button("Go to Speak") {
+                            NotificationCenter.default.post(
+                                name: .navigateToDestination,
+                                object: nil,
+                                userInfo: ["route": AppRoute.readAloudSpeak]
+                            )
+                        }
+                        .buttonStyle(.link)
                     }
-                    .padding(.vertical, 6)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(filteredItems) { item in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Label(item.mode.title, systemImage: "speaker.wave.2")
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text(item.createdAt, format: .dateTime.month().day().hour().minute())
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(verbatim: item.spokenText)
+                                .lineLimit(2)
+                                .font(.system(size: 13, weight: .medium))
+                                .textSelection(.enabled)
+                            Text("Source: \(item.sourceText)")
+                                .lineLimit(1)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 5) {
+                                Text(verbatim: item.providerName)
+                                Text(verbatim: "•")
+                                Text(verbatim: item.voiceName)
+                                if let model = item.localModelName {
+                                    Text(verbatim: "•")
+                                    Text(verbatim: model)
+                                }
+                                Spacer()
+                                Button("Copy") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(item.spokenText, forType: .string)
+                                }
+                                Button(role: .destructive) { itemToDelete = item } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .accessibilityLabel("Delete history item")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .listStyle(.plain)
             }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+        .confirmationDialog(
+            "Clear all Read Aloud history?",
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear History", role: .destructive) { store.clear() }
+            Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
             "Delete this Read Aloud history item?",
