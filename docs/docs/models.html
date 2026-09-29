@@ -69,7 +69,7 @@ network — dictation keeps working on a plane.</p>
 <table role="table">
 <thead>
 <tr>
-<th>Model</th>
+<th>Model family</th>
 <th>Size</th>
 <th>Languages</th>
 <th>Notes</th>
@@ -77,46 +77,76 @@ network — dictation keeps working on a plane.</p>
 </thead>
 <tbody>
 <tr>
+<td>Sherpa-ONNX Moonshine Tiny EN</td>
+<td>103 MB</td>
+<td>English only</td>
+<td>Useful Sensors model converted to ONNX.</td>
+</tr>
+<tr>
+<td>Sherpa-ONNX Moonshine Base EN</td>
+<td>239 MB</td>
+<td>English only</td>
+<td>Useful Sensors model converted to ONNX.</td>
+</tr>
+<tr>
+<td>Sherpa-ONNX Zipformer Russian</td>
+<td>58 MB</td>
+<td>Russian</td>
+<td>Vosk model converted to Zipformer ONNX.</td>
+</tr>
+<tr>
 <td>Parakeet Unified</td>
 <td>614 MB</td>
 <td>English only</td>
-<td>The best English model for most Apple Silicon Macs.</td>
+<td>Best English model for most Apple Silicon Macs.</td>
 </tr>
 <tr>
 <td>Parakeet 110M</td>
 <td>228 MB</td>
 <td>English only</td>
-<td>Small and very fast. Leaves memory free on 8 GB Macs.</td>
+<td>Small and fast.</td>
 </tr>
 <tr>
-<td>Parakeet V3</td>
-<td>494 MB</td>
+<td>Parakeet TDT v2</td>
+<td>1.2 GB</td>
+<td>English only</td>
+<td>NVIDIA model through FluidAudio.</td>
+</tr>
+<tr>
+<td>Parakeet Ultra / V3</td>
+<td>595 / 494 MB</td>
 <td>English + 25 European languages</td>
-<td>Detects the language itself. Supports real-time streaming. No Hebrew.</td>
+<td>Support real-time streaming. No Hebrew.</td>
 </tr>
 <tr>
-<td>Large v3 Turbo</td>
+<td>Parakeet Redux</td>
+<td>220 MB</td>
+<td>English + 25 European languages</td>
+<td>Compact streaming model. <strong>Requires macOS 15 or later.</strong> No Hebrew.</td>
+</tr>
+<tr>
+<td>Whisper Tiny, Base, Small, Medium, Large v2/v3, and Large v3 Turbo</td>
+<td>75 MB–3.1 GB</td>
+<td>Multilingual</td>
+<td>Official ggml-org conversions of OpenAI Whisper. English-only variants available for Tiny, Base, Small, and Medium.</td>
+</tr>
+<tr>
+<td>Whisper quantized variants</td>
+<td>44 MB–1.7 GB</td>
+<td>Matches base model</td>
+<td>ggml-org Q5_0 and Q8_0 files where published. Smaller files use less storage and may trade some accuracy.</td>
+</tr>
+<tr>
+<td>Distil-Whisper Large v3</td>
 <td>1.5 GB</td>
-<td>Multilingual</td>
-<td>Whisper. The most accurate general multilingual model.</td>
+<td>English only</td>
+<td>Official ggml release for whisper.cpp.</td>
 </tr>
 <tr>
-<td>Large v3 Turbo (Quantized)</td>
-<td>547 MB</td>
-<td>Multilingual</td>
-<td>Nearly the same accuracy for a third of the disk.</td>
-</tr>
-<tr>
-<td>ivrit.ai Large v3 Turbo</td>
-<td>1.6 GB</td>
+<td>ivrit.ai Large v3 Turbo / Large v3</td>
+<td>1.6 / 3.1 GB</td>
 <td>Hebrew and English</td>
-<td>Whisper tuned for Hebrew by ivrit.ai.</td>
-</tr>
-<tr>
-<td>ivrit.ai Large v3</td>
-<td>3.1 GB</td>
-<td>Hebrew and English</td>
-<td>Slower and more accurate. Needs a Mac with 24 GB of memory or more.</td>
+<td>Whisper tuned for Hebrew by ivrit.ai. Large v3 needs a Mac with 24 GB of memory or more.</td>
 </tr>
 <tr>
 <td>Apple Speech</td>
@@ -126,25 +156,30 @@ network — dictation keeps working on a plane.</p>
 </tr>
 </tbody>
 </table>
+<p>Earlier versions retired Whisper Tiny, Base, and Small variants and Parakeet TDT v2. Those<br>
+models are offered again; the retired-model cleanup migration is disabled and preserves<br>
+existing selections and files.</p>
 <p><strong>Parakeet</strong> runs through FluidAudio and needs Apple Silicon. <strong>Whisper</strong> models run on<br>
 <code class="notranslate">whisper.cpp</code>, and you can import your own fine-tuned one — see<br>
 <a href="custom-local-whisper-models.html">custom local models</a>.</p>
 <p><strong>The ivrit.ai models</strong> treat Auto as Hebrew and keep the English words you mix in.<br>
 Choose English only when you will dictate nothing but English.</p>
 <p><strong>Apple Speech</strong> offers Hebrew only if your copy of macOS reports that it supports it.</p>
-<h3>Retired models</h3>
-<p>Whisper Tiny, Base, and Small (including the English variants) and Parakeet V2 are no<br>
-longer offered. If you were using one, Zerm moves you — and any<br>
-<a href="power-mode.html">Power Mode</a> that pinned it — to its replacement: Parakeet Unified for<br>
-the English models on Apple Silicon, Large v3 Turbo (Quantized) otherwise. The old files<br>
-are deleted.</p>
-<p>The replacement is not downloaded for you. The Default Model card says a download is<br>
-required, with a button to start it.</p>
+<h3>Sources and licenses</h3>
+<p>Each downloadable local model card includes its creator, official model card and download<br>
+source, license, required credit, and conversion or quantization credit. Whisper downloads<br>
+are pinned to official ggml-org or ivrit.ai files and verified against SHA-256. Parakeet<br>
+models use FluidAudio's official Core ML model packages. Sherpa-ONNX model cards link to the<br>
+upstream model page and list sherpa-onnx as the ONNX converter.</p>
+<p>Before the first download, Zerm shows a third-party model notice with creator, source, license,<br>
+and attribution. Downloads show progress and support pause, resume, cancel, and delete. Choose<br>
+<strong>Model credits</strong> to review attribution and open source and license links for installed models.</p>
 <h2>Streaming and live preview</h2>
 <p>With streaming, text appears in the recorder while you are still talking.</p>
 <ul>
-<li><strong>Parakeet V3</strong> is the local model that streams. Its card has a <strong>Real-time</strong> switch,<br>
-on by default once the model is downloaded.</li>
+<li><strong>Parakeet Ultra</strong>, <strong>Parakeet Redux</strong> (macOS 15+), and <strong>Parakeet V3</strong> are the local models that stream. Their cards have<br>
+a <strong>Real-time</strong> switch, on by default once the model is downloaded. With voice activity<br>
+detection on, the live preview skips its passes while you pause.</li>
 <li><strong>Cloud models</strong> marked <strong>Streaming</strong> get the same <strong>Real-time</strong> switch once their key<br>
 is configured.</li>
 <li><strong>Show Live Text Preview</strong>, in Model Settings, decides whether the recorder shows that<br>
@@ -239,9 +274,17 @@ minutes. The default is 60 seconds.</li>
 <p><strong>Disk and memory.</strong> Each card shows the download size. Zerm marks a model <strong>Heavy for<br>
 this Mac</strong> when it would use a large share of your memory, and <strong>Unavailable</strong> when it<br>
 would not fit.</p>
-<p><strong>Language.</strong> Set the language on the models screen. Parakeet V3 and Gemini detect it<br>
-themselves, and English-only models are always English. A<br>
-<a href="power-mode.html">Power Mode</a> can use a different model and language for one app.</p>
+<p><strong>Language.</strong> Set the language on the models screen. Parakeet and Gemini detect it<br>
+themselves, and English-only models are always English. When the model you pick does not<br>
+support your language (Parakeet, Voxtral and Grok have no Hebrew, for example), the<br>
+language settings say so, and Zerm lets the model detect the language instead of asking it<br>
+for one it does not know. A <a href="power-mode.html">Power Mode</a> can use a different model and<br>
+language for one app.</p>
+<p><strong>My languages.</strong> With a Whisper model and Auto-detect, add the languages you actually<br>
+speak under <strong>My languages</strong>. Detection then chooses only among them, so a short Hebrew<br>
+or Russian phrase cannot come out as a neighbouring language such as Arabic. When two of<br>
+your languages are about equally likely, the one of your current keyboard wins. Leave it<br>
+empty to allow every language.</p>
 <p><strong>Intel Macs.</strong> Local models do not run reliably on Intel hardware and Zerm says so.<br>
 Recommended picks only Whisper models there; a cloud model is usually the better choice.</p>
 <h2>Downloading and managing</h2>

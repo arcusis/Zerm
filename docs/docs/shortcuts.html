@@ -48,12 +48,15 @@
 <p>Zerm is driven from the keyboard. Nothing here is fixed: almost every shortcut on this<br>
 page can be rebound, and most start unset so they cannot collide with what you already<br>
 use.</p>
+<p>In <strong>Settings → Shortcuts</strong>, assigned-key conflicts appear below the affected recorder.<br>
+Use <strong>Restore Defaults</strong> at the end of Additional Shortcuts to return dictation to its<br>
+default key and clear custom shortcut recordings.</p>
 <p><img src="img/shortcuts.png" alt="Shortcut settings" style="max-width: 100%;"></p>
 <h2>Dictation</h2>
 <p>You can configure two independent dictation shortcuts, <strong>Shortcut 1</strong> and<br>
 <strong>Shortcut 2</strong>, each with its own trigger style. Shortcut 1 starts as Right Command.</p>
 <p>A shortcut can be a <strong>bare modifier key</strong> — Right Option, Left Option, Right Command,<br>
-Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason<br>
+Left Command, Right Control, Left Control, Right Shift, or Fn — held on its own. This is the reason<br>
 Zerm feels quick: no chord to remember, just a key your other hand is not using.</p>
 <p>Or choose <strong>Custom</strong> and record any combination you like.</p>
 <p>Each shortcut has a mode:</p>
@@ -79,6 +82,11 @@ Zerm feels quick: no chord to remember, just a key your other hand is not using.
 </tr>
 </tbody>
 </table>
+<p>For push to talk and hybrid holds, Zerm checks whether the trigger key is still down.<br>
+If macOS misses its release event, Zerm detects the release and stops through the same<br>
+recording finalization path. Toggle mode ignores this check because releasing its key is<br>
+expected while dictation continues. The Permissions page reports when global keyboard<br>
+monitoring is unavailable.</p>
 <p><strong>Fn is handled specially.</strong> Pressing Fn together with another key — Fn+F1, Fn+F11,<br>
 brightness, volume — cancels the recording trigger, so binding Zerm to Fn does not break<br>
 your function row.</p>

@@ -111,7 +111,14 @@ exact text instead and tells you.</p>
 Hebrew/English selection is not rewritten as all-Hebrew.</p>
 <h2>Voices</h2>
 <p><strong>Kokoro</strong> is the local voice, running on <code class="notranslate">sherpa-onnx</code>. It downloads once and then<br>
-works offline, and it is good enough to listen to a long document without fatigue.</p>
+works offline, and it is good enough to listen to a long document without fatigue.<br>
+Before its first download, review the source and license notice. Kokoro downloads can be<br>
+paused, resumed, or cancelled; paused transfer data remains available after quitting and<br>
+reopening Zerm.</p>
+<p><strong>Blue v2</strong> is an on-device voice for Hebrew and English. Its ONNX voice and pronunciation<br>
+models download once from their pinned sources; the download notice lists MIT, CC-BY-4.0,<br>
+and eSpeak NG attribution. The download can pause and resume, and deleting the model frees<br>
+its space. The selected speed applies to Blue, and Preview voice uses the same local model.</p>
 <p><strong>Apple System</strong> uses the voices already on the Mac, including Hebrew ones if you have<br>
 installed them.</p>
 <p><strong>Cloud voices</strong> — Deepgram, Inworld, ElevenLabs, Gemini, OpenAI, and Cartesia — are<br>
@@ -120,17 +127,21 @@ and Apple System send nothing anywhere.</p>
 <p>Each provider keeps its own voice selection, so switching provider and switching back<br>
 does not lose your choice. <strong>Preview voice</strong> plays a sample before you rely on it.</p>
 <h3>Other languages</h3>
-<p>Kokoro and Deepgram speak English only. When the selection is in another language, Zerm<br>
-reads it with the best installed Apple voice for that language and says so. If no<br>
-matching Apple voice is installed, Zerm asks you to install one in System Settings.</p>
+<p>Blue speaks Hebrew and English. When selected, Zerm splits mixed Hebrew and English text<br>
+into script runs and synthesizes each run with its matching pronunciation frontend. Blue<br>
+keeps Russian on Apple System. Other unsupported languages use the best installed Apple<br>
+voice for that language; if no matching voice is installed, Zerm asks you to install one<br>
+in System Settings. When Blue is not downloaded, Hebrew uses Apple System.</p>
 <h2>Playback</h2>
 <p><strong>Speed</strong> runs from 0.5× to 2×, defaulting to 1×. It applies to every provider.</p>
 <p>Reading is interruptible: pressing the key again stops playback immediately. Starting a<br>
 dictation while Zerm is speaking is blocked rather than overlapped — one voice at a<br>
-time.</p>
+time. Speech is synthesized in sentence chunks and queued as each chunk becomes ready, so<br>
+playback can begin before the complete selection finishes synthesizing.</p>
 <h2>History and statistics</h2>
 <p>Read Aloud History keeps your most recent 500 sessions on your Mac: the selected text,<br>
-what was spoken, and the voice used. Delete entries one at a time or clear the list.</p>
+what was spoken, and the voice used. Search the text, sort by date, or filter by reading<br>
+mode. Delete entries one at a time or choose <strong>Clear History</strong> from the actions menu.</p>
 <p>Words read and sessions completed are also counted for the dashboard. Those are counters<br>
 only, with no text in them. See <a href="privacy-retention.html">privacy and retention</a>.</p>
         </div>

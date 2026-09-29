@@ -61,7 +61,12 @@ struct ClipboardHistorySettingsView: View {
         Form {
             Section(header: Text("General")) {
                 sectionDescription("Capture copied items locally and open history where it feels natural.")
-                Toggle("Enable Clipboard History", isOn: $enabled)
+                Toggle(isOn: $enabled) {
+                    HStack(spacing: 4) {
+                        Text("Enable Clipboard History")
+                        InfoTip(String(localized: "Keeps an encrypted history of what you copy, stored only on this Mac. Press ⇧⌘V to search and paste from it."), doc: .clipboardHistory)
+                    }
+                }
                 Picker("Panel window position", selection: $windowPosition) {
                     Text("Last location").tag(ClipboardPanelPosition.lastLocation.rawValue)
                     Text("Center of screen").tag(ClipboardPanelPosition.centerScreen.rawValue)
