@@ -9,6 +9,7 @@ class PermissionManager: ObservableObject {
     @Published var isAccessibilityEnabled = false
     @Published var isScreenRecordingEnabled = false
     @Published var isKeyboardShortcutSet = false
+    @Published var isGlobalHotkeyMonitoringAvailable = true
     /// Shown when Screen Recording is toggled on in Settings but the process must relaunch.
     @Published var screenRecordingNeedsRelaunch = false
 
@@ -31,6 +32,14 @@ class PermissionManager: ObservableObject {
             name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("ZermGlobalHotkeyMonitoringChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let available = notification.userInfo?["available"] as? Bool else { return }
+            self?.isGlobalHotkeyMonitoringAvailable = available
+        }
     }
 
     @objc private func applicationDidBecomeActive() {
@@ -254,13 +263,14 @@ struct PermissionsView: View {
         }
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear {
+            hotkeyManager.refreshMonitoring()
             permissionManager.checkAllPermissions()
             permissionManager.pollPermissions(forSeconds: 2)
         }
     }
 
     private enum PermissionKind: CaseIterable {
-        case microphone, accessibility, screenRecording, shortcut
+        case microphone, accessibility, keyboardMonitoring, screenRecording, shortcut
     }
 
     private var orderedPermissions: [PermissionKind] {
@@ -271,6 +281,7 @@ struct PermissionsView: View {
         switch permission {
         case .microphone: permissionManager.audioPermissionStatus == .authorized
         case .accessibility: permissionManager.isAccessibilityEnabled
+        case .keyboardMonitoring: permissionManager.isGlobalHotkeyMonitoringAvailable
         case .screenRecording: permissionManager.isScreenRecordingEnabled
         case .shortcut: hotkeyManager.selectedHotkey1 != .none
         }
@@ -297,6 +308,19 @@ struct PermissionsView: View {
                 isGranted: isGranted(permission), buttonTitle: "Open System Settings",
                 buttonAction: { permissionManager.openAccessibilitySettings(promptIfNeeded: true) },
                 infoTipMessage: String(localized: "Zerm uses Accessibility permissions to paste the transcribed text directly into other applications at your cursor's position. This allows for a seamless dictation experience across your Mac. After enabling Zerm in System Settings, use the refresh button — if it stays red, fully quit Zerm (Cmd+Q) and reopen."),
+                infoTipLink: Links.docString(.permissions)
+            )
+        case .keyboardMonitoring:
+            PermissionCard(
+                icon: "keyboard",
+                title: "Global Keyboard Monitoring",
+                description: permissionManager.isGlobalHotkeyMonitoringAvailable
+                    ? "Receive key releases to stop push-to-talk reliably"
+                    : "Global key events unavailable — enable Accessibility or Input Monitoring",
+                isGranted: isGranted(permission),
+                buttonTitle: "Open System Settings",
+                buttonAction: { permissionManager.openAccessibilitySettings(promptIfNeeded: true) },
+                infoTipMessage: String(localized: "Global keyboard monitoring lets push-to-talk receive key releases while another app is active. Zerm also checks key state locally to stop recordings if a release event is missed."),
                 infoTipLink: Links.docString(.permissions)
             )
         case .screenRecording:
@@ -333,6 +357,7 @@ struct PermissionsView: View {
     }
 
     private func refreshPermissions() {
+        hotkeyManager.refreshMonitoring()
         permissionManager.checkAllPermissions()
         permissionManager.pollPermissions(forSeconds: 2)
     }

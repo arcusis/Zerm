@@ -119,6 +119,8 @@ class HotkeyManager: ObservableObject {
     private var shortcutCurrentKeyState = false
     private var lastShortcutTriggerTime: Date?
     private let shortcutCooldownInterval: TimeInterval = 0.5
+    private let releaseWatchdog = HotkeyReleaseWatchdog()
+    private var handlingWatchdogRelease = false
 
     private static let hybridPressThreshold: TimeInterval = 0.5
 
@@ -143,6 +145,7 @@ class HotkeyManager: ObservableObject {
         case leftControl = "leftControl" 
         case rightControl = "rightControl"
         case fn = "fn"
+        case leftCommand = "leftCommand"
         case rightCommand = "rightCommand"
         case rightShift = "rightShift"
         case custom = "custom"
@@ -155,6 +158,7 @@ class HotkeyManager: ObservableObject {
             case .leftControl: return "Left Control (⌃)"
             case .rightControl: return "Right Control (⌃)"
             case .fn: return "Fn"
+            case .leftCommand: return "Left Command (⌘)"
             case .rightCommand: return "Right Command (⌘)"
             case .rightShift: return "Right Shift (⇧)"
             case .custom: return "Custom"
@@ -168,6 +172,7 @@ class HotkeyManager: ObservableObject {
             case .leftControl: return 0x3B
             case .rightControl: return 0x3E
             case .fn: return 0x3F
+            case .leftCommand: return 0x37
             case .rightCommand: return 0x36
             case .rightShift: return 0x3C
             case .custom, .none: return nil
@@ -284,6 +289,10 @@ class HotkeyManager: ObservableObject {
         setupCustomShortcutMonitoring()
         setupMiddleClickMonitoring()
     }
+
+    func refreshMonitoring() {
+        setupHotkeyMonitoring()
+    }
     
     private func setupModifierKeyMonitoring() {
         // Only set up if at least one hotkey is a modifier key
@@ -300,8 +309,9 @@ class HotkeyManager: ObservableObject {
         // keyboard event monitoring.  addGlobalMonitorForEvents returns nil when the
         // permission is missing — surfacing a notification gives the user actionable
         // guidance rather than a silently broken hotkey. (VoiceInk #735)
-        if globalEventMonitor == nil {
+        if globalEventMonitor == nil || !AXIsProcessTrusted() {
             logger.warning("Global event monitor is nil — Accessibility / Input Monitoring permission may be missing")
+            NotificationCenter.default.post(name: Notification.Name("ZermGlobalHotkeyMonitoringChanged"), object: nil, userInfo: ["available": false])
             Task { @MainActor in
                 NotificationManager.shared.showNotification(
                     title: String(localized: "Hotkey not working — enable Accessibility in System Settings"),
@@ -309,6 +319,8 @@ class HotkeyManager: ObservableObject {
                     duration: 6.0
                 )
             }
+        } else {
+            NotificationCenter.default.post(name: Notification.Name("ZermGlobalHotkeyMonitoringChanged"), object: nil, userInfo: ["available": true])
         }
 
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
@@ -358,7 +370,8 @@ class HotkeyManager: ObservableObject {
         if selectedHotkey1 == .custom {
             KeyboardShortcuts.onKeyDown(for: .toggleMiniRecorder) { [weak self] in
                 let eventTime = ProcessInfo.processInfo.systemUptime
-                Task { @MainActor in await self?.handleCustomShortcutKeyDown(eventTime: eventTime, mode: self?.hotkeyMode1 ?? .toggle) }
+                let keyCode = KeyboardShortcuts.getShortcut(for: .toggleMiniRecorder)?.carbonKeyCode
+                Task { @MainActor in await self?.handleCustomShortcutKeyDown(eventTime: eventTime, mode: self?.hotkeyMode1 ?? .toggle, keyCode: keyCode.map(CGKeyCode.init)) }
             }
             KeyboardShortcuts.onKeyUp(for: .toggleMiniRecorder) { [weak self] in
                 let eventTime = ProcessInfo.processInfo.systemUptime
@@ -368,7 +381,8 @@ class HotkeyManager: ObservableObject {
         if selectedHotkey2 == .custom {
             KeyboardShortcuts.onKeyDown(for: .toggleMiniRecorder2) { [weak self] in
                 let eventTime = ProcessInfo.processInfo.systemUptime
-                Task { @MainActor in await self?.handleCustomShortcutKeyDown(eventTime: eventTime, mode: self?.hotkeyMode2 ?? .toggle) }
+                let keyCode = KeyboardShortcuts.getShortcut(for: .toggleMiniRecorder2)?.carbonKeyCode
+                Task { @MainActor in await self?.handleCustomShortcutKeyDown(eventTime: eventTime, mode: self?.hotkeyMode2 ?? .toggle, keyCode: keyCode.map(CGKeyCode.init)) }
             }
             KeyboardShortcuts.onKeyUp(for: .toggleMiniRecorder2) { [weak self] in
                 let eventTime = ProcessInfo.processInfo.systemUptime
@@ -415,6 +429,7 @@ class HotkeyManager: ObservableObject {
     }
     
     private func resetKeyStates() {
+        releaseWatchdog.cancel()
         currentKeyState = false
         keyPressEventTime = nil
         isHandsFreeMode = false
@@ -471,6 +486,9 @@ class HotkeyManager: ObservableObject {
         case .rightCommand:
             return isDown(left: SidedModifier.leftCommand, right: SidedModifier.rightCommand,
                           wanted: SidedModifier.rightCommand, generic: .command)
+        case .leftCommand:
+            return isDown(left: SidedModifier.leftCommand, right: SidedModifier.rightCommand,
+                          wanted: SidedModifier.leftCommand, generic: .command)
         case .rightShift:
             return isDown(left: SidedModifier.leftShift, right: SidedModifier.rightShift,
                           wanted: SidedModifier.rightShift, generic: .shift)
@@ -550,18 +568,18 @@ class HotkeyManager: ObservableObject {
                 // Skip the trigger if a companion key was pressed — this was a Fn+Fkey combo.
                 if pendingState && self.fnCompanionKeyPressed { return }
                 Task { @MainActor in
-                    await self.processKeyPress(isKeyPressed: pendingState, eventTime: pendingTime, mode: activeMode)
+                    await self.processKeyPress(isKeyPressed: pendingState, eventTime: pendingTime, mode: activeMode, watchdogOption: hotkey)
                 }
             }
             return
-        case .rightOption, .leftOption, .leftControl, .rightControl, .rightCommand, .rightShift:
+        case .rightOption, .leftOption, .leftControl, .rightControl, .leftCommand, .rightCommand, .rightShift:
             if activeMode == .toggle {
                 await handleStandaloneModifier(keyCode: keycode, isKeyPressed: isKeyPressed, eventTime: eventTime)
                 return
             }
         }
 
-        await processKeyPress(isKeyPressed: isKeyPressed, eventTime: eventTime, mode: activeMode)
+        await processKeyPress(isKeyPressed: isKeyPressed, eventTime: eventTime, mode: activeMode, watchdogOption: hotkey)
     }
 
     private func handleStandaloneModifier(keyCode: UInt16, isKeyPressed: Bool, eventTime: TimeInterval) async {
@@ -592,12 +610,15 @@ class HotkeyManager: ObservableObject {
         standaloneCompanionKeyPressed = false
     }
 
-    private func processKeyPress(isKeyPressed: Bool, eventTime: TimeInterval, mode: HotkeyMode) async {
+    private func processKeyPress(isKeyPressed: Bool, eventTime: TimeInterval, mode: HotkeyMode, watchdogOption: HotkeyOption? = nil) async {
         guard isKeyPressed != currentKeyState else { return }
         currentKeyState = isKeyPressed
 
         if isKeyPressed {
             keyPressEventTime = eventTime
+            if HotkeyReleaseWatchdog.shouldWatch(mode: mode), let option = watchdogOption {
+                startModifierReleaseWatchdog(option: option, mode: mode)
+            }
 
             switch mode {
             case .toggle, .hybrid:
@@ -623,6 +644,7 @@ class HotkeyManager: ObservableObject {
                 }
             }
         } else {
+            if !handlingWatchdogRelease { releaseWatchdog.cancel() }
             switch mode {
             case .toggle:
                 isHandsFreeMode = true
@@ -636,7 +658,7 @@ class HotkeyManager: ObservableObject {
 
             case .hybrid:
                 let pressDuration = keyPressEventTime.map { eventTime - $0 } ?? 0
-                if pressDuration >= Self.hybridPressThreshold && engine.recordingState == .recording {
+                if HotkeyReleaseWatchdog.isHybridPushToTalk(pressDuration: pressDuration, threshold: Self.hybridPressThreshold) && engine.recordingState == .recording {
                     guard canProcessHotkeyAction else { return }
                     logger.notice("processKeyPress: stopping recording (hybrid push-to-talk, duration=\(pressDuration, privacy: .public)s)")
                     await recorderUIManager.toggleMiniRecorder()
@@ -648,9 +670,62 @@ class HotkeyManager: ObservableObject {
             keyPressEventTime = nil
         }
     }
+
+    private func startModifierReleaseWatchdog(option: HotkeyOption, mode: HotkeyMode) {
+        let probe = HotkeyStateProbe.modifier(option)
+        let pressedAt = keyPressEventTime ?? ProcessInfo.processInfo.systemUptime
+        releaseWatchdog.start(
+            isKeyDown: { [weak self] in self?.isHotkeyDown(probe) ?? false },
+            onRelease: { [weak self] releasedAt in
+                guard let self else { return }
+                self.handlingWatchdogRelease = true
+                Task { @MainActor in
+                    await self.processKeyPress(isKeyPressed: false, eventTime: releasedAt, mode: mode, watchdogOption: option)
+                    self.handlingWatchdogRelease = false
+                }
+            },
+            shouldForceStop: { [weak self] in
+                guard let self, self.engine.recordingState == .recording else { return false }
+                return mode == .pushToTalk || ProcessInfo.processInfo.systemUptime - pressedAt >= Self.hybridPressThreshold
+            },
+            onForceStop: { [weak self] in self?.forceStopAfterMissedRelease() }
+        )
+    }
+
+    private func startShortcutReleaseWatchdog(keyCode: CGKeyCode, mode: HotkeyMode, pressedAt: TimeInterval) {
+        let probe = HotkeyStateProbe.key(keyCode)
+        releaseWatchdog.start(
+            isKeyDown: { [weak self] in self?.isHotkeyDown(probe) ?? false },
+            onRelease: { [weak self] releasedAt in
+                guard let self else { return }
+                self.handlingWatchdogRelease = true
+                Task { @MainActor in
+                    await self.handleCustomShortcutKeyUp(eventTime: releasedAt, mode: mode, fromWatchdog: true)
+                    self.handlingWatchdogRelease = false
+                }
+            },
+            shouldForceStop: { [weak self] in
+                guard let self, self.engine.recordingState == .recording else { return false }
+                return mode == .pushToTalk || ProcessInfo.processInfo.systemUptime - pressedAt >= Self.hybridPressThreshold
+            },
+            onForceStop: { [weak self] in self?.forceStopAfterMissedRelease() }
+        )
+    }
+
+    private func isHotkeyDown(_ probe: HotkeyStateProbe) -> Bool {
+        let flags = CGEventSource.flagsState(.combinedSessionState)
+        return HotkeyReleaseWatchdog.isDown(probe, flags: flags, keyState: { CGEventSource.keyState(.combinedSessionState, key: $0) })
+    }
+
+    private func forceStopAfterMissedRelease() {
+        guard engine.recordingState == .recording else { return }
+        logger.error("Push-to-talk release watchdog forced recording stop")
+        Task { @MainActor in await recorderUIManager.toggleMiniRecorder() }
+    }
     
-    private func handleCustomShortcutKeyDown(eventTime: TimeInterval, mode: HotkeyMode) async {
+    private func handleCustomShortcutKeyDown(eventTime: TimeInterval, mode: HotkeyMode, keyCode: CGKeyCode?) async {
         guard !isRecordingShortcut else { return }
+        if HotkeyReleaseWatchdog.shouldWatch(mode: mode), keyCode == nil { return }
 
         if let lastTrigger = lastShortcutTriggerTime,
            Date().timeIntervalSince(lastTrigger) < shortcutCooldownInterval {
@@ -661,6 +736,9 @@ class HotkeyManager: ObservableObject {
         shortcutCurrentKeyState = true
         lastShortcutTriggerTime = Date()
         shortcutKeyPressEventTime = eventTime
+        if HotkeyReleaseWatchdog.shouldWatch(mode: mode), let keyCode {
+            startShortcutReleaseWatchdog(keyCode: keyCode, mode: mode, pressedAt: eventTime)
+        }
 
         switch mode {
         case .toggle, .hybrid:
@@ -687,9 +765,10 @@ class HotkeyManager: ObservableObject {
         }
     }
 
-    private func handleCustomShortcutKeyUp(eventTime: TimeInterval, mode: HotkeyMode) async {
+    private func handleCustomShortcutKeyUp(eventTime: TimeInterval, mode: HotkeyMode, fromWatchdog: Bool = false) async {
         guard shortcutCurrentKeyState else { return }
         shortcutCurrentKeyState = false
+        if !fromWatchdog { releaseWatchdog.cancel() }
 
         switch mode {
         case .toggle:
@@ -704,7 +783,7 @@ class HotkeyManager: ObservableObject {
 
         case .hybrid:
             let pressDuration = shortcutKeyPressEventTime.map { eventTime - $0 } ?? 0
-            if pressDuration >= Self.hybridPressThreshold && engine.recordingState == .recording {
+            if HotkeyReleaseWatchdog.isHybridPushToTalk(pressDuration: pressDuration, threshold: Self.hybridPressThreshold) && engine.recordingState == .recording {
                 guard canProcessHotkeyAction else { return }
                 logger.notice("handleCustomShortcutKeyUp: stopping recording (hybrid push-to-talk, duration=\(pressDuration, privacy: .public)s)")
                 await recorderUIManager.toggleMiniRecorder()

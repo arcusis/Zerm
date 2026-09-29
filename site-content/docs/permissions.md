@@ -44,6 +44,14 @@ If it is still red after a relaunch, remove Zerm from the Accessibility list wit
 minus button, then add it back. That clears a stale entry, which usually happens after
 the app has been moved or replaced by an update.
 
+## Global keyboard monitoring
+
+Global keyboard monitoring lets dictation shortcuts work while another app is active.
+If macOS blocks the monitor or Accessibility trust is missing, the Permissions page marks
+keyboard monitoring unavailable and the hotkey notification explains where to enable it.
+Push to talk and hybrid holds also check the physical trigger key state, so a missed key-up
+event still stops and finalizes the recording. Toggle mode keeps recording after key release.
+
 ## Screen Recording
 
 **Optional.** Only needed if you want enhancement in Enhanced output to see what is on
@@ -69,8 +77,8 @@ are unaffected.
 
 ## What Zerm does not ask for
 
-No Full Disk Access, no Contacts, no Calendar, no Input Monitoring beyond the modifier
-keys used as hotkeys, and no account of any kind.
+No Full Disk Access, no Contacts, no Calendar, and no account of any kind. Global hotkey
+monitoring may require Accessibility or Input Monitoring on macOS.
 
 Zerm does not capture system audio, so there is no System Audio Recording permission.
 [Transcribe File](transcribe-file.html) works on files you choose and needs no
