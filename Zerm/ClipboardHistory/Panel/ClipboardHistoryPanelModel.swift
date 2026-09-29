@@ -148,6 +148,8 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private var reloadTask: Task<Void, Never>?
     private var ocrRefreshTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
+    /// Loads run one after another in call order, so a slower load can never overwrite a newer one.
+    private var loadChain: Task<Void, Never>?
     private var pageOffset = 0
     @Published private(set) var canLoadMore = false
     private var ocrRefreshAttempts = 0
@@ -189,6 +191,24 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     }
 
     func loadItems(preservingLoadedPage: Bool = false) async {
+        await enqueueLoad { [weak self] in await self?.performLoadItems(preservingLoadedPage: preservingLoadedPage) }
+    }
+
+    func loadMore() async {
+        await enqueueLoad { [weak self] in await self?.performLoadMore() }
+    }
+
+    private func enqueueLoad(_ load: @escaping @MainActor () async -> Void) async {
+        let previous = loadChain
+        let task = Task { @MainActor in
+            await previous?.value
+            await load()
+        }
+        loadChain = task
+        await task.value
+    }
+
+    private func performLoadItems(preservingLoadedPage: Bool) async {
         if !preservingLoadedPage { pageOffset = 0 }
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
@@ -204,7 +224,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         if selectedIDs.isEmpty, let first = visibleItems.first { selectedIDs = [first.id] }
     }
 
-    func loadMore() async {
+    private func performLoadMore() async {
         guard canLoadMore else { return }
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
@@ -225,13 +245,19 @@ final class ClipboardHistoryPanelModel: ObservableObject {
             await loadItems(preservingLoadedPage: true)
         case let .removed(storeID, ids), let .cleared(storeID, ids):
             guard storeID == store.feedStoreID else { return }
-            items.removeAll { ids.contains($0.id) }
-            selectedIDs.removeAll { ids.contains($0) }
-            if selectionAnchorID.map(ids.contains) == true { selectionAnchorID = selectedIDs.first }
-            if selectionLeadID.map(ids.contains) == true { selectionLeadID = selectedIDs.last }
-            applyQuery()
-            if selectedIDs.isEmpty, let first = visibleItems.first { select(first) }
+            await enqueueLoad { [weak self] in self?.applyRemoval(of: ids) }
         }
+    }
+
+    /// Runs in the load queue, after any load that was already in flight, so a stale fetch
+    /// cannot bring back an item that was just removed.
+    private func applyRemoval(of ids: [UUID]) {
+        items.removeAll { ids.contains($0.id) }
+        selectedIDs.removeAll { ids.contains($0) }
+        if selectionAnchorID.map(ids.contains) == true { selectionAnchorID = selectedIDs.first }
+        if selectionLeadID.map(ids.contains) == true { selectionLeadID = selectedIDs.last }
+        applyQuery()
+        if selectedIDs.isEmpty, let first = visibleItems.first { select(first) }
     }
 
     private func scheduleOCRRefreshIfNeeded(_ fetched: [ClipboardItem]) {

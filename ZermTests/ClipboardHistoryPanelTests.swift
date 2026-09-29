@@ -153,16 +153,16 @@ struct ClipboardHistoryPanelTests {
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
             ))
             _ = try await store.capture(second)
-            try await Task.sleep(nanoseconds: 80_000_000)
+            await eventually { model.items.first?.id == second.id }
             #expect(model.items.first?.id == second.id)
             #expect(model.selectedIDs == [first.id])
 
             try await store.delete(second.id)
-            try await Task.sleep(nanoseconds: 30_000_000)
+            await eventually { !model.items.contains { $0.id == second.id } }
             #expect(!model.items.contains { $0.id == second.id })
 
             try await store.clear(includingPinned: true, keepingFavorites: false, keepingTagged: false)
-            try await Task.sleep(nanoseconds: 30_000_000)
+            await eventually { model.items.isEmpty }
             #expect(model.items.isEmpty)
             #expect(model.visibleItems.isEmpty)
         }
@@ -247,7 +247,7 @@ struct ClipboardHistoryPanelTests {
 
             let command = try #require(model.registry.command(withID: "transform.uppercase", for: model.selection))
             command.perform(model.selection)
-            for _ in 0..<40 {
+            for _ in 0..<200 {
                 try await Task.sleep(nanoseconds: 25_000_000)
                 await model.loadItems()
                 if model.items.contains(where: { $0.preview == "MIXED CASE" }) { break }
@@ -403,6 +403,15 @@ struct ClipboardHistoryPanelTests {
             try png.write(to: output)
             print("Clipboard history panel render: \(output.path)")
             window.close()
+        }
+    }
+
+    /// Polls until the live feed has delivered, instead of a fixed sleep that is too short on slow CI runners.
+    @MainActor
+    private func eventually(timeout: TimeInterval = 5, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
