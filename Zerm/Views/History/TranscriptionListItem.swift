@@ -48,7 +48,7 @@ struct TranscriptionListItem: View {
                 }
             }
         }
-        .padding(8)
+        .padding(10)
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)

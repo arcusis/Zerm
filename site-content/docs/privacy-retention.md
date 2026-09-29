@@ -13,12 +13,9 @@ when they expected it gone, or history emptier than they wanted.
   result. Stored in the app's local database. A transcribed file also keeps its speakers
   and timings in a small file next to the audio.
 - The **audio** — the recording itself, as a file in the app's Application Support
-folder.
+  folder.
 
 Both stay on your Mac. Neither is uploaded anywhere by Zerm.
-
-**Storage Usage** at the top of Settings → Storage & Backup shows the size and count of
-audio files still available to Zerm.
 
 ![Retention settings](img/privacy-retention.png)
 

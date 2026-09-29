@@ -128,8 +128,6 @@ Enhancement never translates. Mixed sentences stay mixed. See
 Every dictation is kept in History, under Dictation in the sidebar, until your
 [retention settings](privacy-retention.html) remove it. Each row has a copy button, and
 a recording whose audio is still on disk can be transcribed again with a different model.
-Search the transcript text, sort by newest or oldest, or filter to dictations with audio.
-The result count follows the current search and filter.
 
 ## Audio and video files
 

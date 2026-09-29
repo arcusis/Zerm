@@ -8,10 +8,6 @@ Zerm is driven from the keyboard. Nothing here is fixed: almost every shortcut o
 page can be rebound, and most start unset so they cannot collide with what you already
 use.
 
-In **Settings → Shortcuts**, assigned-key conflicts appear below the affected recorder.
-Use **Restore Defaults** at the end of Additional Shortcuts to return dictation to its
-default key and clear custom shortcut recordings.
-
 ![Shortcut settings](img/shortcuts.png)
 
 ## Dictation

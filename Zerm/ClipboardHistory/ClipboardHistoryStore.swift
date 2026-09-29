@@ -4,6 +4,10 @@ import Foundation
 
 typealias ClipboardHistoryPasteOperation = @Sendable (ClipboardItem, Bool) async throws -> Void
 
+enum ClipboardHistoryStoreCaptureError: Error {
+    case itemTooLarge
+}
+
 /// Local encrypted clipboard history. Every public operation is asynchronous and serialized by the actor.
 actor ClipboardHistoryStore {
     private struct Metadata: Codable {
@@ -21,33 +25,45 @@ actor ClipboardHistoryStore {
         var title: String?
         var tagIDs: [UUID]? = nil
         var favoriteOrder: Int? = nil
+        var payloadSize: Int? = nil
+        var recognizedText: String? = nil
+        var barcodePayloads: [String]? = nil
         var sourceApp: ClipboardSourceApp
     }
 
     private struct Payload: Codable {
         let representations: [ClipboardRepresentation]
+        var thumbnailData: Data? = nil
         var recognizedText: String?
         var barcodePayloads: [String]?
     }
 
     private let directoryURL: URL
     private let indexURL: URL
+    private let searchIndexURL: URL
     private let tagsURL: URL
     private let encryption: ClipboardHistoryEncryption
     private var metadata: [Metadata]
     private var payloads: [UUID: [ClipboardRepresentation]]
     private var dirtyPayloadIDs: Set<UUID>
+    private var pendingBlobDeletes: Set<UUID> = []
+    private var tagsDirty = true
     private var hasLoaded = false
     private var tags: [ClipboardTag] = []
     private var payloadOCR: [UUID: String] = [:]
     private var payloadBarcodes: [UUID: [String]] = [:]
+    private var thumbnails: [UUID: Data] = [:]
+    private var searchIndex = ClipboardHistorySearchIndex()
+    private var indexWriteTask: Task<Void, Never>?
     private var pasteSequenceLastID: UUID?
     private var indexingImageIDs: Set<UUID> = []
+    nonisolated let feedStoreID = UUID()
 
     /// Tests pass a temporary directory and random key. Live installs use a unique Keychain key.
     init(directoryURL: URL = AppStoragePaths.root.appendingPathComponent("ClipboardHistory", isDirectory: true), keyData: Data? = nil) throws {
         self.directoryURL = directoryURL
         indexURL = directoryURL.appendingPathComponent("index.enc")
+        searchIndexURL = directoryURL.appendingPathComponent("search-index.enc")
         tagsURL = directoryURL.appendingPathComponent("tags.enc")
         let resolvedKey: Data
         if let keyData {
@@ -73,6 +89,9 @@ actor ClipboardHistoryStore {
     /// Inserts a new clipboard payload or moves a matching content hash to the top.
     func capture(_ item: ClipboardItem, now: Date = Date()) throws -> ClipboardItem {
         try ensureLoaded()
+        guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize else {
+            throw ClipboardHistoryStoreCaptureError.itemTooLarge
+        }
         guard ClipboardHistoryEngineSettings.shouldCapture(item.kind) else { throw ClipboardHistoryCaptureError.retentionDisabled }
         if let index = metadata.firstIndex(where: { $0.contentHash == item.contentHash }) {
             metadata[index].lastUsedAt = now
@@ -80,17 +99,24 @@ actor ClipboardHistoryStore {
             metadata[index].useCount += 1
             metadata[index].sourceApp = item.sourceApp
             payloads[metadata[index].id] = item.representations
+            metadata[index].payloadSize = item.representations.reduce(0) { $0 + $1.data.count }
+            metadata[index].recognizedText = item.recognizedText.nilIfEmpty
+            metadata[index].barcodePayloads = item.barcodePayloads
+            if let thumbnailData = item.thumbnailData { thumbnails[metadata[index].id] = thumbnailData }
             payloadOCR.removeValue(forKey: metadata[index].id)
             payloadBarcodes.removeValue(forKey: metadata[index].id)
+            refreshSearchDocument(metadata[index])
             dirtyPayloadIDs.insert(metadata[index].id)
             try enforceRetention(now: now)
-            try save()
+            try save(writeIndex: !FileManager.default.fileExists(atPath: indexURL.path))
+            scheduleIndexWrite()
             let saved = makeItem(metadata[index])
+            publish(.updated(storeID: feedStoreID, item: saved))
             if saved.kind == .image { Task { await self.indexImageText(saved.id) } }
             return saved
         }
 
-        let row = Metadata(
+        var row = Metadata(
             id: item.id,
             contentHash: item.contentHash,
             kind: item.kind,
@@ -105,14 +131,63 @@ actor ClipboardHistoryStore {
             title: nil,
             sourceApp: item.sourceApp
         )
+        row.payloadSize = item.representations.reduce(0) { $0 + $1.data.count }
+        row.recognizedText = item.recognizedText.nilIfEmpty
+        row.barcodePayloads = item.barcodePayloads
         metadata.append(row)
+        refreshSearchDocument(row)
         payloads[row.id] = item.representations
+        if let thumbnailData = item.thumbnailData { thumbnails[row.id] = thumbnailData }
         dirtyPayloadIDs.insert(row.id)
         try enforceRetention(now: now)
-        try save()
+        try save(writeIndex: !FileManager.default.fileExists(atPath: indexURL.path))
+        scheduleIndexWrite()
         let saved = makeItem(row)
+        publish(.inserted(storeID: feedStoreID, item: saved))
         if saved.kind == .image { Task { await self.indexImageText(saved.id) } }
         return saved
+    }
+
+    func captureBatch(_ items: [ClipboardItem], now: Date = Date()) throws -> [ClipboardItem] {
+        try ensureLoaded()
+        var inserted: [ClipboardItem] = []
+        for item in items {
+            guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize else { continue }
+            guard ClipboardHistoryEngineSettings.shouldCapture(item.kind) else { continue }
+            if let index = metadata.firstIndex(where: { $0.contentHash == item.contentHash }) {
+                metadata[index].lastUsedAt = now
+                metadata[index].lastCopiedAt = now
+                metadata[index].useCount += 1
+                metadata[index].sourceApp = item.sourceApp
+                metadata[index].recognizedText = item.recognizedText.nilIfEmpty
+                metadata[index].barcodePayloads = item.barcodePayloads
+                refreshSearchDocument(metadata[index])
+                payloads[metadata[index].id] = item.representations
+                if let thumbnailData = item.thumbnailData { thumbnails[metadata[index].id] = thumbnailData }
+                dirtyPayloadIDs.insert(metadata[index].id)
+                continue
+            }
+            var row = Metadata(
+                id: item.id, contentHash: item.contentHash, kind: item.kind, preview: item.preview,
+                createdAt: now, lastCopiedAt: now, lastUsedAt: now, useCount: 1,
+                isPinned: false, isFavorite: false, collectionID: nil, title: nil,
+                sourceApp: item.sourceApp
+            )
+            row.payloadSize = item.representations.reduce(0) { $0 + $1.data.count }
+            row.recognizedText = item.recognizedText.nilIfEmpty
+            row.barcodePayloads = item.barcodePayloads
+            metadata.append(row)
+            refreshSearchDocument(row)
+            payloads[row.id] = item.representations
+            if let thumbnailData = item.thumbnailData { thumbnails[row.id] = thumbnailData }
+            dirtyPayloadIDs.insert(row.id)
+            inserted.append(makeItem(row))
+        }
+        try enforceRetention(now: now)
+        try save(writeIndex: false)
+        scheduleIndexWrite()
+        if !inserted.isEmpty { publish(.insertedBatch(storeID: feedStoreID, items: inserted)) }
+        return inserted
     }
 
     /// Stores final dictated text only when the opt-in setting is enabled.
@@ -134,33 +209,48 @@ actor ClipboardHistoryStore {
     /// Returns items ordered by last use, newest first.
     func recent(limit: Int = 100) throws -> [ClipboardItem] {
         try ensureLoaded()
-        return metadata.sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(max(0, limit)).map { makeItem($0) }
+        return try metadata.sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(max(0, limit)).map { try makePageItem($0) }
+    }
+
+    func recentPage(offset: Int = 0, limit: Int = 100) throws -> [ClipboardItem] {
+        try ensureLoaded()
+        let rows = metadata.sorted { $0.lastUsedAt > $1.lastUsedAt }
+        let start = min(max(0, offset), rows.count)
+        return try rows.dropFirst(start).prefix(max(0, limit)).map { try makePageItem($0) }
+    }
+
+    func totalCount() throws -> Int {
+        try ensureLoaded()
+        return metadata.count
+    }
+
+    func flushPendingWrites() throws {
+        indexWriteTask?.cancel()
+        indexWriteTask = nil
+        try save()
     }
 
     /// Returns pinned items ordered by last use, newest first.
     func pinned() throws -> [ClipboardItem] {
         try ensureLoaded()
-        return metadata.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }.map { makeItem($0) }
+        return try metadata.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }.map { try makePageItem($0) }
     }
 
     func favorites() throws -> [ClipboardItem] {
         try ensureLoaded()
-        return metadata.filter(\.isFavorite).sorted { ($0.favoriteOrder ?? Int.max) < ($1.favoriteOrder ?? Int.max) }.map { makeItem($0) }
+        return try metadata.filter(\.isFavorite).sorted { ($0.favoriteOrder ?? Int.max) < ($1.favoriteOrder ?? Int.max) }.map { try makePageItem($0) }
     }
 
     /// Searches previews, titles, and source app names, with an optional kind filter.
     func search(text: String = "", kind: ClipboardItemKind? = nil, limit: Int = 100) throws -> [ClipboardItem] {
         try ensureLoaded()
-        let query = text.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
-        return metadata
-            .filter { row in
-                let tagNames = tags.filter { row.tagIDs?.contains($0.id) == true }.map(\.name).joined(separator: " ")
-                return (kind == nil || row.kind == kind)
-                    && (query.isEmpty || ([row.preview, row.title ?? "", row.sourceApp.name ?? "", tagNames, payloadOCR[row.id] ?? "", (payloadBarcodes[row.id] ?? []).joined(separator: " ")].contains { $0.localizedLowercase.contains(query) }))
-            }
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matchingIDs = searchIndex.matchingIDs(query: query, kind: kind)
+        return try metadata
+            .filter { matchingIDs.contains($0.id) }
             .sorted { $0.lastUsedAt > $1.lastUsedAt }
             .prefix(max(0, limit))
-            .map { makeItem($0) }
+            .map { try makePageItem($0) }
     }
 
     /// Pins or unpins an item; pinned items bypass count and age retention.
@@ -169,6 +259,7 @@ actor ClipboardHistoryStore {
         guard let index = metadata.firstIndex(where: { $0.id == id }) else { return }
         metadata[index].isPinned = pinned
         try save()
+        publishUpdated(id)
     }
 
     /// Marks an item as a favourite.
@@ -182,6 +273,7 @@ actor ClipboardHistoryStore {
             metadata[index].favoriteOrder = nil
         }
         try save()
+        publishUpdated(id)
     }
 
     func reorderFavorites(_ ids: [UUID]) throws {
@@ -204,7 +296,9 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         guard let index = metadata.firstIndex(where: { $0.id == id }) else { return }
         metadata[index].title = title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        refreshSearchDocument(metadata[index])
         try save()
+        publishUpdated(id)
     }
 
     /// Sets or clears optional collection membership.
@@ -213,22 +307,25 @@ actor ClipboardHistoryStore {
         guard let index = metadata.firstIndex(where: { $0.id == id }) else { return }
         metadata[index].collectionID = collectionID
         try save()
+        publishUpdated(id)
     }
 
     /// Deletes one item and its encrypted payload.
     func delete(_ id: UUID) throws {
         try ensureLoaded()
         let existed = metadata.contains { $0.id == id }
-        removeItems([id])
+        let removed = removeItems([id])
         try save()
+        if !removed.isEmpty { publish(.removed(storeID: feedStoreID, ids: removed)) }
         if existed { Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() } }
     }
 
     func deleteItems(from bundleIdentifier: String) throws {
         try ensureLoaded()
         let removed = Set(metadata.filter { $0.sourceApp.bundleIdentifier == bundleIdentifier }.map(\.id))
-        removeItems(Array(removed))
+        let removedIDs = removeItems(Array(removed))
         try save()
+        if !removedIDs.isEmpty { publish(.removed(storeID: feedStoreID, ids: removedIDs)) }
         if !removed.isEmpty { Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() } }
     }
 
@@ -241,15 +338,18 @@ actor ClipboardHistoryStore {
             (keepFavorites && row.isFavorite) || (keepTagged && !(row.tagIDs ?? []).isEmpty)
         }
         let removed = metadata.filter { row in !(protected(row) || (!includingPinned && row.isPinned)) }.map(\.id)
-        removeItems(removed)
+        let removedIDs = removeItems(removed)
         try save()
-        if !removed.isEmpty { Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() } }
+        if !removedIDs.isEmpty {
+            publish(.cleared(storeID: feedStoreID, removedIDs: removedIDs))
+            Task { @MainActor in SoundManager.shared.playClipboardDeleteSound() }
+        }
     }
 
     func archiveEntries() throws -> [ClipboardHistoryArchive.Entry] {
         try ensureLoaded()
         return metadata.compactMap { row in
-            guard let representations = payloads[row.id] else { return nil }
+            guard let representations = try? loadPayload(row.id).representations else { return nil }
             return ClipboardHistoryArchive.Entry(item: makeItem(row, representations: representations), favoriteOrder: row.favoriteOrder)
         }
     }
@@ -297,6 +397,7 @@ actor ClipboardHistoryStore {
             dirtyPayloadIDs.insert(importedID)
         }
         try enforceRetention(now: Date())
+        refreshAllSearchDocuments()
         try save()
     }
 
@@ -308,11 +409,18 @@ actor ClipboardHistoryStore {
         }
     }
 
+    func itemWithPayload(_ id: UUID) throws -> ClipboardItem {
+        try ensureLoaded()
+        guard let row = metadata.first(where: { $0.id == id }) else { throw ClipboardHistoryError.missingPayload }
+        let payload = try loadPayload(id)
+        return makeItem(row, representations: payload.representations)
+    }
+
     /// Pastes the original representations, or extracts full plain text from the stored payload.
     func paste(_ item: ClipboardItem, asPlainText: Bool = false) async throws {
         try ensureLoaded()
-        guard let stored = metadata.first(where: { $0.id == item.id }),
-              let representations = payloads[stored.id] else { throw ClipboardHistoryError.missingPayload }
+        guard let stored = metadata.first(where: { $0.id == item.id }) else { throw ClipboardHistoryError.missingPayload }
+        let representations = try loadPayload(stored.id).representations
         let selected = asPlainText
             ? [ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(ClipboardPanelText.plainText(from: representations, fallback: stored.preview).utf8))]
             : representations
@@ -335,6 +443,7 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         let tag = ClipboardTag(name: name, colorHex: colorHex)
         tags.append(tag)
+        tagsDirty = true
         try save()
         return tag
     }
@@ -343,6 +452,8 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         guard let index = tags.firstIndex(where: { $0.id == id }) else { return }
         tags[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        tagsDirty = true
+        refreshAllSearchDocuments()
         try save()
     }
 
@@ -350,13 +461,16 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         guard let index = tags.firstIndex(where: { $0.id == id }) else { return }
         tags[index].colorHex = colorHex
+        tagsDirty = true
         try save()
     }
 
     func deleteTag(_ id: UUID) throws {
         try ensureLoaded()
         tags.removeAll { $0.id == id }
+        tagsDirty = true
         for index in metadata.indices { metadata[index].tagIDs?.removeAll { $0 == id } }
+        refreshAllSearchDocuments()
         try save()
     }
 
@@ -366,33 +480,45 @@ actor ClipboardHistoryStore {
         var tagIDs = metadata[index].tagIDs ?? []
         if !tagIDs.contains(tagID) { tagIDs.append(tagID) }
         metadata[index].tagIDs = tagIDs
+        tagsDirty = true
+        refreshSearchDocument(metadata[index])
         try save()
+        publishUpdated(itemID)
     }
 
     func detachTag(_ tagID: UUID, from itemID: UUID) throws {
         try ensureLoaded()
         guard let index = metadata.firstIndex(where: { $0.id == itemID }) else { return }
         metadata[index].tagIDs?.removeAll { $0 == tagID }
+        tagsDirty = true
+        refreshSearchDocument(metadata[index])
         try save()
+        publishUpdated(itemID)
     }
 
     func search(tagID: UUID, limit: Int = 100) throws -> [ClipboardItem] {
         try ensureLoaded()
-        return metadata.filter { $0.tagIDs?.contains(tagID) == true }
-            .sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(max(0, limit)).map { makeItem($0) }
+        return try metadata.filter { $0.tagIDs?.contains(tagID) == true }
+            .sorted { $0.lastUsedAt > $1.lastUsedAt }.prefix(max(0, limit)).map { try makePageItem($0) }
     }
 
     func sorted(_ order: ClipboardHistorySort, ascending: Bool = false, limit: Int = 100) throws -> [ClipboardItem] {
         try ensureLoaded()
-        let rows = metadata.sorted { left, right in
+        let rows = try sortedRows(order, ascending: ascending)
+        return try Array(rows.prefix(max(0, limit))).map { try makePageItem($0) }
+    }
+
+    private func sortedRows(_ order: ClipboardHistorySort, ascending: Bool) throws -> [Metadata] {
+        try ensureLoaded()
+        return metadata.sorted { left, right in
             let result: ComparisonResult
             switch order {
             case .lastCopy: result = (left.lastCopiedAt ?? left.lastUsedAt).compare(right.lastCopiedAt ?? right.lastUsedAt)
             case .firstCopy, .copySequence: result = left.createdAt.compare(right.createdAt)
             case .copyCount: result = left.useCount == right.useCount ? .orderedSame : (left.useCount < right.useCount ? .orderedAscending : .orderedDescending)
             case .size:
-                let lhs = payloads[left.id]?.reduce(0) { $0 + $1.data.count } ?? 0
-                let rhs = payloads[right.id]?.reduce(0) { $0 + $1.data.count } ?? 0
+                let lhs = left.payloadSize ?? 0
+                let rhs = right.payloadSize ?? 0
                 result = lhs == rhs ? .orderedSame : (lhs < rhs ? .orderedAscending : .orderedDescending)
             }
             if result == .orderedSame {
@@ -400,7 +526,11 @@ actor ClipboardHistoryStore {
             }
             return ascending ? result == .orderedAscending : result == .orderedDescending
         }
-        return Array(rows.prefix(max(0, limit))).map { makeItem($0) }
+    }
+
+    func sortedPage(_ order: ClipboardHistorySort, ascending: Bool = false, offset: Int, limit: Int) throws -> [ClipboardItem] {
+        let rows = try sortedRows(order, ascending: ascending)
+        return try rows.dropFirst(min(max(0, offset), rows.count)).prefix(max(0, limit)).map { try makePageItem($0) }
     }
 
     func cleanupExpired(now: Date = Date()) throws {
@@ -498,11 +628,14 @@ actor ClipboardHistoryStore {
         metadata[index].contentHash = replacement.contentHash
         metadata[index].kind = replacement.kind
         metadata[index].preview = replacement.preview
+        metadata[index].payloadSize = replacement.representations.reduce(0) { $0 + $1.data.count }
+        refreshSearchDocument(metadata[index])
         payloads[id] = replacement.representations
         payloadOCR.removeValue(forKey: id)
         payloadBarcodes.removeValue(forKey: id)
         dirtyPayloadIDs.insert(id)
         try save()
+        publishUpdated(id)
         return makeItem(metadata[index])
     }
 
@@ -529,28 +662,35 @@ actor ClipboardHistoryStore {
         guard (try? ensureLoaded()) != nil,
               let row = metadata.first(where: { $0.id == id }), row.kind == .image,
               !indexingImageIDs.contains(id),
-              payloadOCR[id] == nil,
-              let data = payloads[id]?.first(where: { ["public.tiff", "public.png", "public.jpeg"].contains($0.type) })?.data else { return }
+              row.recognizedText == nil,
+              let data = try? loadPayload(id).representations.first(where: { ["public.tiff", "public.png", "public.jpeg"].contains($0.type) })?.data else { return }
         indexingImageIDs.insert(id)
         defer { indexingImageIDs.remove(id) }
         let result = await ClipboardImageAnalyzer.analyze(data)
         guard metadata.first(where: { $0.id == id })?.contentHash == row.contentHash else { return }
+        guard let index = metadata.firstIndex(where: { $0.id == id }) else { return }
         payloadOCR[id] = result.recognizedText
         payloadBarcodes[id] = result.barcodePayloads
-        dirtyPayloadIDs.insert(id)
+        metadata[index].recognizedText = result.recognizedText
+        metadata[index].barcodePayloads = result.barcodePayloads
+        refreshSearchDocument(metadata[index])
         try? save()
     }
 
-    private func removeItems(_ ids: [UUID]) {
+    private func removeItems(_ ids: [UUID]) -> [UUID] {
         let removed = Set(ids)
         if let pasteSequenceLastID, removed.contains(pasteSequenceLastID) { resetPasteSequence() }
         metadata.removeAll { removed.contains($0.id) }
+        searchIndex.remove(removed)
         for id in removed {
             payloads.removeValue(forKey: id)
             payloadOCR.removeValue(forKey: id)
             payloadBarcodes.removeValue(forKey: id)
+            thumbnails.removeValue(forKey: id)
             dirtyPayloadIDs.remove(id)
+            pendingBlobDeletes.insert(id)
         }
+        return Array(removed)
     }
 
     private func makeItem(_ row: Metadata, representations: [ClipboardRepresentation]? = nil) -> ClipboardItem {
@@ -558,7 +698,9 @@ actor ClipboardHistoryStore {
             id: row.id,
             contentHash: row.contentHash,
             kind: row.kind,
-            representations: representations ?? payloads[row.id] ?? [],
+            representations: representations ?? [],
+            thumbnailData: thumbnails[row.id],
+            payloadSize: row.payloadSize,
             preview: row.preview,
             createdAt: row.createdAt,
             lastCopiedAt: row.lastCopiedAt ?? row.lastUsedAt,
@@ -569,8 +711,8 @@ actor ClipboardHistoryStore {
             collectionID: row.collectionID,
             title: row.title,
             tagIDs: row.tagIDs ?? [],
-            recognizedText: payloadOCR[row.id] ?? "",
-            barcodePayloads: payloadBarcodes[row.id] ?? [],
+            recognizedText: row.recognizedText ?? payloadOCR[row.id] ?? "",
+            barcodePayloads: row.barcodePayloads ?? payloadBarcodes[row.id] ?? [],
             sourceApp: row.sourceApp
         )
     }
@@ -601,16 +743,22 @@ actor ClipboardHistoryStore {
         do {
             let encryptedIndex = try Data(contentsOf: indexURL)
             metadata = try JSONDecoder().decode([Metadata].self, from: encryption.open(encryptedIndex))
-            for row in metadata {
-                let blob = directoryURL.appendingPathComponent("\(row.id.uuidString).blob.enc")
-                let data = try encryption.open(Data(contentsOf: blob))
-                let payload = try JSONDecoder().decode(Payload.self, from: data)
-                payloads[row.id] = payload.representations
-                payloadOCR[row.id] = payload.recognizedText
-                payloadBarcodes[row.id] = payload.barcodePayloads
-            }
             if FileManager.default.fileExists(atPath: tagsURL.path) {
                 tags = try JSONDecoder().decode([ClipboardTag].self, from: encryption.open(Data(contentsOf: tagsURL)))
+            }
+            if FileManager.default.fileExists(atPath: searchIndexURL.path) {
+                searchIndex = try JSONDecoder().decode(ClipboardHistorySearchIndex.self, from: encryption.open(Data(contentsOf: searchIndexURL)))
+            } else {
+                for row in metadata {
+                    let payload = try loadPayload(row.id)
+                    if let index = metadata.firstIndex(where: { $0.id == row.id }) {
+                        metadata[index].payloadSize = row.payloadSize ?? payload.representations.reduce(0) { $0 + $1.data.count }
+                        metadata[index].recognizedText = payload.recognizedText
+                        metadata[index].barcodePayloads = payload.barcodePayloads
+                    }
+                }
+                refreshAllSearchDocuments()
+                try save()
             }
             let previousIDs = Set(metadata.map(\.id))
             try enforceRetention(now: Date())
@@ -626,7 +774,11 @@ actor ClipboardHistoryStore {
         hasLoaded = true
     }
 
-    private func save() throws {
+    private func save(writeIndex: Bool = true) throws {
+        if writeIndex {
+            indexWriteTask?.cancel()
+            indexWriteTask = nil
+        }
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -635,20 +787,102 @@ actor ClipboardHistoryStore {
             guard activeIDs.contains(id), let representations = payloads[id] else { continue }
             let payload = try encoder.encode(Payload(
                 representations: representations,
+                thumbnailData: thumbnails[id],
                 recognizedText: payloadOCR[id],
                 barcodePayloads: payloadBarcodes[id]
             ))
             let encrypted = try encryption.seal(payload)
             try encrypted.write(to: directoryURL.appendingPathComponent("\(id.uuidString).blob.enc"), options: .atomic)
+            if let thumbnailData = thumbnails[id] {
+                try encryption.seal(thumbnailData).write(
+                    to: directoryURL.appendingPathComponent("\(id.uuidString).thumb.enc"), options: .atomic
+                )
+            }
+            payloads.removeValue(forKey: id)
         }
-        for url in try FileManager.default.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
-        where url.lastPathComponent.hasSuffix(".blob.enc") {
-            let id = UUID(uuidString: url.lastPathComponent.replacingOccurrences(of: ".blob.enc", with: ""))
-            if let id, !activeIDs.contains(id) { try? FileManager.default.removeItem(at: url) }
+        for id in pendingBlobDeletes where !activeIDs.contains(id) {
+            try? FileManager.default.removeItem(at: directoryURL.appendingPathComponent("\(id.uuidString).blob.enc"))
+            try? FileManager.default.removeItem(at: directoryURL.appendingPathComponent("\(id.uuidString).thumb.enc"))
         }
-        try encryption.seal(encoder.encode(metadata)).write(to: indexURL, options: .atomic)
-        try encryption.seal(encoder.encode(tags)).write(to: tagsURL, options: .atomic)
+        pendingBlobDeletes.removeAll()
+        if writeIndex {
+            try encryption.seal(encoder.encode(metadata)).write(to: indexURL, options: .atomic)
+            try encryption.seal(encoder.encode(searchIndex)).write(to: searchIndexURL, options: .atomic)
+        }
+        if tagsDirty {
+            try encryption.seal(encoder.encode(tags)).write(to: tagsURL, options: .atomic)
+            tagsDirty = false
+        }
         dirtyPayloadIDs.removeAll()
+    }
+
+    private func scheduleIndexWrite() {
+        indexWriteTask?.cancel()
+        indexWriteTask = Task {
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            try? self.save()
+            self.indexWriteTask = nil
+        }
+    }
+
+    private func publish(_ change: ClipboardHistoryChange) {
+        Task { @MainActor in ClipboardHistoryFeed.shared.publish(change) }
+    }
+
+    private func publishUpdated(_ id: UUID) {
+        guard let row = metadata.first(where: { $0.id == id }) else { return }
+        publish(.updated(storeID: feedStoreID, item: makeItem(row)))
+    }
+
+    private func loadPayload(_ id: UUID) throws -> Payload {
+        if let representations = payloads[id] {
+            return Payload(
+                representations: representations, thumbnailData: thumbnails[id],
+                recognizedText: payloadOCR[id], barcodePayloads: payloadBarcodes[id]
+            )
+        }
+        let url = directoryURL.appendingPathComponent("\(id.uuidString).blob.enc")
+        guard FileManager.default.fileExists(atPath: url.path) else { throw ClipboardHistoryError.missingPayload }
+        do {
+            let decrypted = try encryption.open(Data(contentsOf: url))
+            return try JSONDecoder().decode(Payload.self, from: decrypted)
+        } catch {
+            throw ClipboardHistoryError.corruptStore
+        }
+    }
+
+    private func makePageItem(_ row: Metadata) throws -> ClipboardItem {
+        if row.kind == .image, thumbnails[row.id] == nil { thumbnails[row.id] = try loadThumbnail(row.id) }
+        return makeItem(row)
+    }
+
+    private func loadThumbnail(_ id: UUID) throws -> Data? {
+        let url = directoryURL.appendingPathComponent("\(id.uuidString).thumb.enc")
+        if FileManager.default.fileExists(atPath: url.path) {
+            return try encryption.open(Data(contentsOf: url))
+        }
+        let payload = try loadPayload(id)
+        guard let thumbnailData = payload.thumbnailData else { return nil }
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        try encryption.seal(thumbnailData).write(to: url, options: .atomic)
+        return thumbnailData
+    }
+
+    private func refreshAllSearchDocuments() {
+        searchIndex = ClipboardHistorySearchIndex()
+        for row in metadata { refreshSearchDocument(row) }
+    }
+
+    private func refreshSearchDocument(_ row: Metadata) {
+        let tagNames = tags.filter { row.tagIDs?.contains($0.id) == true }.map(\.name)
+        searchIndex.update(
+            id: row.id,
+            kind: row.kind,
+            fields: [row.preview, row.title ?? "", row.sourceApp.name ?? "", row.sourceApp.bundleIdentifier ?? "",
+                     row.recognizedText ?? payloadOCR[row.id] ?? "", (row.barcodePayloads ?? payloadBarcodes[row.id] ?? []).joined(separator: " "),
+                     tagNames.joined(separator: " "), row.kind.rawValue]
+        )
     }
 }
 

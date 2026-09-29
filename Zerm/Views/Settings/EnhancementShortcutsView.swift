@@ -2,8 +2,6 @@ import SwiftUI
 import KeyboardShortcuts
 
 struct EnhancementShortcutsView: View {
-    @State private var shortcutRefresh = 0
-
     var body: some View {
         VStack(spacing: 8) {
             // Toggle AI Enhancement
@@ -20,18 +18,8 @@ struct EnhancementShortcutsView: View {
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
-                    KeyboardShortcuts.Recorder(for: .toggleEnhancement) { _ in
-                        shortcutRefresh += 1
-                    }
+                KeyboardShortcuts.Recorder(for: .toggleEnhancement)
                     .controlSize(.small)
-
-                    if hasShortcutConflict {
-                        Label("This shortcut is also assigned to another Zerm action.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
             }
 
             // Switch Enhancement Prompt
@@ -53,37 +41,8 @@ struct EnhancementShortcutsView: View {
                     KeyChip(label: "1 – 0")
                 }
             }
-
-            HStack {
-                Spacer()
-                Button("Restore Defaults") {
-                    KeyboardShortcuts.setShortcut(
-                        KeyboardShortcuts.Name.toggleEnhancement.defaultShortcut,
-                        for: .toggleEnhancement
-                    )
-                    shortcutRefresh += 1
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("enhancement-shortcuts-restore-defaults")
-            }
         }
         .background(Color.clear)
-        .onAppear { shortcutRefresh += 1 }
-    }
-
-    private var hasShortcutConflict: Bool {
-        _ = shortcutRefresh
-        guard let shortcut = KeyboardShortcuts.getShortcut(for: .toggleEnhancement) else { return false }
-
-        return [
-            KeyboardShortcuts.Name.toggleMiniRecorder,
-            .toggleMiniRecorder2,
-            .pasteLastTranscription,
-            .pasteLastEnhancement,
-            .retryLastTranscription,
-            .cancelRecorder,
-            .readSelectedTextAloud
-        ].contains { KeyboardShortcuts.getShortcut(for: $0) == shortcut }
     }
 }
 

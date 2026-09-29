@@ -82,11 +82,11 @@ final class ClipboardMonitor {
     }
 
     func poll() {
-        refreshCopyMergeMonitor()
-        guard ClipboardHistorySettings.isEnabled else { return }
         let currentCount = pasteboard.changeCount
         guard currentCount != lastChangeCount else { return }
         lastChangeCount = currentCount
+        refreshCopyMergeMonitor()
+        guard ClipboardHistorySettings.isEnabled else { return }
         let shouldMergeCopy = copyMergeAwaitingClipboard
         copyMergeAwaitingClipboard = false
         if Self.ignoresNextChange {
@@ -122,20 +122,25 @@ final class ClipboardMonitor {
             excludedApps: ClipboardHistorySettings.excludedApps,
             ignoreConfidential: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreConfidential),
             ignoreTransient: ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreTransient)
-        ), let captured = ClipboardItem.capture(representations: representations, sourceApp: appInfo) else { return }
-        let text = captured.kind == .plainText ? captured.preview : nil
+        ), !representations.isEmpty else { return }
         let now = Date()
-        let shouldMerge = text != nil && shouldMergeCopy
-        Task {
+        let shouldMerge = shouldMergeCopy
+        Task.detached(priority: .userInitiated) { [store] in
+            guard let captured = ClipboardItem.capture(
+                representations: representations,
+                sourceApp: appInfo,
+                createdAt: now
+            ) else { return }
+            let text = captured.kind == .plainText ? captured.preview : nil
             do {
                 if shouldMerge, let text {
                     guard await store.shouldCapture(captured.kind) else { return }
                     if let merged = try await store.appendCopyToPreviousText(text, separator: ClipboardHistoryEngineSettings.copyMergeSeparator) {
                         if ClipboardHistoryEngineSettings.copyMergeUpdatesClipboard {
-                            await MainActor.run {
-                                guard pasteboard.changeCount == currentCount else { return }
-                                if ClipboardManager.setClipboard(merged.preview, on: pasteboard) {
-                                    Self.noteZermWrite(changeCount: pasteboard.changeCount)
+                            await MainActor.run { [weak self] in
+                                guard let self, self.pasteboard.changeCount == currentCount else { return }
+                                if ClipboardManager.setClipboard(merged.preview, on: self.pasteboard) {
+                                    Self.noteZermWrite(changeCount: self.pasteboard.changeCount)
                                 }
                             }
                         }

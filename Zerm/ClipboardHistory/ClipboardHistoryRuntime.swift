@@ -133,11 +133,15 @@ final class ClipboardHistoryRuntime {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnQuit),
-                  let store = self?.store else { return }
+            guard let store = self?.store else { return }
+            let clearOnQuit = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnQuit)
             let finished = DispatchSemaphore(value: 0)
             Task.detached {
-                try? await store.clear(includingPinned: true)
+                if clearOnQuit {
+                    try? await store.clear(includingPinned: true)
+                }
+                // Index writes are debounced; persist the last ones before the process exits.
+                try? await store.flushPendingWrites()
                 finished.signal()
             }
             finished.wait()

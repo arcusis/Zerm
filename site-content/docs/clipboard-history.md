@@ -2,6 +2,8 @@
 
 Clipboard History keeps copied items in an encrypted local store. It supports text, rich text, images, files, links, and other pasteboard content. Image text and QR or barcode values are indexed for search and shown in item details.
 
+An open panel receives new copies, edits, removals, and clear operations immediately. History loads in pages as you browse. Image lists use encrypted thumbnails; original clipboard data loads when needed. Items larger than the configured maximum are skipped. Default maximum is 50 MB.
+
 ## Open and search
 
 Open the floating panel with **Shift-Command-V** or choose **Open Clipboard History** from the menu bar. The shortcut can be changed in Settings. Search matches item text, titles, source apps, tags, OCR text, and QR or barcode values. Add `kind:`, `app:`, or `tag:` tokens to filter results.

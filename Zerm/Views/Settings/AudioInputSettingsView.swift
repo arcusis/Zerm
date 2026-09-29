@@ -16,8 +16,7 @@ struct AudioInputSettingsView: View {
     }
     
     private var mainContent: some View {
-        VStack(spacing: 24) {
-            selectedMicrophoneSummary
+        VStack(spacing: 40) {
             inputModeSection
             bluetoothMediaQualitySection
 
@@ -31,33 +30,7 @@ struct AudioInputSettingsView: View {
             }
         }
         .padding(.horizontal, 32)
-        .padding(.vertical, 24)
-    }
-
-    private var selectedMicrophoneSummary: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "mic")
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Current Microphone")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(verbatim: currentMicrophoneName)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .accessibilityIdentifier("settings-current-microphone-summary")
-    }
-
-    private var currentMicrophoneName: String {
-        let currentDeviceID = audioDeviceManager.getCurrentDevice()
-        return audioDeviceManager.availableDevices.first(where: { $0.id == currentDeviceID })?.name
-            ?? String(localized: "No device available")
+        .padding(.vertical, 40)
     }
     
     private var heroSection: some View {

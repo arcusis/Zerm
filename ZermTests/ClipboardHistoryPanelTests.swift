@@ -138,6 +138,63 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
+    @Test func feedUpdatesOpenModelAndPropagatesRemovalAndClear() async throws {
+        try await withPanelModel { model, store in
+            let first = try #require(ClipboardItem.capture(
+                representations: [text("selected item")],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            ))
+            _ = try await store.capture(first)
+            await model.loadItems()
+            model.select(try #require(model.items.first))
+
+            let second = try #require(ClipboardItem.capture(
+                representations: [text("live copy")],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            ))
+            _ = try await store.capture(second)
+            try await Task.sleep(nanoseconds: 80_000_000)
+            #expect(model.items.first?.id == second.id)
+            #expect(model.selectedIDs == [first.id])
+
+            try await store.delete(second.id)
+            try await Task.sleep(nanoseconds: 30_000_000)
+            #expect(!model.items.contains { $0.id == second.id })
+
+            try await store.clear(includingPinned: true, keepingFavorites: false, keepingTagged: false)
+            try await Task.sleep(nanoseconds: 30_000_000)
+            #expect(model.items.isEmpty)
+            #expect(model.visibleItems.isEmpty)
+        }
+    }
+
+    @MainActor
+    @Test func panelLoadsHistoryInPages() async throws {
+        try await withPanelModel { model, store in
+            let now = Date()
+            let items = (0..<250).map { index in
+                ClipboardItem(
+                    contentHash: "page-\(index)", kind: .plainText,
+                    representations: [text("page row \(index)")], preview: "page row \(index)",
+                    createdAt: now.addingTimeInterval(Double(index)),
+                    lastUsedAt: now.addingTimeInterval(Double(index)),
+                    sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+                )
+            }
+            _ = try await store.captureBatch(items, now: now)
+            try await store.flushPendingWrites()
+            await model.loadItems()
+            #expect(model.items.count == 100)
+            #expect(model.canLoadMore)
+            await model.loadMore()
+            #expect(model.items.count == 200)
+            await model.loadMore()
+            #expect(model.items.count == 250)
+            #expect(!model.canLoadMore)
+        }
+    }
+
+    @MainActor
     @Test func tagSearchTokenFiltersMatchingItems() async throws {
         try await withPanelModel { model, store in
             let tagged = try #require(ClipboardItem.capture(
