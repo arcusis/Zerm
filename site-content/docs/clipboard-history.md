@@ -1,7 +1,7 @@
 ---
 title: Clipboard History
 eyebrow: Clipboard
-summary: Everything you copy, kept privately on your Mac. Search it, preview it and paste it back with ⇧⌘V.
+summary: Copied items, kept privately on your Mac. Search them, preview them and paste them back with ⇧⌘V.
 ---
 
 Clipboard History keeps what you copy — text, links, images, files, colors, email
@@ -19,6 +19,8 @@ the menu bar.
   Files, Colors, Emails, Code), or one of the apps you copied from.
 - The **list** shows each item with the app it came from and when you copied it. New copies
   appear while the panel is open.
+- A click selects an item for preview. Double-click or press Return to paste. You can enable
+  single-click pasting in **Settings → Clipboard History**.
 - The **preview** shows the selected item in full: links with their title and image;
   Spotify, YouTube, Apple Music and SoundCloud links as media cards; files with thumbnails;
   colors with their values; and code with syntax highlighting.
@@ -48,9 +50,9 @@ export them. Pasting into other apps is done from the panel.
 
 ## Privacy and storage
 
-Your history is encrypted and stored only on this Mac. Passwords and other items that
-apps mark as confidential are never saved, and you can exclude any app — password managers
-are suggested for you.
+Your history is encrypted and stored only on this Mac. Items that apps mark as confidential
+are ignored by default. Ordinary copied text is not automatically identified as a password;
+exclude password managers and other sensitive apps in Settings.
 
 In **Settings → Clipboard History** you choose:
 

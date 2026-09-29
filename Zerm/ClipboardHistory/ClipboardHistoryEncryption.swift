@@ -21,7 +21,7 @@ struct ClipboardHistoryEncryption {
     }
 }
 
-enum ClipboardHistoryError: Error {
+enum ClipboardHistoryError: LocalizedError {
     case invalidKey
     case encryptionFailed
     case keychainUnavailable
@@ -31,4 +31,18 @@ enum ClipboardHistoryError: Error {
     case invalidArchivePassword
     case unsupportedArchiveVersion
     case corruptArchive
+    case targetUnavailable
+    case pasteCommandFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .targetUnavailable: String(localized: "The destination app is unavailable. Reopen history from the app you want to paste into.")
+        case .pasteCommandFailed: String(localized: "Paste could not be sent. Check Accessibility permission, or copy the item and paste manually.")
+        case .missingPayload: String(localized: "The clipboard item could not be loaded. Choose another item or reopen history.")
+        case .keychainUnavailable, .invalidKey: String(localized: "Clipboard history could not access its encryption key.")
+        case .invalidArchivePassword: String(localized: "The archive password is incorrect.")
+        case .unsupportedArchiveVersion: String(localized: "This clipboard archive requires a newer version of Zerm.")
+        case .corruptStore, .corruptArchive, .encryptionFailed, .archiveOperationFailed: String(localized: "Clipboard history could not read or save its data.")
+        }
+    }
 }

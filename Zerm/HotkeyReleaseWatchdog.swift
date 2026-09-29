@@ -29,7 +29,7 @@ final class HotkeyReleaseWatchdog {
     func start(
         isKeyDown: @escaping () -> Bool,
         onRelease: @escaping (TimeInterval) -> Void,
-        shouldForceStop: @escaping () -> Bool,
+        shouldForceStop: @escaping (TimeInterval) -> Bool,
         onForceStop: @escaping () -> Void
     ) {
         cancel()
@@ -50,7 +50,7 @@ final class HotkeyReleaseWatchdog {
 
                 guard let releasedAt = self.releaseObservedAt else { continue }
                 guard self.clock() - releasedAt >= 1 else { continue }
-                if shouldForceStop() { self.forceStop?() }
+                if shouldForceStop(releasedAt) { self.forceStop?() }
                 self.cancel()
                 return
             }
@@ -70,18 +70,9 @@ final class HotkeyReleaseWatchdog {
         case .key(let keyCode):
             return keyState(keyCode)
         case .modifier(let option):
-            if option == .fn { return flags.contains(.maskSecondaryFn) }
-            guard let keyCode = option.keyCode else { return false }
-            let flagIsDown: Bool
-            switch option {
-            case .leftOption, .rightOption: flagIsDown = flags.contains(.maskAlternate)
-            case .leftControl, .rightControl: flagIsDown = flags.contains(.maskControl)
-            case .leftCommand, .rightCommand: flagIsDown = flags.contains(.maskCommand)
-            case .rightShift: flagIsDown = flags.contains(.maskShift)
-            case .fn: flagIsDown = flags.contains(.maskSecondaryFn)
-            case .custom, .none: flagIsDown = false
-            }
-            return flagIsDown && keyState(CGKeyCode(keyCode))
+            // Modifier keyState can disagree with flagsState, particularly for remapped
+            // keys. Match the flagsChanged event handler's sided flags and generic fallback.
+            return HotkeyManager.isModifierPressed(option, flags: NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue)))
         }
     }
 

@@ -130,6 +130,125 @@ enum ClipboardHistoryRenderError: Error {
 @Suite(.serialized)
 struct ClipboardHistoryPanelTests {
     @MainActor
+    @Test func copyAndEditLoadFullPayloadInsteadOfTruncatedMetadata() async throws {
+        try await withPanelModel { model, store, _ in
+            let value = String(repeating: "long clipboard text ", count: 60) + "end-marker"
+            let item = try #require(ClipboardItem.capture(representations: [text(value)], sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor")))
+            _ = try await store.capture(item)
+            await model.loadItems()
+            let row = try #require(model.items.first)
+            #expect(row.representations.isEmpty)
+            #expect(row.preview.count == 500)
+            let pasteboard = NSPasteboard.withUniqueName()
+            defer { pasteboard.releaseGlobally() }
+            pasteboard.setString("existing clipboard", forType: .string)
+            await model.copy(row, to: pasteboard)
+            #expect(pasteboard.string(forType: .string) == value)
+            #expect(pasteboard.types?.contains(ClipboardManager.historyIgnoreType) == true)
+            await model.beginEditing(row)
+            #expect(model.textBeingEdited == value)
+            await model.saveEditedText()
+            let saved = try await store.itemWithPayload(row.id)
+            #expect(ClipboardPanelText.plainText(from: saved.representations, fallback: saved.preview) == value)
+        }
+    }
+
+    @MainActor
+    @Test func failedCopyPreservesExistingClipboardAndReportsError() async throws {
+        try await withPanelModel { model, _, _ in
+            let missing = ClipboardItem(contentHash: "missing", kind: .plainText, representations: [], preview: "missing", sourceApp: .init(bundleIdentifier: nil, name: nil))
+            let pasteboard = NSPasteboard.withUniqueName()
+            defer { pasteboard.releaseGlobally() }
+            pasteboard.setString("keep this", forType: .string)
+            await model.copy(missing, to: pasteboard)
+            #expect(pasteboard.string(forType: .string) == "keep this")
+            #expect(model.errorMessage != nil)
+        }
+    }
+
+    @MainActor
+    @Test func searchAndAppFiltersFindOlderItemsBeyondFirstPage() async throws {
+        try await withPanelModel { model, store, defaults in
+            defaults.set(1000, forKey: ClipboardHistorySettings.Keys.retentionCount)
+            let now = Date()
+            let value = String(repeating: "older document ", count: 60) + "unique-deep-marker"
+            let older = try #require(ClipboardItem.capture(representations: [text(value)], sourceApp: .init(bundleIdentifier: "test.old-app", name: "Old App")))
+            _ = try await store.capture(older, now: now.addingTimeInterval(-60))
+            let newer = (0..<150).map { index in
+                ClipboardItem(contentHash: "newer-\(index)", kind: .plainText, representations: [text("recent \(index)")], preview: "recent \(index)", sourceApp: .init(bundleIdentifier: "test.editor", name: "Editor"))
+            }
+            _ = try await store.captureBatch(newer, now: now)
+            await model.loadItems()
+            #expect(!model.items.contains(where: { $0.id == older.id }))
+            let olderApp = model.sourceApps.first { $0.bundleIdentifier == "test.old-app" }
+            #expect(olderApp?.count == 1)
+            model.query = "unique-deep-marker"
+            await model.loadItems()
+            #expect(model.visibleItems.map(\.id) == [older.id])
+            model.query = ""
+            model.appFilter = "test.old-app"
+            await model.loadItems()
+            #expect(model.visibleItems.map(\.id) == [older.id])
+            model.dateFilter = .today
+            model.railFilter = .favorites
+            model.clearFilters()
+            #expect(model.query.isEmpty && model.appFilter == nil && model.dateFilter == .anytime && model.railFilter == .history)
+            await model.loadItems()
+            #expect(model.visibleItems.count == 100)
+            #expect(model.canLoadMore)
+        }
+    }
+
+    @MainActor
+    @Test func detailAndMultiPastePayloadsPreserveFullContentAndOrder() async throws {
+        try await withPanelModel { model, store, _ in
+            let first = try #require(ClipboardItem.capture(representations: [text(String(repeating: "first ", count: 150))], sourceApp: .init(bundleIdentifier: nil, name: nil)))
+            let second = try #require(ClipboardItem.capture(representations: [text("second")], sourceApp: .init(bundleIdentifier: nil, name: nil)))
+            _ = try await store.captureBatch([first, second])
+            await model.loadItems()
+            let rows = [second, first].compactMap { item in model.items.first(where: { $0.id == item.id }) }
+            let loaded = try await model.fullItems(for: rows)
+            #expect(loaded.map(\.id) == [second.id, first.id])
+            #expect(loaded.last?.representations.first?.data == first.representations.first?.data)
+            model.select(try #require(rows.last))
+            await eventually { model.detailItem?.id == first.id }
+            #expect(model.detailItem?.representations == first.representations)
+        }
+    }
+
+    @MainActor
+    @Test func panelKeyboardMonitorIgnoresEditorsAndOtherWindows() {
+        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: -4000, y: -4000, width: 820, height: 444))
+        let other = NSWindow(contentRect: .zero, styleMask: [], backing: .buffered, defer: false)
+        other.isReleasedWhenClosed = false
+        defer { panel.close(); other.close() }
+        #expect(ClipboardHistoryPanelController.shouldHandleKeyEvent(in: panel, panel: panel, isEditing: false))
+        #expect(!ClipboardHistoryPanelController.shouldHandleKeyEvent(in: panel, panel: panel, isEditing: true))
+        #expect(!ClipboardHistoryPanelController.shouldHandleKeyEvent(in: other, panel: panel, isEditing: false))
+        #expect(!ClipboardHistoryPanelController.shouldHandleKeyEvent(in: nil, panel: panel, isEditing: false))
+    }
+
+    @MainActor
+    @Test func mergeSplitAndCopyMergeKeepTextBeyondPreviewLimit() async throws {
+        try await withPanelModel { _, store, _ in
+            let longLine = String(repeating: "long line ", count: 100)
+            let first = try #require(ClipboardItem.capture(representations: [text(longLine + "\nlast line")], sourceApp: .init(bundleIdentifier: nil, name: nil)))
+            let second = try #require(ClipboardItem.capture(representations: [text("second")], sourceApp: .init(bundleIdentifier: nil, name: nil)))
+            _ = try await store.captureBatch([first, second])
+            let parts = try await store.split(first.id)
+            let partPayloads = try await store.itemWithPayload(try #require(parts.first).id)
+            #expect(ClipboardPanelText.plainText(from: partPayloads.representations, fallback: partPayloads.preview) == longLine)
+            let merged = try #require(try await store.merge([first.id, second.id]))
+            let payload = try await store.itemWithPayload(merged.id)
+            #expect(ClipboardPanelText.plainText(from: payload.representations, fallback: payload.preview) == longLine + "\nlast line\nsecond")
+            let appended = try #require(try await store.appendCopyToPreviousText("tail"))
+            let appendedPayload = try await store.itemWithPayload(appended.id)
+            #expect(ClipboardPanelText.plainText(from: appendedPayload.representations, fallback: appendedPayload.preview).hasSuffix("\ntail"))
+            #expect((appendedPayload.representations.first?.data.count ?? 0) > 1000)
+        }
+    }
+
+    @MainActor
     @Test func panelWindowHasNoTitleBarStripAboveTheContent() {
         let panel = ClipboardHistoryPanel(contentRect: NSRect(x: -4000, y: -4000, width: 820, height: 444))
         panel.contentView = NSHostingView(rootView: Color.clear)

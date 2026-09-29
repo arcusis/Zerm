@@ -148,6 +148,10 @@ dependencies):</p>
 <div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">PREBUILT_APP=/path/to/Zerm.app \
   RELEASE_LABEL=A.B.C.D RELEASE_TAG=vA.B.C.D \
   scripts/release.sh</pre></div>
+<p dir="auto">To keep the installer background renderer on the build Mac too, render<br>
+<code class="notranslate">scripts/make-dmg-background.swift</code> there and pass its PNG to the signing machine<br>
+with <code class="notranslate">PREBUILT_DMG_BACKGROUND=/path/to/background.png</code>. This path runs no Swift<br>
+compiler on the signing machine.</p>
 <p dir="auto">The script fails before signing if the bundle identifier, project version,<br>
 build number or arm64 executable does not match, and validates the staged copy<br>
 again. Sparkle signing material and release notes are mandatory for a real run.</p>
