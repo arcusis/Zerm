@@ -4,6 +4,9 @@ import SwiftData
 struct InlineHistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var searchText = ""
+    @State private var sortOrder: HistorySortOrder = .newestFirst
+    @State private var historyFilter: DictationHistoryFilter = .all
+    @State private var resultCount = 0
     @State private var expandedId: UUID?
     @State private var selectedTranscriptions: Set<Transcription> = []
     @State private var showDeleteConfirmation = false
@@ -30,30 +33,27 @@ struct InlineHistoryView: View {
     }
 
     private func cursorQueryDescriptor(after timestamp: Date? = nil) -> FetchDescriptor<Transcription> {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requiresAudio = historyFilter == .withAudio
+        let isDescending = sortOrder == .newestFirst
+        let hasCursor = timestamp != nil
+        let cursor = timestamp ?? .distantPast
         var descriptor = FetchDescriptor<Transcription>(
-            sortBy: [SortDescriptor(\Transcription.timestamp, order: .reverse)]
+            sortBy: [SortDescriptor(\Transcription.timestamp, order: isDescending ? .reverse : .forward)]
         )
-
-        if let timestamp = timestamp {
-            if !searchText.isEmpty {
-                descriptor.predicate = #Predicate<Transcription> { transcription in
-                    (transcription.text.localizedStandardContains(searchText) ||
-                    (transcription.enhancedText?.localizedStandardContains(searchText) ?? false)) &&
-                    transcription.timestamp < timestamp
-                }
-            } else {
-                descriptor.predicate = #Predicate<Transcription> { transcription in
-                    transcription.timestamp < timestamp
-                }
-            }
-        } else if !searchText.isEmpty {
-            descriptor.predicate = #Predicate<Transcription> { transcription in
-                transcription.text.localizedStandardContains(searchText) ||
-                (transcription.enhancedText?.localizedStandardContains(searchText) ?? false)
-            }
+        descriptor.predicate = #Predicate<Transcription> { transcription in
+            (query.isEmpty || transcription.text.localizedStandardContains(query) ||
+                (transcription.enhancedText?.localizedStandardContains(query) ?? false)) &&
+            (!requiresAudio || transcription.audioFileURL != nil) &&
+            (!hasCursor || (isDescending ? transcription.timestamp < cursor : transcription.timestamp > cursor))
         }
-
         descriptor.fetchLimit = pageSize
+        return descriptor
+    }
+
+    private func countQueryDescriptor() -> FetchDescriptor<Transcription> {
+        var descriptor = cursorQueryDescriptor()
+        descriptor.fetchLimit = nil
         return descriptor
     }
 
@@ -136,6 +136,11 @@ struct InlineHistoryView: View {
                 await loadInitialContent()
             }
         }
+        .onChange(of: sortOrder) { _, _ in reloadHistory() }
+        .onChange(of: historyFilter) { _, _ in
+            selectedTranscriptions.removeAll()
+            reloadHistory()
+        }
         .onChange(of: latestTranscriptionIndicator.first?.id) { oldId, newId in
             guard isViewCurrentlyVisible else { return }
             if newId != oldId {
@@ -150,25 +155,52 @@ struct InlineHistoryView: View {
     // MARK: - Top Bar
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                    .font(.system(size: 12))
-                TextField("Search transcriptions...", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Dictation History")
+                    .font(.headline)
+                Spacer()
+                Text("history_result_count \(resultCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(Color.secondary.opacity(0.08))
-            )
-            .frame(maxWidth: .infinity)
+
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 12))
+                    TextField("Search transcriptions...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.secondary.opacity(0.08)))
+
+                Menu {
+                    Picker("Sort by", selection: $sortOrder) {
+                        ForEach(HistorySortOrder.allCases) { order in
+                            Text(order.title).tag(order)
+                        }
+                    }
+                    Picker("Filter", selection: $historyFilter) {
+                        ForEach(DictationHistoryFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .help("Sort and Filter")
+                .accessibilityLabel("Sort and Filter")
+            }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     private var selectionBar: some View {
@@ -240,12 +272,19 @@ struct InlineHistoryView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 40))
                 .foregroundColor(.secondary)
-            Text(searchText.isEmpty ? "No transcriptions yet" : "No results found")
+            Text(hasActiveHistoryFilters ? "No results found" : "No transcriptions yet")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundColor(.secondary)
-            Text(searchText.isEmpty ? "Your transcription history will appear here" : "Try a different search term")
+            Text(hasActiveHistoryFilters ? "Try a different search term" : "Your transcription history will appear here")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary.opacity(0.8))
+            if hasActiveHistoryFilters {
+                Button("Clear Filters") {
+                    searchText = ""
+                    historyFilter = .all
+                }
+                .buttonStyle(.link)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -254,9 +293,9 @@ struct InlineHistoryView: View {
     // MARK: - Card List
 
     private var cardListView: some View {
-        Form {
-            ForEach(displayedTranscriptions) { transcription in
-                Section {
+        ScrollView {
+            LazyVStack(spacing: 6) {
+                ForEach(displayedTranscriptions) { transcription in
                     HistoryCardRow(
                         transcription: transcription,
                         isExpanded: expandedId == transcription.id,
@@ -275,11 +314,11 @@ struct InlineHistoryView: View {
                             }
                         }
                     )
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.thinMaterial))
                 }
-            }
 
-            if hasMoreContent {
-                Section {
+                if hasMoreContent {
                     Button(action: {
                         Task { await loadMoreContent() }
                     }) {
@@ -295,11 +334,12 @@ struct InlineHistoryView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isLoading)
+                    .padding(.vertical, 4)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Sliding Panel
@@ -370,11 +410,23 @@ struct InlineHistoryView: View {
         do {
             lastTimestamp = nil
             let items = try modelContext.fetch(cursorQueryDescriptor())
+            resultCount = try modelContext.fetchCount(countQueryDescriptor())
             displayedTranscriptions = items
             lastTimestamp = items.last?.timestamp
             hasMoreContent = items.count == pageSize
         } catch {
             print("Error loading transcriptions: \(error)")
+        }
+    }
+
+    private var hasActiveHistoryFilters: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || historyFilter != .all
+    }
+
+    private func reloadHistory() {
+        Task {
+            resetPagination()
+            await loadInitialContent()
         }
     }
 
@@ -457,15 +509,7 @@ struct InlineHistoryView: View {
 
     private func selectAllTranscriptions() async {
         do {
-            var allDescriptor = FetchDescriptor<Transcription>()
-
-            if !searchText.isEmpty {
-                allDescriptor.predicate = #Predicate<Transcription> { transcription in
-                    transcription.text.localizedStandardContains(searchText) ||
-                    (transcription.enhancedText?.localizedStandardContains(searchText) ?? false)
-                }
-            }
-
+            var allDescriptor = countQueryDescriptor()
             allDescriptor.propertiesToFetch = [\.id]
             let allTranscriptions = try modelContext.fetch(allDescriptor)
             let visibleIds = Set(displayedTranscriptions.map { $0.id })
@@ -656,4 +700,3 @@ private struct HistoryCardRow: View {
     }
 
 }
-
