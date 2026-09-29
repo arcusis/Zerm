@@ -18,7 +18,7 @@ enum ClipboardHistoryRenderAppearance: String, CaseIterable {
 @MainActor
 enum ClipboardHistoryRenderSupport {
     private static let interactiveRoles: Set<String> = [
-        "AXButton", "AXCell", "AXCheckBox", "AXComboBox", "AXDisclosureTriangle", "AXIncrementor",
+        "NoWindowUnderTest", "AXButton", "AXCell", "AXCheckBox", "AXComboBox", "AXDisclosureTriangle", "AXIncrementor",
         "AXLink", "AXMenuButton", "AXPopUpButton", "AXRadioButton", "AXRow", "AXSearchField",
         "AXSlider", "AXStepper", "AXSwitch", "AXTabGroup", "AXTable", "AXTextArea", "AXTextField",
     ]
@@ -97,73 +97,29 @@ enum ClipboardHistoryRenderSupport {
         accessibilityElements(in: root).filter { interactiveRoles.contains($0.role) && $0.label.isEmpty }.map(\.role)
     }
 
-    static func interactiveElementCount(in root: NSView) -> Int {
-        accessibilityElements(in: root).filter { interactiveRoles.contains($0.role) }.count
-    }
-
+    /// Walks the view's accessibility tree in-process through NSAccessibility. The cross-process AX API
+    /// depends on the window server and did not list the test window during full-suite runs.
     private static func accessibilityElements(in root: NSView) -> [(role: String, label: String)] {
-        guard let window = root.window else { return [] }
-        let application = AXUIElementCreateApplication(getpid())
-        var windowValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windowValue) == .success,
-              let windows = windowValue as? [AXUIElement] else { return [] }
-        let title = window.title
-        guard let windowElement = windows.first(where: { element in
-            var value: CFTypeRef?
-            return AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &value) == .success
-                && (value as? String) == title
-        }) else { return [] }
-
-        var visited = Set<CFHashCode>()
         var elements: [(role: String, label: String)] = []
-        func visit(_ element: AXUIElement) -> [String] {
-            guard visited.insert(CFHash(element)).inserted else { return [] }
-
-            var roleValue: CFTypeRef?
-            var labelValue: CFTypeRef?
-            var descriptionValue: CFTypeRef?
-            var subroleValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success {
-                _ = AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &labelValue)
-                _ = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descriptionValue)
-                _ = AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subroleValue)
-            }
-            var childrenValue: CFTypeRef?
+        var visited = Set<ObjectIdentifier>()
+        @discardableResult
+        func visit(_ element: Any) -> [String] {
+            guard let object = element as? NSAccessibilityProtocol,
+                  visited.insert(ObjectIdentifier(object as AnyObject)).inserted else { return [] }
             var childLabels: [String] = []
-            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
-               let children = childrenValue as? [AXUIElement] {
-                for child in children { childLabels.append(contentsOf: visit(child)) }
-            }
-            if childLabels.isEmpty {
-                var visibleChildrenValue: CFTypeRef?
-                if AXUIElementCopyAttributeValue(element, "AXVisibleChildren" as CFString, &visibleChildrenValue) == .success,
-                   let children = visibleChildrenValue as? [AXUIElement] {
-                    for child in children { childLabels.append(contentsOf: visit(child)) }
-                }
-            }
-            if childLabels.isEmpty, roleValue as? String == "AXCell" {
-                var titleElementValue: CFTypeRef?
-                if AXUIElementCopyAttributeValue(element, "AXTitleUIElement" as CFString, &titleElementValue) == .success,
-                   let titleElementValue {
-                    let titleElement = titleElementValue as! AXUIElement
-                    childLabels.append(contentsOf: visit(titleElement))
-                }
-            }
-            guard let role = roleValue as? String else { return childLabels }
-            let label = [labelValue as? String, descriptionValue as? String]
+            for child in object.accessibilityChildren() ?? [] { childLabels.append(contentsOf: visit(child)) }
+            guard let role = object.accessibilityRole()?.rawValue else { return childLabels }
+            let label = [object.accessibilityLabel(), object.accessibilityTitle()]
                 .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .first(where: { !$0.isEmpty }) ?? ""
-            let isWindowChrome = (subroleValue as? String).map {
-                ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].contains($0)
-            } ?? false
-            let effectiveLabel = label.isEmpty && ["AXRow", "AXCell"].contains(role)
-                ? childLabels.joined(separator: ", ")
-                : label
+            let subrole = object.accessibilitySubrole()?.rawValue ?? ""
+            let isWindowChrome = ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].contains(subrole)
+            let effectiveLabel = label.isEmpty && ["AXRow", "AXCell"].contains(role) ? childLabels.joined(separator: ", ") : label
             if !isWindowChrome { elements.append((role, effectiveLabel)) }
             return effectiveLabel.isEmpty ? childLabels : [effectiveLabel]
         }
-        _ = visit(windowElement)
-        return elements
+        visit(root)
+        return elements.isEmpty ? [("NoWindowUnderTest", "")] : elements
     }
 }
 
@@ -173,6 +129,17 @@ enum ClipboardHistoryRenderError: Error {
 
 @Suite(.serialized)
 struct ClipboardHistoryPanelTests {
+    @MainActor
+    @Test func panelWindowHasNoTitleBarStripAboveTheContent() {
+        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: -4000, y: -4000, width: 820, height: 444))
+        panel.contentView = NSHostingView(rootView: Color.clear)
+        #expect(!panel.styleMask.contains(.titled))
+        #expect(panel.contentLayoutRect.height == panel.frame.height)
+        #expect(panel.contentView?.safeAreaInsets.top == 0)
+        #expect(panel.canBecomeKey)
+        panel.close()
+    }
+
     @MainActor
     @Test func favoritesOnTopUsesInjectedDefaults() async throws {
         try await withPanelModel { _, store, defaults in
@@ -400,28 +367,6 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
-    @Test func tagSearchTokenFiltersMatchingItems() async throws {
-        try await withPanelModel { model, store, defaults in
-            let tagged = try #require(ClipboardItem.capture(
-                representations: [text("release notes")],
-                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
-            ))
-            let untagged = try #require(ClipboardItem.capture(
-                representations: [text("meeting notes")],
-                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
-            ))
-            _ = try await store.capture(tagged)
-            _ = try await store.capture(untagged)
-            let tag = try await store.createTag(name: "Release Notes", colorHex: "#446688")
-            try await store.attachTag(tag.id, to: tagged.id)
-            await model.loadItems()
-
-            model.query = "tag:Release%20Notes"
-            #expect(model.visibleItems.map(\.id) == [tagged.id])
-        }
-    }
-
-    @MainActor
     @Test func imageOCRTextIsSearchableInPanelModel() async throws {
         try await withPanelModel { _, store, defaults in
             let image = ClipboardItem(
@@ -559,30 +504,19 @@ struct ClipboardHistoryPanelTests {
             await model.loadItems()
             model.isDetailsVisible = true
 
-            let tagID = UUID()
             let imageRepresentation = try pngRepresentation()
             let image = ClipboardItem(
                 contentHash: "render-image",
                 kind: .image,
                 representations: [imageRepresentation],
                 preview: "Image",
-                tagIDs: [tagID],
                 recognizedText: "QR code: release build 4821",
-                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
-            )
-            let taggedItem = ClipboardItem(
-                contentHash: "render-tagged",
-                kind: .plainText,
-                representations: [text("Tagged release checklist")],
-                preview: "Tagged release checklist",
-                tagIDs: [tagID],
                 sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
             )
             let renderModel = ClipboardHistoryPanelModel(
                 store: store,
                 defaults: defaults,
-                initialItems: [image, taggedItem],
-                initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
+                initialItems: [image]
             )
             renderModel.select(image)
             renderModel.isDetailsVisible = true
@@ -601,9 +535,103 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
+    @Test func accessibilityLabelsArePresentOnPanelAndLibrary() async throws {
+        try await withPanelModel { _, store, _ in
+            let source = ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            let item = try #require(ClipboardItem.capture(
+                representations: [text("Accessible clipboard sample")],
+                sourceApp: source
+            ))
+            _ = try await store.capture(item)
+
+            let panelModel = ClipboardHistoryPanelModel(store: store, initialItems: [item])
+            panelModel.select(item)
+            panelModel.isShowingQuickPasteBadges = true
+            let panelView = ClipboardHistoryPanelView(model: panelModel, linkService: LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil))
+            let panelWindow = NSWindow(contentRect: NSRect(x: -3_200, y: -2_200, width: 1_040, height: 650), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            panelWindow.isReleasedWhenClosed = false
+            panelWindow.title = "Clipboard History Accessibility Audit Panel"
+            panelWindow.contentView = NSHostingView(rootView: panelView)
+            panelWindow.contentView?.layoutSubtreeIfNeeded()
+            NSApp.activate(ignoringOtherApps: true)
+            panelWindow.orderFrontRegardless()
+            panelWindow.makeKeyAndOrderFront(nil)
+            panelWindow.displayIfNeeded()
+            let panelRoot = try #require(panelWindow.contentView)
+            let panelMissing = ClipboardHistoryRenderSupport.unlabeledInteractiveElements(in: panelRoot)
+            #expect(panelMissing.isEmpty, "Panel unlabeled elements: \(panelMissing)")
+            panelWindow.close()
+
+            let libraryModel = ClipboardLibraryModel(store: store)
+            await libraryModel.start()
+            libraryModel.selectedIDs = [item.id]
+            await libraryModel.select(item.id)
+            let libraryWindow = NSWindow(contentRect: NSRect(x: -3_200, y: -2_200, width: 1_120, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            libraryWindow.isReleasedWhenClosed = false
+            libraryWindow.title = "Clipboard History Accessibility Audit Library"
+            libraryWindow.contentView = NSHostingView(rootView: ClipboardLibraryView(model: libraryModel))
+            libraryWindow.contentView?.layoutSubtreeIfNeeded()
+            NSApp.activate(ignoringOtherApps: true)
+            libraryWindow.orderFrontRegardless()
+            libraryWindow.makeKeyAndOrderFront(nil)
+            libraryWindow.displayIfNeeded()
+            let libraryRoot = try #require(libraryWindow.contentView)
+            let libraryMissing = ClipboardHistoryRenderSupport.unlabeledInteractiveElements(in: libraryRoot)
+            #expect(libraryMissing.isEmpty, "Library unlabeled elements: \(libraryMissing)")
+            libraryWindow.close()
+            libraryModel.stop()
+        }
+    }
+
+    /// Every sidebar/preview/details combination must fit the panel's minimum window size; when the
+    /// columns' minimums exceed it, SwiftUI overflows and clips both edges of the panel.
+    @MainActor
+    @Test func everyToggleCombinationFitsTheMinimumPanelSize() async throws {
+        try await withPanelModel { _, store, defaults in
+            let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
+            let item = panelItem(.plainText, "Release checklist", [text("Release checklist")], source: source)
+            let minimum = ClipboardHistoryPanel.minimumContentSize
+            for collapsed in [false, true] {
+                for preview in [true, false] {
+                    for details in [true, false] {
+                        let model = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [item])
+                        model.select(item)
+                        model.isSidebarCollapsed = collapsed
+                        model.isPreviewVisible = preview
+                        model.isDetailsVisible = details
+                        let host = NSHostingController(rootView: ClipboardHistoryPanelView(model: model))
+                        let fitting = host.sizeThatFits(in: .zero)
+                        #expect(fitting.width <= minimum.width, "collapsed \(collapsed), preview \(preview), details \(details): needs \(fitting.width) pt")
+                        #expect(fitting.height <= minimum.height, "collapsed \(collapsed), preview \(preview), details \(details): needs \(fitting.height) pt tall")
+                        if RenderSnapshots.isEnabled {
+                            try renderToggleState(model, name: "toggle-sidebar\(collapsed ? "Collapsed" : "Open")-preview\(preview)-details\(details)", size: minimum)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func renderToggleState(_ model: ClipboardHistoryPanelModel, name: String, size: NSSize) throws {
+        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: -4000, y: -4000, width: size.width, height: size.height))
+        panel.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model))
+        panel.contentView?.frame = NSRect(origin: .zero, size: size)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.displayIfNeeded()
+        let view = try #require(panel.contentView)
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let directory = URL(fileURLWithPath: "/tmp/zerm-work/414-shots/toggles", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try #require(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("\(name).png"))
+        panel.close()
+    }
+
+    @MainActor
     @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersEveryPanelStateOffscreenToPNGs() async throws {
         try await withPanelModel { _, store, defaults in
-            let directory = URL(fileURLWithPath: "/tmp/zerm-work/389-shots", isDirectory: true)
+            let directory = URL(fileURLWithPath: "/tmp/zerm-work/414-shots/panel", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
             let sampleImage = try pngRepresentation()
@@ -612,7 +640,7 @@ struct ClipboardHistoryPanelTests {
                 ("plain-text", panelItem(.plainText, "Release checklist", [text("Release checklist")], source: source)),
                 ("rich-text", panelItem(.richText, "Formatted clipboard sample", [rtf], source: source)),
                 ("image", panelItem(.image, "Copied image", [sampleImage], source: source)),
-                ("file", panelItem(.fileURLs, "release-notes.txt", [fileRepresentation("/tmp/zerm-work/389-file.txt")], source: source)),
+                ("file", panelItem(.fileURLs, "release-notes.txt", [fileRepresentation("/tmp/zerm-work/414-shots/release-notes.txt")], source: source)),
                 ("link", panelItem(.url, "https://example.test/guide", [text("https://example.test/guide", type: "public.url")], source: source)),
                 ("email", panelItem(.email, "person@example.test", [text("person@example.test")], source: source)),
                 ("color", panelItem(.color, "#336699", [text("#336699")], source: source)),
@@ -634,25 +662,6 @@ struct ClipboardHistoryPanelTests {
             noMatchModel.query = "kind:url no-result"
             try await savePanelShot("no-matches", model: noMatchModel, service: previewService, to: directory)
 
-            let tagID = UUID()
-            let tagged = panelItem(.plainText, "Tagged clipboard note", [text("Tagged clipboard note")], source: source, tagIDs: [tagID])
-            let tagModel = ClipboardHistoryPanelModel(
-                store: store,
-                defaults: defaults,
-                initialItems: [tagged],
-                initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
-            )
-            tagModel.query = "tag:Release"
-            tagModel.select(tagged)
-            try await savePanelShot("active-tag-filter", model: tagModel, service: previewService, to: directory)
-            try await savePanelShot(
-                "active-tag-filter-he",
-                model: tagModel,
-                service: previewService,
-                to: directory,
-                locale: Locale(identifier: "he")
-            )
-
             let longItems = (0..<240).map { index in
                 panelItem(.plainText, "Long history row \(index) with searchable release notes", [text("Long history row \(index) with searchable release notes")], source: source)
             }
@@ -662,102 +671,89 @@ struct ClipboardHistoryPanelTests {
         }
     }
 
+    @Test func panelRowsUseReferenceSymbols() {
+        #expect(ClipboardItemKind.plainText.rowSymbolName == "doc")
+        #expect(ClipboardItemKind.richText.rowSymbolName == "doc.richtext")
+        #expect(ClipboardItemKind.url.rowSymbolName == "link")
+        #expect(ClipboardItemKind.image.rowSymbolName == "photo")
+        #expect(ClipboardItemKind.fileURLs.rowSymbolName == "doc.on.doc")
+        #expect(ClipboardItemKind.color.rowSymbolName == "paintpalette")
+        #expect(ClipboardItemKind.email.rowSymbolName == "envelope")
+    }
+
     @MainActor
-    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersPanelAppearanceAndLocaleMatrix() async throws {
-        try await withPanelModel { _, store, _ in
-            let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/panel", isDirectory: true)
-            let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
-            let textItem = panelItem(.plainText, "Release checklist", [text("Release checklist")], source: source)
-            let imageItem = panelItem(.image, "Clipboard image", [try pngRepresentation()], source: source)
-            let service = LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil)
-            var states: [(String, ClipboardHistoryPanelModel)] = []
-
-            let selected = ClipboardHistoryPanelModel(store: store, initialItems: [textItem, imageItem])
-            selected.select(imageItem)
-            selected.isDetailsVisible = true
-            selected.isShowingQuickPasteBadges = true
-            states.append(("selection-preview-details", selected))
-
-            let empty = ClipboardHistoryPanelModel(store: store)
-            await empty.loadItems()
-            states.append(("empty", empty))
-
-            let noMatches = ClipboardHistoryPanelModel(store: store, initialItems: [textItem])
-            noMatches.query = "kind:url no-match"
-            states.append(("no-matches", noMatches))
-
-            let tagID = UUID()
-            let taggedItem = panelItem(.plainText, "Tagged note", [text("Tagged note")], source: source, tagIDs: [tagID])
-            let tagged = ClipboardHistoryPanelModel(
+    @Test func railFiltersKindsAndFavorites() async throws {
+        try await withPanelModel { _, store, defaults in
+            let source = ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            var plainItem = panelItem(.plainText, "Plain note", [text("Plain note")], source: source)
+            plainItem.isFavorite = true
+            let rich = panelItem(.richText, "Rich note", [text("Rich note", type: "public.rtf")], source: source)
+            let image = panelItem(.image, "Neutral image", [try pngRepresentation()], source: source)
+            let model = ClipboardHistoryPanelModel(
                 store: store,
-                initialItems: [taggedItem],
-                initialTags: [ClipboardTag(id: tagID, name: "Research", colorHex: "#4268AD")]
+                defaults: defaults,
+                initialItems: [plainItem, rich, image]
             )
-            tagged.query = "tag:Research"
-            tagged.select(taggedItem)
-            states.append(("active-tag-filter", tagged))
 
-            let multiple = ClipboardHistoryPanelModel(store: store, initialItems: [textItem, imageItem])
-            multiple.select(textItem)
-            multiple.select(imageItem, toggling: true)
-            states.append(("multiple-selection", multiple))
-
-            for (name, model) in states {
-                try await ClipboardHistoryRenderSupport.renderMatrix(
-                    ClipboardHistoryPanelView(model: model, linkService: service),
-                    screen: "panel-\(name)",
-                    size: NSSize(width: 1_040, height: 650),
-                    in: directory
-                )
-            }
+            model.railFilter = .text
+            #expect(Set(model.visibleItems.map(\.id)) == Set([plainItem.id, rich.id]))
+            model.railFilter = .favorites
+            #expect(model.visibleItems.map(\.id) == [plainItem.id])
+            model.railFilter = .kind(.image)
+            #expect(model.visibleItems.map(\.id) == [image.id])
         }
     }
 
     @MainActor
-    @Test func panelAndLibraryInteractiveElementsHaveAccessibilityLabels() async throws {
-        try await withPanelModel { _, store, _ in
-            let source = ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
-            let item = try #require(ClipboardItem.capture(
-                representations: [text("Accessible clipboard sample")],
-                sourceApp: source
-            ))
-            _ = try await store.capture(item)
+    @Test(.enabled(if: RenderSnapshots.isEnabled)) func rendersPanelAppearanceAndLocaleMatrix() async throws {
+        try await withPanelModel { _, store, defaults in
+            let directory = URL(fileURLWithPath: "/tmp/zerm-work/414-shots/panel", isDirectory: true)
+            let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
+            let imageData = try pngRepresentation()
+            let rtf = ClipboardRepresentation(type: "public.rtf", data: Data("{\\rtf1\\ansi Rich clipboard sample}".utf8))
+            let samples: [(String, ClipboardItem)] = [
+                ("text", panelItem(.plainText, "Weekly release checklist", [text("Weekly release checklist")], source: source)),
+                ("rich-text", panelItem(.richText, "Formatted clipboard sample", [rtf], source: source)),
+                ("image", panelItem(.image, "Neutral blue image", [imageData], source: source)),
+                ("link", panelItem(.url, "https://example.test/guide", [text("https://example.test/guide", type: "public.url")], source: source)),
+                ("file", panelItem(.fileURLs, "release-notes.txt", [fileRepresentation("/tmp/zerm-work/414-shots/release-notes.txt")], source: source)),
+                ("color", panelItem(.color, "#336699", [text("#336699")], source: source)),
+                ("email", panelItem(.email, "reader@example.test", [text("reader@example.test")], source: source)),
+                ("code", panelItem(.code, "func answer() {\n  return 42\n}", [text("func answer() {\n  return 42\n}")], source: source)),
+                ("other", panelItem(.other, "Other clipboard data", [], source: source)),
+            ]
+            let service = LinkPreviewService(fetcher: PanelPreviewFetcher(imageData: imageData.data), cache: nil)
+            for (name, item) in samples {
+                let model = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [item])
+                model.select(item)
+                try await ClipboardHistoryRenderSupport.renderMatrix(
+                    ClipboardHistoryPanelView(model: model, linkService: service),
+                    screen: "panel-\(name)",
+                    size: NSSize(width: 820, height: 444),
+                    in: directory
+                )
+            }
 
-            let panelModel = ClipboardHistoryPanelModel(store: store, initialItems: [item])
-            panelModel.select(item)
-            panelModel.isShowingQuickPasteBadges = true
-            let panelView = ClipboardHistoryPanelView(model: panelModel, linkService: LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil))
-            let panelWindow = NSWindow(contentRect: NSRect(x: -3_200, y: -2_200, width: 1_040, height: 650), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-            panelWindow.isReleasedWhenClosed = false
-            panelWindow.title = "Clipboard History Accessibility Audit Panel"
-            panelWindow.contentView = NSHostingView(rootView: panelView)
-            panelWindow.contentView?.layoutSubtreeIfNeeded()
-            panelWindow.makeKeyAndOrderFront(nil)
-            panelWindow.displayIfNeeded()
-            let panelRoot = try #require(panelWindow.contentView)
-            #expect(ClipboardHistoryRenderSupport.interactiveElementCount(in: panelRoot) > 0)
-            let panelMissing = ClipboardHistoryRenderSupport.unlabeledInteractiveElements(in: panelRoot)
-            #expect(panelMissing.isEmpty, "Panel unlabeled elements: \(panelMissing)")
-            panelWindow.close()
+            let empty = ClipboardHistoryPanelModel(store: store, defaults: defaults)
+            await empty.loadItems()
+            let noMatches = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1])
+            noMatches.query = "kind:url no-match"
+            let longItems = (0..<240).map { index in
+                panelItem(.plainText, "History row \(index) with searchable release notes", [text("History row \(index) with searchable release notes")], source: source)
+            }
+            let longList = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: longItems)
+            longList.select(longItems[118])
+            let appFiltered = ClipboardHistoryPanelModel(store: store, defaults: defaults, initialItems: [samples[0].1, samples[1].1])
+            appFiltered.appFilter = "com.apple.finder"
 
-            let libraryModel = ClipboardLibraryModel(store: store)
-            await libraryModel.start()
-            await libraryModel.loadTags()
-            libraryModel.selectedIDs = [item.id]
-            await libraryModel.select(item.id)
-            let libraryWindow = NSWindow(contentRect: NSRect(x: -3_200, y: -2_200, width: 1_120, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-            libraryWindow.isReleasedWhenClosed = false
-            libraryWindow.title = "Clipboard History Accessibility Audit Library"
-            libraryWindow.contentView = NSHostingView(rootView: ClipboardLibraryView(model: libraryModel))
-            libraryWindow.contentView?.layoutSubtreeIfNeeded()
-            libraryWindow.makeKeyAndOrderFront(nil)
-            libraryWindow.displayIfNeeded()
-            let libraryRoot = try #require(libraryWindow.contentView)
-            #expect(ClipboardHistoryRenderSupport.interactiveElementCount(in: libraryRoot) > 0)
-            let libraryMissing = ClipboardHistoryRenderSupport.unlabeledInteractiveElements(in: libraryRoot)
-            #expect(libraryMissing.isEmpty, "Library unlabeled elements: \(libraryMissing)")
-            libraryWindow.close()
-            libraryModel.stop()
+            for (name, model) in [("empty", empty), ("no-matches", noMatches), ("sidebar-app-filter", appFiltered), ("long-list", longList)] {
+                try await ClipboardHistoryRenderSupport.renderMatrix(
+                    ClipboardHistoryPanelView(model: model, linkService: service),
+                    screen: "panel-\(name)",
+                    size: NSSize(width: 820, height: 444),
+                    in: directory
+                )
+            }
         }
     }
 
@@ -783,15 +779,13 @@ struct ClipboardHistoryPanelTests {
         _ kind: ClipboardItemKind,
         _ preview: String,
         _ representations: [ClipboardRepresentation],
-        source: ClipboardSourceApp,
-        tagIDs: [UUID] = []
+        source: ClipboardSourceApp
     ) -> ClipboardItem {
         ClipboardItem(
             contentHash: "panel-render-\(UUID().uuidString)",
             kind: kind,
             representations: representations,
             preview: preview,
-            tagIDs: tagIDs,
             sourceApp: source
         )
     }
@@ -842,7 +836,11 @@ struct ClipboardHistoryPanelTests {
 }
 
 private actor PanelPreviewFetcher: ClipboardLinkMetadataFetching {
+    private let imageData: Data?
+
+    init(imageData: Data? = nil) { self.imageData = imageData }
+
     func fetch(_ url: URL, kind: ClipboardPreviewLinkKind) async throws -> ClipboardLinkMetadata {
-        ClipboardLinkMetadata(title: "Guide preview", siteName: "Example", author: "Clipboard History")
+        ClipboardLinkMetadata(title: "Guide preview", siteName: "Example", author: "Sample publisher", imageData: imageData)
     }
 }

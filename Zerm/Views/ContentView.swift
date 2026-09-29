@@ -15,7 +15,6 @@ enum AppRoute: String, Hashable, Identifiable {
     case readAloudHistory
     case readAloudModels
     case clipboardHistory
-    case clipboardTags
     case enhancement
     case powerModes
     case permissions
@@ -35,7 +34,6 @@ enum AppRoute: String, Hashable, Identifiable {
         case .readAloudHistory: "History"
         case .readAloudModels: "Models & Voices"
         case .clipboardHistory: "History"
-        case .clipboardTags: "Tags"
         case .enhancement: "Enhancement"
         case .powerModes: "Power Modes"
         case .permissions: "Permissions"
@@ -55,7 +53,6 @@ enum AppRoute: String, Hashable, Identifiable {
         case .readAloudHistory: "clock.arrow.circlepath"
         case .readAloudModels: "person.wave.2"
         case .clipboardHistory: "clock.arrow.circlepath"
-        case .clipboardTags: "tag"
         case .enhancement: "wand.and.stars"
         case .powerModes: "slider.horizontal.3"
         case .permissions: "hand.raised"
@@ -112,7 +109,6 @@ struct ContentView: View {
     @AppStorage("sidebarDictationExpanded") private var isDictationExpanded = true
     @AppStorage("sidebarReadAloudExpanded") private var isReadAloudExpanded = true
     @State private var selectedRoute: AppRoute? = .dashboard
-    @State private var selectedClipboardTagID: UUID?
 
     private let logger = Logger(subsystem: "com.arcusis.zerm", category: "ContentView")
 
@@ -126,15 +122,7 @@ struct ContentView: View {
                 updater: updaterViewModel
             )
         } detail: {
-            DetailDestination(
-                route: selectedRoute ?? .dashboard,
-                clipboardTagID: selectedClipboardTagID,
-                onConsumeClipboardTag: { selectedClipboardTagID = nil },
-                onOpenClipboardTag: { tagID in
-                    selectedClipboardTagID = tagID
-                    selectedRoute = .clipboardHistory
-                }
-            )
+            DetailDestination(route: selectedRoute ?? .dashboard)
                 .id(selectedRoute ?? .dashboard)
                 .navigationTitle((selectedRoute ?? .dashboard).title)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -229,7 +217,6 @@ private struct SidebarView: View {
 
                 Section {
                     SidebarLink(route: .clipboardHistory, prominence: .secondary)
-                    SidebarLink(route: .clipboardTags, prominence: .secondary)
                 } header: {
                     SidebarSectionHeader("Clipboard", identifier: "sidebar-group-clipboard")
                 }
@@ -321,9 +308,6 @@ private struct DetailDestination: View {
     @EnvironmentObject private var whisperModelManager: WhisperModelManager
 
     let route: AppRoute
-    let clipboardTagID: UUID?
-    let onConsumeClipboardTag: () -> Void
-    let onOpenClipboardTag: (UUID) -> Void
 
     @ViewBuilder
     var body: some View {
@@ -346,14 +330,7 @@ private struct DetailDestination: View {
             TextToSpeechSettingsView()
         case .clipboardHistory:
             if let store = ClipboardHistoryRuntime.shared.store {
-                ClipboardLibraryView(store: store, initialTagID: clipboardTagID)
-                    .onAppear(perform: onConsumeClipboardTag)
-            } else {
-                ClipboardLibraryUnavailableView()
-            }
-        case .clipboardTags:
-            if let store = ClipboardHistoryRuntime.shared.store {
-                ClipboardTagsView(store: store, onOpenHistory: onOpenClipboardTag)
+                ClipboardLibraryView(store: store)
             } else {
                 ClipboardLibraryUnavailableView()
             }

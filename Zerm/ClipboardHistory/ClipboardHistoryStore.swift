@@ -938,6 +938,18 @@ actor ClipboardHistoryStore {
                     if !indexesAreOrdered { sortOrderIDs.removeAll() }
                 }
             }
+            var reclassified = false
+            for row in metadata where row.kind == .plainText || row.kind == .richText {
+                guard let payload = try? loadPayload(row.id) else { continue }
+                guard let kind = ClipboardItem.migratedKind(from: row.kind, representations: payload.representations),
+                      let index = metadata.firstIndex(where: { $0.id == row.id }) else { continue }
+                metadata[index].kind = kind
+                reclassified = true
+            }
+            if reclassified {
+                refreshAllSearchDocuments()
+                try save()
+            }
             let previousIDs = Set(metadata.map(\.id))
             try enforceRetention(now: Date())
             if Set(metadata.map(\.id)) != previousIDs { try save() }

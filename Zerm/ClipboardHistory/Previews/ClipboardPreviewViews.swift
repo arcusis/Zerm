@@ -55,29 +55,30 @@ struct ClipboardHistorySearchField: NSViewRepresentable {
 struct ClipboardRowThumbnail: View {
     let item: ClipboardItem
     var linkService: LinkPreviewService = .shared
+    var size: CGFloat = 38
     @State private var metadata: ClipboardLinkMetadata?
     @State private var filePreview: ClipboardFilePreview?
 
     var body: some View {
         Group {
             if item.kind == .color, let color = ClipboardColorDetails.parse(item.preview) {
-                RoundedRectangle(cornerRadius: 8).fill(Color(red: Double(color.red) / 255, green: Double(color.green) / 255, blue: Double(color.blue) / 255))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+                RoundedRectangle(cornerRadius: 3).fill(Color(red: Double(color.red) / 255, green: Double(color.green) / 255, blue: Double(color.blue) / 255))
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
             } else if item.kind == .image, let image = item.thumbnail {
-                Image(nsImage: image).resizable().scaledToFill()
+                Image(nsImage: image).resizable().interpolation(.high).scaledToFill()
             } else if item.kind == .url, let imageData = metadata?.imageData ?? metadata?.iconData,
                       let image = ClipboardPreviewImageCache.image(for: item.contentHash, data: imageData) {
                 Image(nsImage: image).resizable().scaledToFill()
             } else if item.kind == .fileURLs, let image = filePreview?.thumbnail {
                 Image(nsImage: image).resizable().scaledToFill()
             } else {
-                Image(systemName: glyph).font(.system(size: 16, weight: .medium)).foregroundStyle(.secondary)
+                Image(systemName: item.kind.rowSymbolName).font(.system(size: 14, weight: .regular)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .controlBackgroundColor))
             }
         }
-        .frame(width: 38, height: 38)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
         .task(id: item.id) {
             metadata = nil
             filePreview = nil
@@ -92,18 +93,6 @@ struct ClipboardRowThumbnail: View {
         .accessibilityLabel(String(localized: "Clipboard item thumbnail"))
     }
 
-    private var glyph: String {
-        switch item.kind {
-        case .plainText: ClipboardPreviewText.isCode(item.preview) ? "chevron.left.forwardslash.chevron.right" : "text.alignleft"
-        case .richText: "doc.richtext"
-        case .image: "photo"
-        case .fileURLs: "doc"
-        case .url: "link"
-        case .email: "envelope"
-        case .color: "paintpalette"
-        case .other: "doc.on.clipboard"
-        }
-    }
 }
 
 struct ClipboardRichPreview: View {
@@ -120,12 +109,12 @@ struct ClipboardRichPreview: View {
             case .color: colorCard
             case .email: emailCard
             case .image: imageCard
-            case .richText: textCard(rich: true)
-            case .plainText, .other: textCard(rich: false)
+            case .code: codeCard
+            case .richText, .plainText, .other: textCard()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(20)
+        .padding(item.kind == .plainText || item.kind == .richText || item.kind == .other ? 16 : 20)
         .task(id: item.id) { await loadPreviewData() }
     }
 
@@ -195,7 +184,7 @@ struct ClipboardRichPreview: View {
                     Text(color.rgb).font(.body.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(color.hsl).font(.body.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 }
-            } else { textCard(rich: false) }
+            } else { textCard() }
         }
     }
 
@@ -220,14 +209,29 @@ struct ClipboardRichPreview: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func textCard(rich: Bool) -> some View {
-        let code = !rich && ClipboardPreviewText.isCode(item.preview)
+    private func textCard() -> some View {
         return ScrollView {
             Text(item.preview.isEmpty ? String(localized: "No text preview") : item.preview)
-                .font(code ? .system(.body, design: .monospaced) : .body)
+                .font(.system(size: 13, design: .monospaced))
+                .lineSpacing(3)
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+    }
+
+    private var codeCard: some View {
+        // Horizontal only: the surrounding preview already scrolls vertically, and a two-axis scroll view
+        // with an unbounded width centers its content.
+        ScrollView(.horizontal) {
+            Text(ClipboardSyntaxHighlighter.highlight(item.preview, language: ClipboardCodeDetection.language(in: item.preview)))
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(12)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel(String(localized: "Code Preview"))
     }
 
     @MainActor
@@ -243,6 +247,33 @@ struct ClipboardRichPreview: View {
                 filePreviews.append(await ClipboardFilePreview.load(url))
             }
         }
+    }
+}
+
+enum ClipboardSyntaxHighlighter {
+    static func highlight(_ source: String, language: ClipboardCodeLanguage?) -> AttributedString {
+        let value = NSMutableAttributedString(string: source, attributes: [.foregroundColor: NSColor.labelColor])
+        let rules: [(String, NSColor)] = [
+            (#"(?m)//[^\n]*|#[^\n]*|/\*[\s\S]*?\*/"#, .secondaryLabelColor),
+            (#"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`"#, .systemRed),
+            (#"\b(?:func|function|def|class|struct|enum|interface|type|let|var|const|return|if|else|for|while|switch|case|import|from|package|fn|pub|async|await|try|catch|throw|guard|select|insert|update|delete|create|where|as|in|true|false|null|nil|None)\b"#, .systemPurple),
+            (#"\b\d+(?:\.\d+)?\b"#, .systemOrange),
+        ]
+        for (pattern, color) in rules {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(source.startIndex..., in: source)
+            for match in regex.matches(in: source, range: range) {
+                value.addAttribute(.foregroundColor, value: color, range: match.range)
+            }
+        }
+        if let language {
+            let label = NSAttributedString(string: language.rawValue + "\n", attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+            ])
+            value.insert(label, at: 0)
+        }
+        return (try? AttributedString(value, including: \.appKit)) ?? AttributedString(source)
     }
 }
 

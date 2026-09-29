@@ -13,6 +13,73 @@ private struct VersionOneArchiveIndex: Codable {
 
 @Suite(.serialized)
 struct ClipboardHistoryTests {
+    @Test func codeDetectionCorpusKeepsProseClearAcrossLanguages() {
+        let codeSamples: [(String, ClipboardCodeLanguage)] = [
+            ("func greet() {\n    print(\"hi\")\n}", .swift),
+            ("const greet = () => {\n  return 'hi';\n};", .javascript),
+            ("def greet():\n    print('hi')\n", .python),
+            ("package main\nfunc main() { fmt.Println(\"hi\") }", .go),
+            ("fn main() {\n    println!(\"hi\");\n}", .rust),
+            ("public class Hello {\n  public static void main(String[] args) {}\n}", .java),
+            ("fun greet() {\n  println(\"hi\")\n}", .kotlin),
+            ("#include <stdio.h>\nint main() { return 0; }", .c),
+            ("#include <iostream>\nint main() { std::cout << 1; }", .cpp),
+            ("#!/bin/bash\nfor item in one two; do\n  echo $item\ndone", .shell),
+            ("SELECT name FROM users;\nWHERE active = true;", .sql),
+            ("{\n  \"name\": \"Ada\",\n  \"active\": true\n}", .json),
+            ("name: Ada\nactive: true\n", .yaml),
+            ("<main>\n  <p>Hello</p>\n</main>", .html),
+            (".card {\n  color: blue;\n  display: flex;\n}", .css),
+            ("```swift\nlet answer = 42\n```", .swift),
+        ]
+        for (source, expected) in codeSamples {
+            #expect(ClipboardCodeDetection.language(in: source) == expected, "Expected \(expected) for \(source)")
+        }
+        #expect(ClipboardCodeDetection.language(in: "```\nplain code\n```") == .markdown)
+
+        let prose = [
+            "Please review the plan before tomorrow.\nThe final version should stay concise.",
+            "I will send the notes after lunch.\nWe can decide together next week.",
+            "Let's meet after lunch.\nWe can review the schedule then.",
+            "The function is helpful for this process.\nIt makes the job easier.",
+            "Please import the document before review.\nThen send a short summary.",
+            "I will return to the office tomorrow.\nWe can meet near the entrance.",
+            "אני חושב שכדאי שנדבר מחר\nונחליט יחד מה לעשות.",
+            "נא להעתיק את הקוד ואז לשלוח לי\nתודה רבה על העזרה.",
+            "אפשר לייבא את המסמך לפני הפגישה.\nאחר כך נשלח סיכום קצר.",
+            "הפגישה נדחתה לשעה ארבע.\nאפשר להגיע כמה דקות קודם.",
+        ]
+        let falsePositives = prose.filter { ClipboardCodeDetection.language(in: $0) != nil }
+        #expect(falsePositives.isEmpty)
+    }
+
+    @Test func detectedCodeRetainsOriginalPasteboardText() throws {
+        let source = "func answer() -> Int {\n    return 42\n}"
+        let representation = Self.text(source)
+        let item = try #require(ClipboardItem.capture(representations: [representation], sourceApp: Self.source))
+        #expect(item.kind == .code)
+        #expect(item.representations == [representation])
+        #expect(ClipboardPanelText.plainText(from: item.representations, fallback: item.preview) == source)
+    }
+
+    @Test func richClipboardURLsBecomeLinksWhileProseStaysRichText() throws {
+        let url = "https://github.com/k2-fsa/sherpa-onnx"
+        let plain = Self.text(url)
+        let rtf = ClipboardRepresentation(type: "public.rtf", data: Data("{\\rtf1 https://github.com/k2-fsa/sherpa-onnx}".utf8))
+        let html = ClipboardRepresentation(type: "public.html", data: Data("<a href=\"\(url)\">\(url)</a>".utf8))
+        let rtfItem = try #require(ClipboardItem.capture(representations: [rtf, plain], sourceApp: Self.source))
+        let htmlItem = try #require(ClipboardItem.capture(representations: [html, plain], sourceApp: Self.source))
+        #expect(rtfItem.kind == .url)
+        #expect(htmlItem.kind == .url)
+        #expect(rtfItem.representations.contains(where: { $0.type == "public.rtf" }))
+        #expect(htmlItem.representations.contains(where: { $0.type == "public.html" }))
+
+        let prose = Self.text("Read the release notes at \(url) before replying.")
+        #expect(ClipboardItem.detectKind(in: [rtf, prose]) == .richText)
+        #expect(ClipboardItem.migratedKind(from: .richText, representations: [html, plain]) == .url)
+        #expect(ClipboardItem.migratedKind(from: .richText, representations: [rtf, prose]) == nil)
+    }
+
     @Test func excludedTypesAndPasswordManagersAreRejected() {
         for marker in ClipboardExclusionPolicy.excludedPasteboardTypes {
             #expect(ClipboardExclusionPolicy.excludes(
@@ -507,24 +574,6 @@ struct ClipboardHistoryTests {
         ])
         noMatchModel.query = "no match"
         try await savePanelImage(noMatchModel, name: "no-matches.png", directory: outputDirectory)
-
-        let tagID = UUID()
-        let tagged = ClipboardItem(
-            contentHash: "tagged-render",
-            kind: .plainText,
-            representations: [Self.text("Tagged release notes")],
-            preview: "Tagged release notes",
-            tagIDs: [tagID],
-            sourceApp: source
-        )
-        let taggedModel = ClipboardHistoryPanelModel(
-            store: store,
-            initialItems: [tagged],
-            initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
-        )
-        taggedModel.select(tagged)
-        taggedModel.isDetailsVisible = true
-        try await savePanelImage(taggedModel, name: "tags.png", directory: outputDirectory)
 
         let longItems = (0..<500).map { index in
             ClipboardItem(

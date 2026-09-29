@@ -20,7 +20,6 @@ struct ClipboardHistorySettingsView: View {
     @AppStorage(ClipboardHistorySettings.Keys.clearDaily) private var clearDaily = false
     @AppStorage(ClipboardHistorySettings.Keys.clearDailyTime) private var clearDailyTime = 32_400
     @AppStorage(ClipboardHistorySettings.Keys.keepFavoritesOnClear) private var keepFavorites = true
-    @AppStorage(ClipboardHistorySettings.Keys.keepTaggedOnClear) private var keepTagged = true
     @AppStorage(ClipboardHistorySettings.Keys.ignoreConfidential) private var ignoreConfidential = true
     @AppStorage(ClipboardHistorySettings.Keys.ignoreTransient) private var ignoreTransient = true
     @AppStorage(ClipboardHistorySettings.Keys.paused) private var paused = false
@@ -141,7 +140,7 @@ struct ClipboardHistorySettingsView: View {
             }
 
             Section(header: Text("Storage")) {
-                sectionDescription("Set item limits and automatic cleanup. Favorites and tagged items follow protection choices.")
+                sectionDescription("Set item limits and automatic cleanup. Favorites follow protection choices.")
                 LabeledContent("Storage used") {
                     Text(verbatim: ByteCountFormatter.string(fromByteCount: storageSize, countStyle: .file))
                         .monospacedDigit()
@@ -181,7 +180,6 @@ struct ClipboardHistorySettingsView: View {
                     DatePicker("Clear at", selection: dailyTimeBinding, displayedComponents: .hourAndMinute)
                 }
                 Toggle("Keep favourites when clearing", isOn: $keepFavorites)
-                Toggle("Keep tagged items when clearing", isOn: $keepTagged)
                 Toggle("Warn before clearing history", isOn: $warnBeforeClear)
                 HStack {
                     Button("Export History…", action: exportArchive)
@@ -466,6 +464,7 @@ struct ClipboardHistorySettingsView: View {
         case .url: "Links"
         case .color: "Colours"
         case .email: "Email"
+        case .code: "Code"
         case .other: "Other"
         }
     }
@@ -501,7 +500,7 @@ struct ClipboardHistorySettingsView: View {
             try? await ClipboardHistoryRuntime.shared.store?.clear(
                 includingPinned: false,
                 keepingFavorites: keepFavorites,
-                keepingTagged: keepTagged
+                keepingTagged: nil
             )
             await refreshStorageSize()
         }
