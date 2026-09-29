@@ -72,7 +72,7 @@ struct ClipboardHistoryEngineTests {
             let saved = try await store.capture(item)
             await store.indexImageText(saved.id)
             #expect(try await store.search(text: "searchable image", kind: .image).first?.id == saved.id)
-            let reloaded = try ClipboardHistoryStore(directoryURL: context.1, keyData: context.2)
+            let reloaded = try ClipboardHistoryStore(directoryURL: context.1, keyData: context.2, defaults: context.0)
             #expect(try await reloaded.search(text: "searchable image", kind: .image).first?.id == saved.id)
             let blob = try Data(contentsOf: context.1.appendingPathComponent("\(saved.id.uuidString).blob.enc"))
             #expect(String(data: blob, encoding: .utf8)?.contains("Zerm searchable image text") != true)
@@ -104,27 +104,16 @@ struct ClipboardHistoryEngineTests {
             try await store.deleteTag(one.id)
             #expect(try await store.search(tagID: one.id).isEmpty)
             #expect(try await store.recent().first?.tagIDs == [two.id])
-            let reloaded = try ClipboardHistoryStore(directoryURL: context.1, keyData: context.2)
+            let reloaded = try ClipboardHistoryStore(directoryURL: context.1, keyData: context.2, defaults: context.0)
             #expect(try await reloaded.allTags().map(\.id) == [two.id])
         }
     }
 
     @Test func kindRetentionProtectsFavoriteAndTaggedItems() async throws {
-        try await Self.withStore { store, _ in
+        try await Self.withStore { store, context in
+            let defaults = context.0
             let kind = ClipboardItemKind.plainText
-            let defaults = UserDefaults.standard
-            let priorRetention = defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind)
-            let priorKeepFavorites = defaults.object(forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear)
-            let priorKeepTagged = defaults.object(forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear)
-            defer {
-                if let priorRetention { defaults.set(priorRetention, forKey: ClipboardHistorySettings.Keys.retentionByKind) }
-                else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.retentionByKind) }
-                if let priorKeepFavorites { defaults.set(priorKeepFavorites, forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear) }
-                else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear) }
-                if let priorKeepTagged { defaults.set(priorKeepTagged, forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear) }
-                else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear) }
-            }
-            ClipboardHistoryEngineSettings.setRetentionPeriod(.days(1), for: kind)
+            ClipboardHistoryEngineSettings.setRetentionPeriod(.days(1), for: kind, defaults: defaults)
             defaults.set(true, forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear)
             defaults.set(true, forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear)
             let old = Date(timeIntervalSince1970: 1_000)
@@ -153,7 +142,7 @@ struct ClipboardHistoryEngineTests {
             settingsDefaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: settingsDefaults)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), defaults: settingsDefaults)
         let start = Date()
         let favoriteItem = try #require(ClipboardItem.capture(representations: [Self.text("fav")], sourceApp: Self.source, createdAt: start))
         let normalItem = try #require(ClipboardItem.capture(representations: [Self.text("new")], sourceApp: Self.source, createdAt: start.addingTimeInterval(1)))
@@ -174,7 +163,7 @@ struct ClipboardHistoryEngineTests {
             settingsDefaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: settingsDefaults)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), defaults: settingsDefaults)
         let tooLarge = try #require(ClipboardItem.capture(representations: [Self.text("four")], sourceApp: Self.source))
         var rejected = false
         do { _ = try await store.capture(tooLarge) }
@@ -198,17 +187,14 @@ struct ClipboardHistoryEngineTests {
         #expect(!ClipboardHistoryRuntime.shouldClearDaily(now: due, lastClear: due, time: 9 * 3_600, calendar: calendar))
     }
 
-    @Test func retentionSettingRoundTripsThroughSinglePerKindModel() {
-        let defaults = UserDefaults.standard
-        let previous = defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind)
-        defer {
-            if let previous { defaults.set(previous, forKey: ClipboardHistorySettings.Keys.retentionByKind) }
-            else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.retentionByKind) }
-        }
+    @Test func retentionSettingRoundTripsThroughSinglePerKindModel() throws {
+        let suite = "ClipboardHistoryRetentionSettingsTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
 
-        ClipboardHistoryEngineSettings.setRetentionPeriod(.days(123), for: .plainText)
+        ClipboardHistoryEngineSettings.setRetentionPeriod(.days(123), for: .plainText, defaults: defaults)
 
-        #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText) == .days(123))
+        #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText, defaults: defaults) == .days(123))
         #expect((defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind) as? [String: String])?[ClipboardItemKind.plainText.rawValue] == "days:123")
     }
 
@@ -222,7 +208,7 @@ struct ClipboardHistoryEngineTests {
             try? FileManager.default.removeItem(at: directory)
         }
         let key = Self.randomKey()
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: key, settingsDefaults: settingsDefaults)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: key, defaults: settingsDefaults)
         let start = Date()
         let first = try #require(ClipboardItem.capture(representations: [Self.text("a")], sourceApp: Self.source, createdAt: start))
         let second = try #require(ClipboardItem.capture(representations: [Self.text("longer")], sourceApp: Self.source, createdAt: start.addingTimeInterval(1)))
@@ -234,7 +220,7 @@ struct ClipboardHistoryEngineTests {
         #expect(try await store.favorites().map(\.id) == [b.id, a.id])
         #expect(try await store.sorted(.firstCopy, ascending: true).map(\.id) == [a.id, b.id])
         #expect(try await store.sorted(.size).first?.id == b.id)
-        let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key, settingsDefaults: settingsDefaults)
+        let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key, defaults: settingsDefaults)
         #expect(try await reloaded.favorites().map(\.id) == [b.id, a.id])
     }
 
@@ -277,13 +263,8 @@ struct ClipboardHistoryEngineTests {
     }
 
     @Test func copyMergeAppendsOnlyToNonFavoritePlainTextAndNeverIsCaptureGate() async throws {
-        try await Self.withStore { store, _ in
-            let defaults = UserDefaults.standard
-            let previous = defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind)
-            defer {
-                if let previous { defaults.set(previous, forKey: ClipboardHistorySettings.Keys.retentionByKind) }
-                else { defaults.removeObject(forKey: ClipboardHistorySettings.Keys.retentionByKind) }
-            }
+        try await Self.withStore { store, context in
+            let defaults = context.0
             let prior = try #require(ClipboardItem.capture(representations: [Self.text("prior")], sourceApp: Self.source))
             let saved = try await store.capture(prior)
             try await store.favorite(saved.id)
@@ -293,7 +274,7 @@ struct ClipboardHistoryEngineTests {
             let merged = try #require(try await store.appendCopyToPreviousText("last", separator: " "))
             #expect(merged.id == savedNext.id)
             #expect(merged.preview == "next last")
-            ClipboardHistoryEngineSettings.setRetentionPeriod(.never, for: .plainText)
+            ClipboardHistoryEngineSettings.setRetentionPeriod(.never, for: .plainText, defaults: defaults)
             #expect(await store.shouldCapture(.plainText) == false)
             #expect(await store.shouldCapture(.image))
             let rejected = try #require(ClipboardItem.capture(representations: [Self.text("blocked")], sourceApp: Self.source))
@@ -387,6 +368,6 @@ struct ClipboardHistoryEngineTests {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        try await body(ClipboardHistoryStore(directoryURL: directory, keyData: key), (defaults, directory, key))
+        try await body(ClipboardHistoryStore(directoryURL: directory, keyData: key, defaults: defaults), (defaults, directory, key))
     }
 }

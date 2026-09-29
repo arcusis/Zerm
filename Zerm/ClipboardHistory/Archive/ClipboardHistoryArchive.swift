@@ -12,6 +12,7 @@ enum ClipboardHistoryArchive {
         let formatVersion: Int
         let createdAt: Date
         let entries: [Entry]
+        let tags: [ClipboardTag]?
     }
 
     private struct SealedArchiveEnvelope: Codable {
@@ -29,7 +30,11 @@ enum ClipboardHistoryArchive {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var indexEntries: [Entry] = []
+        var tagsByID: [UUID: ClipboardTag] = [:]
         for var entry in entries {
+            for tag in entry.item.tagDefinitions ?? [] {
+                tagsByID[tag.id] = tag
+            }
             let representations = entry.item.representations
             let blobURL = archiveDirectory.appendingPathComponent("items/\(entry.item.id.uuidString).json")
             try encoder.encode(representations).write(to: blobURL, options: .atomic)
@@ -46,11 +51,14 @@ enum ClipboardHistoryArchive {
                 isFavorite: entry.item.isFavorite,
                 collectionID: entry.item.collectionID,
                 title: entry.item.title,
+                tagIDs: entry.item.tagIDs,
+                tagDefinitions: entry.item.tagDefinitions,
                 sourceApp: entry.item.sourceApp
             )
             indexEntries.append(entry)
         }
-        try encoder.encode(Index(formatVersion: 1, createdAt: Date(), entries: indexEntries))
+        let archiveTags = tagsByID.values.sorted { $0.id.uuidString < $1.id.uuidString }
+        try encoder.encode(Index(formatVersion: 2, createdAt: Date(), entries: indexEntries, tags: archiveTags))
             .write(to: archiveDirectory.appendingPathComponent("index.json"), options: .atomic)
 
         let zipURL = workingDirectory.appendingPathComponent("history.zip")
@@ -82,7 +90,7 @@ enum ClipboardHistoryArchive {
         try run("/usr/bin/ditto", ["-x", "-k", zipURL.path, workingDirectory.path])
         let archiveDirectory = workingDirectory.appendingPathComponent("archive", isDirectory: true)
         let index = try JSONDecoder().decode(Index.self, from: Data(contentsOf: archiveDirectory.appendingPathComponent("index.json")))
-        guard index.formatVersion == 1 else { throw ClipboardHistoryError.unsupportedArchiveVersion }
+        guard (1...2).contains(index.formatVersion) else { throw ClipboardHistoryError.unsupportedArchiveVersion }
         return try index.entries.map { entry in
             let blobURL = archiveDirectory.appendingPathComponent("items/\(entry.item.id.uuidString).json")
             let representations = try JSONDecoder().decode([ClipboardRepresentation].self, from: Data(contentsOf: blobURL))
@@ -99,6 +107,8 @@ enum ClipboardHistoryArchive {
                 isFavorite: entry.item.isFavorite,
                 collectionID: entry.item.collectionID,
                 title: entry.item.title,
+                tagIDs: entry.item.tagIDs,
+                tagDefinitions: index.tags ?? [],
                 sourceApp: entry.item.sourceApp
             )
             guard let verified = ClipboardItem.capture(

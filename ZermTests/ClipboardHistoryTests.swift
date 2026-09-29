@@ -5,6 +5,12 @@ import KeyboardShortcuts
 import SwiftUI
 @testable import Zerm
 
+private struct VersionOneArchiveIndex: Codable {
+    let formatVersion: Int
+    let createdAt: Date
+    let entries: [ClipboardHistoryArchive.Entry]
+}
+
 @Suite(.serialized)
 struct ClipboardHistoryTests {
     @Test func excludedTypesAndPasswordManagersAreRejected() {
@@ -62,12 +68,8 @@ struct ClipboardHistoryTests {
 
     @Test func countRetentionKeepsPinnedItems() async throws {
         try await Self.withStore { store, context in
-            let previous = UserDefaults.standard.object(forKey: ClipboardHistorySettings.Keys.retentionCount)
-            UserDefaults.standard.set(1, forKey: ClipboardHistorySettings.Keys.retentionCount)
-            defer {
-                if let previous { UserDefaults.standard.set(previous, forKey: ClipboardHistorySettings.Keys.retentionCount) }
-                else { UserDefaults.standard.removeObject(forKey: ClipboardHistorySettings.Keys.retentionCount) }
-            }
+            let defaults = context.0
+            defaults.set(1, forKey: ClipboardHistorySettings.Keys.retentionCount)
             let start = Date()
             let pinnedItem = try #require(ClipboardItem.capture(
                 representations: [Self.text("pinned")], sourceApp: Self.source, createdAt: start
@@ -93,7 +95,7 @@ struct ClipboardHistoryTests {
 
     @Test func encryptedIndexAndPayloadReloadWithoutPlaintextOnDisk() async throws {
         try await Self.withStore { store, context in
-            let (_, directory, key) = context
+            let (defaults, directory, key) = context
             let payload = UUID().uuidString
             let item = try #require(ClipboardItem.capture(
                 representations: [Self.text(payload)], sourceApp: Self.source
@@ -105,7 +107,7 @@ struct ClipboardHistoryTests {
                 let diskData = try Data(contentsOf: file)
                 #expect(String(data: diskData, encoding: .utf8)?.contains(payload) != true)
             }
-            let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key)
+            let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key, defaults: defaults)
             let reloadedItems = try await reloaded.recent()
             let found = reloadedItems.first
             let loaded = try await reloaded.itemWithPayload(try #require(found).id)
@@ -139,8 +141,11 @@ struct ClipboardHistoryTests {
         #expect(ClipboardItem.detectKind(in: [.init(type: "public.color", data: Data())]) == .color)
     }
 
-    @Test func clipboardHistorySettingsDefaultsAreRegistered() {
+    @Test func clipboardHistorySettingsDefaultsAreRegistered() throws {
         let defaults = UserDefaults.standard
+        let suite = "ClipboardHistorySettingsDefaultsTests.\(UUID().uuidString)"
+        let isolatedDefaults = try #require(UserDefaults(suiteName: suite))
+        defer { isolatedDefaults.removePersistentDomain(forName: suite) }
         let keys = [
             ClipboardHistorySettings.Keys.enabled, ClipboardHistorySettings.Keys.windowPosition,
             ClipboardHistorySettings.Keys.pasteOnClick, ClipboardHistorySettings.Keys.doubleClickPaste,
@@ -149,12 +154,8 @@ struct ClipboardHistoryTests {
             ClipboardHistorySettings.Keys.clearOnQuit, ClipboardHistorySettings.Keys.clearOnRestart,
             ClipboardHistorySettings.Keys.clearOnLock, ClipboardHistorySettings.Keys.clearOnSleep,
             ClipboardHistorySettings.Keys.clearDaily, ClipboardHistorySettings.Keys.clearDailyTime,
-            ClipboardHistorySettings.Keys.maximumStorageSize, ClipboardHistorySettings.Keys.maximumSizeByKind,
             ClipboardHistorySettings.Keys.linkPreviewsEnabled,
-            ClipboardHistorySettings.Keys.keepFavoritesOnClear, ClipboardHistorySettings.Keys.keepTaggedOnClear,
             ClipboardHistorySettings.Keys.ignoreConfidential, ClipboardHistorySettings.Keys.ignoreTransient,
-            ClipboardHistorySettings.Keys.retentionCount, ClipboardHistorySettings.Keys.retentionByKind,
-            ClipboardHistorySettings.Keys.maximumItemSize,
             ClipboardHistorySettings.Keys.sort, ClipboardHistorySettings.Keys.copyMergeEnabled,
             ClipboardHistorySettings.Keys.copyMergeSeparator, ClipboardHistorySettings.Keys.copyMergeUpdatesClipboard,
             ClipboardHistorySettings.Keys.saveDictations, ClipboardHistorySettings.Keys.paused,
@@ -167,13 +168,13 @@ struct ClipboardHistoryTests {
         AppDefaults.registerDefaults()
         #expect(ClipboardHistorySettings.isEnabled)
         #expect(ClipboardHistorySettings.windowPosition == "lastLocation")
-        #expect(ClipboardHistorySettings.retentionCount == 500)
-        #expect(ClipboardHistorySettings.maximumItemSize == 50 * 1_024 * 1_024)
-        #expect(ClipboardHistorySettings.maximumStorageSize == 1_073_741_824)
+        #expect(ClipboardHistorySettings.retentionCount(in: isolatedDefaults) == 500)
+        #expect(ClipboardHistorySettings.maximumItemSize(in: isolatedDefaults) == 50 * 1_024 * 1_024)
+        #expect(ClipboardHistorySettings.maximumStorageSize(in: isolatedDefaults) == 1_073_741_824)
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.linkPreviewsEnabled, defaultValue: true))
-        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear))
-        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear))
-        #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText) == .days(90))
+        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, in: isolatedDefaults, defaultValue: true))
+        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, in: isolatedDefaults, defaultValue: true))
+        #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText, defaults: isolatedDefaults) == .days(90))
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.ignoreConfidential))
         #expect(!ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnQuit))
         #expect(!ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.copySound))
@@ -183,11 +184,13 @@ struct ClipboardHistoryTests {
         let item = try #require(ClipboardItem.capture(
             representations: [Self.text("archive payload")], sourceApp: Self.source
         ))
+        let tag = ClipboardTag(name: "Research", colorHex: "#123456")
         let entry = ClipboardHistoryArchive.Entry(item: ClipboardItem(
             id: item.id, contentHash: item.contentHash, kind: item.kind,
             representations: item.representations, preview: item.preview,
             createdAt: item.createdAt, lastUsedAt: item.lastUsedAt, useCount: 4,
-            isPinned: true, isFavorite: true, collectionID: nil, title: "Saved title", sourceApp: item.sourceApp
+            isPinned: true, isFavorite: true, collectionID: nil, title: "Saved title",
+            tagIDs: [tag.id], tagDefinitions: [tag], sourceApp: item.sourceApp
         ), favoriteOrder: 2)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).zermclip")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -198,7 +201,103 @@ struct ClipboardHistoryTests {
         #expect(imported[0].item.representations == item.representations)
         #expect(imported[0].item.title == "Saved title")
         #expect(imported[0].item.isFavorite && imported[0].item.isPinned)
+        #expect(imported[0].item.tagIDs == [tag.id])
+        #expect(imported[0].item.tagDefinitions == [tag])
         #expect(imported[0].favoriteOrder == 2)
+    }
+
+    @Test func archiveImportMergesTagDefinitionsByNameAndRestoresAssignments() async throws {
+        try await Self.withStore { store, _ in
+            let localTag = try await store.createTag(name: "work", colorHex: "#abcdef")
+            let archivedTag = ClipboardTag(name: "Work", colorHex: "#123456")
+            let otherTag = ClipboardTag(name: "Later", colorHex: "#654321")
+            let item = try #require(ClipboardItem.capture(
+                representations: [Self.text("tagged archive payload")], sourceApp: Self.source
+            ))
+            let archivedItem = ClipboardItem(
+                id: item.id, contentHash: item.contentHash, kind: item.kind,
+                representations: item.representations, preview: item.preview,
+                tagIDs: [archivedTag.id, otherTag.id], tagDefinitions: [archivedTag, otherTag],
+                sourceApp: item.sourceApp
+            )
+            try await store.mergeArchiveEntries([.init(item: archivedItem, favoriteOrder: nil)])
+            let tags = try await store.allTags()
+            let imported = try #require(try await store.recent().first)
+            #expect(tags.count == 2)
+            #expect(tags.first(where: { $0.id == localTag.id })?.colorHex == "#abcdef")
+            #expect(imported.tagIDs.contains(localTag.id))
+            #expect(imported.tagIDs.contains(otherTag.id))
+            let fullExportItem = try await store.itemWithPayload(imported.id)
+            #expect(fullExportItem.tagDefinitions?.count == 2)
+        }
+    }
+
+    @Test func cachedSortOrdersTrackCapturesEditsAndDeletes() async throws {
+        try await Self.withStore { store, _ in
+            let start = Date()
+            let first = try #require(ClipboardItem.capture(
+                representations: [Self.text("a")], sourceApp: Self.source, createdAt: start
+            ))
+            let second = try #require(ClipboardItem.capture(
+                representations: [Self.text("bb")], sourceApp: Self.source, createdAt: start.addingTimeInterval(1)
+            ))
+            let third = try #require(ClipboardItem.capture(
+                representations: [Self.text("ccc")], sourceApp: Self.source, createdAt: start.addingTimeInterval(2)
+            ))
+            _ = try await store.capture(first, now: start)
+            _ = try await store.capture(second, now: start.addingTimeInterval(1))
+            _ = try await store.capture(third, now: start.addingTimeInterval(2))
+            _ = try await store.capture(first, now: start.addingTimeInterval(3))
+
+            #expect(try await store.sorted(.lastCopy).map(\.id).first == first.id)
+            #expect(try await store.sorted(.firstCopy, ascending: true).map(\.id) == [first.id, second.id, third.id])
+            #expect(try await store.sorted(.copyCount).map(\.id).first == first.id)
+            #expect(try await store.sorted(.size, ascending: true).map(\.id) == [first.id, second.id, third.id])
+
+            _ = try await store.edit(second.id, representations: [Self.text("bbbbbb")])
+            let afterEdit = try await store.sorted(.size, ascending: true).map(\.id)
+            #expect(afterEdit == [first.id, third.id, second.id])
+            try await store.delete(third.id)
+            let afterDelete = try await store.sortedPage(.size, offset: 0, limit: 10).map(\.id)
+            #expect(afterDelete == [second.id, first.id])
+        }
+    }
+
+    @Test func archiveReadsVersionOneWithoutTags() throws {
+        let item = try #require(ClipboardItem.capture(
+            representations: [Self.text("legacy archive payload")], sourceApp: Self.source
+        ))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let archiveDirectory = root.appendingPathComponent("archive", isDirectory: true)
+        let itemsDirectory = archiveDirectory.appendingPathComponent("items", isDirectory: true)
+        try FileManager.default.createDirectory(at: itemsDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(item.representations).write(to: itemsDirectory.appendingPathComponent("\(item.id.uuidString).json"))
+        let index = VersionOneArchiveIndex(
+            formatVersion: 1,
+            createdAt: Date(),
+            entries: [.init(item: ClipboardItem(
+                id: item.id, contentHash: item.contentHash, kind: item.kind,
+                representations: [], preview: item.preview, createdAt: item.createdAt,
+                lastUsedAt: item.lastUsedAt, sourceApp: item.sourceApp
+            ), favoriteOrder: nil)]
+        )
+        try encoder.encode(index).write(to: archiveDirectory.appendingPathComponent("index.json"))
+        let zipURL = root.appendingPathComponent("legacy.zermclip")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", archiveDirectory.path, zipURL.path]
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+
+        let imported = try ClipboardHistoryArchive.read(from: zipURL)
+        #expect(imported.count == 1)
+        #expect(imported[0].item.representations == item.representations)
+        #expect(imported[0].item.tagIDs.isEmpty)
+        #expect(imported[0].item.tagDefinitions?.isEmpty == true)
     }
 
     @Test func archiveMergeDeduplicatesByContentHashAndCombinesOrganization() async throws {
@@ -296,7 +395,7 @@ struct ClipboardHistoryTests {
         defaults.set(false, forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear)
         defaults.set(false, forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: defaults)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), defaults: defaults)
         defer { try? FileManager.default.removeItem(at: directory) }
         let item = try #require(ClipboardItem.capture(representations: [Self.text("locked item")], sourceApp: Self.source))
         _ = try await store.capture(item)
@@ -355,7 +454,7 @@ struct ClipboardHistoryTests {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: defaults)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), defaults: defaults)
         let now = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 10, minute: 0))!
         let item = try #require(ClipboardItem.capture(representations: [Self.text("daily item")], sourceApp: Self.source))
         _ = try await store.capture(item, now: now)
@@ -455,8 +554,13 @@ struct ClipboardHistoryTests {
         window.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model))
         window.contentView?.frame = NSRect(origin: .zero, size: NSSize(width: 980, height: 600))
         window.contentView?.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(250))
-        window.displayIfNeeded()
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            if window.contentView?.window === window, window.contentView?.needsLayout == false { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
         let content = try #require(window.contentView)
         let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
         content.cacheDisplay(in: content.bounds, to: bitmap)
@@ -532,7 +636,7 @@ struct ClipboardHistoryTests {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: key)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: key, defaults: defaults)
         try await body(store, (defaults, directory, key))
     }
 }

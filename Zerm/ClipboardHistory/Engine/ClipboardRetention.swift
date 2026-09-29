@@ -65,16 +65,16 @@ enum ClipboardHistorySort: String, CaseIterable, Sendable {
 }
 
 enum ClipboardHistoryEngineSettings {
-    static func retentionPeriod(for kind: ClipboardItemKind) -> ClipboardRetentionPeriod {
-        let values = UserDefaults.standard.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind) as? [String: String] ?? [:]
+    static func retentionPeriod(for kind: ClipboardItemKind, defaults: UserDefaults = .standard) -> ClipboardRetentionPeriod {
+        let values = defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind) as? [String: String] ?? [:]
         guard let value = values[kind.rawValue], let period = ClipboardRetentionPeriod(storageValue: value) else { return .days(90) }
         return period
     }
 
-    static func setRetentionPeriod(_ period: ClipboardRetentionPeriod, for kind: ClipboardItemKind) {
-        var values = UserDefaults.standard.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind) as? [String: String] ?? [:]
+    static func setRetentionPeriod(_ period: ClipboardRetentionPeriod, for kind: ClipboardItemKind, defaults: UserDefaults = .standard) {
+        var values = defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind) as? [String: String] ?? [:]
         values[kind.rawValue] = period.storageValue
-        UserDefaults.standard.set(values, forKey: ClipboardHistorySettings.Keys.retentionByKind)
+        defaults.set(values, forKey: ClipboardHistorySettings.Keys.retentionByKind)
     }
 
     static func maximumSize(for kind: ClipboardItemKind, defaults: UserDefaults = .standard) -> Int? {
@@ -111,8 +111,8 @@ enum ClipboardHistoryEngineSettings {
         set { UserDefaults.standard.set(newValue, forKey: ClipboardHistorySettings.Keys.copyMergeUpdatesClipboard) }
     }
 
-    static func shouldCapture(_ kind: ClipboardItemKind) -> Bool {
-        retentionPeriod(for: kind) != .never
+    static func shouldCapture(_ kind: ClipboardItemKind, defaults: UserDefaults = .standard) -> Bool {
+        retentionPeriod(for: kind, defaults: defaults) != .never
     }
 }
 
