@@ -11,7 +11,13 @@ final class ClipboardHistoryRuntime {
     private(set) var cleanupTimer: Timer?
     private var didInstallHandlers = false
     private var didInstallLifecycleHooks = false
-    private static let bootTimeKey = "clipboardHistorySystemBootTime"
+    private let defaults: UserDefaults
+    private let now: () -> Date
+    private let notificationCenter: NotificationCenter
+    private let lockNotificationCenter: NotificationCenter
+    private let workspaceNotificationCenter: NotificationCenter
+    private var notificationTokens: [NSObjectProtocol] = []
+    static let bootTimeKey = "clipboardHistorySystemBootTime"
     static let openShortcutNames: [KeyboardShortcuts.Name] = [.openClipboardHistory]
 
     nonisolated static func didSystemRestart(previousBootTime: TimeInterval?, currentBootTime: TimeInterval) -> Bool {
@@ -19,11 +25,23 @@ final class ClipboardHistoryRuntime {
         return abs(previousBootTime - currentBootTime) > 3
     }
 
+    nonisolated static func shouldClearDaily(now: Date, lastClear: Date?, time: Int, calendar: Calendar = .current) -> Bool {
+        let components = calendar.dateComponents([.hour, .minute], from: now)
+        let currentMinutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        guard currentMinutes >= min(1_439, max(0, time / 60)) else { return false }
+        return lastClear.map { !calendar.isDate($0, inSameDayAs: now) } ?? true
+    }
+
     nonisolated static func menuRecentItems(from items: [ClipboardItem]) -> [ClipboardItem] {
         Array(items.prefix(5))
     }
 
     private init() {
+        defaults = .standard
+        now = Date.init
+        notificationCenter = .default
+        lockNotificationCenter = DistributedNotificationCenter.default()
+        workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
         if let store = try? ClipboardHistoryStore() {
             self.store = store
             monitor = ClipboardMonitor(store: store)
@@ -33,9 +51,22 @@ final class ClipboardHistoryRuntime {
         }
     }
 
-    init(store: ClipboardHistoryStore?, monitor: ClipboardMonitor?) {
+    init(
+        store: ClipboardHistoryStore?,
+        monitor: ClipboardMonitor?,
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init,
+        notificationCenter: NotificationCenter = .default,
+        lockNotificationCenter: NotificationCenter = DistributedNotificationCenter.default(),
+        workspaceNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
+    ) {
         self.store = store
         self.monitor = monitor
+        self.defaults = defaults
+        self.now = now
+        self.notificationCenter = notificationCenter
+        self.lockNotificationCenter = lockNotificationCenter
+        self.workspaceNotificationCenter = workspaceNotificationCenter
     }
 
     func start() {
@@ -48,10 +79,46 @@ final class ClipboardHistoryRuntime {
 
     func startCleanupTimer() {
         guard cleanupTimer == nil, store != nil else { return }
-        cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
-            guard let store = self?.store else { return }
-            Task { try? await store.cleanupExpired() }
+        cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { await self.runScheduledCleanup() }
         }
+    }
+
+    func runScheduledCleanup() async {
+        guard let store else { return }
+        let currentTime = now()
+        try? await store.cleanupExpired(now: currentTime)
+        guard bool(ClipboardHistorySettings.Keys.clearDaily),
+              Self.shouldClearDaily(
+                now: currentTime,
+                lastClear: defaults.object(forKey: ClipboardHistorySettings.Keys.lastDailyClear) as? Date,
+                time: defaults.object(forKey: ClipboardHistorySettings.Keys.clearDailyTime) as? Int ?? 32_400
+              ) else { return }
+        await clearHistory(store: store)
+        defaults.set(currentTime, forKey: ClipboardHistorySettings.Keys.lastDailyClear)
+    }
+
+    func clearForScreenLock() async {
+        guard bool(ClipboardHistorySettings.Keys.clearOnLock), let store else { return }
+        await clearHistory(store: store)
+    }
+
+    func clearForSleep() async {
+        guard bool(ClipboardHistorySettings.Keys.clearOnSleep), let store else { return }
+        await clearHistory(store: store)
+    }
+
+    private func clearHistory(store: ClipboardHistoryStore) async {
+        try? await store.clear(
+            includingPinned: true,
+            keepingFavorites: bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, defaultValue: true),
+            keepingTagged: bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, defaultValue: true)
+        )
+    }
+
+    private func bool(_ key: String, defaultValue: Bool = false) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? defaultValue
     }
 
     func togglePause() {
@@ -112,40 +179,61 @@ final class ClipboardHistoryRuntime {
     }
 
     private func detectRestartAndStoreBootTime() {
-        let defaults = UserDefaults.standard
-        let bootTime = Date().timeIntervalSince1970 - ProcessInfo.processInfo.systemUptime
-        if Self.didSystemRestart(
-            previousBootTime: defaults.object(forKey: Self.bootTimeKey) as? Double,
-            currentBootTime: bootTime
-        ),
-           ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnRestart),
-           let store {
-            Task { try? await store.clear(includingPinned: true) }
-        }
+        let bootTime = now().timeIntervalSince1970 - ProcessInfo.processInfo.systemUptime
+        let previousBootTime = defaults.object(forKey: Self.bootTimeKey) as? Double
+        Task { await clearAfterRestartIfNeeded(previousBootTime: previousBootTime, currentBootTime: bootTime) }
         defaults.set(bootTime, forKey: Self.bootTimeKey)
     }
 
-    private func installLifecycleHooks() {
+    @discardableResult
+    func clearAfterRestartIfNeeded(previousBootTime: TimeInterval?, currentBootTime: TimeInterval) async -> Bool {
+        guard Self.didSystemRestart(previousBootTime: previousBootTime, currentBootTime: currentBootTime),
+              bool(ClipboardHistorySettings.Keys.clearOnRestart),
+              let store else { return false }
+        await clearHistory(store: store)
+        return true
+    }
+
+    func installLifecycleHooks() {
         guard !didInstallLifecycleHooks else { return }
         didInstallLifecycleHooks = true
-        NotificationCenter.default.addObserver(
+        let lifecycleDefaults = defaults
+        notificationTokens.append(notificationCenter.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             guard let store = self?.store else { return }
-            let clearOnQuit = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.clearOnQuit)
+            let clearOnQuit = lifecycleDefaults.object(forKey: ClipboardHistorySettings.Keys.clearOnQuit) as? Bool ?? false
             let finished = DispatchSemaphore(value: 0)
             Task.detached {
                 if clearOnQuit {
-                    try? await store.clear(includingPinned: true)
+                    try? await store.clear(
+                        includingPinned: true,
+                        keepingFavorites: lifecycleDefaults.object(forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear) as? Bool ?? true,
+                        keepingTagged: lifecycleDefaults.object(forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear) as? Bool ?? true
+                    )
                 }
                 // Index writes are debounced; persist the last ones before the process exits.
                 try? await store.flushPendingWrites()
                 finished.signal()
             }
             finished.wait()
-        }
+        })
+        notificationTokens.append(lockNotificationCenter.addObserver(
+            forName: Notification.Name("com.apple.screenIsLocked"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.clearForScreenLock() }
+        })
+        notificationTokens.append(workspaceNotificationCenter.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.clearForSleep() }
+        })
     }
 
     private func installShortcutHandlers() {

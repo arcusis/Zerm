@@ -21,6 +21,8 @@ class SoundManager: ObservableObject {
     private var customStartSound: AVAudioPlayer?
     private var customStopSound: AVAudioPlayer?
     private var startSoundDelegate: AudioPlayerCompletionDelegate?
+    private var clipboardPlayers: [String: AVAudioPlayer] = [:]
+    private var clipboardSystemSounds: [String: NSSound] = [:]
 
     @AppStorage("isSoundFeedbackEnabled") private var isSoundFeedbackEnabled = true
 
@@ -131,15 +133,44 @@ class SoundManager: ObservableObject {
         escSound?.play()
     }
 
-    func playClipboardCopySound() { playClipboardSound(key: ClipboardHistorySettings.Keys.copySound, name: "Pop") }
-    func playClipboardPasteSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.pasteSound, name: "Purr") }
-    func playClipboardDeleteSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.deleteSound, name: "Basso") }
-    func playClipboardSelectionSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.selectionSound, name: "Tink") }
+    func playClipboardCopySound() { playClipboardSound(key: ClipboardHistorySettings.Keys.copySound, fallback: "Pop") }
+    func playClipboardPasteSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.pasteSound, fallback: "Purr") }
+    func playClipboardDeleteSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.deleteSound, fallback: "Basso") }
+    func playClipboardSelectionSound() { playClipboardSound(key: ClipboardHistorySettings.Keys.selectionSound, fallback: "Tink") }
 
-    private func playClipboardSound(key: String, name: String) {
-        guard ClipboardHistorySettings.soundEnabled(for: key), let sound = NSSound(named: NSSound.Name(name)) else { return }
-        sound.volume = 0.22
-        sound.play()
+    func previewClipboardSound(key: String, fallback: String, volume: Double) {
+        let choice = ClipboardHistorySettings.soundChoice(for: key, fallback: fallback)
+        playClipboardSound(choice, id: key, volume: volume)
+    }
+
+    private func playClipboardSound(key: String, fallback: String) {
+        let choice = ClipboardHistorySettings.soundChoice(for: key, fallback: fallback)
+        guard choice != .none else { return }
+        let volumeKey = key + "Volume"
+        let volume = min(1, max(0, UserDefaults.standard.object(forKey: volumeKey) as? Double ?? 0.22))
+        playClipboardSound(choice, id: key, volume: volume)
+    }
+
+    private func playClipboardSound(_ choice: ClipboardHistorySoundChoice, id: String, volume: Double) {
+        switch choice {
+        case .none:
+            return
+        case .system(let name):
+            guard let sound = NSSound(named: NSSound.Name(name)) else { return }
+            sound.volume = Float(volume)
+            clipboardSystemSounds[id] = sound
+            sound.play()
+        case .custom(let bookmark):
+            let choice = ClipboardHistorySoundChoice.custom(bookmark)
+            guard let url = choice.customURL else { return }
+            let hasScope = url.startAccessingSecurityScopedResource()
+            defer { if hasScope { url.stopAccessingSecurityScopedResource() } }
+            guard let player = try? AVAudioPlayer(contentsOf: url) else { return }
+            player.volume = Float(volume)
+            player.prepareToPlay()
+            clipboardPlayers[id] = player
+            player.play()
+        }
     }
     
     var isEnabled: Bool {

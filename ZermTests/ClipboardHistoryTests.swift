@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 import KeyboardShortcuts
+import SwiftUI
 @testable import Zerm
 
 @Suite(.serialized)
@@ -146,6 +147,10 @@ struct ClipboardHistoryTests {
             ClipboardHistorySettings.Keys.showBadges, ClipboardHistorySettings.Keys.updateAfterPaste,
             ClipboardHistorySettings.Keys.favoritesOnTop, ClipboardHistorySettings.Keys.warnBeforeClear,
             ClipboardHistorySettings.Keys.clearOnQuit, ClipboardHistorySettings.Keys.clearOnRestart,
+            ClipboardHistorySettings.Keys.clearOnLock, ClipboardHistorySettings.Keys.clearOnSleep,
+            ClipboardHistorySettings.Keys.clearDaily, ClipboardHistorySettings.Keys.clearDailyTime,
+            ClipboardHistorySettings.Keys.maximumStorageSize, ClipboardHistorySettings.Keys.maximumSizeByKind,
+            ClipboardHistorySettings.Keys.linkPreviewsEnabled,
             ClipboardHistorySettings.Keys.keepFavoritesOnClear, ClipboardHistorySettings.Keys.keepTaggedOnClear,
             ClipboardHistorySettings.Keys.ignoreConfidential, ClipboardHistorySettings.Keys.ignoreTransient,
             ClipboardHistorySettings.Keys.retentionCount, ClipboardHistorySettings.Keys.retentionByKind,
@@ -164,6 +169,8 @@ struct ClipboardHistoryTests {
         #expect(ClipboardHistorySettings.windowPosition == "lastLocation")
         #expect(ClipboardHistorySettings.retentionCount == 500)
         #expect(ClipboardHistorySettings.maximumItemSize == 50 * 1_024 * 1_024)
+        #expect(ClipboardHistorySettings.maximumStorageSize == 1_073_741_824)
+        #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.linkPreviewsEnabled, defaultValue: true))
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear))
         #expect(ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear))
         #expect(ClipboardHistoryEngineSettings.retentionPeriod(for: .plainText) == .days(90))
@@ -268,6 +275,196 @@ struct ClipboardHistoryTests {
         #expect(runtime.cleanupTimer === firstTimer)
     }
 
+    @Test @MainActor func lockAndSleepNotificationsClearHistoryUsingInjectedCenter() async throws {
+        let suite = "ClipboardHistoryLifecycleTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let keys = [
+            ClipboardHistorySettings.Keys.clearOnLock,
+            ClipboardHistorySettings.Keys.clearOnSleep,
+            ClipboardHistorySettings.Keys.clearOnRestart,
+            ClipboardHistorySettings.Keys.clearOnQuit,
+            ClipboardHistorySettings.Keys.keepFavoritesOnClear,
+            ClipboardHistorySettings.Keys.keepTaggedOnClear
+        ]
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        defaults.set(true, forKey: ClipboardHistorySettings.Keys.clearOnLock)
+        defaults.set(true, forKey: ClipboardHistorySettings.Keys.clearOnSleep)
+        defaults.set(true, forKey: ClipboardHistorySettings.Keys.clearOnRestart)
+        defaults.set(true, forKey: ClipboardHistorySettings.Keys.clearOnQuit)
+        defaults.set(false, forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear)
+        defaults.set(false, forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: defaults)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let item = try #require(ClipboardItem.capture(representations: [Self.text("locked item")], sourceApp: Self.source))
+        _ = try await store.capture(item)
+        let lockNotifications = NotificationCenter()
+        let workspaceNotifications = NotificationCenter()
+        let runtime = ClipboardHistoryRuntime(
+            store: store,
+            monitor: nil,
+            defaults: defaults,
+            now: { Date(timeIntervalSince1970: 1_000) },
+            notificationCenter: NotificationCenter(),
+            lockNotificationCenter: lockNotifications,
+            workspaceNotificationCenter: workspaceNotifications
+        )
+        runtime.installLifecycleHooks()
+
+        lockNotifications.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await store.recent().isEmpty)
+
+        let sleepItem = try #require(ClipboardItem.capture(representations: [Self.text("sleep item")], sourceApp: Self.source))
+        _ = try await store.capture(sleepItem)
+        workspaceNotifications.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await store.recent().isEmpty)
+
+        let restartItem = try #require(ClipboardItem.capture(representations: [Self.text("restart item")], sourceApp: Self.source))
+        _ = try await store.capture(restartItem)
+        #expect(await runtime.clearAfterRestartIfNeeded(previousBootTime: 100, currentBootTime: 110))
+        #expect(try await store.recent().isEmpty)
+
+        let quitItem = try #require(ClipboardItem.capture(representations: [Self.text("quit item")], sourceApp: Self.source))
+        _ = try await store.capture(quitItem)
+        let appNotifications = NotificationCenter()
+        let quitRuntime = ClipboardHistoryRuntime(
+            store: store,
+            monitor: nil,
+            defaults: defaults,
+            notificationCenter: appNotifications,
+            workspaceNotificationCenter: NotificationCenter()
+        )
+        quitRuntime.installLifecycleHooks()
+        appNotifications.post(name: NSApplication.willTerminateNotification, object: nil)
+        #expect(try await store.recent().isEmpty)
+    }
+
+    @Test @MainActor func dailyCleanupUsesInjectedClockAndDefaults() async throws {
+        let suite = "ClipboardHistoryDailyCleanupTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: ClipboardHistorySettings.Keys.clearDaily)
+        defaults.set(9 * 3_600, forKey: ClipboardHistorySettings.Keys.clearDailyTime)
+        defaults.set(false, forKey: ClipboardHistorySettings.Keys.keepFavoritesOnClear)
+        defaults.set(false, forKey: ClipboardHistorySettings.Keys.keepTaggedOnClear)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: defaults)
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 10, minute: 0))!
+        let item = try #require(ClipboardItem.capture(representations: [Self.text("daily item")], sourceApp: Self.source))
+        _ = try await store.capture(item, now: now)
+        let runtime = ClipboardHistoryRuntime(store: store, monitor: nil, defaults: defaults, now: { now })
+
+        await runtime.runScheduledCleanup()
+
+        #expect(try await store.recent().isEmpty)
+        #expect(defaults.object(forKey: ClipboardHistorySettings.Keys.lastDailyClear) as? Date == now)
+    }
+
+    @Test @MainActor func rendersClipboardPanelStatesForReview() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey())
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outputDirectory = URL(fileURLWithPath: "/tmp/zerm-work/391-shots", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        let now = Date()
+        let source = Self.source
+        let imageData = try #require(Self.textImage("Clipboard image sample"))
+        let kinds: [(ClipboardItemKind, ClipboardRepresentation, String)] = [
+            (.plainText, Self.text("Plain text sample"), "Plain text sample"),
+            (.richText, .init(type: "public.rtf", data: Data("{\\rtf1\\b Rich text sample}".utf8)), "Rich text sample"),
+            (.image, .init(type: "public.png", data: imageData), "Image sample"),
+            (.fileURLs, .init(type: "public.file-url", data: Data("file:///tmp/sample.txt".utf8)), "sample.txt"),
+            (.url, .init(type: "public.url", data: Data("https://example.test/preview".utf8)), "https://example.test/preview"),
+            (.email, Self.text("reader@example.test"), "reader@example.test"),
+            (.color, .init(type: "public.color", data: Data("#3355aa".utf8)), "#3355aa"),
+            (.other, .init(type: "com.example.custom", data: Data("Other sample".utf8)), "Other sample")
+        ]
+        for (kind, representation, name) in kinds {
+            let item = ClipboardItem(
+                contentHash: "render-\(kind.rawValue)",
+                kind: kind,
+                representations: [representation],
+                preview: name,
+                createdAt: now,
+                sourceApp: source
+            )
+            let model = ClipboardHistoryPanelModel(store: store, initialItems: [item])
+            model.select(item)
+            try await savePanelImage(model, name: "kind-\(kind.rawValue).png", directory: outputDirectory)
+        }
+
+        let emptyModel = ClipboardHistoryPanelModel(store: store)
+        try await savePanelImage(emptyModel, name: "empty.png", directory: outputDirectory)
+
+        let noMatchModel = ClipboardHistoryPanelModel(store: store, initialItems: [
+            ClipboardItem(contentHash: "no-match-source", kind: .plainText, representations: [Self.text("findable")], preview: "findable", sourceApp: source)
+        ])
+        noMatchModel.query = "no match"
+        try await savePanelImage(noMatchModel, name: "no-matches.png", directory: outputDirectory)
+
+        let tagID = UUID()
+        let tagged = ClipboardItem(
+            contentHash: "tagged-render",
+            kind: .plainText,
+            representations: [Self.text("Tagged release notes")],
+            preview: "Tagged release notes",
+            tagIDs: [tagID],
+            sourceApp: source
+        )
+        let taggedModel = ClipboardHistoryPanelModel(
+            store: store,
+            initialItems: [tagged],
+            initialTags: [ClipboardTag(id: tagID, name: "Release", colorHex: "#3355AA")]
+        )
+        taggedModel.select(tagged)
+        taggedModel.isDetailsVisible = true
+        try await savePanelImage(taggedModel, name: "tags.png", directory: outputDirectory)
+
+        let longItems = (0..<500).map { index in
+            ClipboardItem(
+                contentHash: "long-list-\(index)",
+                kind: .plainText,
+                representations: [Self.text("Clipboard history item \(index + 1)")],
+                preview: "Clipboard history item \(index + 1)",
+                createdAt: now.addingTimeInterval(-Double(index)),
+                sourceApp: source
+            )
+        }
+        let longListModel = ClipboardHistoryPanelModel(store: store, initialItems: longItems)
+        longListModel.select(longItems[0])
+        try await savePanelImage(longListModel, name: "long-list.png", directory: outputDirectory)
+        print("Clipboard History review renders: \(outputDirectory.path)")
+    }
+
+    @MainActor
+    private func savePanelImage(_ model: ClipboardHistoryPanelModel, name: String, directory: URL) async throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: -3_200, y: -2_200, width: 980, height: 600),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model))
+        window.contentView?.frame = NSRect(origin: .zero, size: NSSize(width: 980, height: 600))
+        window.contentView?.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(250))
+        window.displayIfNeeded()
+        let content = try #require(window.contentView)
+        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        let data = try #require(bitmap.representation(using: .png, properties: [:]))
+        try data.write(to: directory.appendingPathComponent(name))
+        window.close()
+    }
+
     @Test func clipboardShortcutNamesAreDeclaredWithExpectedStorageNames() {
         #expect(KeyboardShortcuts.Name.openClipboardHistory == KeyboardShortcuts.Name("openClipboardHistory"))
         #expect(KeyboardShortcuts.Name.pauseClipboardHistory == KeyboardShortcuts.Name("pauseClipboardHistory"))
@@ -279,6 +476,31 @@ struct ClipboardHistoryTests {
 
     private static func text(_ text: String) -> ClipboardRepresentation {
         ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))
+    }
+
+    private static func textImage(_ value: String) -> Data? {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 420,
+            pixelsHigh: 180,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 420, height: 180).fill()
+        (value as NSString).draw(at: NSPoint(x: 18, y: 75), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 26, weight: .semibold), .foregroundColor: NSColor.white
+        ])
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap.representation(using: .png, properties: [:])
     }
 
     private static func randomKey() -> Data {

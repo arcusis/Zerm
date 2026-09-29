@@ -8,6 +8,40 @@ enum ClipboardPanelPosition: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ClipboardHistorySoundChoice: Equatable {
+    case none
+    case system(String)
+    case custom(Data)
+
+    init(storageValue: String) {
+        if storageValue == "none" { self = .none }
+        else if storageValue.hasPrefix("system:") { self = .system(String(storageValue.dropFirst(7))) }
+        else if storageValue.hasPrefix("custom:"), let data = Data(base64Encoded: String(storageValue.dropFirst(7))) { self = .custom(data) }
+        else { self = .none }
+    }
+
+    static func customFile(_ url: URL) -> ClipboardHistorySoundChoice {
+        let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        return .custom(bookmark ?? Data(url.absoluteString.utf8))
+    }
+
+    var storageValue: String {
+        switch self {
+        case .none: "none"
+        case .system(let name): "system:\(name)"
+        case .custom(let data): "custom:\(data.base64EncodedString())"
+        }
+    }
+
+    var customURL: URL? {
+        guard case .custom(let data) = self else { return nil }
+        var isStale = false
+        if let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &isStale) { return url }
+        guard let value = String(data: data, encoding: .utf8) else { return nil }
+        return URL(string: value)
+    }
+}
+
 enum ClipboardHistorySettings {
     enum Keys {
         static let enabled = "clipboardHistoryEnabled"
@@ -20,6 +54,12 @@ enum ClipboardHistorySettings {
         static let warnBeforeClear = "clipboardHistoryWarnBeforeClear"
         static let clearOnQuit = "clipboardHistoryClearOnQuit"
         static let clearOnRestart = "clipboardHistoryClearOnRestart"
+        static let clearOnLock = "clipboardHistoryClearOnLock"
+        static let clearOnSleep = "clipboardHistoryClearOnSleep"
+        static let clearDaily = "clipboardHistoryClearDaily"
+        static let clearDailyTime = "clipboardHistoryClearDailyTime"
+        static let lastDailyClear = "clipboardHistoryLastDailyClear"
+        static let maximumStorageSize = "clipboardHistoryMaximumStorageSize"
         static let keepFavoritesOnClear = "clipboardHistoryKeepFavoritesOnClear"
         static let keepTaggedOnClear = "clipboardHistoryKeepTaggedOnClear"
         static let ignoreConfidential = "clipboardHistoryIgnoreConfidential"
@@ -27,6 +67,7 @@ enum ClipboardHistorySettings {
         static let retentionCount = "clipboardHistoryRetentionCount"
         static let maximumItemSize = "clipboardHistoryMaximumItemSize"
         static let retentionByKind = "clipboardHistoryRetentionByKind"
+        static let maximumSizeByKind = "clipboardHistoryMaximumSizeByKind"
         static let sort = "clipboardHistorySort"
         static let copyMergeEnabled = "clipboardHistoryCopyMergeEnabled"
         static let copyMergeSeparator = "clipboardHistoryCopyMergeSeparator"
@@ -39,6 +80,7 @@ enum ClipboardHistorySettings {
         static let pasteSound = "clipboardHistoryPasteSound"
         static let deleteSound = "clipboardHistoryDeleteSound"
         static let selectionSound = "clipboardHistorySelectionSound"
+        static let linkPreviewsEnabled = "clipboardHistoryLinkPreviewsEnabled"
     }
 
     static var isEnabled: Bool {
@@ -52,6 +94,24 @@ enum ClipboardHistorySettings {
     static var maximumItemSize: Int {
         get { max(1, UserDefaults.standard.object(forKey: Keys.maximumItemSize) as? Int ?? 50 * 1_024 * 1_024) }
         set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.maximumItemSize) }
+    }
+    static var maximumStorageSize: Int64 {
+        get { maximumStorageSize(in: .standard) }
+        set { UserDefaults.standard.set(max(1, newValue), forKey: Keys.maximumStorageSize) }
+    }
+    static func maximumStorageSize(in defaults: UserDefaults) -> Int64 {
+        let value = defaults.object(forKey: Keys.maximumStorageSize) as? NSNumber
+        return max(1, value?.int64Value ?? 1_073_741_824)
+    }
+    static func maximumItemSize(in defaults: UserDefaults) -> Int {
+        max(1, defaults.object(forKey: Keys.maximumItemSize) as? Int ?? 50 * 1_024 * 1_024)
+    }
+    static var maximumSizeByKind: [String: Int] {
+        get { UserDefaults.standard.dictionary(forKey: Keys.maximumSizeByKind) as? [String: Int] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.maximumSizeByKind) }
+    }
+    static func maximumSizeByKind(in defaults: UserDefaults) -> [String: Int] {
+        defaults.dictionary(forKey: Keys.maximumSizeByKind) as? [String: Int] ?? [:]
     }
     static var windowPosition: String {
         get { UserDefaults.standard.string(forKey: Keys.windowPosition) ?? "lastLocation" }
@@ -82,7 +142,11 @@ enum ClipboardHistorySettings {
         set { UserDefaults.standard.set(newValue, forKey: Keys.paused) }
     }
 
-    static func soundEnabled(for key: String) -> Bool { bool(key) }
+    static func soundChoice(for key: String, fallback: String) -> ClipboardHistorySoundChoice {
+        if let value = UserDefaults.standard.string(forKey: key) { return ClipboardHistorySoundChoice(storageValue: value) }
+        return bool(key) ? .system(fallback) : .none
+    }
+    static func soundEnabled(for key: String) -> Bool { soundChoice(for: key, fallback: "Pop") != .none }
 
     static let defaultExcludedApps: [String] = [
         "com.1password.1password",
