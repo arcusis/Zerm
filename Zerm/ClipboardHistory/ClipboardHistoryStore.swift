@@ -43,6 +43,7 @@ actor ClipboardHistoryStore {
     private let searchIndexURL: URL
     private let tagsURL: URL
     private let encryption: ClipboardHistoryEncryption
+    private let settingsDefaults: UserDefaults
     private var metadata: [Metadata]
     private var payloads: [UUID: [ClipboardRepresentation]]
     private var dirtyPayloadIDs: Set<UUID>
@@ -60,8 +61,13 @@ actor ClipboardHistoryStore {
     nonisolated let feedStoreID = UUID()
 
     /// Tests pass a temporary directory and random key. Live installs use a unique Keychain key.
-    init(directoryURL: URL = AppStoragePaths.root.appendingPathComponent("ClipboardHistory", isDirectory: true), keyData: Data? = nil) throws {
+    init(
+        directoryURL: URL = AppStoragePaths.root.appendingPathComponent("ClipboardHistory", isDirectory: true),
+        keyData: Data? = nil,
+        settingsDefaults: UserDefaults = .standard
+    ) throws {
         self.directoryURL = directoryURL
+        self.settingsDefaults = settingsDefaults
         indexURL = directoryURL.appendingPathComponent("index.enc")
         searchIndexURL = directoryURL.appendingPathComponent("search-index.enc")
         tagsURL = directoryURL.appendingPathComponent("tags.enc")
@@ -89,10 +95,14 @@ actor ClipboardHistoryStore {
     /// Inserts a new clipboard payload or moves a matching content hash to the top.
     func capture(_ item: ClipboardItem, now: Date = Date()) throws -> ClipboardItem {
         try ensureLoaded()
-        guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize else {
+        guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults) else {
             throw ClipboardHistoryStoreCaptureError.itemTooLarge
         }
         guard ClipboardHistoryEngineSettings.shouldCapture(item.kind) else { throw ClipboardHistoryCaptureError.retentionDisabled }
+        if let maximumSize = ClipboardHistoryEngineSettings.maximumSize(for: item.kind, defaults: settingsDefaults),
+           item.representations.reduce(0, { $0 + $1.data.count }) > maximumSize {
+            throw ClipboardHistoryStoreCaptureError.itemTooLarge
+        }
         if let index = metadata.firstIndex(where: { $0.contentHash == item.contentHash }) {
             metadata[index].lastUsedAt = now
             metadata[index].lastCopiedAt = now
@@ -152,8 +162,10 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         var inserted: [ClipboardItem] = []
         for item in items {
-            guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize else { continue }
+            guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults) else { continue }
             guard ClipboardHistoryEngineSettings.shouldCapture(item.kind) else { continue }
+            if let maximumSize = ClipboardHistoryEngineSettings.maximumSize(for: item.kind, defaults: settingsDefaults),
+               item.representations.reduce(0, { $0 + $1.data.count }) > maximumSize { continue }
             if let index = metadata.firstIndex(where: { $0.contentHash == item.contentHash }) {
                 metadata[index].lastUsedAt = now
                 metadata[index].lastCopiedAt = now
@@ -358,6 +370,9 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         for entry in entries {
             let imported = entry.item
+            let importedSize = imported.representations.reduce(0) { $0 + $1.data.count }
+            guard importedSize <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults),
+                  ClipboardHistoryEngineSettings.maximumSize(for: imported.kind, defaults: settingsDefaults).map({ importedSize <= $0 }) ?? true else { continue }
             if let existingIndex = metadata.firstIndex(where: { $0.contentHash == imported.contentHash }) {
                 let existingID = metadata[existingIndex].id
                 metadata[existingIndex].isPinned = metadata[existingIndex].isPinned || imported.isPinned
@@ -535,17 +550,7 @@ actor ClipboardHistoryStore {
 
     func cleanupExpired(now: Date = Date()) throws {
         try ensureLoaded()
-        let keepFavorites = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, defaultValue: true)
-        let keepTagged = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, defaultValue: true)
-        let expired = metadata.filter { row in
-            guard !row.isPinned,
-                  !(keepFavorites && row.isFavorite),
-                  !(keepTagged && !(row.tagIDs ?? []).isEmpty) else { return false }
-            let period = ClipboardHistoryEngineSettings.retentionPeriod(for: row.kind)
-            guard let days = period.dayCount else { return period == .never }
-            return (row.lastCopiedAt ?? row.lastUsedAt) < now.addingTimeInterval(-Double(days) * 86_400)
-        }.map(\.id)
-        removeItems(expired)
+        try enforceRetention(now: now)
         try save()
     }
 
@@ -625,6 +630,11 @@ actor ClipboardHistoryStore {
         try ensureLoaded()
         guard let index = metadata.firstIndex(where: { $0.id == id }),
               let replacement = ClipboardItem.capture(representations: representations, sourceApp: metadata[index].sourceApp) else { return nil }
+        let replacementSize = replacement.representations.reduce(0) { $0 + $1.data.count }
+        guard replacementSize <= ClipboardHistorySettings.maximumItemSize(in: settingsDefaults),
+              ClipboardHistoryEngineSettings.maximumSize(for: replacement.kind, defaults: settingsDefaults).map({ replacementSize <= $0 }) ?? true else {
+            throw ClipboardHistoryStoreCaptureError.itemTooLarge
+        }
         metadata[index].contentHash = replacement.contentHash
         metadata[index].kind = replacement.kind
         metadata[index].preview = replacement.preview
@@ -634,7 +644,9 @@ actor ClipboardHistoryStore {
         payloadOCR.removeValue(forKey: id)
         payloadBarcodes.removeValue(forKey: id)
         dirtyPayloadIDs.insert(id)
+        try enforceRetention(now: Date())
         try save()
+        guard metadata.contains(where: { $0.id == id }) else { return nil }
         publishUpdated(id)
         return makeItem(metadata[index])
     }
@@ -718,6 +730,8 @@ actor ClipboardHistoryStore {
     }
 
     private func enforceRetention(now: Date) throws {
+        let oversized = metadata.filter { ($0.payloadSize ?? 0) > ClipboardHistorySettings.maximumItemSize(in: settingsDefaults) }.map(\.id)
+        removeItems(oversized)
         let keepFavorites = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepFavoritesOnClear, defaultValue: true)
         let keepTagged = ClipboardHistorySettings.bool(ClipboardHistorySettings.Keys.keepTaggedOnClear, defaultValue: true)
         let expired = metadata.filter { row in
@@ -736,6 +750,31 @@ actor ClipboardHistoryStore {
         }.sorted { $0.lastUsedAt > $1.lastUsedAt }
         let excess = Set(unpinned.dropFirst(ClipboardHistorySettings.retentionCount).map(\.id))
         removeItems(Array(excess))
+        enforceSizeLimits()
+    }
+
+    private func enforceSizeLimits() {
+        let eligible = metadata.filter { !$0.isPinned }.sorted {
+            let leftProtected = $0.isFavorite || !($0.tagIDs ?? []).isEmpty
+            let rightProtected = $1.isFavorite || !($1.tagIDs ?? []).isEmpty
+            if leftProtected != rightProtected { return !leftProtected }
+            return $0.lastUsedAt < $1.lastUsedAt
+        }
+        for kind in ClipboardItemKind.allCases {
+            guard let limit = ClipboardHistoryEngineSettings.maximumSize(for: kind, defaults: settingsDefaults) else { continue }
+            var remaining = metadata.filter { $0.kind == kind }.reduce(0) { $0 + ($1.payloadSize ?? 0) }
+            for row in eligible.filter({ $0.kind == kind }) where remaining > limit {
+                removeItems([row.id])
+                remaining -= row.payloadSize ?? 0
+            }
+        }
+
+        var remaining = metadata.reduce(0) { $0 + ($1.payloadSize ?? 0) }
+        for row in eligible where remaining > ClipboardHistorySettings.maximumStorageSize(in: settingsDefaults) {
+            guard metadata.contains(where: { $0.id == row.id }) else { continue }
+            removeItems([row.id])
+            remaining -= row.payloadSize ?? 0
+        }
     }
 
     private func load() throws {

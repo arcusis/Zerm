@@ -3,6 +3,12 @@ import Foundation
 enum AppDefaults {
     static func registerDefaults() {
         let defaults = UserDefaults.standard
+        let legacyClipboardSounds = [
+            ("clipboardHistoryCopySound", "Pop"),
+            ("clipboardHistoryPasteSound", "Purr"),
+            ("clipboardHistoryDeleteSound", "Basso"),
+            ("clipboardHistorySelectionSound", "Tink")
+        ].map { ($0.0, $0.1, defaults.object(forKey: $0.0) as? Bool ?? false) }
         defaults.register(defaults: [
             // Onboarding & General
             "hasCompletedOnboarding": false,
@@ -23,6 +29,14 @@ enum AppDefaults {
             "clipboardHistoryWarnBeforeClear": true,
             "clipboardHistoryClearOnQuit": false,
             "clipboardHistoryClearOnRestart": false,
+            "clipboardHistoryClearOnLock": false,
+            "clipboardHistoryClearOnSleep": false,
+            "clipboardHistoryClearDaily": false,
+            "clipboardHistoryClearDailyTime": 32400,
+            "clipboardHistoryMaximumStorageSize": 1_073_741_824,
+            "clipboardHistoryMaximumSizeByKind": [:],
+            "clipboardHistoryMaximumItemSize": 52_428_800,
+            "clipboardHistoryLinkPreviewsEnabled": true,
             "clipboardHistoryKeepFavoritesOnClear": true,
             "clipboardHistoryKeepTaggedOnClear": true,
             "clipboardHistoryIgnoreConfidential": true,
@@ -42,10 +56,6 @@ enum AppDefaults {
             ],
             "clipboardHistorySaveDictations": false,
             "clipboardHistorySounds": false,
-            "clipboardHistoryCopySound": false,
-            "clipboardHistoryPasteSound": false,
-            "clipboardHistoryDeleteSound": false,
-            "clipboardHistorySelectionSound": false,
             "clipboardHistoryPaused": false,
 
             // Audio & Media
@@ -114,6 +124,10 @@ enum AppDefaults {
             "UseVoiceProcessingIO": false,
 
         ])
+
+        for (key, sound, wasEnabled) in legacyClipboardSounds where wasEnabled && defaults.string(forKey: key) == nil {
+            defaults.set("system:\(sound)", forKey: key)
+        }
 
         if defaults.integer(forKey: "ZermFastDefaultsVersion") < 1 {
             defaults.set(true, forKey: "InstantTranscriptionMode")

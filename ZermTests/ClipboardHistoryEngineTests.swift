@@ -144,6 +144,60 @@ struct ClipboardHistoryEngineTests {
         }
     }
 
+    @Test func storageLimitEvictsOldestUnprotectedItemsFirst() async throws {
+        let suite = "ClipboardHistoryStorageLimitTests.\(UUID().uuidString)"
+        let settingsDefaults = try #require(UserDefaults(suiteName: suite))
+        settingsDefaults.set(5, forKey: ClipboardHistorySettings.Keys.maximumStorageSize)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        defer {
+            settingsDefaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: settingsDefaults)
+        let start = Date()
+        let favoriteItem = try #require(ClipboardItem.capture(representations: [Self.text("fav")], sourceApp: Self.source, createdAt: start))
+        let normalItem = try #require(ClipboardItem.capture(representations: [Self.text("new")], sourceApp: Self.source, createdAt: start.addingTimeInterval(1)))
+        let favorite = try await store.capture(favoriteItem, now: start)
+        try await store.favorite(favorite.id)
+        _ = try await store.capture(normalItem, now: start.addingTimeInterval(1))
+        try await store.cleanupExpired(now: start.addingTimeInterval(2))
+        let items = try await store.recent()
+        #expect(items.map(\.id) == [favorite.id])
+    }
+
+    @Test func perKindSizeLimitRejectsOversizedCaptureAndEnforcesExistingItems() async throws {
+        let suite = "ClipboardHistoryPerKindLimitTests.\(UUID().uuidString)"
+        let settingsDefaults = try #require(UserDefaults(suiteName: suite))
+        settingsDefaults.set([ClipboardItemKind.plainText.rawValue: 3], forKey: ClipboardHistorySettings.Keys.maximumSizeByKind)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        defer {
+            settingsDefaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: Self.randomKey(), settingsDefaults: settingsDefaults)
+        let tooLarge = try #require(ClipboardItem.capture(representations: [Self.text("four")], sourceApp: Self.source))
+        var rejected = false
+        do { _ = try await store.capture(tooLarge) }
+        catch ClipboardHistoryStoreCaptureError.itemTooLarge { rejected = true }
+        #expect(rejected)
+
+        let valid = try #require(ClipboardItem.capture(representations: [Self.text("ok")], sourceApp: Self.source))
+        _ = try await store.capture(valid)
+        settingsDefaults.set([ClipboardItemKind.plainText.rawValue: 1], forKey: ClipboardHistorySettings.Keys.maximumSizeByKind)
+        try await store.cleanupExpired()
+        #expect(try await store.recent().isEmpty)
+    }
+
+    @Test func dailyClearUsesInjectedLocalClockBoundary() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let before = calendar.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 8, minute: 59))!
+        let due = calendar.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 9, minute: 0))!
+        #expect(!ClipboardHistoryRuntime.shouldClearDaily(now: before, lastClear: nil, time: 9 * 3_600, calendar: calendar))
+        #expect(ClipboardHistoryRuntime.shouldClearDaily(now: due, lastClear: nil, time: 9 * 3_600, calendar: calendar))
+        #expect(!ClipboardHistoryRuntime.shouldClearDaily(now: due, lastClear: due, time: 9 * 3_600, calendar: calendar))
+    }
+
     @Test func retentionSettingRoundTripsThroughSinglePerKindModel() {
         let defaults = UserDefaults.standard
         let previous = defaults.dictionary(forKey: ClipboardHistorySettings.Keys.retentionByKind)
@@ -159,20 +213,29 @@ struct ClipboardHistoryEngineTests {
     }
 
     @Test func sortOrdersAndFavoriteReorderPersist() async throws {
-        try await Self.withStore { store, context in
-            let first = try #require(ClipboardItem.capture(representations: [Self.text("a")], sourceApp: Self.source, createdAt: Date(timeIntervalSince1970: 1)))
-            let second = try #require(ClipboardItem.capture(representations: [Self.text("longer")], sourceApp: Self.source, createdAt: Date(timeIntervalSince1970: 2)))
-            let a = try await store.capture(first, now: first.createdAt)
-            let b = try await store.capture(second, now: second.createdAt)
-            try await store.favorite(a.id)
-            try await store.favorite(b.id)
-            try await store.reorderFavorites([b.id, a.id])
-            #expect(try await store.favorites().map(\.id) == [b.id, a.id])
-            #expect(try await store.sorted(.firstCopy, ascending: true).map(\.id) == [a.id, b.id])
-            #expect(try await store.sorted(.size).first?.id == b.id)
-            let reloaded = try ClipboardHistoryStore(directoryURL: context.1, keyData: context.2)
-            #expect(try await reloaded.favorites().map(\.id) == [b.id, a.id])
+        let suite = "ClipboardHistoryFavoriteOrderTests.\(UUID().uuidString)"
+        let settingsDefaults = try #require(UserDefaults(suiteName: suite))
+        settingsDefaults.set(1_073_741_824, forKey: ClipboardHistorySettings.Keys.maximumStorageSize)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        defer {
+            settingsDefaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
         }
+        let key = Self.randomKey()
+        let store = try ClipboardHistoryStore(directoryURL: directory, keyData: key, settingsDefaults: settingsDefaults)
+        let start = Date()
+        let first = try #require(ClipboardItem.capture(representations: [Self.text("a")], sourceApp: Self.source, createdAt: start))
+        let second = try #require(ClipboardItem.capture(representations: [Self.text("longer")], sourceApp: Self.source, createdAt: start.addingTimeInterval(1)))
+        let a = try await store.capture(first, now: first.createdAt)
+        let b = try await store.capture(second, now: second.createdAt)
+        try await store.favorite(a.id)
+        try await store.favorite(b.id)
+        try await store.reorderFavorites([b.id, a.id])
+        #expect(try await store.favorites().map(\.id) == [b.id, a.id])
+        #expect(try await store.sorted(.firstCopy, ascending: true).map(\.id) == [a.id, b.id])
+        #expect(try await store.sorted(.size).first?.id == b.id)
+        let reloaded = try ClipboardHistoryStore(directoryURL: directory, keyData: key, settingsDefaults: settingsDefaults)
+        #expect(try await reloaded.favorites().map(\.id) == [b.id, a.id])
     }
 
     @Test func mergeSplitEditAndCopyMergeOperateOnEncryptedItems() async throws {
@@ -274,6 +337,10 @@ struct ClipboardHistoryEngineTests {
 
     private static func text(_ value: String) -> ClipboardRepresentation {
         ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: Data(value.utf8))
+    }
+
+    private static func randomKey() -> Data {
+        Data((0..<32).map { _ in UInt8.random(in: 0...255) })
     }
 
     private static func textImage(_ value: String) -> Data? {

@@ -77,6 +77,17 @@ enum ClipboardHistoryEngineSettings {
         UserDefaults.standard.set(values, forKey: ClipboardHistorySettings.Keys.retentionByKind)
     }
 
+    static func maximumSize(for kind: ClipboardItemKind, defaults: UserDefaults = .standard) -> Int? {
+        let value = ClipboardHistorySettings.maximumSizeByKind(in: defaults)[kind.rawValue] ?? 0
+        return value > 0 ? value : nil
+    }
+
+    static func setMaximumSize(_ bytes: Int?, for kind: ClipboardItemKind) {
+        var values = ClipboardHistorySettings.maximumSizeByKind
+        values[kind.rawValue] = max(0, bytes ?? 0)
+        ClipboardHistorySettings.maximumSizeByKind = values
+    }
+
     static var sort: ClipboardHistorySort {
         get {
             let rawValue = UserDefaults.standard.string(forKey: ClipboardHistorySettings.Keys.sort) ?? ClipboardHistorySort.lastCopy.rawValue

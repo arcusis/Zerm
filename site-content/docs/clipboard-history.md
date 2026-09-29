@@ -12,6 +12,16 @@ Select one or more items to paste, copy, merge, or delete them. The command pale
 
 Panel settings control its position, paste-on-click and double-click behavior, quick-paste badges, favourite ordering, and confirmation before clearing. The Details pane shows source app, dates, size, tags, and recognized image text.
 
+## Retention, storage, and privacy
+
+Storage settings show the current encrypted store size and let you set total, per-kind, and per-item size limits. When a size limit is reached, older unpinned items are removed first; ordinary items are removed before favourites and tagged items. Per-kind age retention and the maximum item count also apply during capture and scheduled cleanup.
+
+History can be cleared on quit, restart, screen lock, sleep, or once daily at a chosen local time. Clear operations can preserve favourites and tagged items. App exclusions stop future captures from those apps. Confidential and transient pasteboard types can also be ignored. Link previews can be disabled; when enabled, link titles and images are fetched from the linked site.
+
+## Sounds
+
+Copy, paste, delete, and selection actions each support no sound, a macOS system sound, or a chosen audio file. Each action has its own volume and preview control.
+
 ## Settings and privacy
 
 Clipboard History can be paused from Settings or the menu bar. Settings control which apps and confidential or transient content are ignored, whether dictated text is saved, and retention by item kind. Pinned, favourited, and tagged items can be protected from cleanup or clearing.
