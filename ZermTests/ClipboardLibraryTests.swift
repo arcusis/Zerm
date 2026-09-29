@@ -50,9 +50,11 @@ struct ClipboardLibraryTests {
             ))
             _ = try await store.capture(item)
             await feed.publish(.inserted(storeID: store.feedStoreID, item: item))
-            for _ in 0..<30 where !model.items.contains(where: { $0.id == item.id }) {
-                try await Task.sleep(nanoseconds: 20_000_000)
+            let deadline = Date().addingTimeInterval(5)
+            while !model.items.contains(where: { $0.id == item.id }), Date() < deadline {
+                try await Task.sleep(for: .milliseconds(20))
             }
+            #expect(model.items.contains(where: { $0.id == item.id }))
             model.selectedIDs = [item.id]
             await model.togglePinned(true)
             await model.toggleFavorite(true)
@@ -185,6 +187,81 @@ struct ClipboardLibraryTests {
     }
 
     @MainActor
+    @Test func rendersLibrarySettingsAndTagScreensAppearanceLocaleMatrix() async throws {
+        try await withStore { store, feed in
+            let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/library", isDirectory: true)
+            let tag = try await store.createTag(name: "Research", colorHex: "#4268AD")
+            let first = try #require(ClipboardItem.capture(
+                representations: [text("Release checklist")],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            ))
+            let second = try #require(ClipboardItem.capture(
+                representations: [text("Meeting notes")],
+                sourceApp: ClipboardSourceApp(bundleIdentifier: "test.browser", name: "Test Browser")
+            ))
+            _ = try await store.captureBatch([first, second])
+            try await store.attachTag(tag.id, to: first.id)
+
+            let model = ClipboardLibraryModel(store: store, feed: feed)
+            await model.start()
+            await model.loadTags()
+            model.selectedIDs = [first.id]
+            await model.select(first.id)
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardLibraryView(model: model),
+                screen: "library-inspector-selection",
+                size: NSSize(width: 1_120, height: 720),
+                in: directory
+            )
+
+            model.selectedIDs.removeAll()
+            model.clearDetail()
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardLibraryView(model: model),
+                screen: "library-list",
+                size: NSSize(width: 1_120, height: 720),
+                in: directory
+            )
+
+            model.query = "no-results-404"
+            await model.reload()
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardLibraryView(model: model),
+                screen: "library-no-matches",
+                size: NSSize(width: 1_120, height: 720),
+                in: directory
+            )
+            model.stop()
+
+            let emptyURL = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-library-empty-404-\(UUID().uuidString)", isDirectory: true)
+            let emptyStore = try ClipboardHistoryStore(directoryURL: emptyURL, keyData: Data(repeating: 5, count: 32))
+            let emptyModel = ClipboardLibraryModel(store: emptyStore, feed: feed)
+            await emptyModel.start()
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardLibraryView(model: emptyModel),
+                screen: "library-empty",
+                size: NSSize(width: 1_120, height: 720),
+                in: directory
+            )
+            emptyModel.stop()
+            try? FileManager.default.removeItem(at: emptyURL)
+
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardTagsView(store: store, onOpenHistory: { _ in }),
+                screen: "tags-manager",
+                size: NSSize(width: 1_120, height: 720),
+                in: directory
+            )
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardHistorySettingsView(),
+                screen: "clipboard-settings",
+                size: NSSize(width: 1_120, height: 820),
+                in: directory
+            )
+        }
+    }
+
+    @MainActor
     @Test func rendersTagManagerToPNG() async throws {
         try await withStore { store, _ in
             let directory = URL(fileURLWithPath: "/tmp/zerm-work/390-library-shots", isDirectory: true)
@@ -236,20 +313,14 @@ struct ClipboardLibraryTests {
 
     @MainActor
     private func render<V: View>(_ view: V, named name: String, in directory: URL) async throws {
-        let window = NSWindow(contentRect: NSRect(x: -3200, y: -2000, width: 1_120, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.setFrameOrigin(NSPoint(x: -3200, y: -2000))
-        window.contentView = NSHostingView(rootView: view.frame(width: 1_120, height: 720))
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.orderFrontRegardless()
-        try await Task.sleep(nanoseconds: 450_000_000)
-        window.displayIfNeeded()
-        let content = try #require(window.contentView)
-        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
-        content.cacheDisplay(in: content.bounds, to: bitmap)
-        let png = try #require(bitmap.representation(using: .png, properties: [:]))
-        try png.write(to: directory.appendingPathComponent(name))
-        window.close()
+        try await ClipboardHistoryRenderSupport.render(
+            view,
+            name: name,
+            size: NSSize(width: 1_120, height: 720),
+            appearance: .aqua,
+            locale: Locale(identifier: "en"),
+            in: directory
+        )
     }
 
     private func text(_ value: String) -> ClipboardRepresentation {

@@ -122,7 +122,7 @@ struct ClipboardPreviewTests {
 
     @MainActor
     @Test func rendersEachPreviewKindToPNG() async throws {
-        let directory = URL(fileURLWithPath: "/tmp/zerm-work/387-previews", isDirectory: true)
+        let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/previews", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let folderURL = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-preview-folder-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
@@ -142,28 +142,12 @@ struct ClipboardPreviewTests {
             ("other", item(.other, "Other clipboard data", representations: [])),
         ]
         for (name, item) in items {
-            let window = NSWindow(contentRect: NSRect(x: -3200, y: -2200, width: 520, height: 360), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.setFrameOrigin(NSPoint(x: -3200, y: -2200))
-            window.contentView = NSHostingView(rootView: ClipboardRichPreview(item: item, linkService: service))
-            window.contentView?.frame = NSRect(x: 0, y: 0, width: 520, height: 360)
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.orderFrontRegardless()
-            if item.kind == .url {
-                for _ in 0..<40 {
-                    if await fixture.calls > 0 { break }
-                    try await Task.sleep(nanoseconds: 25_000_000)
-                }
-            }
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            window.displayIfNeeded()
-            let content = try #require(window.contentView)
-            let bounds = content.bounds
-            let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: bounds))
-            content.cacheDisplay(in: bounds, to: bitmap)
-            let png = try #require(bitmap.representation(using: .png, properties: [:]))
-            try png.write(to: directory.appendingPathComponent("\(name).png"))
-            window.close()
+            try await ClipboardHistoryRenderSupport.renderMatrix(
+                ClipboardRichPreview(item: item, linkService: service),
+                screen: "preview-\(name)",
+                size: NSSize(width: 520, height: 360),
+                in: directory
+            )
         }
     }
 

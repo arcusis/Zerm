@@ -15,11 +15,13 @@ struct ClipboardLibraryUnavailableView: View {
 
 struct ClipboardLibraryView: View {
     @StateObject private var model: ClipboardLibraryModel
+    @Environment(\.locale) private var locale
     private let linkService: LinkPreviewService
     private let layoutDirectionOverride: LayoutDirection?
     @State private var confirmsDelete = false
     @State private var showsExportError = false
-    @FocusState private var searchFocused: Bool
+    @State private var showsInspector = true
+    @State private var searchFocused = false
 
     init(
         store: ClipboardHistoryStore,
@@ -49,16 +51,12 @@ struct ClipboardLibraryView: View {
             Divider()
             filters
             Divider()
-            HStack(spacing: 0) {
-                itemList
-                    .frame(minWidth: 310, idealWidth: 370, maxWidth: 460)
-                Divider()
-                previewPane
-                    .frame(minWidth: 340, maxWidth: .infinity)
-            }
-            .frame(maxHeight: .infinity)
+            itemList
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(.regularMaterial)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .inspector(isPresented: $showsInspector) { previewPane }
+        .inspectorColumnWidth(min: 340, ideal: 380, max: 520)
         .environment(\.layoutDirection, layoutDirectionOverride ?? currentLayoutDirection)
         .task { await model.start() }
         .onDisappear { model.stop() }
@@ -120,10 +118,12 @@ struct ClipboardLibraryView: View {
                 } label: {
                     Label("Organize", systemImage: "tag")
                 }
+                .help(String(localized: "Organize selected items"))
                 Button(role: .destructive) { confirmsDelete = true } label: {
                     Label("Delete", systemImage: "trash")
                 }
                 .keyboardShortcut(.delete, modifiers: [])
+                .help(String(localized: "Delete selected items"))
             }
         }
         .padding(.horizontal, 24)
@@ -155,22 +155,12 @@ struct ClipboardLibraryView: View {
 
     private var filters: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(String(localized: "Search clipboard history"), text: $model.query)
-                    .textFieldStyle(.plain)
-                    .focused($searchFocused)
-                    .accessibilityLabel(String(localized: "Search clipboard history"))
-                if !model.query.isEmpty {
-                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                        .buttonStyle(.plain)
-                        .help(String(localized: "Clear Search"))
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(minWidth: 180, maxWidth: 340)
-            .frame(height: 30)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+            ClipboardHistorySearchField(
+                text: $model.query,
+                isFocused: $searchFocused,
+                placeholder: String(localized: "Search clipboard history")
+            )
+            .frame(minWidth: 180, idealWidth: 280, maxWidth: 340)
 
             Menu {
                 ForEach(ClipboardItemKind.allCases, id: \.self) { kind in
@@ -180,14 +170,17 @@ struct ClipboardLibraryView: View {
                     ))
                 }
             } label: { filterLabel("Kind", symbol: "line.3.horizontal.decrease.circle", active: !model.selectedKinds.isEmpty) }
+                .help(String(localized: "Filter by Kind"))
             Menu {
                 Button(String(localized: "All Apps")) { model.setAppFilter(nil) }
                 ForEach(model.appNames, id: \.self) { name in Button(name) { model.setAppFilter(name) } }
             } label: { filterLabel("App", symbol: "app", active: model.selectedAppName != nil) }
+                .help(String(localized: "Filter by Source App"))
             Menu {
                 Button(String(localized: "All Tags")) { model.setTagFilter(nil) }
                 ForEach(model.tags) { tag in Button { model.setTagFilter(tag.id) } label: { Label(tag.name, systemImage: "tag.fill") } }
             } label: { filterLabel("Tag", symbol: "tag", active: model.selectedTagID != nil) }
+                .help(String(localized: "Filter by Tag"))
             Picker(String(localized: "Date"), selection: Binding(get: { model.dateFilter }, set: { model.setDateFilter($0) })) {
                 Text(verbatim: String(localized: "Any Time")).tag(ClipboardLibraryDateFilter.anytime)
                 Text(verbatim: String(localized: "Today")).tag(ClipboardLibraryDateFilter.today)
@@ -207,6 +200,7 @@ struct ClipboardLibraryView: View {
                 Button(model.ascending ? String(localized: "Newest First") : String(localized: "Oldest First")) { model.toggleOrder() }
             } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 28, height: 28) }
                 .help(String(localized: "Sort clipboard history"))
+                .accessibilityLabel(String(localized: "Sort clipboard history"))
             Spacer(minLength: 0)
             if filtersActive {
                 Button(String(localized: "Clear Filters")) {
@@ -230,7 +224,7 @@ struct ClipboardLibraryView: View {
             .foregroundStyle(active ? Color.accentColor : Color.primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(active ? Color.accentColor.opacity(0.12) : Color.clear, in: Capsule())
+            .background(active ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear, in: Capsule())
     }
 
     private var itemList: some View {
@@ -271,29 +265,18 @@ struct ClipboardLibraryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: filtersActive ? "line.3.horizontal.decrease.circle" : "clipboard")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(verbatim: filtersActive ? String(localized: "No Matching Items") : String(localized: "Clipboard History Is Empty"))
-                .font(.headline)
-            Text(verbatim: filtersActive ? String(localized: "Try changing search or filters") : String(localized: "Copied items will appear here"))
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        ContentUnavailableView {
+            Label(
+                String(localized: filtersActive ? "No Matching Items" : "Clipboard History Is Empty"),
+                systemImage: filtersActive ? "line.3.horizontal.decrease.circle" : "clipboard"
+            )
+        } description: {
+            Text(verbatim: String(localized: filtersActive ? "Try changing search or filters" : "Copied items will appear here"))
+        } actions: {
             if filtersActive {
-                Button(String(localized: "Clear Filters")) {
-                    model.selectedKinds.removeAll()
-                    model.setAppFilter(nil)
-                    model.setTagFilter(nil)
-                    model.setDateFilter(.anytime)
-                    model.query = ""
-                }
-                .padding(.top, 4)
+                Button(String(localized: "Clear Filters"), action: clearFilters)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .multilineTextAlignment(.center)
-        .padding(28)
     }
 
     private var previewPane: some View {
@@ -305,8 +288,16 @@ struct ClipboardLibraryView: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        if item.isPinned { Image(systemName: "pin.fill").foregroundStyle(Color.accentColor).help(String(localized: "Pinned")) }
-                        if item.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow).help(String(localized: "Favorite")) }
+                        if item.isPinned {
+                            Image(systemName: "pin.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(String(localized: "Pinned"))
+                        }
+                        if item.isFavorite {
+                            Image(systemName: "star.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(String(localized: "Favorite"))
+                        }
                     }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
@@ -326,22 +317,32 @@ struct ClipboardLibraryView: View {
                     .padding(.vertical, 12)
                 }
             } else {
-                VStack(spacing: 9) {
-                    Image(systemName: "rectangle.split.2x1").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
-                    Text("Select an item to preview").font(.callout).foregroundStyle(.secondary)
-                }
+                ContentUnavailableView(
+                    "Select an item to preview",
+                    systemImage: "rectangle.split.2x1",
+                    description: Text("The selected item preview and details appear here.")
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color.primary.opacity(0.025))
+        .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityElement(children: .contain)
     }
 
     private var filtersActive: Bool {
         !model.query.isEmpty || !model.selectedKinds.isEmpty || model.selectedAppName != nil || model.selectedTagID != nil || model.dateFilter != .anytime
     }
 
+    private func clearFilters() {
+        model.selectedKinds.removeAll()
+        model.setAppFilter(nil)
+        model.setTagFilter(nil)
+        model.setDateFilter(.anytime)
+        model.query = ""
+    }
+
     private var currentLayoutDirection: LayoutDirection {
-        Locale.Language(identifier: Locale.current.identifier).characterDirection == .rightToLeft ? .rightToLeft : .leftToRight
+        Locale.Language(identifier: locale.identifier).characterDirection == .rightToLeft ? .rightToLeft : .leftToRight
     }
 
     private func exportSelection() {
@@ -374,8 +375,14 @@ private struct ClipboardLibraryRow: View {
                         .lineLimit(2)
                         .textSelection(.enabled)
                     Spacer(minLength: 0)
-                    if item.isPinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.accentColor) }
-                    if item.isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
+                    if item.isPinned {
+                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                            .accessibilityLabel(String(localized: "Pinned"))
+                    }
+                    if item.isFavorite {
+                        Image(systemName: "star.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                            .accessibilityLabel(String(localized: "Favorite"))
+                    }
                 }
                 HStack(spacing: 6) {
                     Text(verbatim: item.sourceApp.name ?? String(localized: "Unknown App"))
@@ -388,6 +395,7 @@ private struct ClipboardLibraryRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color(clipboardHex: tag.colorHex).opacity(0.14), in: Capsule())
+                            .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Tag: %@"), tag.name))
                     }
                 }
                 .font(.caption)
@@ -399,7 +407,14 @@ private struct ClipboardLibraryRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: String.localizedStringWithFormat(
+            String(localized: "clipboard_row_accessibility_label"),
+            item.kind.libraryLocalizedName,
+            item.title?.clipboardLibraryNonEmpty ?? item.preview.clipboardLibraryNonEmpty ?? item.kind.libraryLocalizedName,
+            item.sourceApp.name ?? String(localized: "Unknown App"),
+            item.lastCopiedAt.formatted(date: .abbreviated, time: .shortened)
+        )))
     }
 }
 
@@ -436,7 +451,7 @@ extension Color {
         if let value = ClipboardColorDetails.parse(clipboardHex) {
             self.init(red: Double(value.red) / 255, green: Double(value.green) / 255, blue: Double(value.blue) / 255)
         } else {
-            self = .gray
+            self = .secondary
         }
     }
 }

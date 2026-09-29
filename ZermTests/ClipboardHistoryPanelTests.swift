@@ -1,9 +1,175 @@
 import AppKit
+import ApplicationServices
 import Foundation
 import SwiftUI
 import Testing
 
 @testable import Zerm
+
+enum ClipboardHistoryRenderAppearance: String, CaseIterable {
+    case aqua
+    case darkAqua
+    case accessibilityHighContrastAqua
+    case accessibilityHighContrastDarkAqua
+
+    var colorScheme: ColorScheme { self == .darkAqua || self == .accessibilityHighContrastDarkAqua ? .dark : .light }
+}
+
+@MainActor
+enum ClipboardHistoryRenderSupport {
+    private static let interactiveRoles: Set<String> = [
+        "AXButton", "AXCell", "AXCheckBox", "AXComboBox", "AXDisclosureTriangle", "AXIncrementor",
+        "AXLink", "AXMenuButton", "AXPopUpButton", "AXRadioButton", "AXRow", "AXSearchField",
+        "AXSlider", "AXStepper", "AXSwitch", "AXTabGroup", "AXTable", "AXTextArea", "AXTextField",
+    ]
+
+    static func render<V: View>(
+        _ view: V,
+        name: String,
+        size: NSSize,
+        appearance: ClipboardHistoryRenderAppearance,
+        locale: Locale,
+        in directory: URL
+    ) async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let rightToLeft = Locale.Language(identifier: locale.identifier).characterDirection == .rightToLeft
+        let root = view
+            .environment(\.locale, locale)
+            .environment(\.layoutDirection, rightToLeft ? .rightToLeft : .leftToRight)
+            .environment(\.colorScheme, appearance.colorScheme)
+            .frame(width: size.width, height: size.height)
+        let window = NSWindow(
+            contentRect: NSRect(origin: NSPoint(x: -3_200, y: -2_200), size: size),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: NSAppearance.Name(rawValue: appearance.rawValue))
+        window.contentView = NSHostingView(rootView: root)
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.orderFrontRegardless()
+
+        let deadline = Date().addingTimeInterval(5)
+        var previousImage: Data?
+        var stableFrames = 0
+        while Date() < deadline {
+            window.displayIfNeeded()
+            guard let content = window.contentView,
+                  let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
+                try await Task.sleep(for: .milliseconds(40))
+                continue
+            }
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            guard let image = bitmap.representation(using: .png, properties: [:]) else {
+                try await Task.sleep(for: .milliseconds(40))
+                continue
+            }
+            if image == previousImage { stableFrames += 1 } else { stableFrames = 0 }
+            if stableFrames >= 2 {
+                try image.write(to: directory.appendingPathComponent(name))
+                window.close()
+                return
+            }
+            previousImage = image
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        window.close()
+        throw ClipboardHistoryRenderError.unstableFrame(name)
+    }
+
+    static func renderMatrix<V: View>(
+        _ view: V,
+        screen: String,
+        size: NSSize,
+        in directory: URL
+    ) async throws {
+        for appearance in ClipboardHistoryRenderAppearance.allCases {
+            for localeIdentifier in ["en", "he"] {
+                let locale = Locale(identifier: localeIdentifier)
+                let name = "\(screen)-\(appearance.rawValue)-\(localeIdentifier).png"
+                try await render(view, name: name, size: size, appearance: appearance, locale: locale, in: directory)
+            }
+        }
+    }
+
+    static func unlabeledInteractiveElements(in root: NSView) -> [String] {
+        accessibilityElements(in: root).filter { interactiveRoles.contains($0.role) && $0.label.isEmpty }.map(\.role)
+    }
+
+    static func interactiveElementCount(in root: NSView) -> Int {
+        accessibilityElements(in: root).filter { interactiveRoles.contains($0.role) }.count
+    }
+
+    private static func accessibilityElements(in root: NSView) -> [(role: String, label: String)] {
+        guard let window = root.window else { return [] }
+        let application = AXUIElementCreateApplication(getpid())
+        var windowValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windowValue) == .success,
+              let windows = windowValue as? [AXUIElement] else { return [] }
+        let title = window.title
+        guard let windowElement = windows.first(where: { element in
+            var value: CFTypeRef?
+            return AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &value) == .success
+                && (value as? String) == title
+        }) else { return [] }
+
+        var visited = Set<CFHashCode>()
+        var elements: [(role: String, label: String)] = []
+        func visit(_ element: AXUIElement) -> [String] {
+            guard visited.insert(CFHash(element)).inserted else { return [] }
+
+            var roleValue: CFTypeRef?
+            var labelValue: CFTypeRef?
+            var descriptionValue: CFTypeRef?
+            var subroleValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success {
+                _ = AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &labelValue)
+                _ = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descriptionValue)
+                _ = AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subroleValue)
+            }
+            var childrenValue: CFTypeRef?
+            var childLabels: [String] = []
+            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+               let children = childrenValue as? [AXUIElement] {
+                for child in children { childLabels.append(contentsOf: visit(child)) }
+            }
+            if childLabels.isEmpty {
+                var visibleChildrenValue: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, "AXVisibleChildren" as CFString, &visibleChildrenValue) == .success,
+                   let children = visibleChildrenValue as? [AXUIElement] {
+                    for child in children { childLabels.append(contentsOf: visit(child)) }
+                }
+            }
+            if childLabels.isEmpty, roleValue as? String == "AXCell" {
+                var titleElementValue: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, "AXTitleUIElement" as CFString, &titleElementValue) == .success,
+                   let titleElementValue {
+                    let titleElement = titleElementValue as! AXUIElement
+                    childLabels.append(contentsOf: visit(titleElement))
+                }
+            }
+            guard let role = roleValue as? String else { return childLabels }
+            let label = [labelValue as? String, descriptionValue as? String]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first(where: { !$0.isEmpty }) ?? ""
+            let isWindowChrome = (subroleValue as? String).map {
+                ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].contains($0)
+            } ?? false
+            let effectiveLabel = label.isEmpty && ["AXRow", "AXCell"].contains(role)
+                ? childLabels.joined(separator: ", ")
+                : label
+            if !isWindowChrome { elements.append((role, effectiveLabel)) }
+            return effectiveLabel.isEmpty ? childLabels : [effectiveLabel]
+        }
+        _ = visit(windowElement)
+        return elements
+    }
+}
+
+enum ClipboardHistoryRenderError: Error {
+    case unstableFrame(String)
+}
 
 @Suite(.serialized)
 struct ClipboardHistoryPanelTests {
@@ -275,10 +441,11 @@ struct ClipboardHistoryPanelTests {
 
             let command = try #require(model.registry.command(withID: "transform.uppercase", for: model.selection))
             command.perform(model.selection)
-            for _ in 0..<200 {
-                try await Task.sleep(nanoseconds: 25_000_000)
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline {
                 await model.loadItems()
                 if model.items.contains(where: { $0.preview == "MIXED CASE" }) { break }
+                try await Task.sleep(for: .milliseconds(25))
             }
 
             #expect(model.items.contains(where: { $0.preview == "MIXED CASE" }))
@@ -407,30 +574,17 @@ struct ClipboardHistoryPanelTests {
             )
             renderModel.select(image)
             renderModel.isDetailsVisible = true
-            let window = NSWindow(
-                contentRect: NSRect(x: -3200, y: -2200, width: 1050, height: 620),
-                styleMask: [.titled, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: renderModel))
-            window.contentView?.frame = NSRect(origin: .zero, size: NSSize(width: 1050, height: 620))
-            window.contentView?.layoutSubtreeIfNeeded()
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            window.displayIfNeeded()
-
-            let bounds = window.contentView?.bounds ?? .zero
-            let contentView = try #require(window.contentView)
-            let bitmap = try #require(contentView.bitmapImageRepForCachingDisplay(in: bounds))
-            contentView.cacheDisplay(in: bounds, to: bitmap)
-            let png = try #require(bitmap.representation(using: .png, properties: [:]))
             let directory = URL(fileURLWithPath: "/tmp/zerm-work", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let output = directory.appendingPathComponent("389-panel-before.png")
-            try png.write(to: output)
+            try await ClipboardHistoryRenderSupport.render(
+                ClipboardHistoryPanelView(model: renderModel),
+                name: output.lastPathComponent,
+                size: NSSize(width: 1_050, height: 620),
+                appearance: .aqua,
+                locale: Locale(identifier: "en"),
+                in: directory
+            )
             print("Clipboard history panel render: \(output.path)")
-            window.close()
         }
     }
 
@@ -496,6 +650,105 @@ struct ClipboardHistoryPanelTests {
     }
 
     @MainActor
+    @Test func rendersPanelAppearanceAndLocaleMatrix() async throws {
+        try await withPanelModel { _, store in
+            let directory = URL(fileURLWithPath: "/tmp/zerm-work/404-shots/after/panel", isDirectory: true)
+            let source = ClipboardSourceApp(bundleIdentifier: "com.apple.finder", name: "Finder")
+            let textItem = panelItem(.plainText, "Release checklist", [text("Release checklist")], source: source)
+            let imageItem = panelItem(.image, "Clipboard image", [try pngRepresentation()], source: source)
+            let service = LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil)
+            var states: [(String, ClipboardHistoryPanelModel)] = []
+
+            let selected = ClipboardHistoryPanelModel(store: store, initialItems: [textItem, imageItem])
+            selected.select(imageItem)
+            selected.isDetailsVisible = true
+            selected.isShowingQuickPasteBadges = true
+            states.append(("selection-preview-details", selected))
+
+            let empty = ClipboardHistoryPanelModel(store: store)
+            await empty.loadItems()
+            states.append(("empty", empty))
+
+            let noMatches = ClipboardHistoryPanelModel(store: store, initialItems: [textItem])
+            noMatches.query = "kind:url no-match"
+            states.append(("no-matches", noMatches))
+
+            let tagID = UUID()
+            let taggedItem = panelItem(.plainText, "Tagged note", [text("Tagged note")], source: source, tagIDs: [tagID])
+            let tagged = ClipboardHistoryPanelModel(
+                store: store,
+                initialItems: [taggedItem],
+                initialTags: [ClipboardTag(id: tagID, name: "Research", colorHex: "#4268AD")]
+            )
+            tagged.query = "tag:Research"
+            tagged.select(taggedItem)
+            states.append(("active-tag-filter", tagged))
+
+            let multiple = ClipboardHistoryPanelModel(store: store, initialItems: [textItem, imageItem])
+            multiple.select(textItem)
+            multiple.select(imageItem, toggling: true)
+            states.append(("multiple-selection", multiple))
+
+            for (name, model) in states {
+                try await ClipboardHistoryRenderSupport.renderMatrix(
+                    ClipboardHistoryPanelView(model: model, linkService: service),
+                    screen: "panel-\(name)",
+                    size: NSSize(width: 1_040, height: 650),
+                    in: directory
+                )
+            }
+        }
+    }
+
+    @MainActor
+    @Test func panelAndLibraryInteractiveElementsHaveAccessibilityLabels() async throws {
+        try await withPanelModel { _, store in
+            let source = ClipboardSourceApp(bundleIdentifier: "test.editor", name: "Test Editor")
+            let item = try #require(ClipboardItem.capture(
+                representations: [text("Accessible clipboard sample")],
+                sourceApp: source
+            ))
+            _ = try await store.capture(item)
+
+            let panelModel = ClipboardHistoryPanelModel(store: store, initialItems: [item])
+            panelModel.select(item)
+            panelModel.isShowingQuickPasteBadges = true
+            let panelView = ClipboardHistoryPanelView(model: panelModel, linkService: LinkPreviewService(fetcher: PanelPreviewFetcher(), cache: nil))
+            let panelWindow = NSWindow(contentRect: NSRect(x: -3_200, y: -2_200, width: 1_040, height: 650), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            panelWindow.isReleasedWhenClosed = false
+            panelWindow.title = "Clipboard History Accessibility Audit Panel"
+            panelWindow.contentView = NSHostingView(rootView: panelView)
+            panelWindow.contentView?.layoutSubtreeIfNeeded()
+            panelWindow.makeKeyAndOrderFront(nil)
+            panelWindow.displayIfNeeded()
+            let panelRoot = try #require(panelWindow.contentView)
+            #expect(ClipboardHistoryRenderSupport.interactiveElementCount(in: panelRoot) > 0)
+            let panelMissing = ClipboardHistoryRenderSupport.unlabeledInteractiveElements(in: panelRoot)
+            #expect(panelMissing.isEmpty, "Panel unlabeled elements: \(panelMissing)")
+            panelWindow.close()
+
+            let libraryModel = ClipboardLibraryModel(store: store)
+            await libraryModel.start()
+            await libraryModel.loadTags()
+            libraryModel.selectedIDs = [item.id]
+            await libraryModel.select(item.id)
+            let libraryWindow = NSWindow(contentRect: NSRect(x: -3_200, y: -2_200, width: 1_120, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            libraryWindow.isReleasedWhenClosed = false
+            libraryWindow.title = "Clipboard History Accessibility Audit Library"
+            libraryWindow.contentView = NSHostingView(rootView: ClipboardLibraryView(model: libraryModel))
+            libraryWindow.contentView?.layoutSubtreeIfNeeded()
+            libraryWindow.makeKeyAndOrderFront(nil)
+            libraryWindow.displayIfNeeded()
+            let libraryRoot = try #require(libraryWindow.contentView)
+            #expect(ClipboardHistoryRenderSupport.interactiveElementCount(in: libraryRoot) > 0)
+            let libraryMissing = ClipboardHistoryRenderSupport.unlabeledInteractiveElements(in: libraryRoot)
+            #expect(libraryMissing.isEmpty, "Library unlabeled elements: \(libraryMissing)")
+            libraryWindow.close()
+            libraryModel.stop()
+        }
+    }
+
+    @MainActor
     private func savePanelShot(
         _ name: String,
         model: ClipboardHistoryPanelModel,
@@ -503,27 +756,14 @@ struct ClipboardHistoryPanelTests {
         to directory: URL,
         locale: Locale = .current
     ) async throws {
-        let window = NSWindow(
-            contentRect: NSRect(x: -3_200, y: -2_200, width: 1_040, height: 650),
-            styleMask: [.titled, .resizable],
-            backing: .buffered,
-            defer: false
+        try await ClipboardHistoryRenderSupport.render(
+            ClipboardHistoryPanelView(model: model, linkService: service),
+            name: "\(name).png",
+            size: NSSize(width: 1_040, height: 650),
+            appearance: .aqua,
+            locale: locale,
+            in: directory
         )
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(
-            rootView: ClipboardHistoryPanelView(model: model, linkService: service).environment(\.locale, locale)
-        )
-        window.contentView?.frame = NSRect(origin: .zero, size: NSSize(width: 1_040, height: 650))
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.orderFrontRegardless()
-        try await Task.sleep(nanoseconds: 180_000_000)
-        window.displayIfNeeded()
-        let content = try #require(window.contentView)
-        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
-        content.cacheDisplay(in: content.bounds, to: bitmap)
-        let png = try #require(bitmap.representation(using: .png, properties: [:]))
-        try png.write(to: directory.appendingPathComponent("\(name).png"))
-        window.close()
     }
 
     private func panelItem(
