@@ -8,7 +8,7 @@ enum ClipboardHistoryStoreCaptureError: Error {
     case itemTooLarge
 }
 
-struct ClipboardSourceAppCount: Identifiable, Sendable {
+struct ClipboardSourceAppCount: Identifiable, Equatable, Sendable {
     let bundleIdentifier: String
     let name: String
     let count: Int
@@ -182,6 +182,7 @@ actor ClipboardHistoryStore {
     func captureBatch(_ items: [ClipboardItem], now: Date = Date()) throws -> [ClipboardItem] {
         try ensureLoaded()
         var inserted: [ClipboardItem] = []
+        var updatedIDs: Set<UUID> = []
         var changed = false
         for item in items {
             guard item.representations.reduce(0, { $0 + $1.data.count }) <= ClipboardHistorySettings.maximumItemSize(in: defaults) else { continue }
@@ -197,6 +198,7 @@ actor ClipboardHistoryStore {
                 metadata[index].recognizedText = item.recognizedText.nilIfEmpty
                 metadata[index].barcodePayloads = item.barcodePayloads
                 payloads[metadata[index].id] = item.representations
+                updatedIDs.insert(metadata[index].id)
                 refreshSearchDocument(metadata[index])
                 if let thumbnailData = item.thumbnailData { thumbnails[metadata[index].id] = thumbnailData }
                 dirtyPayloadIDs.insert(metadata[index].id)
@@ -224,6 +226,11 @@ actor ClipboardHistoryStore {
         try save(writeIndex: false)
         scheduleIndexWrite()
         if !inserted.isEmpty { publish(.insertedBatch(storeID: feedStoreID, items: inserted)) }
+        for id in updatedIDs {
+            if let row = metadata.first(where: { $0.id == id }) {
+                publish(.updated(storeID: feedStoreID, item: makeItem(row)))
+            }
+        }
         return inserted
     }
 
@@ -838,6 +845,7 @@ actor ClipboardHistoryStore {
         metadata[index].barcodePayloads = result.barcodePayloads
         refreshSearchDocument(metadata[index])
         try? save()
+        publish(.updated(storeID: feedStoreID, item: makeItem(metadata[index])))
     }
 
     private func removeItems(_ ids: [UUID]) -> [UUID] {
