@@ -3,27 +3,22 @@
     <channel>
         <title>Zerm</title>
         <item>
-            <title>2.8.7</title>
+            <title>2.8.8</title>
             <description><![CDATA[
-                <h3>What's New in v2.8.7</h3>
+                <h3>What's New in v2.8.8</h3>
                 <ul>
-                    <li><strong>Clipboard History.</strong> Zerm now keeps a private, encrypted history of copied items, right on your Mac. Press ⇧⌘V to search it, preview any item and paste it into the app you're in. Filter by kind (text, images, links, files, colors, emails, code) or by the app it came from. Items are previewed properly: links with their title and image, Spotify, YouTube, Apple Music and SoundCloud links as media cards, files with thumbnails, colors with their values, and code with syntax highlighting. Text inside copied images is searchable.</li>
-                    <li>Clipboard History does more than paste. It has favorites, pinning, Paste Next for pasting a sequence of items, Copy & Merge (press ⌘C twice to append), text transforms, and merging or splitting items. The main window has a full Clipboard History page, too.</li>
-                    <li>Clipboard History preserves full text when copying, editing, merging or splitting. Search finds older items and text beyond the short list preview. A click selects an item to preview; double-click or Return pastes it. Empty searches offer Clear Filters, editing failures preserve drafts, and layouts and controls are clearer in English and Hebrew.</li>
-                    <li>You decide what's kept. Clipboard History has its own settings: how long each kind is kept, a storage limit, clearing on quit, restart, lock, sleep or at a set time, apps to exclude (password managers are suggested), a sound for each action, and whether links are fetched for previews. Items marked confidential by their app are ignored by default; exclude sensitive apps to avoid capturing ordinary copied text from them.</li>
-                    <li>A natural Hebrew voice for Read Aloud. The new on-device Blue voice reads Hebrew and English aloud without an internet connection. Download it from Read Aloud settings.</li>
-                    <li>Many more on-device models. The Whisper catalog is back to its full range, with English-only and quantized versions. Parakeet V2 and Redux are added, along with Moonshine for English and a Russian model. Each model shows who made it, its license and where it comes from. Downloads can be paused and resumed, even after quitting Zerm.</li>
-                    <li>Faster on M5 Macs. Dictation and on-device AI use the Neural Accelerators in M5 chips.</li>
-                    <li>Your language, every time. The language you choose in Settings is used everywhere, so Hebrew and Russian no longer come out as Arabic. With My languages, automatic detection only chooses between the languages you actually speak.</li>
-                    <li>Better with AirPods and other Bluetooth headphones. Zerm records from another microphone when one is available, so your headphones keep full sound quality while you dictate. The start sound plays when your voice is actually being picked up. Missed key releases are recovered for push-to-talk; short hybrid taps keep hands-free recording running.</li>
-                    <li>Dictation starts and pastes faster, and many screens are clearer, including Dictation History, Read Aloud History, Settings, Transcribe File, Dictation Models and Permissions.</li>
+                    <li>Clipboard History reopens with its search, selection, and loaded pages; completed image recognition no longer causes repeated refreshes.</li>
+                    <li>Fixed loading, paging, missing-row, and selected-preview races with bounded preview caching.</li>
+                    <li>Added a visible window drag area and improved floating-window behavior and active-display positioning.</li>
+                    <li>Improved selection contrast, keyboard navigation, searchable commands, sorting, and interaction menus.</li>
+                    <li>Smoother optional panes and improved English/Hebrew layouts on smaller displays.</li>
                 </ul>
             ]]></description>
-            <pubDate>Tue, 29 Sep 2026 19:03:37 +0000</pubDate>
-            <sparkle:version>287</sparkle:version>
-            <sparkle:shortVersionString>2.8.7</sparkle:shortVersionString>
+            <pubDate>Thu, 01 Oct 2026 07:01:50 +0000</pubDate>
+            <sparkle:version>288</sparkle:version>
+            <sparkle:shortVersionString>2.8.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.7/Zerm-2.8.7-macos.zip" length="38873140" type="application/octet-stream" sparkle:edSignature="jCnHuf9KH5N/2bANuWDHhqH8vyZaaGFdxHdB66JZbX7JhZ41bEgmPJM/WK6lx/ZV+dtK044bJ1UvGtXQXhqcDQ=="/>
+            <enclosure url="https://github.com/arcusis/Zerm/releases/download/v2.8.8/Zerm-2.8.8-macos.zip" length="38915508" type="application/octet-stream" sparkle:edSignature="t8+cVtmQcvovnAG+feH1eqgjQk+heUr0Vwoch2h6GEUVJjmanbjfwx4iMkQgpfZNzs2y+xCwq+2Nk0TmEz4AAA=="/>
         </item>
     </channel>
 </rss>
