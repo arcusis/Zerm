@@ -182,6 +182,23 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath .ci-derived \
             -only-testing:ZermTests \
+            -skip-testing:ZermTests/ClipboardHistoryScaleTests \
+            -parallel-testing-enabled NO \
+            -quiet
+
+      # Wall-clock latency and process-wide memory measurements must not include
+      # concurrent AppKit/SwiftUI fixture work from other suites.
+      - name: Clipboard scale performance
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building \
+            -project Zerm.xcodeproj \
+            -scheme Zerm \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath .ci-derived \
+            -only-testing:ZermTests/ClipboardHistoryScaleTests \
+            -parallel-testing-enabled NO \
             -quiet
 
   # ── Website lint ─────────────────────────────────────────────────────────
