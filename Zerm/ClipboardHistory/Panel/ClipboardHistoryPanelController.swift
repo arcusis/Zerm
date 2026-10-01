@@ -7,9 +7,10 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     static let shared = ClipboardHistoryPanelController()
 
     private(set) var panel: ClipboardHistoryPanel?
-    private var model: ClipboardHistoryPanelModel?
+    private(set) var model: ClipboardHistoryPanelModel?
     private var previousApplication: NSRunningApplication?
-    private var previousWindowFrame: NSRect?
+    private var storeFeedStoreID: UUID?
+    private let defaults: UserDefaults
     private var localMonitor: Any?
     private var localFlagsMonitor: Any?
     private var quickLookData: Data?
@@ -21,41 +22,101 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private var isPasting = false
 
     var targetApplicationName: String? { previousApplication?.localizedName }
+    var targetApplicationProcessIdentifier: pid_t? { previousApplication?.processIdentifier }
 
-    private override init() { super.init() }
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        super.init()
+    }
 
     func toggle() {
         if panel?.isVisible == true { close() } else { show() }
     }
 
     func show() {
+        let currentStore = ClipboardHistoryRuntime.shared.store
+        if let currentStore,
+           let storeFeedStoreID,
+           currentStore.feedStoreID != storeFeedStoreID
+        {
+            discardPresentation()
+            self.storeFeedStoreID = nil
+        }
         if let panel, panel.isVisible {
             panel.makeKeyAndOrderFront(nil)
             return
         }
-        guard let store = ClipboardHistoryRuntime.shared.store else { return }
-        previousApplication = NSWorkspace.shared.frontmostApplication
-        previousWindowFrame = NSApp.keyWindow?.frame
+        guard let currentStore else { return }
+        show(store: currentStore, frontmostApplication: NSWorkspace.shared.frontmostApplication)
+    }
 
-        let model = ClipboardHistoryPanelModel(store: store)
-        model.onCommand = { [weak self] id in self?.executeRegisteredCommand(id) }
-        self.model = model
-        let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 820, height: 444))
-        panel.delegate = self
-        panel.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model, controller: self, tracksSystemClipboard: true))
-        self.panel = panel
-        position(panel)
-        panel.makeKeyAndOrderFront(nil)
-        installKeyMonitor()
-        model.reload()
+    func show(store: ClipboardHistoryStore, frontmostApplication: NSRunningApplication?, present: Bool = true) {
+        if storeFeedStoreID != store.feedStoreID {
+            discardPresentation()
+            storeFeedStoreID = store.feedStoreID
+        }
+        if panel?.isVisible == true {
+            if present { panel?.makeKeyAndOrderFront(nil) }
+            return
+        }
+        previousApplication = frontmostApplication
+        if model == nil {
+            let newModel = ClipboardHistoryPanelModel(store: store, defaults: defaults)
+            newModel.onCommand = { [weak self] id in self?.executeRegisteredCommand(id) }
+            model = newModel
+        }
+        if panel == nil, let model {
+            let newPanel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 820, height: 444))
+            newPanel.delegate = self
+            newPanel.contentView = NSHostingView(rootView: ClipboardHistoryPanelView(model: model, controller: self, tracksSystemClipboard: present).defaultAppStorage(defaults))
+            panel = newPanel
+        }
+        guard let panel, let model else { return }
+        model.isCommandPaletteVisible = false
+        model.commandQuery = ""
+        model.commandSelectionID = nil
+        model.presentationID += 1
+        if present {
+            position(panel)
+            panel.makeKeyAndOrderFront(nil)
+            installKeyMonitor()
+        }
+        model.reload(preservingLoadedPage: true)
     }
 
     func close() {
         removeKeyMonitor()
+        closeQuickLookIfNeeded()
+        model?.isCommandPaletteVisible = false
+        model?.commandQuery = ""
+        model?.commandSelectionID = nil
         panel?.orderOut(nil)
+    }
+
+    private func discardPresentation() {
+        removeKeyMonitor()
+        closeQuickLookIfNeeded()
         panel?.delegate = nil
+        panel?.orderOut(nil)
         panel = nil
         model = nil
+    }
+
+    private func disposePanel() {
+        discardPresentation()
+        storeFeedStoreID = nil
+    }
+
+    private func closeQuickLookIfNeeded() {
+        guard isShowingQuickLook, let quickLook = QLPreviewPanel.shared() else { return }
+        quickLook.close()
+        isShowingQuickLook = false
+        quickLook.dataSource = nil
+        quickLook.delegate = nil
+        if let quickLookTemporaryURL { try? FileManager.default.removeItem(at: quickLookTemporaryURL) }
+        quickLookTemporaryURL = nil
+        quickLookData = nil
+        quickLookURL = nil
     }
 
     func paste(_ item: ClipboardItem, asPlainText: Bool = false, pasteSelection: Bool = true) {
@@ -159,55 +220,142 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
     private func position(_ panel: ClipboardHistoryPanel) {
         let point = NSEvent.mouseLocation
-        let pointerScreen = NSScreen.screens.first(where: { $0.frame.contains(point) })
-        let activeScreen =
-            previousWindowFrame.flatMap { frame in NSScreen.screens.first(where: { $0.frame.intersects(frame) }) }
-            ?? NSScreen.main
-            ?? pointerScreen
-        let option = ClipboardHistorySettings.panelPosition
-        guard !NSScreen.screens.isEmpty else { return }
-        let fallbackScreen = NSScreen.main ?? pointerScreen ?? NSScreen.screens[0]
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        let foregroundWindow = visibleWindowFrame(for: previousApplication)
+        let screenFrames = screens.map(\.frame)
+        let activeIndex = Self.preferredScreenIndex(foregroundWindow: foregroundWindow, pointer: point, screens: screenFrames)
+        let pointerScreen = screens.first(where: { $0.frame.contains(point) })
+        let option = ClipboardPanelPosition(rawValue: defaults.string(forKey: ClipboardHistorySettings.Keys.windowPosition) ?? "lastLocation") ?? .lastLocation
+        let fallbackScreen = NSScreen.main ?? pointerScreen ?? screens[0]
         let screen: NSScreen
         if option == .pointer {
-            screen = pointerScreen ?? activeScreen ?? fallbackScreen
+            screen = pointerScreen ?? activeIndex.map { screens[$0] } ?? fallbackScreen
         } else {
-            screen = activeScreen ?? fallbackScreen
+            screen = activeIndex.map { screens[$0] } ?? fallbackScreen
         }
         let savedKey = "clipboardHistoryPanelFrame.\(displayID(for: screen))"
         var frame = NSRect(origin: .zero, size: panel.frame.size)
+        let visible = screen.visibleFrame
+        frame.size = Self.clampedSize(frame.size, to: visible.size)
+        panel.minSize = Self.clampedSize(ClipboardHistoryPanel.minimumContentSize, to: visible.size)
         switch option {
         case .lastLocation:
-            if let saved = UserDefaults.standard.string(forKey: savedKey) {
-                var savedFrame = NSRectFromString(saved)
-                // Frames saved by older layouts can be smaller than the current minimum.
-                savedFrame.size.width = max(savedFrame.width, ClipboardHistoryPanel.minimumContentSize.width)
-                savedFrame.size.height = max(savedFrame.height, ClipboardHistoryPanel.minimumContentSize.height)
-                if screen.visibleFrame.intersects(savedFrame) {
-                    frame = savedFrame
+            if let saved = defaults.string(forKey: savedKey) {
+                let savedFrame = NSRectFromString(saved)
+                if visible.intersects(savedFrame) {
+                    frame = Self.restoredFrame(
+                        savedFrame,
+                        within: visible,
+                        minimumSize: ClipboardHistoryPanel.minimumContentSize
+                    )
                 } else {
-                    frame.origin = centeredOrigin(in: screen.visibleFrame, size: frame.size)
+                    frame.origin = centeredOrigin(in: visible, size: frame.size)
                 }
             } else {
-                frame.origin = centeredOrigin(in: screen.visibleFrame, size: frame.size)
+                frame.origin = centeredOrigin(in: visible, size: frame.size)
             }
         case .centerScreen:
-            frame.origin = centeredOrigin(in: screen.visibleFrame, size: frame.size)
+            frame.origin = centeredOrigin(in: visible, size: frame.size)
         case .pointer:
             frame.origin = NSPoint(x: point.x + 10, y: point.y - frame.height - 10)
         }
-        frame = clamp(frame, to: screen.visibleFrame)
+        frame = Self.clampedFrame(frame, to: visible)
         panel.setFrame(frame, display: false)
+    }
+
+    private func visibleWindowFrame(for application: NSRunningApplication?) -> CGRect? {
+        guard let application,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
+        let windowCandidates = windows.compactMap { entry -> ForegroundWindowCandidate? in
+            guard (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == application.processIdentifier,
+                  let layer = (entry[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  let bounds = entry[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary), rect.width > 0, rect.height > 0
+            else { return nil }
+            return ForegroundWindowCandidate(
+                ownerProcessID: application.processIdentifier,
+                layer: layer,
+                alpha: CGFloat((entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1),
+                quartzFrame: rect
+            )
+        }
+        guard let quartzFrame = Self.foregroundWindowFrame(
+                fromFrontToBack: windowCandidates,
+                ownerProcessID: application.processIdentifier
+              ),
+              let mainScreen = NSScreen.screens.first
+        else { return nil }
+        return Self.appKitFrame(fromQuartz: quartzFrame, primaryScreenFrame: mainScreen.frame)
     }
 
     private func centeredOrigin(in rect: NSRect, size: NSSize) -> NSPoint {
         NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2)
     }
 
-    private func clamp(_ frame: NSRect, to visible: NSRect) -> NSRect {
+    static func clampedSize(_ size: CGSize, to bounds: CGSize) -> CGSize {
+        CGSize(width: min(max(0, size.width), max(0, bounds.width)), height: min(max(0, size.height), max(0, bounds.height)))
+    }
+
+    static func clampedFrame(_ frame: CGRect, to visible: CGRect) -> CGRect {
         var result = frame
+        result.size = clampedSize(result.size, to: visible.size)
         result.origin.x = min(max(result.minX, visible.minX), visible.maxX - result.width)
         result.origin.y = min(max(result.minY, visible.minY), visible.maxY - result.height)
         return result
+    }
+
+    static func restoredFrame(_ saved: CGRect, within visible: CGRect, minimumSize: CGSize) -> CGRect {
+        var frame = saved
+        frame.size.width = max(frame.width, minimumSize.width)
+        frame.size.height = max(frame.height, minimumSize.height)
+        frame.size = clampedSize(frame.size, to: visible.size)
+        return clampedFrame(frame, to: visible)
+    }
+
+    static func preferredScreenIndex(foregroundWindow: CGRect?, pointer: CGPoint, screens: [CGRect]) -> Int? {
+        guard !screens.isEmpty else { return nil }
+        if let foregroundWindow,
+           let candidate = screens.indices.max(by: {
+               intersectionArea(screens[$0], foregroundWindow) < intersectionArea(screens[$1], foregroundWindow)
+           }),
+           intersectionArea(screens[candidate], foregroundWindow) > 0
+        {
+            return candidate
+        }
+        return screens.firstIndex(where: { $0.contains(pointer) })
+    }
+
+    struct ForegroundWindowCandidate {
+        let ownerProcessID: Int32
+        let layer: Int
+        let alpha: CGFloat
+        let quartzFrame: CGRect
+    }
+
+    static func foregroundWindowFrame(
+        fromFrontToBack candidates: [ForegroundWindowCandidate],
+        ownerProcessID: Int32
+    ) -> CGRect? {
+        candidates.first(where: {
+            $0.ownerProcessID == ownerProcessID && $0.layer == 0 && $0.alpha > 0
+                && $0.quartzFrame.width >= 160 && $0.quartzFrame.height >= 100
+        })?.quartzFrame
+    }
+
+    static func appKitFrame(fromQuartz quartzFrame: CGRect, primaryScreenFrame: CGRect) -> CGRect {
+        CGRect(
+            x: primaryScreenFrame.minX + quartzFrame.minX,
+            y: primaryScreenFrame.maxY - quartzFrame.maxY,
+            width: quartzFrame.width,
+            height: quartzFrame.height
+        )
+    }
+
+    private static func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        return intersection.isNull ? 0 : intersection.width * intersection.height
     }
 
     private func displayID(for screen: NSScreen) -> String {
@@ -218,7 +366,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private func saveFrame(_ panel: NSPanel) {
         guard let screen = panel.screen else { return }
         let key = "clipboardHistoryPanelFrame.\(displayID(for: screen))"
-        UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: key)
+        defaults.set(NSStringFromRect(panel.frame), forKey: key)
     }
 
     private func installKeyMonitor() {
@@ -238,12 +386,12 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             }
 
             if event.keyCode == 53 {
-                if !model.query.isEmpty {
-                    model.query = ""
-                    return nil
-                }
                 if model.isCommandPaletteVisible {
                     model.isCommandPaletteVisible = false
+                    return nil
+                }
+                if !model.query.isEmpty {
+                    model.query = ""
                     return nil
                 }
                 self.close()
@@ -257,7 +405,18 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
                 model.isCommandPaletteVisible.toggle()
                 return nil
             }
-            if model.isCommandPaletteVisible { return event }
+            if model.isCommandPaletteVisible {
+                if event.keyCode == 126 { model.moveCommandSelection(by: -1); return nil }
+                if event.keyCode == 125 { model.moveCommandSelection(by: 1); return nil }
+                if event.keyCode == 36 || event.keyCode == 76 { model.performSelectedCommand(); return nil }
+                return event
+            }
+            if (event.keyCode == 126 || event.keyCode == 125),
+               !command, !option, !modifiers.contains(.control)
+            {
+                model.moveSelection(by: event.keyCode == 126 ? -1 : 1, extending: modifiers.contains(.shift))
+                return nil
+            }
             if command, !searchHasFocus, event.charactersIgnoringModifiers?.lowercased() == "c", let item = model.selectedItem {
                 self.copy(item)
                 return nil
@@ -324,22 +483,30 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         guard let panel else { return }
+        // A drag must be able to cross a display edge before the window's screen changes.
         saveFrame(panel)
     }
 
     func windowDidResize(_ notification: Notification) {
         guard let panel else { return }
+        clampToVisibleScreen(panel)
         saveFrame(panel)
     }
 
+    private func clampToVisibleScreen(_ panel: NSPanel) {
+        guard let screen = panel.screen else { return }
+        panel.minSize = Self.clampedSize(ClipboardHistoryPanel.minimumContentSize, to: screen.visibleFrame.size)
+        let clamped = Self.clampedFrame(panel.frame, to: screen.visibleFrame)
+        if clamped != panel.frame { panel.setFrame(clamped, display: false) }
+    }
+
     func windowDidResignKey(_ notification: Notification) {
+        panel?.level = .floating
         if !isShowingQuickLook && !isPasting && model?.isTextEditorVisible != true { closeIfUnpinned() }
     }
 
     func windowWillClose(_ notification: Notification) {
-        removeKeyMonitor()
-        panel = nil
-        model = nil
+        disposePanel()
     }
 }
 
@@ -364,6 +531,7 @@ extension ClipboardHistoryPanelController: @preconcurrency QLPreviewPanelDataSou
         isShowingQuickLook = false
         if let quickLookTemporaryURL { try? FileManager.default.removeItem(at: quickLookTemporaryURL) }
         quickLookTemporaryURL = nil
+        if self.panel?.isKeyWindow != true, !isPasting, model?.isTextEditorVisible != true { closeIfUnpinned() }
     }
 }
 
@@ -372,6 +540,10 @@ final class ClipboardHistoryPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    override var level: NSWindow.Level {
+        get { .floating }
+        set { super.level = .floating }
+    }
 
     init(contentRect: NSRect) {
         super.init(
@@ -387,7 +559,7 @@ final class ClipboardHistoryPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         minSize = Self.minimumContentSize
     }
 }

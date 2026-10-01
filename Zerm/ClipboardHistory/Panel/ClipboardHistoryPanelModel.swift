@@ -141,16 +141,26 @@ final class ClipboardHistoryPanelModel: ObservableObject {
             queryChanged()
         }
     }
-    @Published var selectedIDs: [UUID] = [] { didSet { loadSelectedDetail() } }
+    @Published var selectedIDs: [UUID] = [] {
+        didSet {
+            if oldValue != selectedIDs { loadSelectedDetail(); updateCommandSelection() }
+        }
+    }
     @Published private(set) var detailItem: ClipboardItem?
     @Published private(set) var isLoadingDetail = false
     @Published private(set) var sourceApps: [ClipboardSourceAppCount] = []
     @Published var errorMessage: String?
     @Published var isPinned = false
     @Published var isPreviewVisible = true
-    @Published var isSidebarCollapsed = false
-    @Published var isDetailsVisible = true
-    @Published var isCommandPaletteVisible = false
+    @Published var isSidebarCollapsed = true
+    @Published var isDetailsVisible = false
+    @Published var isCommandPaletteVisible = false {
+        didSet { if !oldValue && isCommandPaletteVisible { selectInitialCommand() } }
+    }
+    @Published var commandQuery = "" { didSet { updateCommandSelection(preferFirst: true) } }
+    @Published var presentationID = 0
+    @Published var commandSelectionID: String?
+    @Published private(set) var filteredCommands: [ClipboardPanelCommand] = []
     @Published var isShowingQuickPasteBadges = false
     @Published var isClearConfirmationVisible = false
     @Published var isTextEditorVisible = false
@@ -163,19 +173,27 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     private let store: ClipboardHistoryStore
     private let defaults: UserDefaults
     private var reloadTask: Task<Void, Never>?
-    private var ocrRefreshTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
-    /// Loads run one after another in call order, so a slower load can never overwrite a newer one.
-    private var loadChain: Task<Void, Never>?
+    private var feedCoalesceTask: Task<Void, Never>?
+    private var pendingFeedChanges: [ClipboardHistoryChange] = []
     private var pageOffset = 0
+    private var loadChain: Task<Void, Never>?
+    private var loadGeneration = 0
+    private var pendingFullLoads = 0
+    private var datasetRevision = 0
+    private var loadedDatasetRevision = 0
+    private var loadedQueryRevision = 0
     @Published private(set) var hasLoadedItems = false
     @Published private(set) var isLoadingItems = false
     @Published private(set) var canLoadMore = false
     @Published private(set) var isLoadingMore = false
-    private var ocrRefreshAttempts = 0
     private var selectionAnchorID: UUID?
     private var selectionLeadID: UUID?
     private var detailTask: Task<Void, Never>?
+    private var detailCache: [UUID: ClipboardItem] = [:]
+    private var detailCacheOrder: [UUID] = []
+    private let detailCacheLimit = 12
+    private let detailCacheByteLimit = 16 * 1_024 * 1_024
     private var loadedSearchText: String?
     private var queryRevision = 0
     private var editingItemID: UUID?
@@ -191,18 +209,19 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         items = initialItems
         applyQuery()
         registerCoreCommands()
+        updateCommandSelection()
         feedTask = Task { [weak self] in
             for await change in ClipboardHistoryFeed.shared.changes() {
-                guard let self else { return }
-                await self.receive(change)
+                guard !Task.isCancelled else { return }
+                await self?.receive(change)
             }
         }
     }
 
     deinit {
         reloadTask?.cancel()
-        ocrRefreshTask?.cancel()
         feedTask?.cancel()
+        feedCoalesceTask?.cancel()
         detailTask?.cancel()
     }
 
@@ -217,7 +236,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
             || appFilter != nil || railFilter != .history || dateFilter != .anytime
     }
 
-    func reload(debounced: Bool = false) {
+    func reload(debounced: Bool = false, preservingLoadedPage: Bool = false) {
         reloadTask?.cancel()
         reloadTask = Task { [weak self] in
             if debounced {
@@ -225,96 +244,255 @@ final class ClipboardHistoryPanelModel: ObservableObject {
                 catch { return }
             }
             guard !Task.isCancelled else { return }
-            await self?.loadItems()
+            await self?.loadItems(preservingLoadedPage: preservingLoadedPage)
         }
     }
 
     func loadItems(preservingLoadedPage: Bool = false) async {
-        await enqueueLoad { [weak self] in await self?.performLoadItems(preservingLoadedPage: preservingLoadedPage) }
+        pendingFullLoads += 1
+        if !isLoadingItems { isLoadingItems = true }
+        let previous = loadChain
+        loadGeneration += 1
+        let generation = loadGeneration
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            guard let self else { return }
+            await self.performLoadItems(preservingLoadedPage: preservingLoadedPage)
+        }
+        loadChain = task
+        await task.value
+        if generation == loadGeneration { loadChain = nil }
+        pendingFullLoads = max(0, pendingFullLoads - 1)
+        let remainsLoading = pendingFullLoads > 0
+        if isLoadingItems != remainsLoading { isLoadingItems = remainsLoading }
     }
 
     func loadMore() async {
         // Checked at call time: the paging sentinel can fire again before the queued load runs.
-        guard canLoadMore, !isLoadingMore else { return }
+        guard (canLoadMore || isLoadingItems), !isLoadingMore else { return }
         isLoadingMore = true
-        await enqueueLoad { [weak self] in await self?.performLoadMore() }
-    }
-
-    private func enqueueLoad(_ load: @escaping @MainActor () async -> Void) async {
         let previous = loadChain
-        let task = Task { @MainActor in
+        loadGeneration += 1
+        let generation = loadGeneration
+        let task = Task { @MainActor [weak self] in
             await previous?.value
-            await load()
+            guard let self else { return }
+            await self.performLoadMore()
         }
         loadChain = task
         await task.value
+        if generation == loadGeneration { loadChain = nil }
     }
 
     private func performLoadItems(preservingLoadedPage: Bool) async {
-        isLoadingItems = true
-        defer { isLoadingItems = false }
+        while !Task.isCancelled {
+            let startingQueryRevision = queryRevision
+            let startingDatasetRevision = datasetRevision
+            await fetchAndPublishItems(preservingLoadedPage: preservingLoadedPage)
+            guard !Task.isCancelled else { return }
+            if startingQueryRevision == queryRevision && startingDatasetRevision == datasetRevision { return }
+        }
+    }
+
+    private func fetchAndPublishItems(preservingLoadedPage: Bool) async {
         let revision = queryRevision
+        let snapshotRevision = datasetRevision
         let searchText = ClipboardPanelQuery.parse(query).text
-        if !preservingLoadedPage { pageOffset = 0 }
+        let keepLoadedPage = preservingLoadedPage
+            || (pageOffset > 100 && loadedQueryRevision == queryRevision)
+        if !keepLoadedPage { pageOffset = 0 }
         var ascending = reversed
         if sort == .firstCopy { ascending.toggle() }
-        let requestedCount = preservingLoadedPage ? max(pageOffset, 100) : 100
+        let requestedCount = keepLoadedPage ? max(pageOffset, 100) : 100
         let page: (items: [ClipboardItem], total: Int)
         do { page = try await fetchPage(ascending: ascending, offset: 0, limit: requestedCount) }
         catch {
-            guard revision == queryRevision else { return }
+            guard !Task.isCancelled, revision == queryRevision, snapshotRevision == datasetRevision else { return }
             hasLoadedItems = true
             errorMessage = error.localizedDescription
             return
         }
         let fetched = page.items
         let apps = (try? await store.sourceAppCounts()) ?? []
-        guard revision == queryRevision else { return }
-        sourceApps = apps
-        items = fetched
-        hasLoadedItems = true
+        guard !Task.isCancelled, revision == queryRevision, snapshotRevision == datasetRevision else { return }
+        if sourceApps != apps { sourceApps = apps }
+        if items != fetched { items = fetched }
+        if !hasLoadedItems { hasLoadedItems = true }
         pageOffset = fetched.count
-        canLoadMore = page.total > pageOffset
+        let nextCanLoadMore = page.total > pageOffset
+        if canLoadMore != nextCanLoadMore { canLoadMore = nextCanLoadMore }
         loadedSearchText = searchText
+        loadedDatasetRevision = snapshotRevision
+        loadedQueryRevision = revision
         applyQuery()
-        scheduleOCRRefreshIfNeeded(fetched)
         if selectedIDs.isEmpty, let first = visibleItems.first { selectedIDs = [first.id] }
     }
 
     private func performLoadMore() async {
         defer { isLoadingMore = false }
-        guard canLoadMore else { return }
-        let revision = queryRevision
-        var ascending = reversed
-        if sort == .firstCopy { ascending.toggle() }
-        let page: (items: [ClipboardItem], total: Int)
-        do { page = try await fetchPage(ascending: ascending, offset: pageOffset, limit: 100) }
-        catch { errorMessage = error.localizedDescription; return }
-        let additional = page.items
-        guard revision == queryRevision else { return }
-        items.append(contentsOf: additional)
-        pageOffset += additional.count
-        canLoadMore = page.total > pageOffset
-        applyQuery()
-    }
-
-    private func receive(_ change: ClipboardHistoryChange) async {
-        switch change {
-        case let .inserted(storeID, _), let .updated(storeID, _):
-            guard storeID == store.feedStoreID else { return }
-            await loadItems(preservingLoadedPage: true)
-        case let .insertedBatch(storeID, _):
-            guard storeID == store.feedStoreID else { return }
-            await loadItems(preservingLoadedPage: true)
-        case let .removed(storeID, ids), let .cleared(storeID, ids):
-            guard storeID == store.feedStoreID else { return }
-            await enqueueLoad { [weak self] in self?.applyRemoval(of: ids) }
+        if loadedDatasetRevision != datasetRevision || loadedQueryRevision != queryRevision {
+            await performLoadItems(preservingLoadedPage: true)
+        }
+        while !Task.isCancelled {
+            guard canLoadMore,
+                  loadedDatasetRevision == datasetRevision,
+                  loadedQueryRevision == queryRevision else { return }
+            let revision = queryRevision
+            let snapshotRevision = datasetRevision
+            var ascending = reversed
+            if sort == .firstCopy { ascending.toggle() }
+            let page: (items: [ClipboardItem], total: Int)
+            do { page = try await fetchPage(ascending: ascending, offset: pageOffset, limit: 100) }
+            catch {
+                guard !Task.isCancelled, revision == queryRevision, snapshotRevision == datasetRevision else {
+                    if !Task.isCancelled { await performLoadItems(preservingLoadedPage: true) }
+                    continue
+                }
+                errorMessage = error.localizedDescription
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard revision == queryRevision, snapshotRevision == datasetRevision else {
+                await performLoadItems(preservingLoadedPage: true)
+                continue
+            }
+            // Store mutations can precede their asynchronous feed event. If an
+            // offset page overlaps loaded rows, its ordering changed in flight.
+            // Refresh the whole requested prefix so the shifted row is not lost.
+            let loadedIDs = Set(items.map(\.id))
+            if page.items.contains(where: { loadedIDs.contains($0.id) }) {
+                pageOffset += page.items.count
+                await performLoadItems(preservingLoadedPage: true)
+                return
+            }
+            let additional = page.items
+            if !additional.isEmpty { items.append(contentsOf: additional) }
+            pageOffset = items.count
+            let nextCanLoadMore = page.total > pageOffset
+            if canLoadMore != nextCanLoadMore { canLoadMore = nextCanLoadMore }
+            loadedDatasetRevision = snapshotRevision
+            loadedQueryRevision = revision
+            applyQuery()
+            return
         }
     }
 
-    /// Runs in the load queue, after any load that was already in flight, so a stale fetch
-    /// cannot bring back an item that was just removed.
+    private func receive(_ change: ClipboardHistoryChange) async {
+        let storeID: UUID
+        switch change {
+        case let .inserted(id, _), let .updated(id, _), let .insertedBatch(id, _), let .removed(id, _), let .cleared(id, _): storeID = id
+        }
+        guard storeID == store.feedStoreID else { return }
+        guard feedChangeCanAffectDataset(change) else { return }
+        datasetRevision += 1
+        pendingFeedChanges.append(change)
+        guard feedCoalesceTask == nil else { return }
+        feedCoalesceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(35))
+            guard !Task.isCancelled, let self else { return }
+            let changes = self.pendingFeedChanges
+            self.pendingFeedChanges.removeAll(keepingCapacity: true)
+            self.feedCoalesceTask = nil
+            await self.applyFeedChanges(changes)
+        }
+    }
+
+    private func feedChangeCanAffectDataset(_ change: ClipboardHistoryChange) -> Bool {
+        switch change {
+        case let .inserted(_, item), let .updated(_, item):
+            return items.first(where: { $0.id == item.id }).map { $0 != item } ?? true
+        case let .insertedBatch(_, inserted):
+            return inserted.contains { item in items.first(where: { $0.id == item.id }).map { $0 != item } ?? true }
+        case let .removed(_, ids), let .cleared(_, ids):
+            return !ids.isEmpty
+        }
+    }
+
+    private func applyFeedChanges(_ changes: [ClipboardHistoryChange]) async {
+        enum Change { case upsert(ClipboardItem, inserted: Bool), remove }
+        var latest: [UUID: Change] = [:]
+        for change in changes {
+            switch change {
+            case let .inserted(_, item): latest[item.id] = .upsert(item, inserted: true)
+            case let .updated(_, item):
+                let wasInserted: Bool
+                if case let .upsert(_, inserted)? = latest[item.id] { wasInserted = inserted }
+                else { wasInserted = false }
+                latest[item.id] = .upsert(item, inserted: wasInserted)
+            case let .insertedBatch(_, items): for item in items { latest[item.id] = .upsert(item, inserted: true) }
+            case let .removed(_, ids), let .cleared(_, ids): for id in ids { latest[id] = .remove }
+            }
+        }
+        let removed = latest.compactMap { id, change -> UUID? in
+            if case .remove = change { return id }
+            return nil
+        }
+        if !removed.isEmpty { applyRemoval(of: removed) }
+        var needsReload = !removed.isEmpty
+        for (id, change) in latest {
+            guard case let .upsert(item, inserted) = change else { continue }
+            guard let index = items.firstIndex(where: { $0.id == id }) else {
+                needsReload = true
+                continue
+            }
+            let previous = items[index]
+            guard previous != item else { continue }
+            let orderChanged: Bool
+            switch sort {
+            case .lastCopy: orderChanged = previous.lastCopiedAt != item.lastCopiedAt
+            case .firstCopy: orderChanged = previous.createdAt != item.createdAt
+            case .copyCount: orderChanged = previous.useCount != item.useCount
+            case .size: orderChanged = previous.payloadSize != item.payloadSize
+            }
+            let favoriteOrderChanged = favoritesOnTop && previous.isFavorite != item.isFavorite
+            let parsed = ClipboardPanelQuery.parse(query)
+            let searchableChanged = previous.preview != item.preview || previous.title != item.title
+                || previous.recognizedText != item.recognizedText || previous.barcodePayloads != item.barcodePayloads
+                || previous.sourceApp != item.sourceApp
+            let kindChanged = previous.kind != item.kind
+            let kindMembershipChanged: Bool
+            if case let .kind(kind) = railFilter {
+                kindMembershipChanged = (previous.kind == kind) != (item.kind == kind)
+            } else { kindMembershipChanged = false }
+            let membershipChanged = (!parsed.text.isEmpty && searchableChanged)
+                || (appFilter != nil && previous.sourceApp != item.sourceApp)
+                || (dateFilter != .anytime && previous.lastCopiedAt != item.lastCopiedAt)
+                || (railFilter == .favorites && previous.isFavorite != item.isFavorite)
+                || (railFilter == .text && kindChanged)
+                || kindMembershipChanged
+                || (!parsed.filters.kinds.isEmpty && kindChanged)
+                || (parsed.filters.sourceApps.isEmpty == false && previous.sourceApp != item.sourceApp)
+            if items[index] != item { items[index] = item }
+            let contentChanged = previous.contentHash != item.contentHash || previous.payloadSize != item.payloadSize
+            if contentChanged { invalidateDetailCache(for: id) }
+            let payloadSource = detailCache[id] ?? (detailItem?.id == id ? detailItem : nil)
+            var mergedFullDetail = false
+            if let payloadSource {
+                if !contentChanged {
+                    let merged = item.replacingPayload(from: payloadSource)
+                    cacheDetail(merged)
+                    if selectedIDs.first == id, detailItem != merged { detailItem = merged }
+                    mergedFullDetail = true
+                }
+            }
+            if inserted || orderChanged || favoriteOrderChanged || membershipChanged { needsReload = true }
+            else { applyQuery() }
+            if selectedIDs.first == id, contentChanged || (!mergedFullDetail && !isLoadingDetail) {
+                loadSelectedDetail(keepingCurrentPreview: true)
+            }
+        }
+        if needsReload { reload(preservingLoadedPage: true) }
+        else {
+            loadedDatasetRevision = datasetRevision
+            loadedQueryRevision = queryRevision
+        }
+    }
+
+    /// Invalidates in-flight fetches before removing IDs, so stale results cannot restore them.
     private func applyRemoval(of ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        queryRevision += 1
+        ids.forEach { invalidateDetailCache(for: $0) }
         items.removeAll { ids.contains($0.id) }
         pageOffset = items.count
         selectedIDs.removeAll { ids.contains($0) }
@@ -322,25 +500,7 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         if selectionLeadID.map(ids.contains) == true { selectionLeadID = selectedIDs.last }
         applyQuery()
         if selectedIDs.isEmpty, let first = visibleItems.first { select(first) }
-        reload()
-    }
-
-    private func scheduleOCRRefreshIfNeeded(_ fetched: [ClipboardItem]) {
-        let needsOCRRefresh = fetched.contains {
-            $0.kind == .image && $0.recognizedText.isEmpty && $0.barcodePayloads.isEmpty
-        }
-        guard needsOCRRefresh else {
-            ocrRefreshAttempts = 0
-            return
-        }
-        guard ocrRefreshAttempts < 5 else { return }
-        ocrRefreshAttempts += 1
-        ocrRefreshTask?.cancel()
-        ocrRefreshTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled else { return }
-            await self?.loadItems()
-        }
+        if hasLoadedItems { reload(preservingLoadedPage: true) }
     }
 
     func select(_ item: ClipboardItem, extending: Bool = false, toggling: Bool = false, playSelectionSound: Bool = false) {
@@ -383,6 +543,41 @@ final class ClipboardHistoryPanelModel: ObservableObject {
     func quickPasteItem(forCommandNumber number: Int) -> ClipboardItem? {
         guard (1...9).contains(number), number <= visibleItems.count else { return nil }
         return visibleItems[number - 1]
+    }
+
+    func moveCommandSelection(by offset: Int) {
+        guard !filteredCommands.isEmpty else { commandSelectionID = nil; return }
+        let current = filteredCommands.firstIndex { $0.id == commandSelectionID } ?? 0
+        let next = min(max(current + offset, 0), filteredCommands.count - 1)
+        commandSelectionID = filteredCommands[next].id
+    }
+
+    @discardableResult
+    func performSelectedCommand() -> Bool {
+        guard let id = commandSelectionID,
+              let command = registry.command(withID: id, for: selection) else { return false }
+        command.perform(selection)
+        isCommandPaletteVisible = false
+        commandQuery = ""
+        return true
+    }
+
+    private func selectInitialCommand() {
+        updateCommandSelection(preferFirst: true)
+    }
+
+    private func updateCommandSelection(preferFirst: Bool = false) {
+        let needle = commandQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let commands = registry.available(for: selection).filter { command in
+            needle.isEmpty || [command.title, command.id, command.shortcut ?? ""].contains {
+                $0.localizedCaseInsensitiveContains(needle)
+            }
+        }
+        if filteredCommands.map(\.id) != commands.map(\.id) { filteredCommands = commands }
+        if preferFirst || !filteredCommands.contains(where: { $0.id == commandSelectionID }) {
+            let nextID = filteredCommands.first?.id
+            if commandSelectionID != nextID { commandSelectionID = nextID }
+        }
     }
 
     func showInHistory(_ item: ClipboardItem) {
@@ -440,30 +635,85 @@ final class ClipboardHistoryPanelModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func loadSelectedDetail() {
+    private func loadSelectedDetail(keepingCurrentPreview: Bool = false) {
         detailTask?.cancel()
-        detailItem = nil
-        isLoadingDetail = false
-        guard let id = selectedIDs.first else { return }
-        if let item = items.first(where: { $0.id == id }), !item.representations.isEmpty {
-            detailItem = item
+        guard let id = selectedIDs.first else {
+            if detailItem != nil { detailItem = nil }
+            if isLoadingDetail { isLoadingDetail = false }
             return
         }
-        isLoadingDetail = true
+        if let cached = cachedDetail(for: id) {
+            if detailItem != cached { detailItem = cached }
+            if isLoadingDetail { isLoadingDetail = false }
+            return
+        }
+        if !keepingCurrentPreview || detailItem?.id != id { detailItem = nil }
+        if isLoadingDetail { isLoadingDetail = false }
+        if let item = items.first(where: { $0.id == id }), !item.representations.isEmpty {
+            if detailItem != item { detailItem = item }
+            cacheDetail(item)
+            return
+        }
+        if !isLoadingDetail { isLoadingDetail = true }
         detailTask = Task { [weak self] in
             guard let self else { return }
-            defer { if !Task.isCancelled, self.selectedIDs.first == id { self.isLoadingDetail = false } }
+            defer {
+                if !Task.isCancelled, self.selectedIDs.first == id, self.isLoadingDetail {
+                    self.isLoadingDetail = false
+                }
+            }
             do {
                 let loaded = try await self.store.itemWithPayload(id)
                 guard !Task.isCancelled, self.selectedIDs.first == id else { return }
-                self.detailItem = loaded
+                let latestMetadata = self.items.first(where: { $0.id == id }) ?? loaded
+                let current = latestMetadata.replacingPayload(from: loaded)
+                if self.detailItem != current { self.detailItem = current }
+                self.cacheDetail(current)
             } catch {
                 guard !Task.isCancelled, self.selectedIDs.first == id else { return }
                 if self.isTextEditorVisible, self.editingItemID == id {
                     self.editingErrorMessage = error.localizedDescription
                 } else { self.errorMessage = error.localizedDescription }
+                if self.detailItem?.id == id { self.detailItem = nil }
             }
         }
+    }
+
+    private func cachedDetail(for id: UUID) -> ClipboardItem? {
+        guard let item = detailCache[id] else { return nil }
+        detailCacheOrder.removeAll { $0 == id }
+        detailCacheOrder.append(id)
+        return item
+    }
+
+    private func cacheDetail(_ item: ClipboardItem) {
+        let byteCount = detailPayloadSize(item)
+        guard byteCount <= detailCacheByteLimit else {
+            invalidateDetailCache(for: item.id)
+            return
+        }
+        detailCache[item.id] = item
+        detailCacheOrder.removeAll { $0 == item.id }
+        detailCacheOrder.append(item.id)
+        while detailCacheOrder.count > detailCacheLimit || detailCacheByteCount > detailCacheByteLimit {
+            let evictedID = detailCacheOrder.removeFirst()
+            detailCache.removeValue(forKey: evictedID)
+        }
+    }
+
+    private var detailCacheByteCount: Int {
+        detailCache.values.reduce(0) { $0 + detailPayloadSize($1) }
+    }
+
+    private func detailPayloadSize(_ item: ClipboardItem) -> Int {
+        item.representations.reduce(item.thumbnailData?.count ?? 0) { $0 + $1.data.count }
+    }
+
+    var detailCacheMetrics: (count: Int, bytes: Int) { (detailCache.count, detailCacheByteCount) }
+
+    private func invalidateDetailCache(for id: UUID) {
+        detailCache.removeValue(forKey: id)
+        detailCacheOrder.removeAll { $0 == id }
     }
 
     private func queryChanged() {
@@ -638,12 +888,14 @@ final class ClipboardHistoryPanelModel: ObservableObject {
             return ascending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
         let sorted = favoritesOnTop ? filtered.filter(\.isFavorite) + ordered.filter { !$0.isFavorite } : ordered
-        visibleItems = sorted
-        selectedIDs = selectedIDs.filter { id in sorted.contains(where: { $0.id == id }) }
+        if visibleItems != sorted { visibleItems = sorted }
+        let filteredSelection = selectedIDs.filter { id in sorted.contains(where: { $0.id == id }) }
+        if selectedIDs != filteredSelection { selectedIDs = filteredSelection }
         if let selectionAnchorID, !selectedIDs.contains(selectionAnchorID) {
             self.selectionAnchorID = selectedIDs.first
         }
         if let selectionLeadID, !selectedIDs.contains(selectionLeadID) { self.selectionLeadID = selectedIDs.last }
+        updateCommandSelection()
     }
 
     private func dateMatches(_ date: Date) -> Bool {
@@ -724,5 +976,32 @@ final class ClipboardHistoryPanelModel: ObservableObject {
 extension String {
     fileprivate func localizedCaseInsensitiveHasPrefix(_ prefix: String) -> Bool {
         range(of: prefix, options: [.anchored, .caseInsensitive, .diacriticInsensitive], locale: .current) != nil
+    }
+}
+
+private extension ClipboardItem {
+    func replacingPayload(from payloadItem: ClipboardItem) -> ClipboardItem {
+        ClipboardItem(
+            id: id,
+            contentHash: contentHash,
+            kind: kind,
+            representations: payloadItem.representations,
+            thumbnailData: thumbnailData ?? payloadItem.thumbnailData,
+            payloadSize: payloadSize,
+            preview: preview,
+            createdAt: createdAt,
+            lastCopiedAt: lastCopiedAt,
+            lastUsedAt: lastUsedAt,
+            useCount: useCount,
+            isPinned: isPinned,
+            isFavorite: isFavorite,
+            collectionID: collectionID,
+            title: title,
+            tagIDs: tagIDs,
+            tagDefinitions: tagDefinitions ?? payloadItem.tagDefinitions,
+            recognizedText: recognizedText,
+            barcodePayloads: barcodePayloads,
+            sourceApp: sourceApp
+        )
     }
 }

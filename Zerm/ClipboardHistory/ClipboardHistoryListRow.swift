@@ -16,12 +16,14 @@ struct ClipboardHistoryListRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     highlightedTitle
-                        .font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail).textSelection(.enabled)
+                        .font(.callout.weight(.medium)).lineLimit(2).truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Spacer(minLength: 0)
-                    if item.isPinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.accentColor).accessibilityLabel(String(localized: "Pinned")) }
-                    if item.isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(Color.accentColor).accessibilityLabel(String(localized: "Favorite")) }
+                    if item.isPinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : Color.accentColor).accessibilityLabel(String(localized: "Pinned")) }
+                    if item.isFavorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : Color.accentColor).accessibilityLabel(String(localized: "Favorite")) }
                     if showQuickPasteBadge, let index, index < 9 {
-                        Text("⌘\(index + 1)").font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+                        Text("⌘\(index + 1)").font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : Color.secondary)
                             .accessibilityLabel(String.localizedStringWithFormat(String(localized: "Paste with Command %lld"), Int64(index + 1)))
                     }
                 }
@@ -34,16 +36,13 @@ struct ClipboardHistoryListRow: View {
                     Text(verbatim: item.kind.historyLocalizedName)
                     Spacer(minLength: 0)
                 }
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .font(.caption).foregroundStyle(isSelected ? Color(nsColor: .selectedMenuItemTextColor).opacity(0.86) : Color.secondary).lineLimit(1)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 4).frame(minHeight: 44)
         .contentShape(Rectangle())
-        .background {
-            ZStack(alignment: .leading) {
-                if isSelected { RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.08)).padding(.horizontal, 4) }
-                if isCurrentClipboard { Capsule().fill(Color.accentColor).frame(width: 2, height: 24).padding(.leading, 3) }
-            }
+        .background(alignment: .leading) {
+            if isCurrentClipboard { Capsule().fill(Color.accentColor).frame(width: 2, height: 24).padding(.leading, 3) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: String.localizedStringWithFormat(
@@ -51,23 +50,27 @@ struct ClipboardHistoryListRow: View {
             item.title?.clipboardHistoryNonEmpty ?? item.preview, item.sourceApp.name ?? String(localized: "Unknown App"),
             item.lastCopiedAt.formatted(date: .abbreviated, time: .shortened)
         )))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var highlightedTitle: Text {
         let value = item.title?.clipboardHistoryNonEmpty ?? item.preview.clipboardHistoryNonEmpty ?? item.kind.historyLocalizedName
         let terms = ClipboardPanelQuery.parse(query).text.split(whereSeparator: \.isWhitespace).map(String.init).filter { !$0.isEmpty }
-        guard !terms.isEmpty else { return Text(verbatim: value) }
+        guard !terms.isEmpty else {
+            return Text(verbatim: value).foregroundColor(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
+        }
         var result = Text("")
         var cursor = value.startIndex
         while cursor < value.endIndex {
             let range = cursor..<value.endIndex
             guard let match = terms.compactMap({ value.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive], range: range) })
                 .min(by: { $0.lowerBound < $1.lowerBound }) else {
-                result = result + Text(verbatim: String(value[cursor...])).foregroundColor(.primary)
+                result = result + Text(verbatim: String(value[cursor...])).foregroundColor(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
                 break
             }
-            if cursor < match.lowerBound { result = result + Text(verbatim: String(value[cursor..<match.lowerBound])).foregroundColor(.primary) }
-            result = result + Text(verbatim: String(value[match])).foregroundColor(.accentColor)
+            if cursor < match.lowerBound { result = result + Text(verbatim: String(value[cursor..<match.lowerBound])).foregroundColor(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
+            }
+            result = result + Text(verbatim: String(value[match])).foregroundColor(isSelected ? Color(nsColor: .selectedMenuItemTextColor) : .accentColor)
             cursor = match.upperBound
         }
         return result
