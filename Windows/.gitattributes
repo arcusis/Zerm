@@ -1,0 +1,9 @@
+# Keep LF so verbatim prompt raw strings stay byte-identical to the macOS sources.
+*.cs text eol=lf
+*.xaml text eol=lf
+*.csproj text eol=lf
+*.onnx binary
+*.ico binary
+*.png binary
+*.mp3 binary
+*.wav binary

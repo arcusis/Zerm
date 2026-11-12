@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>Zerm</AssemblyName>
+    <RootNamespace>Zerm.App</RootNamespace>
+    <ApplicationIcon>Assets\Zerm.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>2.8.8</Version>
+    <Product>Zerm</Product>
+    <Company>Arcusis</Company>
+    <Copyright>GPLv3 — based on VoiceInk by Beingpax</Copyright>
+    <!-- .NET 9 Fluent theme is marked experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zerm.Core\Zerm.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The native packages ship binaries for every OS; a Windows x64 build only needs its own.
+       Removed from the publish list itself so they never reach the folder or the single-file bundle. -->
+  <Target Name="TrimForeignRuntimes" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\/](vulkan[\/])?(win-x86|win-arm64|osx-x64|osx-arm64|linux-x64|linux-arm64|linux-musl-x64)[\/]'))" />
+    </ItemGroup>
+  </Target>
+
+  <!-- One-file build: dotnet publish -p:ZermSingleFile=true -->
+  <PropertyGroup Condition="'$(ZermSingleFile)' == 'true'">
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en;he</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Zerm.ico" />
+    <Resource Include="Assets\logo.png" />
+    <Content Include="Assets\Sounds\*.*" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Localization\he.json" LogicalName="Zerm.he.json" />
+    <EmbeddedResource Include="Localization\he.windows.json" LogicalName="Zerm.he.windows.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WinForms is only used for the tray icon; keep its types out of the global namespace. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>
