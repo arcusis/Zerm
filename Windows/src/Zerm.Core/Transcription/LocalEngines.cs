@@ -144,6 +144,10 @@ public sealed class WhisperTranscriber : ILocalTranscriber
                 .WithNoContext()
                 .WithLanguage(string.IsNullOrEmpty(o.Language) ? "auto" : o.Language);
             if (!string.IsNullOrWhiteSpace(o.Prompt)) builder = builder.WithPrompt(o.Prompt);
+            // Hebrew-tuned models (ivrit.ai) drift into Hebrew script even when another language is
+            // forced, e.g. writing accented English phonetically in Hebrew letters. Ban those tokens.
+            var suppressHebrew = SuppressesHebrew(o.Language);
+            if (suppressHebrew) builder = builder.WithSuppressRegex(HebrewTokenRegex);
             // On CPU, encoding a full 30 s window for a short clip dominates latency; size the
             // encoder context to the clip instead (50 frames per second plus headroom).
             if (!UsesGpu && input.Length < 25 * AudioUtil.SampleRate)
@@ -152,13 +156,43 @@ public sealed class WhisperTranscriber : ILocalTranscriber
             await using var processor = builder.Build();
             var segments = new List<TranscriptSegment>();
             await foreach (var seg in processor.ProcessAsync(input, ct))
-                segments.Add(new TranscriptSegment(seg.Start.TotalSeconds, seg.End.TotalSeconds, seg.Text));
+            {
+                var text = CleanSegmentText(seg.Text, suppressHebrew);
+                if (text.Length > 0) segments.Add(new TranscriptSegment(seg.Start.TotalSeconds, seg.End.TotalSeconds, text));
+            }
             return segments;
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Matches any vocabulary token containing a UTF-8 lead byte of the Hebrew block (U+0580–U+05FF
+    /// starts with 0xD6 or 0xD7). whisper.cpp tests it with std::regex_match against raw token bytes.
+    /// </summary>
+    public const string HebrewTokenRegex = @"[\s\S]*[\xD6\xD7][\s\S]*";
+
+    /// <summary>True when a specific non-Hebrew-script language is forced (never for auto-detect).</summary>
+    public static bool SuppressesHebrew(string? language) =>
+        !string.IsNullOrEmpty(language) && language is not ("auto" or "he" or "iw" or "yi");
+
+    /// <summary>
+    /// Drops U+FFFD (whisper.cpp can emit half of a multi-byte character). With Hebrew blocked,
+    /// Hebrew speech leaves only right-to-left marks and punctuation behind, so drop those too.
+    /// </summary>
+    public static string CleanSegmentText(string text, bool hebrewBlocked)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        foreach (var c in text)
+        {
+            if (c == '\uFFFD') continue;
+            if (hebrewBlocked && c is '\u200E' or '\u200F' or (>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069')) continue;
+            sb.Append(c);
+        }
+        var cleaned = sb.ToString();
+        return hebrewBlocked && !cleaned.Any(char.IsLetterOrDigit) ? "" : cleaned;
     }
 
     public void Dispose() => _factory.Dispose();

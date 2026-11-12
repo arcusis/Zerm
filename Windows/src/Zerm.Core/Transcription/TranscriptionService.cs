@@ -66,11 +66,12 @@ public sealed class TranscriptionService(AppSettings settings, SecretStore secre
 
     public string? LoadedModel => _engineModel;
 
-    public string StylePrompt(string? language)
+    /// <param name="builtIn">False skips the built-in sample sentence and keeps only a user-written prompt.</param>
+    public string StylePrompt(string? language, bool builtIn = true)
     {
         var code = string.IsNullOrEmpty(language) ? "auto" : language;
         if (settings.CustomLanguagePrompts.TryGetValue(code, out var custom) && !string.IsNullOrWhiteSpace(custom)) return custom;
-        return code == "auto" ? "" : Languages.WhisperStylePrompts.GetValueOrDefault(code, "");
+        return code == "auto" || !builtIn ? "" : Languages.WhisperStylePrompts.GetValueOrDefault(code, "");
     }
 
     public async Task<ILocalTranscriber> GetEngineAsync(TranscriptionModel model, CancellationToken ct = default)
@@ -151,7 +152,9 @@ public sealed class TranscriptionService(AppSettings settings, SecretStore secre
                 var engine = await GetEngineAsync(model, cts.Token);
                 var language = model.TranscriptionLanguage(selectedLanguage);
                 var prompt = model.Provider == ModelProvider.Whisper
-                    ? (StylePrompt(language) + VocabularyTerms.WhisperSuffix(vocabulary)).Trim()
+                    // ivrit.ai models were tuned without prompts: the built-in sample sentence makes them
+                    // drop the start of the recording (output begins with ", and ..."), so skip it.
+                    ? (StylePrompt(language, builtIn: !model.IsHebrewOptimized) + VocabularyTerms.WhisperSuffix(vocabulary)).Trim()
                     : null;
                 var vad = useVad ?? settings.VadEnabled;
                 var segments = await engine.TranscribeAsync(samples, new TranscriptionOptions(language, prompt, vad), cts.Token);
